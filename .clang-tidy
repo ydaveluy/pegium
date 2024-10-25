@@ -1,0 +1,30 @@
+FormatStyle: file
+
+Checks: |
+  *bugprone*,
+  *performance*,
+  clang-analyzer-optin.cplusplus.VirtualCall,
+  clang-analyzer-optin.performance.Padding,
+  clang-analyzer-optin.performance.*,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-prefer-member-initializer,
+  cppcoreguidelines-pro-type-static-cast-downcast,
+  cppcoreguidelines-slicing,
+  google-explicit-constructor,
+  llvm-namespace-comment,
+  misc-*,
+  modernize-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -misc-no-recursion,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -modernize-avoid-c-arrays,
+  -readability-implicit-bool-conversion,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-named-parameter,
+  
+
+UseColor: true
+HeaderFilterRegex: ''
