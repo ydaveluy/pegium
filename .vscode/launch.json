@@ -1,0 +1,15 @@
+{
+    "configurations": [
+        {
+            "name": "(ctest) Launch",
+            "type": "cppdbg",
+            "cwd": "${workspaceFolder}",
+            "request": "launch",
+            "program": "${cmake.testProgram}",
+            "args": [ "${cmake.testArgs}" ],
+            // other options...
+        }
+        
+    ],
+    "version": "2.0.0"
+}
