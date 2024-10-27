@@ -54,7 +54,7 @@ inline bool fail(size_t len) { return len == PARSE_ERROR; }
  *---------------------------------------------------------------------------*/
 
 inline size_t codepoint_length(std::string_view sv) {
-    if (!sv.empty()) {
+  if (!sv.empty()) {
     auto b = static_cast<uint8_t>(sv.front());
     if ((b & 0x80) == 0) {
       return 1;
@@ -70,11 +70,9 @@ inline size_t codepoint_length(std::string_view sv) {
 }
 
 Rule::Rule(std::string_view name, ContextProvider provider,
-                           std::shared_ptr<GrammarElement> element,
-                           std::function<bool(std::any &, CstNode &)> action,
-                           DataType type)
+           std::function<bool(std::any &, CstNode &)> action)
     : _name{name}, _context_provider{std::move(provider)},
-      _element(std::move(element)), _action{std::move(action)}, _type{type} {}
+      _action{std::move(action)} {}
 
 const std::string &Rule::name() const noexcept { return _name; }
 
@@ -97,6 +95,28 @@ ParseResult ParserRule::parse(std::string_view text) const {
 
   return result;
 }
+
+ParseResult DataTypeRule::parse(std::string_view text) const {
+
+  ParseResult result;
+  result.root_node = std::make_shared<RootCstNode>();
+  result.root_node->fullText = text;
+  std::string_view sv = result.root_node->fullText;
+  result.root_node->text = result.root_node->fullText;
+  result.root_node->grammarSource = this;
+  Context c = _context_provider();
+
+  auto i = c.skipHiddenNodes(sv, *result.root_node);
+
+  result.len =
+      i + parse_rule({sv.data() + i, sv.size() - i}, *result.root_node, c);
+
+  result.ret = result.len == sv.size();
+  // TODO apply value_converter if any
+
+  return result;
+}
+
 ParseResult TerminalRule::parse(std::string_view text) const {
 
   ParseResult result;
@@ -105,13 +125,11 @@ ParseResult TerminalRule::parse(std::string_view text) const {
   std::string_view sv = result.root_node->fullText;
   result.root_node->text = result.root_node->fullText;
   result.root_node->grammarSource = this;
-  //Context c = _context_provider();
-
 
   result.len = parse_terminal(sv);
 
   result.ret = result.len == sv.size();
-
+  // TODO apply value_converter if any
   return result;
 }
 
@@ -134,7 +152,6 @@ std::size_t RuleCall::parse_rule(std::string_view sv, CstNode &parent,
 
 std::size_t RuleCall::parse_hidden(std::string_view sv, CstNode &parent) const {
   assert(_rule && "Call an undefined rule");
-
   return _rule->parse_hidden(sv, parent);
 }
 std::size_t RuleCall::parse_terminal(std::string_view sv) const {
@@ -143,20 +160,12 @@ std::size_t RuleCall::parse_terminal(std::string_view sv) const {
 }
 void RuleCall::accept(Visitor &v) const { v.visit(*this); }
 
-ParserRule::ParserRule(std::string_view name, ContextProvider provider,
-                       std::shared_ptr<GrammarElement> element,
-                       std::function<bool(std::any &, CstNode &)> action,
-                       DataType type)
-    : Rule(name, std::move(provider), std::move(element),
-                   std::move(action), type) {}
-
 std::size_t Rule::parse_rule(std::string_view sv, CstNode &parent,
-                                     Context &c) const {
+                             Context &c) const {
   assert(_element);
   return _element->parse_rule(sv, parent, c);
 }
-std::size_t Rule::parse_hidden(std::string_view sv,
-                                       CstNode &parent) const {
+std::size_t Rule::parse_hidden(std::string_view sv, CstNode &parent) const {
   assert(_element);
   return _element->parse_hidden(sv, parent);
 }
@@ -164,16 +173,28 @@ std::size_t Rule::parse_terminal(std::string_view sv) const {
   assert(_element);
   return _element->parse_terminal(sv);
 }
+
+ParserRule::ParserRule(std::string_view name, ContextProvider provider,
+
+                       std::function<bool(std::any &, CstNode &)> action)
+    : Rule(name, std::move(provider), std::move(action)) {}
+
 void ParserRule::accept(Visitor &v) const { v.visit(*this); }
 
-TerminalRule::TerminalRule(std::string_view name, ContextProvider provider,
-                           std::shared_ptr<GrammarElement> element,
-                           TerminalRule::Kind kind,
+DataTypeRule::DataTypeRule(std::string_view name, ContextProvider provider,
+
                            std::function<bool(std::any &, CstNode &)> action,
                            DataType type)
-    : Rule(name, std::move(provider), std::move(element),
-                   std::move(action), type),
-      _kind{kind} {}
+    : Rule(name, std::move(provider), std::move(action)), _type{type} {}
+
+void DataTypeRule::accept(Visitor &v) const { v.visit(*this); }
+
+TerminalRule::TerminalRule(std::string_view name, ContextProvider provider,
+
+                           std::function<bool(std::any &, CstNode &)> action,
+                           DataType type)
+    : Rule(name, std::move(provider), std::move(action)), _type{type} {}
+
 std::size_t TerminalRule::parse_rule(std::string_view sv, CstNode &parent,
                                      Context &c) const {
   auto i = Rule::parse_terminal(sv);
@@ -209,7 +230,6 @@ std::size_t TerminalRule::parse_hidden(std::string_view sv,
 }
 
 void TerminalRule::accept(Visitor &v) const { v.visit(*this); }
-TerminalRule::Kind TerminalRule::getKind() const { return _kind; }
 
 CharacterClass::CharacterClass(std::string_view s, bool negated,
                                bool ignore_case)
@@ -356,29 +376,24 @@ PrioritizedChoice::PrioritizedChoice(
 
 std::size_t PrioritizedChoice::parse_rule(std::string_view sv, CstNode &parent,
                                           Context &c) const {
-
   const auto size = parent.content.size();
-
   for (const auto &elem : _elements) {
     if (auto i = elem->parse_rule(sv, parent, c); success(i)) {
       return i;
     }
     parent.content.resize(size);
   }
-
   return PARSE_ERROR;
 }
 std::size_t PrioritizedChoice::parse_hidden(std::string_view sv,
                                             CstNode &parent) const {
   auto size = parent.content.size();
-
   for (const auto &elem : _elements) {
     if (auto i = elem->parse_hidden(sv, parent); success(i)) {
       return i;
     }
     parent.content.resize(size);
   }
-
   return PARSE_ERROR;
 }
 
@@ -393,55 +408,30 @@ std::size_t PrioritizedChoice::parse_terminal(std::string_view sv) const {
 
 void PrioritizedChoice::accept(Visitor &v) const { v.visit(*this); }
 
-std::shared_ptr<PrioritizedChoice> &
-operator|(std::shared_ptr<PrioritizedChoice> &lhs,
-          std::shared_ptr<GrammarElement> rhs) {
-  lhs->_elements.emplace_back(std::move(rhs));
-  return lhs;
-}
-
-std::shared_ptr<PrioritizedChoice>
-operator|(std::shared_ptr<GrammarElement> lhs,
-          std::shared_ptr<GrammarElement> rhs) {
-  return std::make_shared<PrioritizedChoice>(std::move(lhs), std::move(rhs));
-}
-
-Repetition::Repetition(std::shared_ptr<GrammarElement> element, size_t min,
-                       size_t max)
-    : _element(std::move(element)), _min(min), _max(max) {}
-
 std::size_t Repetition::parse_rule(std::string_view sv, CstNode &parent,
                                    Context &c) const {
   std::size_t count = 0;
   std::size_t i = 0;
   auto size = parent.content.size();
-
   while (count < _min) {
-
     auto len = _element->parse_rule({sv.data() + i, sv.size() - i}, parent, c);
-
     if (fail(len)) {
       parent.content.resize(size);
-
       return len;
     }
     i += len;
     count++;
   }
-
   while (count < _max) {
     size = parent.content.size();
     auto len = _element->parse_rule({sv.data() + i, sv.size() - i}, parent, c);
-
     if (fail(len)) {
       parent.content.resize(size);
-
       break;
     }
     i += len;
     count++;
   }
-
   return i;
 }
 std::size_t Repetition::parse_hidden(std::string_view sv,
@@ -449,33 +439,25 @@ std::size_t Repetition::parse_hidden(std::string_view sv,
   std::size_t count = 0;
   std::size_t i = 0;
   auto size = parent.content.size();
-
   while (count < _min) {
-
     auto len = _element->parse_hidden({sv.data() + i, sv.size() - i}, parent);
-
     if (fail(len)) {
       parent.content.resize(size);
-
       return len;
     }
     i += len;
     count++;
   }
-
   while (count < _max) {
     size = parent.content.size();
     auto len = _element->parse_hidden({sv.data() + i, sv.size() - i}, parent);
-
     if (fail(len)) {
       parent.content.resize(size);
-
       break;
     }
     i += len;
     count++;
   }
-
   return i;
 }
 
@@ -483,37 +465,25 @@ std::size_t Repetition::parse_terminal(std::string_view sv) const {
   std::size_t count = 0;
   std::size_t i = 0;
   while (count < _min) {
-
     auto len = _element->parse_terminal({sv.data() + i, sv.size() - i});
-
     if (fail(len)) {
       return len;
     }
     i += len;
     count++;
   }
-
   while (count < _max) {
-
     auto len = _element->parse_terminal({sv.data() + i, sv.size() - i});
-
     if (fail(len)) {
       break;
     }
     i += len;
     count++;
   }
-
   return i;
 }
 void Repetition::accept(Visitor &v) const { v.visit(*this); }
 
-bool Repetition::is_many() const {
-  return _min == 0 && _max == std::numeric_limits<size_t>::max();
-}
-
-Optional::Optional(std::shared_ptr<GrammarElement> element)
-    : _element{std::move(element)} {}
 std::size_t Optional::parse_rule(std::string_view sv, CstNode &parent,
                                  Context &c) const {
   auto size = parent.content.size();
@@ -539,15 +509,12 @@ std::size_t Optional::parse_terminal(std::string_view sv) const {
   return fail(i) ? 0 : i;
 }
 
-Many::Many(std::shared_ptr<GrammarElement> element)
-    : _element{std::move(element)} {}
 std::size_t Many::parse_rule(std::string_view sv, CstNode &parent,
                              Context &c) const {
   std::size_t i = 0;
   while (true) {
     auto size = parent.content.size();
     auto len = _element->parse_rule({sv.data() + i, sv.size() - i}, parent, c);
-
     if (fail(len)) {
       parent.content.resize(size);
       break;
@@ -562,7 +529,6 @@ std::size_t Many::parse_hidden(std::string_view sv, CstNode &parent) const {
   while (true) {
     auto size = parent.content.size();
     auto len = _element->parse_hidden({sv.data() + i, sv.size() - i}, parent);
-
     if (fail(len)) {
       parent.content.resize(size);
       break;
@@ -580,12 +546,9 @@ std::size_t Many::parse_terminal(std::string_view sv) const {
     }
     i += len;
   }
-
   return i;
 }
 
-AtLeastOne::AtLeastOne(std::shared_ptr<GrammarElement> element)
-    : _element{std::move(element)} {}
 std::size_t AtLeastOne::parse_rule(std::string_view sv, CstNode &parent,
                                    Context &c) const {
 
@@ -629,11 +592,9 @@ std::size_t AtLeastOne::parse_hidden(std::string_view sv,
   return i;
 }
 std::size_t AtLeastOne::parse_terminal(std::string_view sv) const {
-
   auto i = _element->parse_terminal(sv);
   if (fail(i))
     return i;
-
   while (true) {
     auto len = _element->parse_terminal({sv.data() + i, sv.size() - i});
     if (fail(len)) {
@@ -641,46 +602,39 @@ std::size_t AtLeastOne::parse_terminal(std::string_view sv) const {
     }
     i += len;
   }
-
   return i;
 }
 
-Group::Group(std::shared_ptr<Group> seq) noexcept
-    : _elements{std::move(seq->_elements)} {}
-
 std::size_t Group::parse_rule(std::string_view sv, CstNode &parent,
                               Context &c) const {
-
   size_t i = 0;
   auto size = parent.content.size();
-
   for (const auto &element : _elements) {
     auto len = element->parse_rule({sv.data() + i, sv.size() - i}, parent, c);
     if (fail(len)) {
       parent.content.resize(size);
-
       return len;
     }
     i += len;
   }
-
   return i;
 }
+
 std::size_t Group::parse_hidden(std::string_view sv, CstNode &parent) const {
   size_t i = 0;
+  auto size = parent.content.size();
   for (const auto &element : _elements) {
     auto len = element->parse_hidden({sv.data() + i, sv.size() - i}, parent);
     if (fail(len)) {
+      parent.content.resize(size);
       return len;
     }
     i += len;
   }
-
   return i;
 }
 
 std::size_t Group::parse_terminal(std::string_view sv) const {
-
   size_t i = 0;
   for (const auto &element : _elements) {
     auto len = element->parse_terminal({sv.data() + i, sv.size() - i});
@@ -689,27 +643,90 @@ std::size_t Group::parse_terminal(std::string_view sv) const {
     }
     i += len;
   }
-
   return i;
 }
 
 void Group::accept(Visitor &v) const { v.visit(*this); }
 
-std::shared_ptr<Group> &operator,(std::shared_ptr<Group> &lhs,
-                                  std::shared_ptr<GrammarElement> rhs) {
-  lhs->_elements.emplace_back(std::move(rhs));
-  return lhs;
+std::size_t UnorderedGroup::parse_rule(std::string_view sv, CstNode &parent,
+                                       Context &c) const {
+  std::size_t i = 0;
+  auto elements = _elements;
+  bool progress_made = true;
+  auto size = parent.content.size();
+  while (!elements.empty() && progress_made) {
+    progress_made = false;
+    for (auto it = elements.begin(); it != elements.end();) {
+      auto len = (*it)->parse_rule({sv.data() + i, sv.size() - i}, parent, c);
+      if (fail(len)) {
+        ++it;
+      } else {
+        i += len;
+        it = elements.erase(it);
+        progress_made = true;
+      }
+    }
+  }
+  if (elements.empty())
+    return i;
+
+  parent.content.resize(size);
+  return PARSE_ERROR;
 }
-std::shared_ptr<Group> operator,(std::shared_ptr<GrammarElement> lhs,
-                                 std::shared_ptr<GrammarElement> rhs) {
-  return std::make_shared<Group>(std::move(lhs), std::move(rhs));
+std::size_t UnorderedGroup::parse_hidden(std::string_view sv,
+                                         CstNode &parent) const {
+  std::size_t i = 0;
+  auto elements = _elements;
+  bool progress_made = true;
+  auto size = parent.content.size();
+  while (!elements.empty() && progress_made) {
+    progress_made = false;
+    for (auto it = elements.begin(); it != elements.end();) {
+      auto len = (*it)->parse_hidden({sv.data() + i, sv.size() - i}, parent);
+
+      if (fail(len)) {
+        ++it;
+      } else {
+        i += len;
+        it = elements.erase(it);
+        progress_made = true;
+      }
+    }
+  }
+  if (elements.empty())
+    return i;
+
+  parent.content.resize(size);
+  return PARSE_ERROR;
 }
+
+std::size_t UnorderedGroup::parse_terminal(std::string_view sv) const {
+  std::size_t i = 0;
+  auto elements = _elements;
+  bool progress_made = true;
+  while (!elements.empty() && progress_made) {
+    progress_made = false;
+    for (auto it = elements.begin(); it != elements.end();) {
+      auto len = (*it)->parse_terminal({sv.data() + i, sv.size() - i});
+      if (fail(len)) {
+        ++it;
+      } else {
+        i += len;
+        it = elements.erase(it);
+        progress_made = true;
+      }
+    }
+  }
+  return elements.empty() ? i : PARSE_ERROR;
+}
+
+void UnorderedGroup::accept(Visitor &v) const { /*v.visit(*this);*/ }
 
 Keyword::Keyword(std::string s, bool ignore_case)
     : _kw(std::move(s)), _ignore_case{ignore_case} {}
 
 std::size_t Keyword::parse_rule(std::string_view sv, CstNode &parent,
-                                      Context &c) const {
+                                Context &c) const {
   auto i = Keyword::parse_terminal(sv);
   if (fail(i) || (isword(_kw.back()) && isword(sv[i])))
     return PARSE_ERROR;
@@ -721,8 +738,7 @@ std::size_t Keyword::parse_rule(std::string_view sv, CstNode &parent,
 
   return i + c.skipHiddenNodes({sv.data() + i, sv.size() - i}, parent);
 }
-std::size_t Keyword::parse_hidden(std::string_view sv,
-                                        CstNode &parent) const {
+std::size_t Keyword::parse_hidden(std::string_view sv, CstNode &parent) const {
   auto i = Keyword::parse_terminal(sv);
   if (fail(i) || (isword(_kw.back()) && isword(sv[i])))
     return PARSE_ERROR;
@@ -740,7 +756,6 @@ std::size_t Keyword::parse_terminal(std::string_view sv) const {
     return PARSE_ERROR;
   std::size_t i = 0;
   for (; i < _kw.size(); i++) {
-
     if (_ignore_case ? (tolower(sv[i]) != tolower(_kw[i]))
                      : (sv[i] != _kw[i])) {
       // c.set_error_pos(s, lit_.data());
@@ -801,8 +816,6 @@ std::size_t Action::parse_hidden(std::string_view sv, CstNode &parent) const {
 }
 void Action::accept(Visitor &v) const { v.visit(*this); }
 
-Assignment::Assignment(Feature feature, std::shared_ptr<GrammarElement> elem)
-    : feature{std::move(feature)}, elem{std::move(elem)} {}
 std::size_t Assignment::parse_rule(std::string_view sv, CstNode &parent,
                                    Context &c) const {
   CstNode node;
@@ -853,36 +866,24 @@ std::size_t NoOp::parse_hidden(std::string_view sv, CstNode &parent) const {
   return PARSE_ERROR;
 }
 void NoOp::accept(Visitor &v) const {}
-std::shared_ptr<GrammarElement> operator"" _kw(const char *str, std::size_t s) {
-  return std::make_shared<Keyword>(std::string(str, s));
+Keyword operator"" _kw(const char *str, std::size_t s) {
+  return Keyword(std::string(str, s));
 }
-std::shared_ptr<GrammarElement> operator"" _ikw(const char *str,
-                                                std::size_t s) {
-  return std::make_shared<Keyword>(std::string(str, s), true);
-}
-
-std::shared_ptr<Character> operator"" _kw(char chr) {
-  return std::make_shared<Character>(chr);
+Keyword operator"" _ikw(const char *str, std::size_t s) {
+  return Keyword(std::string(str, s), true);
 }
 
-/*std::shared_ptr<Character> operator"" _ikw(char chr) {
-  return std::make_shared<Character>(chr);
-}*/
+Character operator"" _kw(char chr) { return Character(chr); }
 
 bool Feature::operator==(const Feature &rhs) const noexcept {
   return _equal(*this, rhs);
 }
 void Feature::assign(const std::any &object, const std::any &value) const {
-  _assign(std::any_cast<std::shared_ptr<pegium::AstNode>>(object).get(),
-          _feature, value);
+  _assign(std::any_cast<std::shared_ptr<AstNode>>(object).get(), _feature,
+          value);
 }
 void Feature::assign(AstNode *object, const std::any &value) const {
   _assign(object, _feature, value);
-}
-
-std::shared_ptr<Assignment>
-Feature::operator=(std::shared_ptr<GrammarElement> elem) {
-  return std::make_shared<Assignment>(*this, elem);
 }
 
 } // namespace pegium

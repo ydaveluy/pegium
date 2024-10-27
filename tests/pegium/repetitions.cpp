@@ -8,9 +8,9 @@ TEST(RepetitionTest, Optional) {
   public:
     Parser() {
       using namespace pegium;
-      ignored_terminal("WS", at_least_one(s()));
-      rule("RULE", opt("test"_kw));
-      terminal("TERM", opt("test"_kw));
+      terminal("WS").ignore()(+s());
+      rule("RULE")(opt("test"_kw));
+      terminal("TERM")(opt("test"_kw));
     }
   };
   Parser p;
@@ -33,9 +33,9 @@ TEST(RepetitionTest, Many) {
   public:
     Parser() {
       using namespace pegium;
-      ignored_terminal("WS", at_least_one(s()));
-      rule("RULE", many("test"_kw));
-      terminal("TERM", many("test"_kw));
+      terminal("WS").ignore()(+s());
+      rule("RULE")(many("test"_kw));
+      terminal("TERM")(many("test"_kw));
     }
   };
   Parser p;
@@ -60,9 +60,9 @@ TEST(RepetitionTest, ManySep) {
   public:
     Parser() {
       using namespace pegium;
-      ignored_terminal("WS", at_least_one(s()));
-      rule("RULE", many_sep('.'_kw, "test"_kw));
-      terminal("TERM", many_sep('.'_kw, "test"_kw));
+      terminal("WS").ignore()(+s());
+      rule("RULE")(many_sep('.'_kw, "test"_kw));
+      terminal("TERM")(many_sep('.'_kw, "test"_kw));
     }
   };
   Parser p;
@@ -91,9 +91,9 @@ TEST(RepetitionTest, AtLeastOne) {
   public:
     Parser() {
       using namespace pegium;
-      ignored_terminal("WS", at_least_one(s()));
-      rule("RULE", at_least_one("test"_kw));
-      terminal("TERM", at_least_one("test"_kw));
+      terminal("WS").ignore()(+s());
+      rule("RULE")(at_least_one("test"_kw));
+      terminal("TERM")(at_least_one("test"_kw));
     }
   };
   Parser p;
@@ -115,9 +115,9 @@ TEST(RepetitionTest, AtLeastOneSep) {
   public:
     Parser() {
       using namespace pegium;
-      ignored_terminal("WS", at_least_one(s()));
-      rule("RULE", at_least_one_sep('.'_kw, "test"_kw));
-      terminal("TERM", at_least_one_sep('.'_kw, "test"_kw));
+      terminal("WS").ignore()(+s());
+      rule("RULE")(at_least_one_sep('.'_kw, "test"_kw));
+      terminal("TERM")(at_least_one_sep('.'_kw, "test"_kw));
     }
   };
   Parser p;
@@ -143,9 +143,9 @@ TEST(RepetitionTest, Repetition) {
   public:
     Parser() {
       using namespace pegium;
-      ignored_terminal("WS", at_least_one(s()));
-      rule("RULE", rep(2, 3, "test"_kw));
-      terminal("TERM", rep(2, 3, "test"_kw));
+      terminal("WS").ignore()(+s());
+      rule("RULE")(rep(2, 3, "test"_kw));
+      terminal("TERM")(rep(2, 3, "test"_kw));
     }
   };
   Parser p;

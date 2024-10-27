@@ -9,9 +9,9 @@
 namespace pegium {
 
 struct ParseResult {
-  bool ret;
-  bool recovered;
-  size_t len;
+  bool ret = false;
+  bool recovered = false;
+  size_t len = 0;
   std::shared_ptr<RootCstNode> root_node;
   std::any value;
   // TODO add errors

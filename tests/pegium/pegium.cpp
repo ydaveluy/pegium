@@ -19,14 +19,15 @@ public:
   TestGrammar() {
 
     using namespace pegium;
-    ignored_terminal("WS", at_least_one(s()));
-    hidden_terminal("SL_COMMENT", "//"_kw, many(cls("\r\n", true)));
-    hidden_terminal("ML_COMMENT", "/*"_kw, many(!"*/"_kw, any()), "*/"_kw);
-    terminal("ID", cls("a-zA-Z_"), many(w()));
-    rule("QualifiedName", at_least_one_sep('.'_kw, call("ID")));
+    terminal("WS").ignore()(+s());
+    //terminal("SL_COMMENT").hide()("//"_kw >> (eol()| eof()));
+    terminal("SL_COMMENT").hide()("//"_kw, many(cls("\r\n", true)));
+    terminal("ML_COMMENT").hide()("/*"_kw >> "*/"_kw);
+    terminal("ID")(cls("a-zA-Z_"), *w());
+    rule("QualifiedName")(at_least_one_sep('.'_kw, call("ID")));
 
-    rule<TestAst>(
-        "TestAst", "test"_kw, &TestAst::name += call("ID"),
+    rule<TestAst>("TestAst")(
+        "test"_kw, &TestAst::name += call("ID"),
         opt("{"_kw, many(&TestAst::child += call("TestAst")), "}"_kw));
   }
 };
@@ -37,8 +38,7 @@ protected:
 };
 TEST(PegiumTest, TestAst) {
   TestGrammar g;
-  auto result =
-      g.parse("TestAst", R"(
+  auto result = g.parse("TestAst", R"(
       test name   
       { 
         test child1
@@ -47,7 +47,7 @@ TEST(PegiumTest, TestAst) {
           test nested
         }
       }
-      )"); 
+      )");
   EXPECT_TRUE(result.ret);
   auto test = std::any_cast<std::shared_ptr<pegium::AstNode>>(result.value);
   auto *ast = dynamic_cast<TestAst *>(test.get());
@@ -59,7 +59,6 @@ TEST(PegiumTest, TestAst) {
 
   ASSERT_EQ(ast->child[1]->child.size(), 1);
   EXPECT_EQ(ast->child[1]->child[0]->name, "nested");
-
 }
 
 TEST(PegiumTest, QualifiedName) {
