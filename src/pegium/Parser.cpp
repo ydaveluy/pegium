@@ -5,10 +5,8 @@ Context Parser::createContext() const {
 
   struct HiddenVisitor : public GrammarElement::Visitor {
 
-    void visit(const TerminalRule &rule) override {
-      _hidden = rule.getKind() != TerminalRule::Kind::Normal;
-    }
-    static bool isHidden(GrammarElement &elem) {
+    void visit(const TerminalRule &rule) override { _hidden = rule.hidden(); }
+    static bool isHidden(const GrammarElement &elem) {
       HiddenVisitor v;
       elem.accept(v);
       return v._hidden;
@@ -17,6 +15,7 @@ Context Parser::createContext() const {
   private:
     bool _hidden = false;
   };
+
   std::vector<std::shared_ptr<GrammarElement>> hiddenRules;
   for (auto &[_, def] : _rules) {
     if (HiddenVisitor::isHidden(*def)) {
@@ -46,10 +45,9 @@ struct AstBuilder : public GrammarElement::Visitor {
     rule.execute(_result);
   }
   void visit(const ParserRule &rule) override {
-    if (rule.getDataType() == Rule::DataType::AstNode) {
-      // create the object
-      rule.execute(_result, _node);
-    }
+
+    // create the object
+    rule.execute(_result, _node);
   }
   void visit(const TerminalRule &rule) override {
 
@@ -57,53 +55,48 @@ struct AstBuilder : public GrammarElement::Visitor {
   }
   void visit(const Assignment &assignment) override;
 
-protected:
-  AstBuilder(std::any &result, CstNode &node) : _result{result}, _node{node} {}
-  inline void prune() { _prune = true; }
-
-  // private:
+private:
   std::any &_result;
   CstNode &_node;
   bool _prune = false;
+  AstBuilder(std::any &result, CstNode &node) : _result{result}, _node{node} {}
+  inline void prune() { _prune = true; }
 };
 
-struct RootAstBuilder : public AstBuilder {
+struct RootAstBuilder : public GrammarElement::Visitor {
   static std::any build(const GrammarElement &element, CstNode &node) {
     std::any result;
     RootAstBuilder builder{result, node};
     element.accept(builder);
+    if (!result.has_value()) {
+      std::string text;
+      for (const auto &n : node)
+        if (n.isLeaf && !n.hidden)
+          text += n.text;
+      result = text;
+    }
     return result;
   }
 
-  void visit(const Assignment &assignment) override {
-    /*for (const auto &node : _node.content)
-      node.grammarSource->accept(*this);
-    prune();*/
-  }
+ // void visit(const Assignment &assignment) override {}
   void visit(const ParserRule &rule) override {
-
-    // if rule of type string or with value converter, concatenate all visible
-    // LeafCstNodes and prune content. Apply the value_converter if any else
-    // execute the rule action to create the type and do not prune to process
-    // the assignments (if any)
-
-    if (rule.getDataType() == Rule::DataType::AstNode) {
-
-      for (auto it = _node.begin(); it != _node.end(); ++it) {
-        if (AstBuilder::build(*it->grammarSource, *it, _result))
-          it.prune();
-      }
-    } else {
-      std::string text;
-      for (const auto &node : _node) {
-        if (node.isLeaf && !node.hidden)
-          text += node.text;
-      }
-      /*if (rule.getValueConverter()) {
-        _result = rule.getValueConverter()(text);
-      } else*/
-      _result = text;
+    for (auto it = _node.begin(); it != _node.end(); ++it) {
+      if (AstBuilder::build(*it->grammarSource, *it, _result))
+        it.prune();
     }
+  }
+
+  void visit(const DataTypeRule &rule) override {
+
+    std::string text;
+    for (const auto &node : _node) {
+      if (node.isLeaf && !node.hidden)
+        text += node.text;
+    }
+    /*if (rule.getValueConverter()) {
+      _result = rule.getValueConverter()(text);
+    } else*/
+    _result = text;
   }
   void visit(const TerminalRule &rule) override {
     std::string text;
@@ -118,7 +111,10 @@ struct RootAstBuilder : public AstBuilder {
   }
 
 private:
-  RootAstBuilder(std::any &result, CstNode &node) : AstBuilder{result, node} {}
+  RootAstBuilder(std::any &result, CstNode &node)
+      : _result{result}, _node{node} {}
+  std::any &_result;
+  CstNode &_node;
 };
 
 void AstBuilder::visit(const Assignment &assignment) {

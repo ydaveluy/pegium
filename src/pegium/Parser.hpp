@@ -29,114 +29,114 @@ concept ValidRuleType = std::is_same_v<T, bool> ||        // bool
 
 class Parser : public IParser {
 public:
- ParseResult parse(const std::string &input) const override;
+  ParseResult parse(const std::string &input) const override;
   ParseResult parse(const std::string &name, std::string_view text) const;
   ~Parser() noexcept override = default;
 
 protected:
+  /// The end of file token
+  static NotPredicate eof() { return !AnyCharacter{}; }
+
+  /// The end of line token
+  static PrioritizedChoice eol() { return "\r\n"_kw | '\n'_kw | '\r'_kw; }
+
   /// any character equivalent to regex `.`
-  inline std::shared_ptr<AnyCharacter> any() const {
-    return std::make_shared<AnyCharacter>();
-  }
+  static inline AnyCharacter any() { return {}; }
 
   /// a space character equivalent to regex `\s`
-  inline std::shared_ptr<CharacterClass> s() const {
-    return std::make_shared<CharacterClass>(" \t\r\n\f\v", false, false);
+  static inline CharacterClass s() {
+    return CharacterClass(" \t\r\n\f\v", false, false);
   }
   /// a non space character equivalent to regex `\S`
-  inline std::shared_ptr<CharacterClass> S() const {
-    return std::make_shared<CharacterClass>(" \t\r\n\f\v", true, false);
+  static inline CharacterClass S() {
+    return CharacterClass(" \t\r\n\f\v", true, false);
   }
 
   /// a word character equivalent to regex `\w`
-  inline std::shared_ptr<CharacterClass> w() const {
-    return std::make_shared<CharacterClass>("a-zA-Z0-9_", false, false);
+  static inline CharacterClass w() {
+    return CharacterClass("a-zA-Z0-9_", false, false);
   }
   /// a non word character equivalent to regex `\W`
-  inline std::shared_ptr<CharacterClass> W() const {
-    return std::make_shared<CharacterClass>("a-zA-Z0-9_", true, false);
+  static inline CharacterClass W() {
+    return CharacterClass("a-zA-Z0-9_", true, false);
   }
   /// a digit character equivalent to regex `\d`
-  inline std::shared_ptr<CharacterClass> d() const {
-    return std::make_shared<CharacterClass>("0-9", false, false);
+  static inline CharacterClass d() {
+    return CharacterClass("0-9", false, false);
   }
   /// a non-digit character equivalent to regex `\D`
-  inline std::shared_ptr<CharacterClass> D() const {
-    return std::make_shared<CharacterClass>("0-9", true, false);
+  static inline CharacterClass D() {
+    return CharacterClass("0-9", true, false);
   }
 
-  inline std::shared_ptr<Character> chr(char dt) const {
-    return std::make_shared<Character>(dt);
+  static inline Character chr(char dt) { return Character(dt); }
+
+  static inline CharacterClass cls(std::string_view s, bool negated = false,
+                                   bool ignoreCase = false) {
+    return CharacterClass(s, negated, ignoreCase);
   }
 
-  inline std::shared_ptr<CharacterClass>
-  cls(std::string_view s, bool negated = false, bool ignoreCase = false) const {
-    return std::make_shared<CharacterClass>(s, negated, ignoreCase);
-  }
-
-  /// Create a repetion of zero or more elements
+  /// Create a repetition of zero or more elements
   /// @tparam ...Args
   /// @param ...args a sequence of elements to be repeated
   /// @return The created Repetition
   template <typename... Args>
-    requires(std::convertible_to<Args, std::shared_ptr<GrammarElement>> && ...)
-  inline std::shared_ptr<Many> many(Args... args) const {
-    return std::make_shared<Many>((std::move(args), ...));
+    requires(IsGrammarElement<Args> && ...)
+  static inline Many many(Args &&...args) {
+    return Many((std::forward<Args>(args), ...));
   }
-  /// Create a repetion of zero or more elements with a separator
+  /// Create a repetition of zero or more elements with a separator
   /// @tparam ...Args
   /// @param sep the separator to be used between elements
   /// @param ...args a sequence of elements to be repeated
   /// @return The created Repetition
-  template <typename... Args>
-    requires(std::convertible_to<Args, std::shared_ptr<GrammarElement>> && ...)
-  inline std::shared_ptr<Optional> many_sep(std::shared_ptr<GrammarElement> sep,
-                                            Args... args) const {
-    return std::make_shared<Optional>(at_least_one_sep(sep, args...));
+  template <typename Sep, typename... Args>
+    requires IsGrammarElement<Sep> && (IsGrammarElement<Args> && ...)
+  static inline Optional many_sep(Sep &&sep, Args &&...args) {
+    return Optional(
+        at_least_one_sep(std::forward<Sep>(sep), std::forward<Args>(args)...));
   }
 
-  /// Create a repetion of one or more elements
+  /// Create a repetition of one or more elements
   /// @tparam ...Args
   /// @param ...args a sequence of elements to be repeated
   /// @return The created Repetition
   template <typename... Args>
-    requires(std::convertible_to<Args, std::shared_ptr<GrammarElement>> && ...)
-  inline std::shared_ptr<AtLeastOne> at_least_one(Args &&...args) const {
-    return std::make_shared<AtLeastOne>((std::forward<Args>(args), ...));
+    requires(IsGrammarElement<Args> && ...)
+  static inline AtLeastOne at_least_one(Args &&...args) {
+    return AtLeastOne((std::forward<Args>(args), ...));
   }
 
-  /// Create a repetion of one or more elements with a separator
+  /// Create a repetition of one or more elements with a separator
   /// @tparam ...Args
   /// @param sep the separator to be used between elements
   /// @param ...args a sequence of elements to be repeated
   /// @return The created Repetition
-  template <typename... Args>
-    requires(std::convertible_to<Args, std::shared_ptr<GrammarElement>> && ...)
-  inline std::shared_ptr<Group>
-  at_least_one_sep(std::shared_ptr<GrammarElement> sep, Args... args) const {
-    return ((args, ...), std::make_shared<Many>((sep, (args, ...))));
+
+  template <typename Sep, typename... Args>
+    requires IsGrammarElement<Sep> && (IsGrammarElement<Args> && ...)
+  static inline Group at_least_one_sep(Sep &&sep, Args... args) {
+    return Group((args, ...), Many{(std::forward<Sep>(sep), (args, ...))});
   }
   /// Create an option (zero or one)
   /// @tparam ...Args
   /// @param ...args a sequence of elements to be repeated
   /// @return The created Repetition
   template <typename... Args>
-    requires(std::convertible_to<Args, std::shared_ptr<GrammarElement>> && ...)
-  inline std::shared_ptr<Optional> opt(Args &&...args) const {
-    return std::make_shared<Optional>((std::forward<Args>(args), ...));
+    requires(IsGrammarElement<Args> && ...)
+  static inline Optional opt(Args &&...args) {
+    return Optional((std::forward<Args>(args), ...));
   }
-  /// Create a custom repetion with min and max.
+  /// Create a custom repetition with min and max.
   /// @tparam ...Args
   /// @param ...args a sequence of elements to be repeated
   /// @param min the min number of occurence (inclusive)
   /// @param max the maw number of occurence (inclusive)
   /// @return The created Repetition
   template <typename... Args>
-    requires(std::convertible_to<Args, std::shared_ptr<GrammarElement>> && ...)
-  inline std::shared_ptr<Repetition> rep(size_t min, size_t max,
-                                         Args &&...args) const {
-    return std::make_shared<Repetition>((std::forward<Args>(args), ...), min,
-                                        max);
+    requires(IsGrammarElement<Args> && ...)
+  static inline Repetition rep(size_t min, size_t max, Args &&...args) {
+    return Repetition((std::forward<Args>(args), ...), min, max);
   }
 
   /// An action that create a new object of type T and assign its member
@@ -151,9 +151,9 @@ protected:
   /// @return the created Action.
   template <typename T, typename C, typename R>
     requires std::derived_from<T, C>
-  std::shared_ptr<Action> action(R C::*member) const {
+  static Action action(R C::*member) {
 
-    return std::make_shared<Action>([member](std::any &value) {
+    return Action([member](std::any &value) {
       // create a new object of type C
       auto result = std::make_shared<T>();
       // assign the current value to the new object member
@@ -172,9 +172,8 @@ protected:
   /// @tparam R the member type
   /// @param member the object member
   /// @return the created Action.
-  template <typename C, typename R>
-  std::shared_ptr<Action> action(R C::*member) const {
-    return std::make_shared<Action>([member](std::any &value) {
+  template <typename C, typename R> static Action action(R C::*member) {
+    return Action([member](std::any &value) {
       // create a new object of type C
       auto result = std::make_shared<C>();
       // assign the current value to the new object member
@@ -190,52 +189,48 @@ protected:
   /// ```
   /// @tparam T the object type
   /// @return the created Action.
-  template <typename T> std::shared_ptr<Action> action() const {
-    return std::make_shared<Action>([](std::any &value) {
+  template <typename T> static Action action() {
+    return Action([](std::any &value) {
       // create a new object of type T and assign it to value
       value = std::static_pointer_cast<AstNode>(std::make_shared<T>());
     });
   }
 
-  template <typename T = std::string, typename... Args>
-    requires(std::convertible_to<Args, std::shared_ptr<GrammarElement>> && ...)
-  void rule(std::string name, Args &&...args) {
-    _rules[name] = std::make_shared<ParserRule>(
-        name, [this] { return this->createContext(); },
-        (std::forward<Args>(args), ...), make_converter<T>(),
-        Rule::DataTypeOf<T>());
+  template <typename T> // TODO add requires T DataType or AstNode
+    requires std::derived_from<T, AstNode>
+  ParserRule &rule(std::string name) {
+    auto rule = std::make_shared<ParserRule>(
+        name, [this] { return this->createContext(); }, make_converter<T>());
+
+    _rules[name] = rule;
+    return *rule.get();
   }
 
-  template <typename T = std::string, typename... Args>
-    requires(std::convertible_to<Args, std::shared_ptr<GrammarElement>> && ...)
-  void terminal(std::string name, Args &&...args) {
-    _rules[name] = std::make_shared<TerminalRule>(
-        name, [this] { return this->createContext(); },
-        (std::forward<Args>(args), ...), TerminalRule::Kind::Normal,
-        make_converter<T>(), Rule::DataTypeOf<T>());
+  template <typename T = std::string>
+    requires is_data_type_v<T>
+  DataTypeRule &rule(std::string name) {
+    auto rule = std::make_shared<DataTypeRule>(
+        name, [this] { return this->createContext(); }, make_converter<T>(),
+        data_type_of<T>());
+
+    _rules[name] = rule;
+    return *rule.get();
   }
 
-  template <typename T = std::string, typename... Args>
-    requires(std::convertible_to<Args, std::shared_ptr<GrammarElement>> && ...)
-  void hidden_terminal(std::string name, Args &&...args) {
-    _rules[name] = std::make_shared<TerminalRule>(
-        name, [this] { return this->createContext(); },
-        (std::forward<Args>(args), ...), TerminalRule::Kind::Hidden,
-        make_converter<T>(), Rule::DataTypeOf<T>());
+  template <typename T = std::string> TerminalRule &terminal(std::string name) {
+
+    auto rule = std::make_shared<TerminalRule>(
+        name, [this] { return this->createContext(); }, make_converter<T>(),
+        data_type_of<T>());
+
+    _rules[name] = rule;
+    return *rule.get();
   }
 
-  template <typename T = std::string, typename... Args>
-    requires(std::convertible_to<Args, std::shared_ptr<GrammarElement>> && ...)
-  void ignored_terminal(std::string name, Args &&...args) {
-    _rules[name] = std::make_shared<TerminalRule>(
-        name, [this] { return this->createContext(); },
-        (std::forward<Args>(args), ...), TerminalRule::Kind::Ignored,
-        make_converter<T>(), Rule::DataTypeOf<T>());
-  }
-
-  std::shared_ptr<GrammarElement> call(const std::string &name) {
-    return std::make_shared<RuleCall>(_rules[name]);
-  }
+  /// Call an other rule
+  /// @param name the rule name
+  /// @return the Rule call action
+  RuleCall call(const std::string &name) { return RuleCall(_rules[name]); }
 
 private:
   Context createContext() const;
@@ -259,4 +254,90 @@ private:
   }
   std::map<std::string, std::shared_ptr<Rule>, std::less<>> _rules;
 };
+
+/// An until operation that starts from element `from` and ends to element
+/// `to`. e.g `"/*"_kw >> "*/"_kw` to match a multiline comment
+/// @param from the starting element
+/// @param to the ending element
+/// @return the until element
+template <typename T, typename U>
+  requires IsGrammarElement<T> && IsGrammarElement<U>
+Group operator>>(T &&from, U to) {
+  return Group(std::forward<T>(from), Many{(!to, AnyCharacter{})}, to);
+}
+
+/// Create a repetition of one or more elements
+/// @tparam ...Args
+/// @param ...args a sequence of elements to be repeated
+/// @return The created Repetition
+template <typename Args>
+  requires(IsGrammarElement<Args>)
+inline AtLeastOne operator+(Args &&args) {
+  return AtLeastOne(std::forward<Args>(args));
+}
+
+/// Create a repetition of zero or more elements
+/// @tparam ...Args
+/// @param ...args a sequence of elements to be repeated
+/// @return The created Repetition
+template <typename Args>
+  requires IsGrammarElement<Args>
+inline Many operator*(Args &&args) {
+  return Many(std::forward<Args>(args));
+}
+
+namespace regex {
+struct Element : public AstNode {};
+struct Many : public Element {
+  attribute<Element> element;
+};
+struct Optional : public Element {
+  attribute<Element> element;
+};
+struct AtLeastOne : public Element {
+  attribute<Element> element;
+};
+struct Repetition : public Element {
+  attribute<Element> element;
+  attribute<int64_t> min = 0;
+  attribute<int64_t> max = std::numeric_limits<int64_t>::max();
+};
+
+struct CharacterClass : public Element {
+  attribute<string> value;
+};
+struct StringLiteral : public Element {
+  attribute<string> value;
+};
+
+class RegexParser : public Parser {
+  RegexParser() {
+    rule<Many>("Many")(call("Element"), '*'_kw);
+    rule<Optional>("Optional")(call("Element"), '?'_kw);
+    rule<AtLeastOne>("AtLeastOne")(call("Element"), '+'_kw);
+
+    rule<Repetition>("Repetition")(call("Element"), '{'_kw,
+                                   &Repetition::min += +d(), ','_kw,
+                                   &Repetition::max += + +d(), '}'_kw);
+
+    rule<CharacterClass>(
+        "CharacterClass")(&CharacterClass::value +=
+                          ('['_kw, many(R"(\\)"_kw | R"(\])"_kw | !']'_kw),
+                           ']'_kw));
+
+    rule<StringLiteral>(
+        "StringLiteral")(&StringLiteral::value +=
+                         ('['_kw, many(R"(\\)"_kw | R"(\])"_kw | !']'_kw),
+                          ']'_kw));
+  }
+};
+
+// static constexpr RegexParser p;
+} // namespace regex
+// Opérateur de string literal ""_reg
+consteval auto operator""_reg(const char *str, std::size_t len) {
+
+  std::string_view input{str, len};
+}
+
 } // namespace pegium
