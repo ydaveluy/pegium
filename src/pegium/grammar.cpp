@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstddef>
 #include <limits>
 #include <pegium/grammar.hpp>
 namespace pegium {
@@ -55,14 +56,14 @@ inline bool fail(size_t len) { return len == PARSE_ERROR; }
 
 inline size_t codepoint_length(std::string_view sv) {
   if (!sv.empty()) {
-    auto b = static_cast<uint8_t>(sv.front());
-    if ((b & 0x80) == 0) {
+    auto b = static_cast<std::byte>(sv.front());
+    if ((b & std::byte{0x80}) == std::byte{0}) {
       return 1;
-    } else if ((b & 0xE0) == 0xC0 && sv.size() >= 2) {
+    } else if ((b & std::byte{0xE0}) == std::byte{0xC0} && sv.size() >= 2) {
       return 2;
-    } else if ((b & 0xF0) == 0xE0 && sv.size() >= 3) {
+    } else if ((b & std::byte{0xF0}) == std::byte{0xE0} && sv.size() >= 3) {
       return 3;
-    } else if ((b & 0xF8) == 0xF0 && sv.size() >= 4) {
+    } else if ((b & std::byte{0xF8}) == std::byte{0xF0} && sv.size() >= 4) {
       return 4;
     }
   }
