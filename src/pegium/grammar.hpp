@@ -49,10 +49,6 @@ public:
     virtual void visit(const DataTypeRule &) { /* ignore */ }
     virtual void visit(const TerminalRule &) { /* ignore */ }
   };
-  struct Result {
-    std::size_t len;
-    std::shared_ptr<CstNode> cstNode;
-  };
 
   virtual ~GrammarElement() = default;
 
@@ -79,7 +75,7 @@ protected:
   /// @return a srared_ptr initialized with param
   template <typename T>
     requires std::derived_from<std::decay_t<T>, GrammarElement>
-  static std::shared_ptr<GrammarElement> toSharedPtr(T &&param) {
+  static constexpr std::shared_ptr<std::decay_t<T>> make_shared(T &&param) {
     return std::make_shared<std::decay_t<T>>(std::forward<T>(param));
   }
 };
@@ -263,7 +259,7 @@ public:
   template <typename T>
     requires IsGrammarElement<T>
   Assignment(Feature feature, T &&elem)
-      : feature{std::move(feature)}, elem{toSharedPtr(std::forward<T>(elem))} {}
+      : feature{std::move(feature)}, elem{make_shared(std::forward<T>(elem))} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -318,7 +314,7 @@ public:
     requires(IsGrammarElement<Args> && ...) &&
             (!std::same_as<std::decay_t<Args>, Group> && ...)
   explicit Group(Args &&...args)
-      : _elements{toSharedPtr(std::forward<Args>(args))...} {}
+      : _elements{make_shared(std::forward<Args>(args))...} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -340,7 +336,7 @@ private:
   template <typename T>
     requires IsGrammarElement<T> && (!std::same_as<std::decay_t<T>, Group>)
   friend Group &&operator,(Group &&lhs, T &&rhs) {
-    lhs._elements.emplace_back(toSharedPtr(std::forward<T>(rhs)));
+    lhs._elements.emplace_back(make_shared(std::forward<T>(rhs)));
     return std::move(lhs);
   }
 
@@ -348,7 +344,7 @@ private:
   template <typename T>
     requires IsGrammarElement<T> && (!std::same_as<std::decay_t<T>, Group>)
   friend Group operator,(T &&lhs, Group rhs) {
-    rhs._elements.insert(rhs._elements.begin(), toSharedPtr(lhs));
+    rhs._elements.insert(rhs._elements.begin(), make_shared(lhs));
     return rhs;
   }
 };
@@ -369,7 +365,7 @@ public:
     requires(IsGrammarElement<Args> && ...) &&
             (!std::same_as<std::decay_t<Args>, Group> && ...)
   explicit UnorderedGroup(Args &&...args)
-      : _elements{toSharedPtr(std::forward<Args>(args))...} {}
+      : _elements{make_shared(std::forward<Args>(args))...} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -393,7 +389,7 @@ private:
     requires IsGrammarElement<T> &&
              (!std::same_as<std::decay_t<T>, UnorderedGroup>)
   friend UnorderedGroup &&operator&(UnorderedGroup &&lhs, T &&rhs) {
-    lhs._elements.emplace_back(toSharedPtr(std::forward<T>(rhs)));
+    lhs._elements.emplace_back(make_shared(std::forward<T>(rhs)));
     return std::move(lhs);
   }
 
@@ -402,7 +398,7 @@ private:
     requires IsGrammarElement<T> &&
              (!std::same_as<std::decay_t<T>, UnorderedGroup>)
   friend UnorderedGroup operator&(T &&lhs, UnorderedGroup rhs) {
-    rhs._elements.insert(rhs._elements.begin(), toSharedPtr(lhs));
+    rhs._elements.insert(rhs._elements.begin(), make_shared(lhs));
     return rhs;
   }
 };
@@ -422,7 +418,7 @@ public:
   template <typename T>
     requires IsGrammarElement<T> && (!std::same_as<std::decay_t<T>, Optional>)
   explicit Optional(T &&element)
-      : _element{toSharedPtr(std::forward<T>(element))} {}
+      : _element{make_shared(std::forward<T>(element))} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -440,7 +436,7 @@ public:
   template <typename T>
     requires IsGrammarElement<T> && (!std::same_as<std::decay_t<T>, Many>)
   explicit Many(T &&element)
-      : _element{toSharedPtr(std::forward<T>(element))} {}
+      : _element{make_shared(std::forward<T>(element))} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -458,7 +454,7 @@ public:
   template <typename T>
     requires IsGrammarElement<T> && (!std::same_as<std::decay_t<T>, AtLeastOne>)
   explicit AtLeastOne(T &&element)
-      : _element{toSharedPtr(std::forward<T>(element))} {}
+      : _element{make_shared(std::forward<T>(element))} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -478,7 +474,7 @@ public:
   template <typename T>
     requires IsGrammarElement<T>
   explicit Repetition(T &&element, size_t min, size_t max)
-      : _element{toSharedPtr(std::forward<T>(element))}, _min{min}, _max{max} {}
+      : _element{make_shared(std::forward<T>(element))}, _min{min}, _max{max} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -503,7 +499,7 @@ public:
     requires(IsGrammarElement<Args> && ...) &&
             (!std::same_as<PrioritizedChoice, std::decay_t<Args>> && ...)
   explicit PrioritizedChoice(Args &&...args)
-      : _elements{toSharedPtr(std::forward<Args>(args))...} {}
+      : _elements{make_shared(std::forward<Args>(args))...} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -528,7 +524,7 @@ private:
     requires IsGrammarElement<T> &&
              (!std::same_as<std::decay_t<T>, PrioritizedChoice>)
   friend PrioritizedChoice &&operator|(PrioritizedChoice &&lhs, T &&rhs) {
-    lhs._elements.emplace_back(toSharedPtr(std::forward<T>(rhs)));
+    lhs._elements.emplace_back(make_shared(std::forward<T>(rhs)));
     return std::move(lhs);
   }
 
@@ -537,7 +533,7 @@ private:
     requires IsGrammarElement<T> &&
              (!std::same_as<std::decay_t<T>, PrioritizedChoice>)
   friend PrioritizedChoice operator|(T &&lhs, PrioritizedChoice rhs) {
-    rhs._elements.insert(rhs._elements.begin(), toSharedPtr(lhs));
+    rhs._elements.insert(rhs._elements.begin(), make_shared(lhs));
     return rhs;
   }
 };
@@ -562,7 +558,7 @@ public:
     requires IsGrammarElement<T> &&
              (!std::same_as<std::decay_t<T>, AndPredicate>)
   explicit AndPredicate(T &&element)
-      : _element{toSharedPtr(std::forward<T>(element))} {}
+      : _element{make_shared(std::forward<T>(element))} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -584,7 +580,7 @@ public:
     requires IsGrammarElement<T> &&
              (!std::same_as<std::decay_t<T>, NotPredicate>)
   explicit NotPredicate(T &&element)
-      : _element{toSharedPtr(std::forward<T>(element))} {}
+      : _element{make_shared(std::forward<T>(element))} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -676,7 +672,7 @@ public:
   template <typename... Args>
     requires(IsGrammarElement<Args> && ...)
   TerminalRule &operator()(Args &&...args) {
-    _element = toSharedPtr((std::forward<Args>(args), ...));
+    _element = make_shared((std::forward<Args>(args), ...));
     return *this;
   }
 
@@ -722,7 +718,7 @@ public:
   template <typename... Args>
     requires(IsGrammarElement<Args> && ...)
   ParserRule &operator()(Args &&...args) {
-    _element = toSharedPtr((std::forward<Args>(args), ...));
+    _element = make_shared((std::forward<Args>(args), ...));
     return *this;
   }
 };
@@ -740,7 +736,7 @@ public:
   template <typename... Args>
     requires(IsGrammarElement<Args> && ...)
   DataTypeRule &operator()(Args &&...args) {
-    _element = toSharedPtr((std::forward<Args>(args), ...));
+    _element = make_shared((std::forward<Args>(args), ...));
     return *this;
   }
 
@@ -769,10 +765,16 @@ private:
   const std::shared_ptr<Rule> &_rule;
 };
 
-Keyword operator"" _kw(const char *str, std::size_t s);
-Keyword operator"" _ikw(const char *str, std::size_t s);
+inline Keyword operator"" _kw(const char *str, std::size_t s) {
+  return Keyword(std::string(str, s));
+}
 
-Character operator"" _kw(char chr);
+inline Keyword operator"" _ikw(const char *str, std::size_t s) {
+  return Keyword(std::string(str, s), true);
+}
+
+inline Character operator"" _kw(char chr) { return Character(chr); }
+
 
 template <typename T>
   requires IsGrammarElement<T> && (!std::same_as<std::decay_t<T>, AndPredicate>)
