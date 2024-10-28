@@ -1,10 +1,12 @@
 #pragma once
 
 #include <any>
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -38,6 +40,43 @@ enum class DataType {
   String,
   Enum,
 };
+template <typename T> struct Reference {
+
+  T *get() const {
+    if (resolved.load(std::memory_order_acquire)) {
+      return ref;
+    }
+    std::scoped_lock lock(mutex);
+    if (!resolved.load(std::memory_order_relaxed)) {
+      auto value = resolve(_refText);
+      if (value) {
+        ref = value.value();
+        resolved.store(true, std::memory_order_release);
+      }
+    }
+    return ref;
+  }
+  T &operator->() { return *get(); }
+
+  explicit operator bool() const { return get(); }
+
+  Reference &operator=(std::string refText) noexcept {
+    _refText = std::move(refText);
+    return *this;
+  }
+
+private:
+  std::string _refText;
+  std::function<std::optional<T *>(const std::string &)> resolve;
+  mutable std::atomic_bool resolved = false;
+  mutable T *ref = nullptr;
+  mutable std::mutex mutex;
+};
+
+template <typename T> struct is_reference : std::false_type {};
+
+template <typename T> struct is_reference<Reference<T>> : std::true_type {};
+template <typename T> constexpr bool is_reference_v = is_reference<T>::value;
 
 template <typename U> static constexpr DataType data_type_of() {
   using T = std::decay_t<U>;
@@ -83,11 +122,17 @@ struct AstNode {
   using attribute =
       std::conditional_t<is_data_type_v<T>, T, std::shared_ptr<T>>;
 
-  /// A vector that expand to std::vector<T> when T is a data type and to
-  /// std::vector<std::shared_ptr<T>> otherwise (T must be derived from
-  /// AstNode).
+  /// A reference to an AstNode of type T
+  /// @tparam T the AstNode type
+  template <typename T> using reference = Reference<T>;
+
+  /// A vector that expand to std::vector<T> when T is a data type or a
+  /// reference and to std::vector<std::shared_ptr<T>> otherwise (T must be
+  /// derived from AstNode).
   /// @tparam T type of element
-  template <typename T> using vector = std::vector<attribute<T>>;
+  template <typename T>
+  using vector =
+      std::vector<std::conditional_t<is_reference_v<T>, T, attribute<T>>>;
 
   // import standard types
   using int8_t = std::int8_t;

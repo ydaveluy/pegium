@@ -752,6 +752,7 @@ std::size_t Keyword::parse_hidden(std::string_view sv, CstNode &parent) const {
 }
 
 std::size_t Keyword::parse_terminal(std::string_view sv) const {
+
   if (_kw.size() > sv.size())
     return PARSE_ERROR;
   std::size_t i = 0;
@@ -866,14 +867,6 @@ std::size_t NoOp::parse_hidden(std::string_view sv, CstNode &parent) const {
   return PARSE_ERROR;
 }
 void NoOp::accept(Visitor &v) const {}
-Keyword operator"" _kw(const char *str, std::size_t s) {
-  return Keyword(std::string(str, s));
-}
-Keyword operator"" _ikw(const char *str, std::size_t s) {
-  return Keyword(std::string(str, s), true);
-}
-
-Character operator"" _kw(char chr) { return Character(chr); }
 
 bool Feature::operator==(const Feature &rhs) const noexcept {
   return _equal(*this, rhs);
