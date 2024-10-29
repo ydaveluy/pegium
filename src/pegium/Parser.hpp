@@ -34,42 +34,26 @@ public:
   ~Parser() noexcept override = default;
 
 protected:
-  /// The end of file token
-  static NotPredicate eof() { return !AnyCharacter{}; }
-
-  /// The end of line token
-  static PrioritizedChoice eol() { return "\r\n"_kw | '\n'_kw | '\r'_kw; }
-
   /// any character equivalent to regex `.`
-  static inline AnyCharacter any() { return {}; }
-
+  static const inline AnyCharacter dot{};
+  /// The end of file token
+  static const inline NotPredicate eof = !dot;
+  /// The end of line token
+  static const inline PrioritizedChoice eol{"\r\n"_kw | '\n'_kw | '\r'_kw};
   /// a space character equivalent to regex `\s`
-  static inline CharacterClass s() {
-    return CharacterClass(" \t\r\n\f\v", false, false);
-  }
+  static const inline CharacterClass s{" \t\r\n\f\v", false, false};
   /// a non space character equivalent to regex `\S`
-  static inline CharacterClass S() {
-    return CharacterClass(" \t\r\n\f\v", true, false);
-  }
-
+  static const inline CharacterClass S{" \t\r\n\f\v", true, false};
   /// a word character equivalent to regex `\w`
-  static inline CharacterClass w() {
-    return CharacterClass("a-zA-Z0-9_", false, false);
-  }
+  static const inline CharacterClass w{"a-zA-Z0-9_", false, false};
   /// a non word character equivalent to regex `\W`
-  static inline CharacterClass W() {
-    return CharacterClass("a-zA-Z0-9_", true, false);
-  }
+  static const inline CharacterClass W{"a-zA-Z0-9_", true, false};
   /// a digit character equivalent to regex `\d`
-  static inline CharacterClass d() {
-    return CharacterClass("0-9", false, false);
-  }
+  static const inline CharacterClass d{"0-9", false, false};
   /// a non-digit character equivalent to regex `\D`
-  static inline CharacterClass D() {
-    return CharacterClass("0-9", true, false);
-  }
+  static const inline CharacterClass D{"0-9", true, false};
 
-  static inline Character chr(char dt) { return Character(dt); }
+  // static inline Character chr(char dt) { return Character(dt); }
 
   static inline CharacterClass cls(std::string_view s, bool negated = false,
                                    bool ignoreCase = false) {
@@ -85,17 +69,6 @@ protected:
   static inline Many many(Args &&...args) {
     return Many((std::forward<Args>(args), ...));
   }
-  /// Create a repetition of zero or more elements with a separator
-  /// @tparam ...Args
-  /// @param sep the separator to be used between elements
-  /// @param ...args a sequence of elements to be repeated
-  /// @return The created Repetition
-  template <typename Sep, typename... Args>
-    requires IsGrammarElement<Sep> && (IsGrammarElement<Args> && ...)
-  static inline Optional many_sep(Sep &&sep, Args &&...args) {
-    return Optional(
-        at_least_one_sep(std::forward<Sep>(sep), std::forward<Args>(args)...));
-  }
 
   /// Create a repetition of one or more elements
   /// @tparam ...Args
@@ -106,18 +79,6 @@ protected:
   static inline AtLeastOne at_least_one(Args &&...args) {
     return AtLeastOne((std::forward<Args>(args), ...));
   }
-
-  /// Create a repetition of one or more elements with a separator
-  /// @tparam ...Args
-  /// @param sep the separator to be used between elements
-  /// @param ...args a sequence of elements to be repeated
-  /// @return The created Repetition
-
-  template <typename Sep, typename... Args>
-    requires IsGrammarElement<Sep> && (IsGrammarElement<Args> && ...)
-  static inline Group at_least_one_sep(Sep &&sep, Args... args) {
-    return Group((args, ...), Many{(std::forward<Sep>(sep), (args, ...))});
-  }
   /// Create an option (zero or one)
   /// @tparam ...Args
   /// @param ...args a sequence of elements to be repeated
@@ -127,6 +88,29 @@ protected:
   static inline Optional opt(Args &&...args) {
     return Optional((std::forward<Args>(args), ...));
   }
+
+  /// Create a repetition of one or more elements with a separator
+  /// @tparam ...Args
+  /// @param sep the separator to be used between elements
+  /// @param ...args a sequence of elements to be repeated
+  /// @return The created Repetition
+  template <typename Sep, typename... Args>
+    requires IsGrammarElement<Sep> && (IsGrammarElement<Args> && ...)
+  static inline Group at_least_one_sep(Sep &&sep, Args &&...args) {
+    return (args, ...), many(std::forward<Sep>(sep), (args, ...));
+  }
+  /// Create a repetition of zero or more elements with a separator
+  /// @tparam ...Args
+  /// @param sep the separator to be used between elements
+  /// @param ...args a sequence of elements to be repeated
+  /// @return The created Repetition
+  template <typename Sep, typename... Args>
+    requires IsGrammarElement<Sep> && (IsGrammarElement<Args> && ...)
+  static inline Optional many_sep(Sep &&sep, Args &&...args) {
+    return opt(
+        at_least_one_sep(std::forward<Sep>(sep), std::forward<Args>(args)...));
+  }
+
   /// Create a custom repetition with min and max.
   /// @tparam ...Args
   /// @param ...args a sequence of elements to be repeated
@@ -196,7 +180,7 @@ protected:
     });
   }
 
-  template <typename T> // TODO add requires T DataType or AstNode
+  template <typename T>
     requires std::derived_from<T, AstNode>
   ParserRule &rule(std::string name) {
     auto rule = std::make_shared<ParserRule>(
@@ -207,21 +191,21 @@ protected:
   }
 
   template <typename T = std::string>
-    requires is_data_type_v<T>
+    requires(!std::derived_from<T, AstNode>)
   DataTypeRule &rule(std::string name) {
     auto rule = std::make_shared<DataTypeRule>(
-        name, [this] { return this->createContext(); }, make_converter<T>(),
-        data_type_of<T>());
+        name, [this] { return this->createContext(); }, make_converter<T>());
 
     _rules[name] = rule;
     return *rule.get();
   }
 
-  template <typename T = std::string> TerminalRule &terminal(std::string name) {
+  template <typename T = std::string>
+    requires(!std::derived_from<T, AstNode>)
+  TerminalRule &terminal(std::string name) {
 
     auto rule = std::make_shared<TerminalRule>(
-        name, [this] { return this->createContext(); }, make_converter<T>(),
-        data_type_of<T>());
+        name, [this] { return this->createContext(); }, make_converter<T>());
 
     _rules[name] = rule;
     return *rule.get();
@@ -231,6 +215,28 @@ protected:
   /// @param name the rule name
   /// @return the Rule call action
   RuleCall call(const std::string &name) { return RuleCall(_rules[name]); }
+
+  /// Assign an element to a member of the current object
+  /// @tparam ...Args
+  /// @tparam e the member pointer
+  /// @param ...args the list of grammar elements
+  /// @return
+  template <auto e, typename... Args>
+    requires(IsGrammarElement<Args> && ...)
+  static inline Assignment assign(Args &&...args) {
+    return Assignment::assign<e>((std::forward<Args>(args), ...));
+  }
+
+  /// Append an element to a member of the current object
+  /// @tparam ...Args
+  /// @tparam e the member pointer
+  /// @param ...args the list of grammar elements
+  /// @return
+  template <auto e, typename... Args>
+    requires(IsGrammarElement<Args> && ...)
+  static inline Assignment append(Args &&...args) {
+    return Assignment::append<e>((std::forward<Args>(args), ...));
+  }
 
 private:
   Context createContext() const;
@@ -316,7 +322,7 @@ class RegexParser : public Parser {
     rule<Optional>("Optional")(call("Element"), '?'_kw);
     rule<AtLeastOne>("AtLeastOne")(call("Element"), '+'_kw);
 
-    rule<Repetition>("Repetition")(call("Element"), '{'_kw,
+    /*rule<Repetition>("Repetition")(call("Element"), '{'_kw,
                                    &Repetition::min += +d(), ','_kw,
                                    &Repetition::max += + +d(), '}'_kw);
 
@@ -328,7 +334,7 @@ class RegexParser : public Parser {
     rule<StringLiteral>(
         "StringLiteral")(&StringLiteral::value +=
                          ('['_kw, many(R"(\\)"_kw | R"(\])"_kw | !']'_kw),
-                          ']'_kw));
+                          ']'_kw));*/
   }
 };
 

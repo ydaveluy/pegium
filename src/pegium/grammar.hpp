@@ -148,47 +148,29 @@ struct Feature {
                  std::any_cast<R C::*>(rhs._feature);
     };
   }
-  template <typename R, typename C> static constexpr auto assignOperator() {
-    if constexpr (std::is_same_v<R, std::shared_ptr<AstNode>> ||
-                  std::is_same_v<R, std::vector<std::shared_ptr<AstNode>>>) {
-      return [](AstNode *object, const std::any &fea, const std::any &value) {
-        auto *obj = dynamic_cast<C *>(object);
-        assert(obj);
-        auto &member = obj->*std::any_cast<R C::*>(fea);
-
-        if constexpr (std::is_same_v<R, std::shared_ptr<AstNode>>) {
-          member = std::dynamic_pointer_cast<R::element_type>(
-              std::any_cast<std::shared_ptr<AstNode>>(value));
-        } else {
-          member.emplace_back(
-              std::dynamic_pointer_cast<R::value_type::element_type>(
-                  std::any_cast<std::shared_ptr<AstNode>>(value)));
-        }
-      };
-    } else if constexpr (std::is_same_v<R, std::vector<AstNode>>) {
-      return [](AstNode *object, const std::any &fea, const std::any &value) {
-        auto *obj = dynamic_cast<C *>(object);
-        assert(obj);
-        auto &member = obj->*std::any_cast<R C::*>(fea);
-        member.emplace_back(std::any_cast<AstNode>(value));
-      };
-    } else {
-      return [](AstNode *object, const std::any &fea, const std::any &value) {
-        auto *obj = dynamic_cast<C *>(object);
-        assert(obj);
-        auto &member = obj->*std::any_cast<R C::*>(fea);
-        member = std::any_cast<R>(value);
-      };
-    }
-  }
 
   template <typename R, typename C, typename Assign>
   Feature(R C::*feature, Assign &&assign)
       : _feature{feature}, _equal{equalOperator<std::shared_ptr<R>, C>()},
         _assign{std::forward<Assign>(assign)} {}
 
+  // create a Feature for a reference
   template <typename R, typename C>
-    requires std::derived_from<C, AstNode> // TODO && R is "simple type"
+    requires std::derived_from<C, AstNode>
+  explicit Feature(Reference<R> C::*feature)
+      : Feature{feature, [](AstNode *object, const std::any &fea,
+                            const std::any &value) {
+                  auto *obj = dynamic_cast<C *>(object);
+                  assert(obj);
+                  auto &member = obj->*std::any_cast<Reference<R> C::*>(fea);
+                  // store the reference as string
+                  member = std::any_cast<std::string>(value);
+                  // TODO initialize resolve from the Context
+                }} {}
+
+  // create a feature for an attribute of data type
+  template <typename R, typename C>
+    requires std::derived_from<C, AstNode> && (!std::derived_from<R, AstNode>)
   explicit Feature(R C::*feature)
       : Feature{feature, [](AstNode *object, const std::any &fea,
                             const std::any &value) {
@@ -197,18 +179,7 @@ struct Feature {
                   auto &member = obj->*std::any_cast<R C::*>(fea);
                   member = std::any_cast<R>(value);
                 }} {}
-
-  template <typename R, typename C>
-    requires std::derived_from<C, AstNode> // TODO && R is "simple type"
-  explicit Feature(std::vector<R> C::*feature)
-      : Feature{feature, [](AstNode *object, const std::any &fea,
-                            const std::any &value) {
-                  auto *obj = dynamic_cast<C *>(object);
-                  assert(obj);
-                  auto &member = obj->*std::any_cast<std::vector<R> C::*>(fea);
-                  member.emplace_back(std::any_cast<R>(value));
-                }} {}
-
+  // create a feature for an attribute of AstNode
   template <typename R, typename C>
     requires std::derived_from<C, AstNode> && std::derived_from<R, AstNode>
   explicit Feature(std::shared_ptr<R> C::*feature)
@@ -221,6 +192,32 @@ struct Feature {
                   member = std::dynamic_pointer_cast<R>(
                       std::any_cast<std::shared_ptr<AstNode>>(value));
                 }} {}
+
+  // create a feature for a vector of reference
+  template <typename R, typename C>
+    requires std::derived_from<C, AstNode> && (!std::derived_from<R, AstNode>)
+  explicit Feature(std::vector<Reference<R>> C::*feature)
+      : Feature{feature, [](AstNode *object, const std::any &fea,
+                            const std::any &value) {
+                  auto *obj = dynamic_cast<C *>(object);
+                  assert(obj);
+                  auto &member =
+                      obj->*std::any_cast<std::vector<Reference<R>> C::*>(fea);
+                  member.emplace_back() = std::any_cast<std::string>(value);
+                }} {}
+  // create a feature for a vector of data type
+  template <typename R, typename C>
+    requires std::derived_from<C, AstNode> && (!std::derived_from<R, AstNode>)
+  explicit Feature(std::vector<R> C::*feature)
+      : Feature{feature, [](AstNode *object, const std::any &fea,
+                            const std::any &value) {
+                  auto *obj = dynamic_cast<C *>(object);
+                  assert(obj);
+                  auto &member = obj->*std::any_cast<std::vector<R> C::*>(fea);
+                  member.emplace_back(std::any_cast<R>(value));
+                }} {}
+
+  // create a feature for a vector of AstNode
   template <typename R, typename C>
     requires std::derived_from<C, AstNode> && std::derived_from<R, AstNode>
   explicit Feature(std::vector<std::shared_ptr<R>> C::*feature)
@@ -256,10 +253,6 @@ class Assignment final : public GrammarElement {
 public:
   Assignment(Assignment &&) = default;
   Assignment(const Assignment &) = default;
-  template <typename T>
-    requires IsGrammarElement<T>
-  Assignment(Feature feature, T &&elem)
-      : feature{std::move(feature)}, elem{make_shared(std::forward<T>(elem))} {}
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -268,7 +261,28 @@ public:
   void accept(Visitor &v) const override;
   const Feature &getFeature() const noexcept { return feature; }
 
+  template <auto e, typename T>
+    requires IsGrammarElement<T>
+  static Assignment assign(T &&elem) {
+    return Assignment{Feature{e}, std::forward<T>(elem)};
+  }
+  template <auto e, typename T>
+    requires IsGrammarElement<T>
+  static Assignment append(T &&elem) {
+    return Assignment{Feature{e}, std::forward<T>(elem)};
+  }
+  template <auto e, typename T>
+    requires IsGrammarElement<T>
+  static Assignment enable(T &&elem) {
+    return Assignment{Feature{e}, std::forward<T>(elem)};
+  }
+
 private:
+  template <typename T>
+    requires IsGrammarElement<T>
+  Assignment(Feature feature, T &&elem)
+      : feature{std::move(feature)}, elem{make_shared(std::forward<T>(elem))} {}
+
   Feature feature;
   std::shared_ptr<GrammarElement> elem;
 };
@@ -277,12 +291,6 @@ template <typename T>
   requires IsGrammarElement<T>
 Assignment Feature::operator=(T &&elem) {
   return Assignment(*this, std::forward<T>(elem));
-}
-
-template <typename R, typename C, typename T>
-  requires IsGrammarElement<T>
-Assignment operator+=(R C::*member, T &&elem) {
-  return Feature{member} = std::forward<T>(elem);
 }
 
 class Action final : public GrammarElement {
@@ -326,26 +334,36 @@ private:
   std::vector<std::shared_ptr<GrammarElement>> _elements;
 
   // concat 2 Groups
-  friend Group &&operator,(Group &&lhs, Group &&rhs) {
-    for (auto &elem : rhs._elements)
-      lhs._elements.emplace_back(std::move(elem));
-    return std::move(lhs);
+  template <typename T, typename U>
+    requires std::same_as<std::decay_t<T>, Group> &&
+                 std::same_as<std::decay_t<U>, Group>
+  friend Group operator,(T &&lhs, U &&rhs) {
+    Group result = std::forward<T>(lhs);
+    result._elements.insert(result._elements.end(),
+                            std::make_move_iterator(rhs._elements.begin()),
+                            std::make_move_iterator(rhs._elements.end()));
+    return result;
   }
 
   // append an element to an existing Group
-  template <typename T>
-    requires IsGrammarElement<T> && (!std::same_as<std::decay_t<T>, Group>)
-  friend Group &&operator,(Group &&lhs, T &&rhs) {
-    lhs._elements.emplace_back(make_shared(std::forward<T>(rhs)));
-    return std::move(lhs);
+  template <typename T, typename U>
+    requires std::same_as<std::decay_t<T>, Group> && IsGrammarElement<U> &&
+                 (!std::same_as<std::decay_t<U>, Group>)
+  friend Group operator,(T &&lhs, U &&rhs) {
+    Group result = std::forward<T>(lhs);
+    result._elements.emplace_back(make_shared(std::forward<U>(rhs)));
+    return result;
   }
 
   // prepend an element to an existing Group
-  template <typename T>
-    requires IsGrammarElement<T> && (!std::same_as<std::decay_t<T>, Group>)
-  friend Group operator,(T &&lhs, Group rhs) {
-    rhs._elements.insert(rhs._elements.begin(), make_shared(lhs));
-    return rhs;
+  template <typename T, typename U>
+    requires IsGrammarElement<T> && (!std::same_as<std::decay_t<T>, Group>) &&
+                 std::same_as<std::decay_t<U>, Group>
+  friend Group operator,(T &&lhs, U &&rhs) {
+    Group result = std::forward<U>(rhs);
+    result._elements.insert(result._elements.begin(),
+                            make_shared(std::forward<T>(lhs)));
+    return result;
   }
 };
 // create a Group from 2 elements (not of type Group)
@@ -356,7 +374,6 @@ template <typename T, typename U>
 Group operator,(T &&lhs, U &&rhs) {
   return Group(std::forward<T>(lhs), std::forward<U>(rhs));
 }
-
 class UnorderedGroup final : public GrammarElement {
 public:
   UnorderedGroup(UnorderedGroup &&) = default;
@@ -377,29 +394,38 @@ private:
   std::vector<std::shared_ptr<GrammarElement>> _elements;
 
   // concat 2 UnorderedGroups
-  friend UnorderedGroup &&operator&(UnorderedGroup &&lhs,
-                                    UnorderedGroup &&rhs) {
-    for (auto &elem : rhs._elements)
-      lhs._elements.emplace_back(std::move(elem));
-    return std::move(lhs);
+  template <typename T, typename U>
+    requires std::same_as<std::decay_t<T>, UnorderedGroup> &&
+             std::same_as<std::decay_t<U>, UnorderedGroup>
+  friend UnorderedGroup operator&(T &&lhs, U &&rhs) {
+    UnorderedGroup result = std::forward<T>(lhs);
+    result._elements.insert(result._elements.end(),
+                            std::make_move_iterator(rhs._elements.begin()),
+                            std::make_move_iterator(rhs._elements.end()));
+    return result;
   }
 
   // append an element to an existing UnorderedGroup
-  template <typename T>
-    requires IsGrammarElement<T> &&
-             (!std::same_as<std::decay_t<T>, UnorderedGroup>)
-  friend UnorderedGroup &&operator&(UnorderedGroup &&lhs, T &&rhs) {
-    lhs._elements.emplace_back(make_shared(std::forward<T>(rhs)));
-    return std::move(lhs);
+  template <typename T, typename U>
+    requires std::same_as<std::decay_t<T>, UnorderedGroup> &&
+             IsGrammarElement<U> &&
+             (!std::same_as<std::decay_t<U>, UnorderedGroup>)
+  friend UnorderedGroup operator&(T &&lhs, U &&rhs) {
+    UnorderedGroup result = std::forward<T>(lhs);
+    result._elements.emplace_back(make_shared(std::forward<U>(rhs)));
+    return result;
   }
 
   // prepend an element to an existing UnorderedGroup
-  template <typename T>
+  template <typename T, typename U>
     requires IsGrammarElement<T> &&
-             (!std::same_as<std::decay_t<T>, UnorderedGroup>)
-  friend UnorderedGroup operator&(T &&lhs, UnorderedGroup rhs) {
-    rhs._elements.insert(rhs._elements.begin(), make_shared(lhs));
-    return rhs;
+             (!std::same_as<std::decay_t<T>, UnorderedGroup>) &&
+             std::same_as<std::decay_t<U>, UnorderedGroup>
+  friend UnorderedGroup operator&(T &&lhs, U &&rhs) {
+    UnorderedGroup result = std::forward<U>(rhs);
+    result._elements.insert(result._elements.begin(),
+                            make_shared(std::forward<T>(lhs)));
+    return result;
   }
 };
 // create a UnorderedGroup from 2 elements (not of type UnorderedGroup)
@@ -411,6 +437,7 @@ template <typename T, typename U>
 UnorderedGroup operator&(T &&lhs, U &&rhs) {
   return UnorderedGroup(std::forward<T>(lhs), std::forward<U>(rhs));
 }
+
 class Optional final : public GrammarElement {
 public:
   Optional(Optional &&) = default;
@@ -513,28 +540,37 @@ private:
   std::vector<std::shared_ptr<GrammarElement>> _elements;
 
   // concat 2 PrioritizedChoices
-  friend PrioritizedChoice &&operator|(PrioritizedChoice &&lhs,
-                                       PrioritizedChoice &&rhs) {
-    for (auto &elem : rhs._elements)
-      lhs._elements.emplace_back(std::move(elem));
-    return std::move(lhs);
+  template <typename T, typename U>
+    requires std::same_as<std::decay_t<T>, PrioritizedChoice> &&
+             std::same_as<std::decay_t<U>, PrioritizedChoice>
+  friend PrioritizedChoice operator|(T &&lhs, U &&rhs) {
+    PrioritizedChoice result = std::forward<T>(lhs);
+    result._elements.insert(result._elements.end(),
+                            std::make_move_iterator(rhs._elements.begin()),
+                            std::make_move_iterator(rhs._elements.end()));
+    return result;
   }
   // append an element to an existing PrioritizedChoice
-  template <typename T>
-    requires IsGrammarElement<T> &&
-             (!std::same_as<std::decay_t<T>, PrioritizedChoice>)
-  friend PrioritizedChoice &&operator|(PrioritizedChoice &&lhs, T &&rhs) {
-    lhs._elements.emplace_back(make_shared(std::forward<T>(rhs)));
-    return std::move(lhs);
+  template <typename T, typename U>
+    requires std::same_as<std::decay_t<T>, PrioritizedChoice> &&
+             IsGrammarElement<T> &&
+             (!std::same_as<std::decay_t<U>, PrioritizedChoice>)
+  friend PrioritizedChoice operator|(T &&lhs, U &&rhs) {
+    PrioritizedChoice result = std::forward<T>(lhs);
+    result._elements.emplace_back(make_shared(std::forward<U>(rhs)));
+    return result;
   }
 
   // prepend an element to an existing PrioritizedChoice
-  template <typename T>
+  template <typename T, typename U>
     requires IsGrammarElement<T> &&
-             (!std::same_as<std::decay_t<T>, PrioritizedChoice>)
-  friend PrioritizedChoice operator|(T &&lhs, PrioritizedChoice rhs) {
-    rhs._elements.insert(rhs._elements.begin(), make_shared(lhs));
-    return rhs;
+             (!std::same_as<std::decay_t<T>, PrioritizedChoice>) &&
+             std::same_as<std::decay_t<U>, PrioritizedChoice>
+  friend PrioritizedChoice operator|(T &&lhs, U &&rhs) {
+    PrioritizedChoice result = std::forward<U>(rhs);
+    result._elements.insert(result._elements.begin(),
+                            make_shared(std::forward<T>(lhs)));
+    return result;
   }
 };
 
@@ -655,8 +691,7 @@ public:
   ParseResult parse(std::string_view sv) const override;
 
   explicit TerminalRule(std::string_view name, ContextProvider provider,
-                        std::function<bool(std::any &, CstNode &)> action,
-                        DataType type);
+                        std::function<bool(std::any &, CstNode &)> action);
 
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          Context &c) const override;
@@ -690,10 +725,7 @@ public:
     return *this;
   }
 
-  DataType getType() const noexcept { return _type; }
-
 private:
-  DataType _type;
   enum class Kind {
     // a terminal mapped to a normal CstNode (non-hidden)
     Normal,
@@ -726,10 +758,7 @@ public:
 class DataTypeRule final : public Rule {
 public:
   explicit DataTypeRule(std::string_view name, ContextProvider provider,
-                        std::function<bool(std::any &, CstNode &)> action,
-                        DataType type);
-  // DataTypeRule(const DataTypeRule &) = delete;
-  // DataTypeRule(ParserRule &&) = delete;
+                        std::function<bool(std::any &, CstNode &)> action);
   void accept(Visitor &v) const override;
   ParseResult parse(std::string_view sv) const override;
 
@@ -740,16 +769,13 @@ public:
     return *this;
   }
 
-  DataType getType() const noexcept { return _type; }
-
 private:
-  DataType _type;
   // TODO add value_converter
 };
 
 class RuleCall final : public GrammarElement {
 public:
-  // here the rule parameter is a reference on the unique_ptr instead of on the
+  // here the rule parameter is a reference on the shared_ptr instead of on the
   // rule because the rule may not be allocated/initialized yet
   explicit RuleCall(const std::shared_ptr<Rule> &rule);
 
@@ -765,6 +791,7 @@ private:
   const std::shared_ptr<Rule> &_rule;
 };
 
+inline namespace literals {
 inline Keyword operator"" _kw(const char *str, std::size_t s) {
   return Keyword(std::string(str, s));
 }
@@ -774,7 +801,7 @@ inline Keyword operator"" _ikw(const char *str, std::size_t s) {
 }
 
 inline Character operator"" _kw(char chr) { return Character(chr); }
-
+} // namespace literals
 
 template <typename T>
   requires IsGrammarElement<T> && (!std::same_as<std::decay_t<T>, AndPredicate>)

@@ -1,7 +1,14 @@
+#include <any>
+#include <array>
 #include <cassert>
 #include <cstddef>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <pegium/grammar.hpp>
+#include <string_view>
+#include <vector>
+
 namespace pegium {
 
 consteval std::array<bool, 256> make_lookup() { return {}; }
@@ -42,7 +49,7 @@ consteval std::array<unsigned char, 256> make_tolower() {
 
 inline char tolower(char c) {
   static constexpr auto tolower = make_tolower();
-  return tolower[static_cast<unsigned char>(c)];
+  return static_cast<char>(tolower[static_cast<unsigned char>(c)]);
 }
 
 static constexpr std::size_t PARSE_ERROR =
@@ -59,11 +66,14 @@ inline size_t codepoint_length(std::string_view sv) {
     auto b = static_cast<std::byte>(sv.front());
     if ((b & std::byte{0x80}) == std::byte{0}) {
       return 1;
-    } else if ((b & std::byte{0xE0}) == std::byte{0xC0} && sv.size() >= 2) {
+    }
+    if ((b & std::byte{0xE0}) == std::byte{0xC0} && sv.size() >= 2) {
       return 2;
-    } else if ((b & std::byte{0xF0}) == std::byte{0xE0} && sv.size() >= 3) {
+    }
+    if ((b & std::byte{0xF0}) == std::byte{0xE0} && sv.size() >= 3) {
       return 3;
-    } else if ((b & std::byte{0xF8}) == std::byte{0xF0} && sv.size() >= 4) {
+    }
+    if ((b & std::byte{0xF8}) == std::byte{0xF0} && sv.size() >= 4) {
       return 4;
     }
   }
@@ -184,17 +194,15 @@ void ParserRule::accept(Visitor &v) const { v.visit(*this); }
 
 DataTypeRule::DataTypeRule(std::string_view name, ContextProvider provider,
 
-                           std::function<bool(std::any &, CstNode &)> action,
-                           DataType type)
-    : Rule(name, std::move(provider), std::move(action)), _type{type} {}
+                           std::function<bool(std::any &, CstNode &)> action)
+    : Rule(name, std::move(provider), std::move(action)) {}
 
 void DataTypeRule::accept(Visitor &v) const { v.visit(*this); }
 
 TerminalRule::TerminalRule(std::string_view name, ContextProvider provider,
 
-                           std::function<bool(std::any &, CstNode &)> action,
-                           DataType type)
-    : Rule(name, std::move(provider), std::move(action)), _type{type} {}
+                           std::function<bool(std::any &, CstNode &)> action)
+    : Rule(name, std::move(provider), std::move(action)){}
 
 std::size_t TerminalRule::parse_rule(std::string_view sv, CstNode &parent,
                                      Context &c) const {
@@ -239,8 +247,9 @@ CharacterClass::CharacterClass(std::string_view s, bool negated,
   std::size_t i = 0;
   while (i < s.size()) {
     if (i + 2 < s.size() && s[i + 1] == '-') {
-      for (auto c = s[i]; c <= s[i + 2]; ++c)
+      for (auto c = s[i]; c <= s[i + 2]; ++c) {
         lookup[static_cast<unsigned char>(c)] = true;
+      }
       i += 3;
     } else {
       lookup[static_cast<unsigned char>(s[i])] = true;
@@ -248,16 +257,19 @@ CharacterClass::CharacterClass(std::string_view s, bool negated,
     }
   }
   if (ignore_case) {
-    for (auto c = 'a'; c <= 'z'; ++c)
+    for (auto c = 'a'; c <= 'z'; ++c) {
       lookup[static_cast<unsigned char>(c)] |=
           lookup[static_cast<unsigned char>(c - 'a' + 'A')];
-    for (auto c = 'A'; c <= 'Z'; ++c)
+    }
+    for (auto c = 'A'; c <= 'Z'; ++c) {
       lookup[static_cast<unsigned char>(c)] |=
           lookup[static_cast<unsigned char>(c - 'A' + 'a')];
+    }
   }
   if (negated) {
-    for (auto &c : lookup)
+    for (auto &c : lookup) {
       c = !c;
+    }
   }
 }
 std::size_t CharacterClass::parse_rule(std::string_view sv, CstNode &parent,

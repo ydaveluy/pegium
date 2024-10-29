@@ -5,29 +5,29 @@
 #include <pegium/Parser.hpp>
 
 namespace Xsmp {
-
+struct Type;
 struct Attribute : public pegium::AstNode {
-  attribute<string> type;
+  reference<Type> type;
 };
 struct NamedElement : public pegium::AstNode {
-  attribute<string> name;
-  vector<Attribute> attributes;
+  string name;
+  vector<containment<Attribute>> attributes;
 };
 struct VisibilityElement : public NamedElement {
   vector<string> modifiers;
 };
 struct Namespace;
 struct Catalogue : public NamedElement {
-  vector<Namespace> namespaces;
+  vector<containment<Namespace>> namespaces;
 };
 
 struct Namespace : public NamedElement {
-  vector<NamedElement> members;
+  vector<containment<NamedElement>> members;
 };
 
 struct Type : public VisibilityElement {};
 struct Structure : public Type {
-  vector<NamedElement> members;
+  vector<containment<NamedElement>> members;
 };
 
 struct Class : public Structure {};
@@ -36,28 +36,31 @@ class XsmpParser : public pegium::Parser {
 public:
   XsmpParser() {
 
-    using namespace pegium;
-    terminal("WS").ignore()(+s());
-    terminal("SL_COMMENT").hide()("//"_kw >> &(eol() | eof()));
+    using namespace pegium::literals;
+    terminal("WS").ignore()(+s);
+    terminal("SL_COMMENT").hide()("//"_kw >> &(eol | eof));
     terminal("ML_COMMENT").hide()("/*"_kw >> "*/"_kw);
-    terminal("ID")(cls("a-zA-Z_"), *w());
+    terminal("ID")(cls("a-zA-Z_"), *w);
     rule("QualifiedName")(at_least_one_sep('.'_kw, call("ID")));
 
-    auto Attributes = many(&NamedElement::attributes += call("Attribute"));
-    auto Name = &NamedElement::name += call("ID");
+    static const auto Attributes =
+        *append<&NamedElement::attributes>(call("Attribute"));
+    auto Name = assign<&NamedElement::name>(call("ID"));
     auto Visibilities =
-        many(&VisibilityElement::modifiers += call("Visibility"));
+        *append<&VisibilityElement::modifiers>(call("Visibility"));
 
     rule<Attribute>("Attribute")(
-        '@'_kw, &Attribute::type += call("QualifiedName"), opt('('_kw, ')'_kw));
+        '@'_kw, assign<&Attribute::type>(call("QualifiedName")),
+        opt('('_kw, ')'_kw));
 
     rule<Catalogue>("Catalogue")(
         Attributes, "catalogue"_kw, Name,
-        many(&Catalogue::namespaces += call("Namespace")));
+        many(append<&Catalogue::namespaces>(call("Namespace"))));
 
     rule<Namespace>("Namespace")(
         Attributes, "namespace"_kw, Name, '{'_kw,
-        many(&Namespace::members += call("Namespace") | call("Type")), '}'_kw);
+        many(append<&Namespace::members>(call("Namespace") | call("Type"))),
+        '}'_kw);
 
     rule<std::string>("Visibility")("private"_kw | "protected"_kw |
                                     "public"_kw);
@@ -71,8 +74,8 @@ public:
                                  '}'_kw);
 
     rule<Class>("Class")(Attributes,
-                         many(&VisibilityElement::modifiers +=
-                              call("Visibility") | "abstract"_kw),
+                         many(append<&VisibilityElement::modifiers>(
+                             call("Visibility") | "abstract"_kw)),
                          "class"_kw, Name, '{'_kw,
                          /*many(&Structure::members += call("Constant") |
                             call("Field")),*/

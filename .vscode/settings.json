@@ -80,7 +80,8 @@
         "forward_list": "cpp",
         "ios": "cpp",
         "cassert": "cpp",
-        "stack": "cpp"
+        "stack": "cpp",
+        "source_location": "cpp"
     },
     "sonarlint.pathToCompileCommands": "${workspaceFolder}/build/compile_commands.json"
 }
