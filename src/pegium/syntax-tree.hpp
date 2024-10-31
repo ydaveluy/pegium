@@ -102,7 +102,9 @@ struct AstNode {
 };
 
 struct RootCstNode;
+namespace grammar {
 class GrammarElement;
+}
 
 /**
  * A node in the Concrete Syntax Tree (CST).
@@ -111,8 +113,7 @@ struct CstNode {
 
   /** The container of the node */
   // const CstNode *container;
-  /** The actual text */
-  std::string_view text;
+
   /** The root CST node */
   RootCstNode *root;
 
@@ -157,9 +158,10 @@ struct CstNode {
   Iterator end() { return Iterator(); }
 
   std::vector<CstNode> content;
-
+  /** The actual text */
+  std::string_view text;
   /** The grammar element from which this node was parsed */
-  const GrammarElement *grammarSource;
+  const grammar::GrammarElement *grammarSource;
   // A leaf CST node corresponds to a token in the input token stream.
   bool isLeaf = false;
   // Whether the token is hidden, i.e. not explicitly part of the containing

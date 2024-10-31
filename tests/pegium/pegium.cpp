@@ -1,139 +1,81 @@
-#include <chrono>
-#include <fstream>
-#include <gtest/gtest.h>
-#include <iostream>
+#include <array>
+#include <cassert>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <limits>
+#include <memory>
 #include <pegium/Parser.hpp>
+#include <pegium/syntax-tree.hpp>
+#include <random>
+#include <string_view>
+#include <utility>
+#include <vector>
 
-using namespace pegium;
-struct TestAst : public pegium::AstNode {
+#include <gtest/gtest.h>
 
-  string name;
-  string text;
-  vector<containment<TestAst>> child;
-};
+namespace pegium {
+using namespace grammar;
 
-class TestGrammar : public Parser {
-public:
-  TestGrammar() {
+static_assert("test"_kw.parse_terminal("test123") == 4);
+constexpr auto a = "a"_kw;
+constexpr auto b = "b"_kw;
+constexpr auto c = "c"_kw;
 
-    using namespace pegium;
-    terminal("WS").ignore()(+s);
-    // terminal("SL_COMMENT").hide()("//"_kw >> (eol| eof));
-    terminal("SL_COMMENT").hide()("//"_kw, many(cls("\r\n", true)));
-    terminal("ML_COMMENT").hide()("/*"_kw >> "*/"_kw);
-    terminal("ID")(cls("a-zA-Z_"), *w);
-    rule("QualifiedName")(at_least_one_sep('.'_kw, call("ID")));
-    rule("QualifiedName2")(at_least_one_sep('.'_kw, "test"_ikw));
+static_assert(a.parse_terminal("a") == 1);
+static_assert(a.i().parse_terminal("A") == 1);
 
-    rule<TestAst>("TestAst")(
-        "test"_kw, assign<&TestAst::name>(call("ID")),
-        opt("{"_kw, *append<&TestAst::child>(call("TestAst")), "}"_kw));
-  }
-};
+static_assert((a, b).parse_terminal("abaa") == 2);
 
-TEST(PegiumTest, TestAst) {
-  TestGrammar g;
-  auto result = g.parse("TestAst", R"(
-      test name   
-      { 
-        test child1
-        test child2
-        {
-          test nested
-        }
-      }
-      )");
-  EXPECT_TRUE(result.ret);
-  auto test = std::any_cast<std::shared_ptr<pegium::AstNode>>(result.value);
-  auto *ast = dynamic_cast<TestAst *>(test.get());
-  ASSERT_TRUE(ast);
-  EXPECT_EQ(ast->name, "name");
-  ASSERT_EQ(ast->child.size(), 2);
-  EXPECT_EQ(ast->child[0]->name, "child1");
-  EXPECT_EQ(ast->child[1]->name, "child2");
+static_assert((a | b).parse_terminal("ab") == 1);
+static_assert((a | b).parse_terminal("ba") == 1);
+static_assert((a | b).parse_terminal("c") == PARSE_ERROR);
+static_assert(((a | b) | (c | d)).parse_terminal("b") == 1);
+static_assert(((a | b) | (c | d)).parse_terminal("c") == 1);
+static_assert((a | (c | b)).parse_terminal("c") == 1);
+static_assert(((a | b) | c).parse_terminal("c") == 1);
 
-  ASSERT_EQ(ast->child[1]->child.size(), 1);
-  EXPECT_EQ(ast->child[1]->child[0]->name, "nested");
-}
+static_assert(((a, a), a).parse_terminal("aaaa") == 3);
+static_assert(((a, a), (a, a)).parse_terminal("aaaa") == 4);
+static_assert((a, (a, a)).parse_terminal("aaaa") == 3);
 
-TEST(PegiumTest, QualifiedName) {
-  TestGrammar g;
-  auto result = g.parse("QualifiedName", "a.b.c");
-  EXPECT_TRUE(result.ret);
-  auto str = std::any_cast<std::string>(result.value);
-  EXPECT_EQ(str, "a.b.c");
-}
+static_assert(opt(a).parse_terminal("a") == 1);
+static_assert(opt(a).parse_terminal("") == 0);
+static_assert(opt(a).parse_terminal("b") == 0);
 
-TEST(PegiumTest, QualifiedNameWithSpacesAndComment) {
-  TestGrammar g;
-  auto result = g.parse("QualifiedName", R"(
-  /**
-   * multi line comment
-   */
-  a  .
-  // single line comment
-  b
-  .
-  
-  c
-  // trailing comment ->
-  //)");
-  EXPECT_TRUE(result.ret);
-  auto str = std::any_cast<std::string>(result.value);
-  EXPECT_EQ(str, "a.b.c");
-}
-TEST(PegiumTest, DISABLED_Bench) {
-  TestGrammar g;
+static_assert((+a).parse_terminal("a") == 1);
+static_assert((+a).parse_terminal("aaa") == 3);
+static_assert((+a).parse_terminal("") == PARSE_ERROR);
+static_assert((+a).parse_terminal("b") == PARSE_ERROR);
+
+static_assert((*a).parse_terminal("a") == 1);
+static_assert((*a).parse_terminal("aaa") == 3);
+static_assert((*a).parse_terminal("") == 0);
+static_assert((*a).parse_terminal("b") == 0);
+
+static_assert("a-z"_cr.parse_terminal("b") == 1);
+static_assert(("a-z"_cr | "A-Z"_cr).i().parse_terminal("+") == PARSE_ERROR);
+
+TEST(Pegium2Test, DISABLED_Bench2) {
 
   std::string input;
-  for (int i = 0; i < 1'000'000; ++i)
-    input += R"(
-    // comment
-    a.b.c.d.e.
-    /* comment*/
-    g.h.
-    )";
-  input += "end";
-
-  // std::ofstream out("output.txt");
-  // out << input;
-
+  input.reserve(1'000'000'000);
+  for (int i = 0; i < 1'000'000'000; ++i)
+    // input += R"(teSTII)";
+    input += ('a' + std::rand() % 26);
+  static constinit auto g = *("a-z"_cr.i());
   using namespace std::chrono;
   auto start = high_resolution_clock::now();
-
-  auto l = g.parse("QualifiedName", input);
-
+  CstNode node;
+  Context c{{}};
+  auto i = g.parse_terminal(input);
+  // auto i = g.parse_rule(input , node,c);
   auto end = high_resolution_clock::now();
   auto duration = duration_cast<milliseconds>(end - start).count();
 
-  std::cout << "Parsed " << l.len << " / " << input.size() << " characters in "
+  std::cout << "Parsed " << i << " / " << input.size() << " characters in "
             << duration << "ms\n";
 }
 
-TEST(PegiumTest, DISABLED_Bench2) {
-  TestGrammar g;
-
-  std::string input;
-  for (int i = 0; i < 1'000'000; ++i)
-    input += R"(
-    // comment
-    test.test.TEST.test
-    /* comment*/
-    .test.TesT.Test.TeST.test.tesT.
-    )";
-  input += "test";
-
-  // std::ofstream out("output.txt");
-  // out << input;
-
-  using namespace std::chrono;
-  auto start = high_resolution_clock::now();
-
-  auto l = g.parse("QualifiedName2", input);
-
-  auto end = high_resolution_clock::now();
-  auto duration = duration_cast<milliseconds>(end - start).count();
-
-  std::cout << "Parsed " << l.len << " / " << input.size() << " characters in "
-            << duration << "ms\n";
-}
+} // namespace pegium

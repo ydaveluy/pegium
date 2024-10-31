@@ -7,7 +7,7 @@ TEST(GrammarTest, Optional) {
   class Parser : public pegium::Parser {
   public:
     Parser() {
-      using namespace pegium;
+      using namespace pegium::grammar;
       terminal("WS").ignore()(+s);
       rule("RULE")(opt("test"_kw));
       terminal("TERM")(opt("test"_kw));
@@ -15,8 +15,8 @@ TEST(GrammarTest, Optional) {
   };
   Parser p;
 
-  EXPECT_TRUE(p.parse("RULE", "").ret);
-  EXPECT_TRUE(p.parse("RULE", "test").ret);
+  EXPECT_TRUE(p.parse("RULE", " ").ret);
+  EXPECT_TRUE(p.parse("RULE", "  test  ").ret);
   EXPECT_FALSE(p.parse("RULE", "test test").ret);
   EXPECT_FALSE(p.parse("RULE", "testtest").ret);
 
@@ -32,7 +32,7 @@ TEST(GrammarTest, Many) {
   class Parser : public pegium::Parser {
   public:
     Parser() {
-      using namespace pegium;
+      using namespace pegium::grammar;
       terminal("WS").ignore()(+s);
       rule("RULE")(many("test"_kw));
       terminal("TERM")(many("test"_kw));
@@ -59,10 +59,10 @@ TEST(GrammarTest, ManySep) {
   class Parser : public pegium::Parser {
   public:
     Parser() {
-      using namespace pegium;
+      using namespace pegium::grammar;
       terminal("WS").ignore()(+s);
-      rule("RULE")(many_sep('.'_kw, "test"_kw));
-      terminal("TERM")(many_sep('.'_kw, "test"_kw));
+      rule("RULE")(many_sep("."_kw, "test"_kw));
+      terminal("TERM")(many_sep("."_kw, "test"_kw));
     }
   };
   Parser p;
@@ -90,7 +90,7 @@ TEST(GrammarTest, AtLeastOne) {
   class Parser : public pegium::Parser {
   public:
     Parser() {
-      using namespace pegium;
+      using namespace pegium::grammar;
       terminal("WS").ignore()(+s);
       rule("RULE")(at_least_one("test"_kw));
       terminal("TERM")(at_least_one("test"_kw));
@@ -114,10 +114,10 @@ TEST(GrammarTest, AtLeastOneSep) {
   class Parser : public pegium::Parser {
   public:
     Parser() {
-      using namespace pegium;
+      using namespace pegium::grammar;
       terminal("WS").ignore()(+s);
-      rule("RULE")(at_least_one_sep('.'_kw, "test"_kw));
-      terminal("TERM")(at_least_one_sep('.'_kw, "test"_kw));
+      rule("RULE")(at_least_one_sep("."_kw, "test"_kw));
+      terminal("TERM")(at_least_one_sep("."_kw, "test"_kw));
     }
   };
   Parser p;
@@ -142,10 +142,10 @@ TEST(GrammarTest, Repetition) {
   class Parser : public pegium::Parser {
   public:
     Parser() {
-      using namespace pegium;
+      using namespace pegium::grammar;
       terminal("WS").ignore()(+s);
-      rule("RULE")(rep(2, 3, "test"_kw));
-      terminal("TERM")(rep(2, 3, "test"_kw));
+      rule("RULE")(rep<2, 3>("test"_kw));
+      terminal("TERM")(rep<2, 3>("test"_kw));
     }
   };
   Parser p;
@@ -164,10 +164,10 @@ TEST(GrammarTest, Group) {
   class Parser : public pegium::Parser {
   public:
     Parser() {
-      using namespace pegium;
+      using namespace pegium::grammar;
       terminal("WS").ignore()(+s);
-      rule("RULE")("A"_kw , "B"_kw);
-      terminal("TERM")("A"_kw , "B"_kw);
+      rule("RULE")("A"_kw, "B"_kw);
+      terminal("TERM")("A"_kw, "B"_kw);
     }
   };
   Parser p;
@@ -181,12 +181,11 @@ TEST(GrammarTest, Group) {
   EXPECT_FALSE(p.parse("TERM", " AB").ret);
 }
 
-
 TEST(GrammarTest, UnorderedGroup) {
   class Parser : public pegium::Parser {
   public:
     Parser() {
-      using namespace pegium;
+      using namespace pegium::grammar;
       terminal("WS").ignore()(+s);
       rule("RULE")("A"_kw & "B"_kw & "C"_kw);
       terminal("TERM")("A"_kw & "B"_kw & "C"_kw);
@@ -219,7 +218,7 @@ TEST(GrammarTest, PrioritizedChoice) {
   class Parser : public pegium::Parser {
   public:
     Parser() {
-      using namespace pegium;
+      using namespace pegium::grammar;
       terminal("WS").ignore()(+s);
       rule("RULE")("A"_kw | "B"_kw);
       terminal("TERM")("A"_kw | "B"_kw);
@@ -243,10 +242,10 @@ TEST(GrammarTest, PrioritizedChoiceWithGroup) {
   class Parser : public pegium::Parser {
   public:
     Parser() {
-      using namespace pegium;
+      using namespace pegium::grammar;
       terminal("WS").ignore()(+s);
-      rule("RULE")(("A"_kw , "B"_kw)|("A"_kw,"C"_kw));
-      terminal("TERM")(("A"_kw , "B"_kw)|("A"_kw,"C"_kw));
+      rule("RULE")(("A"_kw, "B"_kw) | ("A"_kw, "C"_kw));
+      terminal("TERM")(("A"_kw, "B"_kw) | ("A"_kw, "C"_kw));
     }
   };
   Parser p;
