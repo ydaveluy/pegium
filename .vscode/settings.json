@@ -81,7 +81,8 @@
         "ios": "cpp",
         "cassert": "cpp",
         "stack": "cpp",
-        "source_location": "cpp"
+        "source_location": "cpp",
+        "hash_map": "cpp"
     },
     "sonarlint.pathToCompileCommands": "${workspaceFolder}/build/compile_commands.json",
     "C_Cpp.errorSquiggles": "enabledIfIncludesResolve"
