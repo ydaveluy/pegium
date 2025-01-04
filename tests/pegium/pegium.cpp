@@ -26,7 +26,7 @@ constexpr auto c = "c"_kw;
 static_assert(a.parse_terminal("a") == 1);
 static_assert(a.i().parse_terminal("A") == 1);
 
-static_assert((a, b).parse_terminal("abaa") == 2);
+static_assert((a + b).parse_terminal("abaa") == 2);
 
 static_assert((a | b).parse_terminal("ab") == 1);
 static_assert((a | b).parse_terminal("ba") == 1);
@@ -36,46 +36,27 @@ static_assert(((a | b) | (c | d)).parse_terminal("c") == 1);
 static_assert((a | (c | b)).parse_terminal("c") == 1);
 static_assert(((a | b) | c).parse_terminal("c") == 1);
 
-static_assert(((a, a), a).parse_terminal("aaaa") == 3);
-static_assert(((a, a), (a, a)).parse_terminal("aaaa") == 4);
-static_assert((a, (a, a)).parse_terminal("aaaa") == 3);
+static_assert(((a + a) + a).parse_terminal("aaaa") == 3);
+static_assert(((a + a) + (a + a)).parse_terminal("aaaa") == 4);
+static_assert((a + (a + a)).parse_terminal("aaaa") == 3);
 
 static_assert(opt(a).parse_terminal("a") == 1);
 static_assert(opt(a).parse_terminal("") == 0);
 static_assert(opt(a).parse_terminal("b") == 0);
 
-static_assert((+a).parse_terminal("a") == 1);
-static_assert((+a).parse_terminal("aaa") == 3);
-static_assert((+a).parse_terminal("") == PARSE_ERROR);
-static_assert((+a).parse_terminal("b") == PARSE_ERROR);
+static_assert((at_least_one(a)).parse_terminal("a") == 1);
+static_assert((at_least_one(a)).parse_terminal("aaa") == 3);
+static_assert((at_least_one(a)).parse_terminal("") == PARSE_ERROR);
+static_assert((at_least_one(a)).parse_terminal("b") == PARSE_ERROR);
 
-static_assert((*a).parse_terminal("a") == 1);
-static_assert((*a).parse_terminal("aaa") == 3);
-static_assert((*a).parse_terminal("") == 0);
-static_assert((*a).parse_terminal("b") == 0);
+static_assert((many(a)).parse_terminal("a") == 1);
+static_assert((many(a)).parse_terminal("aaa") == 3);
+static_assert((many(a)).parse_terminal("") == 0);
+static_assert((many(a)).parse_terminal("b") == 0);
 
-static_assert("a-z"_cr.parse_terminal("b") == 1);
+static_assert("a-z"_cr.i().parse_terminal("B") == 1);
 static_assert(("a-z"_cr | "A-Z"_cr).i().parse_terminal("+") == PARSE_ERROR);
 
-TEST(Pegium2Test, DISABLED_Bench2) {
 
-  std::string input;
-  input.reserve(1'000'000'000);
-  for (int i = 0; i < 1'000'000'000; ++i)
-    // input += R"(teSTII)";
-    input += ('a' + std::rand() % 26);
-  static constinit auto g = *("a-z"_cr.i());
-  using namespace std::chrono;
-  auto start = high_resolution_clock::now();
-  CstNode node;
-  Context c{{}};
-  auto i = g.parse_terminal(input);
-  // auto i = g.parse_rule(input , node,c);
-  auto end = high_resolution_clock::now();
-  auto duration = duration_cast<milliseconds>(end - start).count();
-
-  std::cout << "Parsed " << i << " / " << input.size() << " characters in "
-            << duration << "ms\n";
-}
 
 } // namespace pegium

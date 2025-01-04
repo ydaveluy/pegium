@@ -24,11 +24,11 @@ if(PEGIUM_ENABLE_CODECOVERAGE)
 endif(PEGIUM_ENABLE_CODECOVERAGE)
 
 
-file(GLOB_RECURSE SRC CONFIGURE_DEPENDS src/pegium/*.cpp)
+file(GLOB_RECURSE SRC CONFIGURE_DEPENDS src/pegium/**.cpp)
 
 add_library(pegium ${SRC})
 target_include_directories(pegium PUBLIC src)
-target_compile_features(pegium PUBLIC cxx_std_20)
+target_compile_features(pegium PUBLIC cxx_std_23)
 include(CTest)
 
 
@@ -46,7 +46,12 @@ if(BUILD_TESTING)
     set(INSTALL_GTEST OFF CACHE BOOL "")
     FetchContent_MakeAvailable(googletest)
 
-    file(GLOB_RECURSE SRC-TEST CONFIGURE_DEPENDS tests/pegium/*.cpp)
+    file(GLOB_RECURSE SRC-TEST CONFIGURE_DEPENDS 
+    tests/pegium/test.cpp 
+    tests/pegium/pegium.cpp
+    tests/pegium/xsmp.cpp
+    
+    )# tests/pegium/grammar.cpp 
     add_executable (PegiumTest ${SRC-TEST})
 
     target_include_directories(PegiumTest PRIVATE tests)
