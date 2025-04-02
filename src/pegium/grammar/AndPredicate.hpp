@@ -4,10 +4,10 @@ namespace pegium::grammar {
 
 template <typename Element>
   requires IsGrammarElement<Element>
-struct AndPredicate final: IGrammarElement {
+struct AndPredicate final : IGrammarElement {
   constexpr ~AndPredicate() override = default;
   explicit constexpr AndPredicate(Element &&element)
-      : _element{std::forward<Element>(element)} {}
+      : _element{forwardGrammarElement<Element>(element)} {}
 
   constexpr std::size_t parse_rule(std::string_view sv, CstNode &,
                                    IContext &c) const override {
@@ -25,13 +25,12 @@ struct AndPredicate final: IGrammarElement {
   }
 
 private:
-  Element _element;
+  GrammarElementType<Element> _element;
 };
 
 template <typename Element>
   requires IsGrammarElement<Element>
 constexpr auto operator~(Element &&element) {
-  return AndPredicate<GrammarElementType<Element>>{
-      std::forward<Element>(element)};
+  return AndPredicate<Element>{std::forward<Element>(element)};
 }
 } // namespace pegium::grammar

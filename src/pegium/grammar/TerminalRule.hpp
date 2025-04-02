@@ -13,7 +13,9 @@ template <typename T = std::string> struct TerminalRule final : AbstractRule {
       : AbstractRule{name, description} {
 
     // initialize the value converter for standard types
-    if constexpr (std::is_same_v<T, std::string>) {
+    if constexpr (std::is_same_v<T, std::string_view>) {
+      _value_converter = [](std::string_view sv) { return sv; };
+    } else if constexpr (std::is_same_v<T, std::string>) {
       _value_converter = [](std::string_view sv) { return std::string(sv); };
     } else if constexpr (std::is_same_v<T, bool>) {
       _value_converter = [](std::string_view sv) { return sv == "true"; };
@@ -35,23 +37,21 @@ template <typename T = std::string> struct TerminalRule final : AbstractRule {
 
   T getValue(const CstNode &node) const {
     assert(_value_converter);
-    // if (_value_converter)
+    // TODO protect with try catch and store error in context
     return _value_converter(node.text);
-    // throw std::logic_error("value converter not provided.");
   }
 
   std::any getAnyValue(const CstNode &node) const override {
     return getValue(node);
   }
-  pegium::GenericParseResult parseGeneric(
-      std::string_view text,
-      std::unique_ptr<pegium::grammar::IContext> context) const override {
+  pegium::GenericParseResult
+  parseGeneric(std::string_view text,
+               std::unique_ptr<IContext> context) const override {
     auto result = parse(text, std::move(context));
     return {.root_node = result.root_node};
   }
-  pegium::ParseResult<T>
-  parse(std::string_view text,
-        std::unique_ptr<pegium::grammar::IContext> context) const {
+  pegium::ParseResult<T> parse(std::string_view text,
+                               std::unique_ptr<IContext> context) const {
     pegium::ParseResult<T> result;
     result.root_node = std::make_shared<RootCstNode>();
     result.root_node->fullText = text;

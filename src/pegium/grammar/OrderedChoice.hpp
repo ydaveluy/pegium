@@ -5,43 +5,23 @@ namespace pegium::grammar {
 
 template <typename... Elements>
   requires(IsGrammarElement<Elements> && ...)
-struct OrderedChoice final: IGrammarElement {
+struct OrderedChoice final : IGrammarElement {
   static_assert(sizeof...(Elements) > 1,
                 "An OrderedChoice shall contains at least 2 elements.");
   constexpr ~OrderedChoice() override = default;
   constexpr explicit OrderedChoice(std::tuple<Elements...> &&elems)
       : elements{std::move(elems)} {}
 
-  template <typename T>
-  static constexpr bool
-  parse_rule_element(const T &element, std::string_view sv, CstNode &parent,
-                     IContext &c, std::size_t size, std::size_t &i) {
-    i = element.parse_rule(sv, parent, c);
-    if (success(i)) {
-      return true;
-    }
-    parent.content.resize(size);
-    return false;
-  }
-
   constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
     std::size_t i = PARSE_ERROR;
     std::apply(
         [&](const auto &...element) {
-          auto size = parent.content.size();
-          (parse_rule_element(element, sv, parent, c, size, i) || ...);
+          (success(i = element.parse_rule(sv, parent, c)) || ...);
         },
         elements);
 
     return i;
-  }
-  template <typename T>
-  static constexpr bool parse_terminal_element(const T &element,
-                                               std::string_view sv,
-                                               std::size_t &i) noexcept {
-    i = element.parse_terminal(sv);
-    return success(i);
   }
 
   constexpr std::size_t
@@ -50,7 +30,7 @@ struct OrderedChoice final: IGrammarElement {
 
     std::apply(
         [&](const auto &...element) {
-          (parse_terminal_element(element, sv, i) || ...);
+          (success(i = element.parse_terminal(sv)) || ...);
         },
         elements);
     return i;
@@ -68,10 +48,9 @@ struct OrderedChoice final: IGrammarElement {
   constexpr GrammarElementKind getKind() const noexcept override {
     return GrammarElementKind::OrderedChoice;
   }
-  //private:
+  // private:
 
   std::tuple<Elements...> elements;
-
 };
 
 template <typename... Lhs, typename... Rhs>
@@ -101,5 +80,10 @@ constexpr auto operator|(Lhs &&lhs, Rhs &&rhs) {
   return OrderedChoice<GrammarElementType<Lhs>, GrammarElementType<Rhs>>{
       std::forward_as_tuple(std::forward<Lhs>(lhs), std::forward<Rhs>(rhs))};
 }
+
+template <typename T> struct IsOrderedChoice : std::false_type {};
+
+template <typename... E>
+struct IsOrderedChoice<OrderedChoice<E...>> : std::true_type {};
 
 } // namespace pegium::grammar

@@ -8,7 +8,7 @@
 namespace pegium::grammar {
 
 template <typename T>
-// requires std::derived_from<T, AstNode>
+  requires std::derived_from<T, AstNode>
 struct ParserRule final : AbstractRule {
   using type = T;
   ParserRule(std::string_view name = "", std::string_view description = "")
@@ -18,82 +18,53 @@ struct ParserRule final : AbstractRule {
 
   std::any getAnyValue(const CstNode &node) const override {
 
-    if constexpr (is_shared_ptr<T>::value) {
-      return std::static_pointer_cast<AstNode>(getValue(node));
-    } else {
-      return std::static_pointer_cast<AstNode>(
-          std::make_shared<T>(getValue(node)));
-    }
+    return std::static_pointer_cast<AstNode>(getValue(node));
   }
 
-  T getValue(const CstNode &node) const {
+  std::shared_ptr<T> getValue(const CstNode &node) const {
+    std::shared_ptr<T> value;
+    std::vector<std::pair<const IAssignment *, const CstNode *>> assignments;
+    for (auto &it : node.content) {
+      if (it.grammarSource) {
+        switch (it.grammarSource->getKind()) {
+        case pegium::grammar::GrammarElementKind::Assignment: {
+          const auto *assignment =
+              static_cast<const IAssignment *>(it.grammarSource);
+          if (value)
+            assignment->execute(value.get(), it);
+          else
+            assignments.emplace_back(assignment, &it);
+          break;
+        }
+        case pegium::grammar::GrammarElementKind::Action:
+          if (!value)
+            value = std::make_shared<T>();
+          for (auto &assignment : assignments)
+            assignment.first->execute(value.get(), *assignment.second);
 
-    if constexpr (is_shared_ptr<T>::value) {
-      using U = typename T::element_type;
-      T value = std::make_shared<U>();
-      for (auto it = node.begin(); it != node.end(); ++it) {
-        if (it->grammarSource) {
-          switch (it->grammarSource->getKind()) {
-          case pegium::grammar::GrammarElementKind::Assignment:
-            static_cast<const IAssignment *>(it->grammarSource)
-                ->execute(value.get(), *it);
-            it.prune();
-            break;
-          case pegium::grammar::GrammarElementKind::Action:
-            value = std::dynamic_pointer_cast<U>(
-                static_cast<const IAction *>(it->grammarSource)
-                    ->execute(std::static_pointer_cast<AstNode>(value)));
-            it.prune();
-            break;
-          case pegium::grammar::GrammarElementKind::ParserRule:
-            value = std::dynamic_pointer_cast<U>(
-                std::any_cast<std::shared_ptr<AstNode>>(
-                    static_cast<const IRule *>(it->grammarSource)
-                        ->getAnyValue(*it)));
-            it.prune();
-            break;
-          default:
-            break;
-          }
+          value = std::static_pointer_cast<T>(
+              static_cast<const IAction *>(it.grammarSource)
+                  ->execute(std::static_pointer_cast<AstNode>(value)));
+          break;
+        case pegium::grammar::GrammarElementKind::ParserRule:
+          value = std::static_pointer_cast<T>(
+              std::any_cast<std::shared_ptr<AstNode>>(
+                  static_cast<const IRule *>(it.grammarSource)
+                      ->getAnyValue(it)));
+          // apply leading assignments
+          for (auto &assignment : assignments)
+            assignment.first->execute(value.get(), *assignment.second);
+          break;
+        default:
+          break;
         }
       }
-      return value;
-    } else {
-      T value;
-
-      // std::cout << "process root node '" << node << "'";
-      for (auto it = node.begin(); it != node.end(); ++it) {
-        if (it->grammarSource) {
-          switch (it->grammarSource->getKind()) {
-          case pegium::grammar::GrammarElementKind::Assignment:
-            static_cast<const IAssignment *>(it->grammarSource)
-                ->execute(&value, *it);
-            it.prune();
-            break;
-          default:
-            break;
-          }
-          /*if (auto *assignment =
-                  dynamic_cast<const IAssignment *>(it->grammarSource)) {
-            assignment->execute(&value, *it);
-            it.prune();
-          } else if (auto *rule =
-                         dynamic_cast<const IRule *>(it->grammarSource)) {
-
-            auto value = rule->getAnyValue(*it);
-            if (auto ptr = std::any_cast<std::shared_ptr<AstNode>>(&value)) {
-              if (auto asT = std::dynamic_pointer_cast<T>(*ptr)) {
-                value = asT;
-              } else {
-                throw std::logic_error("The return type of the parser rule is "
-                                       "not a base type of the rule call.");
-              }
-            }
-          }*/
-        }
-      }
-      return value;
     }
+    if (!value)
+      value = std::make_shared<T>();
+    for (auto &assignment : assignments)
+      assignment.first->execute(value.get(), *assignment.second);
+    return value;
   }
   pegium::GenericParseResult parseGeneric(
       std::string_view text,
@@ -101,10 +72,10 @@ struct ParserRule final : AbstractRule {
     auto result = parse(text, std::move(context));
     return {.root_node = result.root_node};
   }
-  pegium::ParseResult<T>
+  pegium::ParseResult<std::shared_ptr<T>>
   parse(std::string_view text,
         std::unique_ptr<pegium::grammar::IContext> context) const {
-    pegium::ParseResult<T> result;
+    pegium::ParseResult<std::shared_ptr<T>> result;
     result.root_node = std::make_shared<RootCstNode>();
     result.root_node->fullText = text;
     std::string_view sv = result.root_node->fullText;
@@ -126,17 +97,14 @@ struct ParserRule final : AbstractRule {
   }
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          IContext &c) const override {
-    auto size = parent.content.size();
-    auto &node = parent.content.emplace_back();
-
+    CstNode node;
     auto i = element->parse_rule(sv, node, c);
     if (fail(i)) {
-      parent.content.resize(size);
       return PARSE_ERROR;
     }
-    node.text = {sv.data(), i};
     node.grammarSource = this;
-
+    node.text = {sv.data(), i};
+    parent.content.emplace_back(std::move(node));
     return i;
   }
   using AbstractRule::operator=;

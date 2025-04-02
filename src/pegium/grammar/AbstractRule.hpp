@@ -9,8 +9,7 @@ namespace pegium::grammar {
 
 struct AbstractRule : IRule {
 
-  AbstractRule(std::string_view name,
-               std::string_view description = "")
+  AbstractRule(std::string_view name, std::string_view description = "")
       : _name{name}, _description{description} {}
   AbstractRule(const AbstractRule &) = delete;
   AbstractRule &operator=(const AbstractRule &) = delete;
@@ -19,9 +18,9 @@ struct AbstractRule : IRule {
     requires IsRule<Element>
   AbstractRule &operator=(Element &&element) {
     this->element = _elements
-                   .emplace_back(std::make_unique<RuleCall<Element>>(
-                       std::forward<Element>(element)))
-                   .get();
+                        .emplace_back(std::make_unique<RuleCall<Element>>(
+                            std::forward<Element>(element)))
+                        .get();
     return *this;
   }
   /// Initialize the rule with an element
@@ -31,15 +30,16 @@ struct AbstractRule : IRule {
   template <typename Element>
     requires(IsGrammarElement<Element> && !IsRule<Element>)
   AbstractRule &operator=(Element &&element) {
-    this->element = _elements
-                   .emplace_back(std::make_unique<GrammarElementType<Element>>(
-                       std::forward<Element>(element)))
-                   .get();
+    this->element =
+        _elements
+            .emplace_back(std::make_unique<GrammarElementType<Element>>(
+                forwardGrammarElement<Element>(element)))
+            .get();
     return *this;
   }
 
   std::size_t parse_terminal(std::string_view sv) const noexcept final {
-    assert(element&&"The rule definition is missing !");
+    assert(element && "The rule definition is missing !");
     return element->parse_terminal(sv);
   }
   /** get the super implementation of the rule */
@@ -52,6 +52,7 @@ struct AbstractRule : IRule {
 
 protected:
   IGrammarElement *element = nullptr;
+  const std::string &getName() const noexcept { return _name; }
 
 private:
   std::vector<std::unique_ptr<IGrammarElement>> _elements;

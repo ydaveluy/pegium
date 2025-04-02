@@ -7,7 +7,8 @@ template <typename Element>
   requires IsGrammarElement<Element>
 struct NotPredicate final : IGrammarElement {
   constexpr ~NotPredicate() override = default;
-  explicit constexpr NotPredicate(Element &&element) : _element{element} {}
+  explicit constexpr NotPredicate(Element &&element)
+      : _element{forwardGrammarElement<Element>(element)} {}
   constexpr std::size_t parse_rule(std::string_view sv, CstNode &,
                                    IContext &c) const override {
     CstNode node;
@@ -24,14 +25,14 @@ struct NotPredicate final : IGrammarElement {
   }
 
 private:
-  Element _element;
+GrammarElementType<Element> _element;
 };
 
 template <typename Element>
   requires IsGrammarElement<Element>
 constexpr auto operator!(Element &&element) {
-  return NotPredicate<GrammarElementType<Element>>{
-      std::forward<Element>(element)};
+  return NotPredicate<Element>{
+    std::forward<Element>(element)};
 }
 
 } // namespace pegium::grammar

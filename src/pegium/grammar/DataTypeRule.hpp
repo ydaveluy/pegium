@@ -13,27 +13,41 @@ struct DataTypeRule final : AbstractRule {
       : AbstractRule{name, description} {
 
     if constexpr (std::is_same_v<T, std::string>) {
-      _value_converter = [](const CstNode &node) {
+      _value_converter = [this](const CstNode &node) {
         std::string value;
         value.reserve(node.text.size());
 
-        for (auto it = node.begin(); it != node.end(); ++it) {
-          assert(it->grammarSource);
+        for (auto &it : node.content) {
+          assert(it.grammarSource);
           // std::cout << n << std::endl;
-          if (!it->hidden) {
-            switch (it->grammarSource->getKind()) {
-            case GrammarElementKind::DataTypeRule:
-            case GrammarElementKind::TerminalRule:
-            case GrammarElementKind::ParserRule:
-              value += std::any_cast<std::string>(
-                  static_cast<const IRule *>(it->grammarSource)
-                      ->getAnyValue(*it));
-              it.prune();
+          if (!it.hidden) {
+            switch (it.grammarSource->getKind()) {
+            case GrammarElementKind::TerminalRule: {
+              auto any =
+                  static_cast<const IRule *>(it.grammarSource)->getAnyValue(it);
+              if (auto ptr = std::any_cast<std::string_view>(&any)) {
+                value += *ptr;
+              } else if (auto ptr = std::any_cast<std::string>(&any)) {
+                value += *ptr;
+              } else {
+                value += it.text;
+              }
               break;
+            }
+            case GrammarElementKind::DataTypeRule:
+            case GrammarElementKind::ParserRule: {
+              auto any =
+                  static_cast<const IRule *>(it.grammarSource)->getAnyValue(it);
+              if (auto ptr = std::any_cast<std::string>(&any)) {
+                value += *ptr;
+              } else {
+                value += it.text;
+              }
+              break;
+            }
             default:
-              assert(it->isLeaf());
-              // if (it->isLeaf())
-              value += it->text;
+              assert(it.isLeaf());
+              value += it.text;
               break;
             }
           }
@@ -49,30 +63,25 @@ struct DataTypeRule final : AbstractRule {
 
   T getValue(const CstNode &node) const {
     assert(_value_converter);
-    // if (_value_converter)
+    // TODO protect with try catch and store error in context
     return _value_converter(node);
-    // throw std::logic_error("value converter not provided.");
   }
   std::any getAnyValue(const CstNode &node) const override {
     return getValue(node);
   }
-  pegium::GenericParseResult parseGeneric(
-      std::string_view text,
-      std::unique_ptr<pegium::grammar::IContext> context) const override {
+  pegium::GenericParseResult
+  parseGeneric(std::string_view text,
+               std::unique_ptr<IContext> context) const override {
     auto result = parse(text, std::move(context));
     return {.root_node = result.root_node};
   }
-  pegium::ParseResult<T>
-  parse(std::string_view text,
-        std::unique_ptr<pegium::grammar::IContext> context) const {
-    // assert(_current);
+  pegium::ParseResult<T> parse(std::string_view text,
+                               std::unique_ptr<IContext> context) const {
     pegium::ParseResult<T> result;
     result.root_node = std::make_shared<RootCstNode>();
     result.root_node->fullText = text;
     std::string_view sv = result.root_node->fullText;
     result.root_node->text = result.root_node->fullText;
-    // result.root_node->grammarSource = element;
-    // auto c = _parser->createContext();
 
     // skip leading hidden nodes
     auto i = context->skipHiddenNodes(sv, *result.root_node);
@@ -90,15 +99,14 @@ struct DataTypeRule final : AbstractRule {
   std::size_t parse_rule(std::string_view sv, CstNode &parent,
                          IContext &c) const override {
     assert(element && "The rule definition is missing !");
-    auto size = parent.content.size();
-    auto &node = parent.content.emplace_back();
+    CstNode node;
     auto i = element->parse_rule(sv, node, c);
     if (fail(i)) {
-      parent.content.resize(size);
       return PARSE_ERROR;
     }
     node.text = {sv.data(), i};
     node.grammarSource = this;
+    parent.content.emplace_back(std::move(node));
 
     return i;
   }
