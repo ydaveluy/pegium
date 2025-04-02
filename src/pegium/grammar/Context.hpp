@@ -17,10 +17,10 @@ void for_each(Tuple &&tuple, Func &&func) {
 
 template <typename HiddenTuple, typename IgnoredTuple> struct Context;
 template <typename... Hidden, typename... Ignored>
-  requires(std::derived_from<std::remove_cvref_t<Hidden>, TerminalRule<>> &&
+  /*requires(std::derived_from<std::remove_cvref_t<Hidden>, TerminalRule<>> &&
            ...) &&
           (std::derived_from<std::remove_cvref_t<Ignored>, TerminalRule<>> &&
-           ...)
+           ...)*/
 struct Context<std::tuple<Hidden &...>, std::tuple<Ignored &...>> final
     : IContext {
 
@@ -85,8 +85,8 @@ struct ContextBuilder {
       : _hidden{std::move(hiddens)}, _ignored{std::move(ignored)} {}
 
   template <typename... Ignored>
-    requires (std::derived_from<std::remove_cvref_t<Ignored>, TerminalRule<>> &&
-             ...) && (std::tuple_size<IgnoredTuple>::value == 0)
+    /*requires (std::derived_from<std::remove_cvref_t<Ignored>, TerminalRule<>> &&
+             ...) && (std::tuple_size<IgnoredTuple>::value == 0)*/
   ContextBuilder<HiddenTuple, std::tuple<Ignored &...>>
   ignore(Ignored &&...ignored) {
     return ContextBuilder<HiddenTuple, std::tuple<Ignored &...>>{
@@ -95,8 +95,8 @@ struct ContextBuilder {
   }
 
   template <typename... Hidden>
-    requires(std::derived_from<std::remove_cvref_t<Hidden>, TerminalRule<>> &&
-             ...) && (std::tuple_size<HiddenTuple>::value == 0)
+    /*requires(std::derived_from<std::remove_cvref_t<Hidden>, TerminalRule<>> &&
+             ...) && (std::tuple_size<HiddenTuple>::value == 0)*/
   ContextBuilder<std::tuple<Hidden &...>, IgnoredTuple>
   hide(Hidden &&...hidden) {
     return ContextBuilder<std::tuple<Hidden &...>, IgnoredTuple>{

@@ -1,52 +1,10 @@
+#include "xsmp.hpp"
 #include <chrono>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <pegium/Parser.hpp>
 
 namespace Xsmp {
-struct Type;
-struct Attribute : public pegium::AstNode {
-  /*reference<Type>*/ string type;
-};
-struct NamedElement : public pegium::AstNode {
-  string name;
-  vector<pointer<Attribute>> attributes;
-};
-
-struct VisibilityElement : public NamedElement {
-  vector<string> modifiers;
-};
-struct Namespace;
-struct Catalogue : public NamedElement {
-  vector<pointer<Namespace>> namespaces;
-};
-
-struct Namespace : public NamedElement {
-  vector<pointer<NamedElement>> members;
-};
-
-struct Type : public VisibilityElement {};
-struct Structure : public Type {
-  vector<pointer<NamedElement>> members;
-};
-
-struct Class : public Structure {};
-
-struct Expression : pegium::AstNode {};
-struct BinaryExpression : Expression {
-  pointer<Expression> leftOperand;
-  string feature;
-  pointer<Expression> rightOperand;
-};
-
-struct BooleanLiteral : Expression {
-  bool isTrue;
-};
-struct Constant : public VisibilityElement {
-  string type;
-  pointer<Expression> value;
-};
-
 class XsmpParser : public pegium::Parser {
 public:
 #include <pegium/rule_macros_begin.h>
@@ -59,25 +17,50 @@ public:
   RULE(Attribute, Xsmp::Attribute);
   RULE(Catalogue, Xsmp::Catalogue);
   RULE(Namespace, Xsmp::Namespace);
-  RULE(NamespaceMember, std::shared_ptr<Xsmp::NamedElement>);
-  RULE(Type, std::shared_ptr<Xsmp::Type>);
+  RULE(NamespaceWithAttributes, Xsmp::Namespace);
+  RULE(NamespaceMember, Xsmp::NamedElement);
   RULE(Structure, Xsmp::Structure);
-  RULE(StructureMember, std::shared_ptr<Xsmp::NamedElement>);
+  RULE(StructureMember, Xsmp::NamedElement);
+  RULE(Interface, Xsmp::Interface);
+  RULE(InterfaceMember, Xsmp::NamedElement);
+  RULE(Class, Xsmp::Class);
+  RULE(ClassMember, Xsmp::NamedElement);
+  RULE(Exception, Xsmp::Exception);
+  RULE(Model, Xsmp::Model);
+  RULE(Service, Xsmp::Service);
+  RULE(ComponentMember, Xsmp::NamedElement);
+  RULE(ValueReference, Xsmp::ValueReference);
+  RULE(Array, Xsmp::Array);
+  RULE(StringType, Xsmp::StringType);
+  RULE(PrimitiveType, Xsmp::PrimitiveType);
+  RULE(NativeType, Xsmp::NativeType);
+  RULE(AttributeType, Xsmp::AttributeType);
+  RULE(Enumeration, Xsmp::Enumeration);
+  RULE(EnumerationLiteral, Xsmp::EnumerationLiteral);
+  RULE(Float, Xsmp::Float);
+  RULE(Integer, Xsmp::Integer);
+  RULE(EventType, Xsmp::EventType);
   RULE(Constant, Xsmp::Constant);
-  RULE(Expression, std::shared_ptr<Xsmp::Expression>);
-  RULE(OrExpression, std::shared_ptr<Xsmp::Expression>);
-  RULE(AndExpression, std::shared_ptr<Xsmp::Expression>);
-  RULE(BitwiseOrExpression, std::shared_ptr<Xsmp::Expression>);
-  RULE(BitwiseXorExpression, std::shared_ptr<Xsmp::Expression>);
-  RULE(BitwiseAndExpression, std::shared_ptr<Xsmp::Expression>);
-  RULE(EqualityExpression, std::shared_ptr<Xsmp::Expression>);
-  RULE(RelationalExpression, std::shared_ptr<Xsmp::Expression>);
-  RULE(BitwiseExpression, std::shared_ptr<Xsmp::Expression>);
-  RULE(AdditiveExpression, std::shared_ptr<Xsmp::Expression>);
-  RULE(MultiplicativeExpression, std::shared_ptr<Xsmp::Expression>);
-  RULE(UnaryOperation, std::shared_ptr<Xsmp::Expression>);
+  RULE(Field, Xsmp::Field);
+  RULE(Property, Xsmp::Property);
+  RULE(Association, Xsmp::Association);
+  RULE(Container, Xsmp::Container);
+  RULE(Reference, Xsmp::Reference);
+  RULE(Expression, Xsmp::Expression);
+  RULE(OrExpression, Xsmp::Expression);
+  RULE(AndExpression, Xsmp::Expression);
+  RULE(BitwiseOrExpression, Xsmp::Expression);
+  RULE(BitwiseXorExpression, Xsmp::Expression);
+  RULE(BitwiseAndExpression, Xsmp::Expression);
+  RULE(EqualityExpression, Xsmp::Expression);
+  RULE(RelationalExpression, Xsmp::Expression);
+  RULE(BitwiseExpression, Xsmp::Expression);
+  RULE(AdditiveExpression, Xsmp::Expression);
+  RULE(MultiplicativeExpression, Xsmp::Expression);
+  RULE(UnaryOperation, Xsmp::Expression);
   RULE(BooleanLiteral, Xsmp::BooleanLiteral);
 #include <pegium/rule_macros_end.h>
+
   XsmpParser() {
     using namespace pegium::grammar;
     WS = at_least_one(s);
@@ -95,25 +78,154 @@ public:
 
     Catalogue = many(assign<&NamedElement::attributes>(Attribute)) +
                 "catalogue"_kw + assign<&NamedElement::name>(ID) +
-                many(assign<&Catalogue::namespaces>(Namespace));
+                many(assign<&Catalogue::namespaces>(NamespaceWithAttributes));
 
-    Namespace = many(assign<&NamedElement::attributes>(Attribute)) +
-                "namespace"_kw + assign<&NamedElement::name>(QualifiedName) +
-                "{"_kw + many(assign<&Namespace::members>(NamespaceMember)) +
+    NamespaceWithAttributes =
+        many(assign<&NamedElement::attributes>(Attribute)) + Namespace;
+
+    Namespace = "namespace"_kw + assign<&NamedElement::name>(QualifiedName) + //
+                "{"_kw +                                                      //
+                many(assign<&Namespace::members>(NamespaceMember)) +          //
+                "}"_kw;                                                       //
+
+    NamespaceMember =
+        // attributes
+        many(assign<&NamedElement::attributes>(Attribute)) +
+        (
+            // Namespace
+            Namespace |
+            // elements with visibility
+            many(assign<&VisibilityElement::modifiers>(Visibility)) +
+                (
+                    // Types
+                    Structure | Interface | Array | ValueReference | Float |
+                    Integer | EventType | StringType | PrimitiveType |
+                    NativeType | AttributeType | Enumeration |
+                    // Types with abstract
+                    opt(assign<&VisibilityElement::modifiers>("abstract"_kw) +
+                        many(assign<&VisibilityElement::modifiers>(
+                            Visibility | "abstract"_kw))) +
+                        (Class | Exception | Model | Service) //
+                    )
+            //
+        );
+    Enumeration =
+        "enum"_kw + assign<&NamedElement::name>(ID) + "{"_kw +
+        many_sep(assign<&Enumeration::literals>(EnumerationLiteral), ","_kw) +
+        "}"_kw;
+
+    EnumerationLiteral = assign<&NamedElement::name>(ID) + "="_kw +
+                         assign<&EnumerationLiteral::value>(Expression);
+
+    Structure = "struct"_kw + assign<&NamedElement::name>(ID) + "{"_kw +
+                many(assign<&Structure::members>(StructureMember)) + "}"_kw;
+
+    StructureMember = many(assign<&NamedElement::attributes>(Attribute)) +
+                      many(assign<&VisibilityElement::modifiers>(Visibility)) +
+                      (Field | Constant);
+
+    Class = "class"_kw + assign<&NamedElement::name>(ID) + "{"_kw +
+            many(assign<&Structure::members>(ClassMember)) + "}"_kw;
+    ClassMember = many(assign<&NamedElement::attributes>(Attribute)) +
+                  many(assign<&VisibilityElement::modifiers>(Visibility)) +
+                  (Field | Constant | Property | Association);
+
+    Exception = "exception"_kw + assign<&NamedElement::name>(ID) + "{"_kw +
+                many(assign<&Structure::members>(ClassMember)) + "}"_kw;
+
+    Interface = "interface"_kw + assign<&NamedElement::name>(ID) +
+                // base interfaces
+                opt("extends"_kw +
+                    at_least_one_sep(assign<&Interface::bases>(QualifiedName),
+                                     ","_kw)) +
+                "{"_kw + many(assign<&Structure::members>(InterfaceMember)) +
                 "}"_kw;
 
-    NamespaceMember = Namespace | Type;
-    Type = Structure;
-    Structure = many(assign<&NamedElement::attributes>(Attribute)) +
-                many(assign<&VisibilityElement::modifiers>(Visibility)) +
-                "struct"_kw + assign<&NamedElement::name>(ID) + "{"_kw +
-                many(assign<&Structure::members>(StructureMember)) + "}"_kw;
-    StructureMember = Constant;
-    Constant = many(assign<&NamedElement::attributes>(Attribute)) +
-               many(assign<&VisibilityElement::modifiers>(Visibility)) +
-               "constant"_kw + assign<&Constant::type>(QualifiedName) +
+    InterfaceMember = many(assign<&NamedElement::attributes>(Attribute)) +
+                      many(assign<&VisibilityElement::modifiers>(Visibility)) +
+                      (Constant | Property);
+    Model = "model"_kw + assign<&NamedElement::name>(ID) +
+            // base class
+            opt("extends"_kw + assign<&Component::base>(QualifiedName)) +
+            // base interfaces
+            opt("implements"_kw +
+                at_least_one_sep(assign<&Component::interfaces>(QualifiedName),
+                                 ","_kw)) +
+            "{"_kw + many(assign<&Component::members>(ComponentMember)) +
+            "}"_kw;
+    Service =
+        "service"_kw + assign<&NamedElement::name>(ID) +
+        // base class
+        opt("extends"_kw + assign<&Component::base>(QualifiedName)) +
+        // base interfaces
+        opt("implements"_kw +
+            at_least_one_sep(assign<&Component::interfaces>(QualifiedName),
+                             ","_kw)) +
+        "{"_kw + many(assign<&Component::members>(ComponentMember)) + "}"_kw;
+
+    ComponentMember =
+        many(assign<&NamedElement::attributes>(Attribute)) +
+        (
+            // elemenst with visibility
+            many(assign<&VisibilityElement::modifiers>(Visibility)) +
+                (Constant | Association | Field | Property) |
+            Container | Reference);
+
+    Array = "array"_kw + assign<&NamedElement::name>(ID) + "="_kw +
+            assign<&Array::itemType>(QualifiedName) + "["_kw +
+            assign<&Array::size>(Expression) + "]"_kw;
+
+    StringType = "string"_kw + assign<&NamedElement::name>(ID) + "="_kw +
+                 "["_kw + assign<&StringType::size>(Expression) + "]"_kw;
+
+    ValueReference = "using"_kw + assign<&NamedElement::name>(ID) + "="_kw +
+                     assign<&ValueReference::type>(QualifiedName) + "*"_kw;
+
+    Float = "float"_kw + assign<&NamedElement::name>(ID) +
+            opt("extends"_kw + assign<&Float::primitiveType>(QualifiedName))
+        // TODO add min/max
+        ;
+    Integer = "integer"_kw + assign<&NamedElement::name>(ID) +
+              opt("extends"_kw + assign<&Integer::primitiveType>(QualifiedName))
+        // TODO add min/max
+        ;
+    EventType = "event"_kw + assign<&NamedElement::name>(ID) +
+                opt("extends"_kw + assign<&EventType::eventArg>(QualifiedName));
+    PrimitiveType = "primitive"_kw + assign<&NamedElement::name>(ID);
+    NativeType = "native"_kw + assign<&NamedElement::name>(ID);
+
+    AttributeType = "attribute"_kw +
+                    assign<&AttributeType::type>(QualifiedName) +
+                    assign<&NamedElement::name>(ID) + opt("="_kw +
+                    assign<&AttributeType::value>(Expression));
+    Constant = "constant"_kw + assign<&Constant::type>(QualifiedName) +
                assign<&NamedElement::name>(ID) + "="_kw +
                assign<&Constant::value>(Expression);
+
+    Field = opt(assign<&VisibilityElement::modifiers>("input"_kw | "output"_kw |
+                                                      "transient"_kw) +
+                many(assign<&VisibilityElement::modifiers>(
+                    Visibility | "input"_kw | "output"_kw | "transient"_kw))) +
+            "field"_kw + assign<&Field::type>(QualifiedName) +
+            assign<&NamedElement::name>(ID) +
+            opt("="_kw + assign<&Field::value>(Expression));
+
+    Property = opt(assign<&VisibilityElement::modifiers>(
+                       "readWrite"_kw | "readOnly"_kw | "writeOnly"_kw) +
+                   many(assign<&VisibilityElement::modifiers>(
+                       Visibility | "readWrite"_kw | "readOnly"_kw |
+                       "writeOnly"_kw))) +
+               "property"_kw + assign<&Property::type>(QualifiedName) +
+               assign<&NamedElement::name>(ID);
+
+    Association = "association"_kw + assign<&Association::type>(QualifiedName) +
+                  assign<&NamedElement::name>(ID);
+
+    Container = "container"_kw + assign<&Container::type>(QualifiedName) +
+                assign<&NamedElement::name>(ID);
+
+    Reference = "reference"_kw + assign<&Reference::type>(QualifiedName) +
+                assign<&NamedElement::name>(ID);
 
     Expression = OrExpression;
 
@@ -131,29 +243,6 @@ public:
     BitwiseOrExpression = BooleanLiteral;
 
     BooleanLiteral = assign<&BooleanLiteral::isTrue>("true"_kw) | "false"_kw;
-    /*auto Attributes = *append<&NamedElement::attributes>(attribute);
-    auto Name = assign<&NamedElement::name>(ID);
-    auto Visibilities = *append<&VisibilityElement::modifiers>(visibility);
-
-    auto structure = rule<Structure>("Structure") =
-        Attributes + Visibilities + "struct"_kw + Name + "{"_kw +
-        // many(&Structure::members +=       call("Constant") | call("Field")),
-        "}"_kw;
-
-    auto class_ = rule<Class>("Class") =
-        Attributes +
-        *append<&VisibilityElement::modifiers>(visibility | "abstract"_kw) +
-        "class"_kw + Name + "{"_kw +
-        // many(&Structure::members += call("Constant") |       call("Field")),
-        "}"_kw;
-
-    auto type = rule<Type>("Type") = structure | class_;
-    auto ns = rule<Namespace>("Namespace") =
-        Attributes + "namespace"_kw + Name + "{"_kw +
-        *append<&Namespace::members>(call("Namespace") | type) + "}"_kw;
-
-    rule<Catalogue>("Catalogue") = Attributes + "catalogue"_kw + Name +
-                                   *(append<&Catalogue::namespaces>(ns));*/
   }
   std::unique_ptr<pegium::grammar::IContext> createContext() const override {
     return ContextBuilder().ignore(WS).hide(ML_COMMENT, SL_COMMENT).build();
@@ -170,43 +259,40 @@ TEST(XsmpTest, TestCatalogue) {
      * A demo catalogue
      */
     catalogue test 
-    // a single line comment
-    namespace A
-    {
-      @Abstract()
-      public protected private struct MyStruct{
-      }
 
-      private public  public struct MyClass{}
-    }
-    namespace B
-    {
-    }
   )";
-  for (std::size_t i = 0; i < 200'000; ++i) {
+  for (std::size_t i = 0; i < 200'00; ++i) {
     input += R"(    
-    namespace A
+   
+namespace hidden
+{
+    
+    primitive Bool
+    integer privateInteger extends Smp.Int32
+    public private attribute Bool SingleAttribute 
+    service MyService extends Other.Service implements interfaces.I1, interfaces.I2
     {
-      @Abstract()
-      public protected private struct MyStruct{
-        constant Int8 c1 = true
-        public constant Int8 c1 = false
-        constant Int8 c1 = false //|| true
-        protected constant Int8 c1 = false
-        constant Int8 c1 = false
-        constant Int8 c1 = false
-       private constant Int8 c1 = false
-        constant Int8 c1 = false
-        constant Int8 c1 = false
-      
-      }
-      @Abstract()
-      private public  public struct MyClass{}
+        @Static
+        @Virtual
+        @Abstract
+        @Const
+        readOnly public readWrite property Int32 property 
+
+        reference MyInterface ref8
+
+       container MyService ctn 
+       input output transient field Bool aField
+       input output transient field Bool aField = false
     }
-    namespace B
+    enum MyEnum2
     {
+        L0 = false,
+        L1 = true
     }
-    /* a comment multi line */
+
+    array MyArray = MyModel2[true]
+}
+
     )";
   }
 
@@ -217,13 +303,14 @@ TEST(XsmpTest, TestCatalogue) {
   auto end = high_resolution_clock::now();
   auto duration = duration_cast<milliseconds>(end - start).count();
 
-  std::cout << "XSMP Parsed " << input.size() / static_cast<double>(1024 * 1024)
+  std::cout << "XSMP Parsed " << result.len / static_cast<double>(1024 * 1024)
             << " Mo in " << duration << "ms: "
             << ((1000. * result.len / duration) /
                 static_cast<double>(1024 * 1024))
             << " Mo/s\n";
 
-  EXPECT_TRUE(result.ret);
+  ASSERT_TRUE(result.ret);
 
-  EXPECT_EQ(result.value.name, "test");
+  EXPECT_EQ(result.value->name, "test");
+ // EXPECT_EQ(result.value->namespaces.size(), 400'002);
 }

@@ -58,7 +58,8 @@ struct IGrammarElement {
 };
 
 template <typename T>
-concept IsGrammarElement =
+constexpr bool IsGrammarElement =
+    // std::is_base_of_v<IGrammarElement, std::remove_cvref_t<T>>;
     std::derived_from<std::remove_cvref_t<T>, IGrammarElement>;
 
 // GrammarElementType<T> ensures that if T is an lvalue reference, it is
@@ -66,9 +67,34 @@ concept IsGrammarElement =
 // keeping the base type.
 template <typename T>
   requires IsGrammarElement<T>
-using GrammarElementType = std::conditional_t<std::is_lvalue_reference_v<T>, T,
-                                              std::remove_cvref_t<T>>;
+/*using GrammarElementType = std::conditional_t<
+    std::is_lvalue_reference_v<T>,
+    std::conditional_t<
+    std::is_copy_constructible_v<std::remove_reference_t<T>>,
+    std::remove_reference_t<T>,  // copie
+    T                            // sinon, référence
+>,
+    std::remove_cvref_t<T>>;*/
+using GrammarElementType =
+    // std::conditional_t<std::is_copy_constructible_v<std::remove_cvref_t<T>>
+    // || !std::is_lvalue_reference_v<T>, std::remove_cvref_t<T>, T>;
+    std::conditional_t<std::is_copy_constructible_v<std::remove_cvref_t<T>>,
+                       std::remove_cvref_t<T>, T>;
 
+template <typename T>
+  requires IsGrammarElement<T>
+[[nodiscard]] constexpr auto forwardGrammarElement(
+    typename std::remove_reference<T>::type &element) noexcept {
+  if constexpr (std::is_copy_constructible_v<std::remove_cvref_t<T>> &&
+                std::is_lvalue_reference_v<T>)
+    return std::remove_cvref_t<T>{element};
+  else
+    return static_cast<T &&>(element);
+}
+
+/*template <typename T> constexpr GrammarElementType<T> forwardGrammarElement(T
+&&value) { return std::forward<T>(value);
+}*/
 /// Build an array of char (remove the ending '\0')
 /// @tparam N the number of char without the ending '\0'
 template <std::size_t N> struct range_array_builder {
@@ -148,7 +174,16 @@ template <auto Member> using AttrType = typename MemberTraits<Member>::AttrType;
 
 // Generic
 template <typename T> struct AssignmentHelper {
-  void operator()(T &member, T &&value) const { member = std::move(value); }
+  template <typename U> void operator()(T &member, U &&value) const {
+
+    if constexpr (std::is_convertible_v<U, T>) {
+      member = std::move(value);
+    } else if constexpr (std::is_constructible_v<T, U>) {
+      member = T{value};
+    } else {
+      static_assert(false, "not convertible or constructible");
+    }
+  }
 };
 template <typename T> struct AssignmentHelper<Reference<T>> {
   // Use cross reference
@@ -158,21 +193,28 @@ template <typename T> struct AssignmentHelper<Reference<T>> {
 };
 template <typename T> struct AssignmentHelper<std::shared_ptr<T>> {
   template <typename U>
-    requires std::derived_from<U, T> || std::same_as<U,T>
+    requires std::derived_from<U, T> || std::same_as<U, T>
   void operator()(std::shared_ptr<T> &member,
                   std::shared_ptr<U> &&value) const {
     member = std::move(value);
   }
   template <typename U>
-    requires std::derived_from<U, T> || std::same_as<U,T>
+    requires std::derived_from<U, T> || std::same_as<U, T>
   void operator()(std::shared_ptr<T> &member, U &&value) const {
     member = std::make_shared<U>(std::move(value));
   }
 };
 
 template <typename T> struct AssignmentHelper<std::vector<T>> {
-  void operator()(std::vector<T> &member, T &&value) const {
-    member.emplace_back(std::move(value));
+    template<typename U>
+  void operator()(std::vector<T> &member, U &&value) const {
+    if constexpr (std::is_convertible_v<U, T>) {
+      member.emplace_back(std::move(value));
+    } else if constexpr (std::is_constructible_v<T, U>) {
+      member.emplace_back(T{value});
+    } else {
+      static_assert(false, "not convertible or constructible");
+    }
   }
 };
 template <typename T> struct AssignmentHelper<std::vector<std::shared_ptr<T>>> {

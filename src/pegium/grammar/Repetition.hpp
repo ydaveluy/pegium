@@ -9,29 +9,31 @@ template <std::size_t min, std::size_t max, typename Element>
   requires IsGrammarElement<Element>
 struct Repetition : IGrammarElement {
   constexpr ~Repetition() override = default;
-  Element element;
+  GrammarElementType<Element> element;
   constexpr explicit Repetition(Element &&element)
-      : element{std::forward<Element>(element)} {}
+      : element{forwardGrammarElement<Element>(element)} {}
 
   constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
     std::size_t count = 0;
     std::size_t i = 0;
-    auto size = parent.content.size();
+    //auto size = parent.content.size();
     while (count < min) {
       auto len = element.parse_rule({sv.data() + i, sv.size() - i}, parent, c);
       if (fail(len)) {
-        parent.content.resize(size);
+        // parent.content.resize(size);
+        //assert(size == parent.content.size());
         return len;
       }
       i += len;
       count++;
     }
     while (count < max) {
-      size = parent.content.size();
+      //size = parent.content.size();
       auto len = element.parse_rule({sv.data() + i, sv.size() - i}, parent, c);
       if (fail(len)) {
-        parent.content.resize(size);
+        // parent.content.resize(size);
+        //assert(size == parent.content.size());
         break;
       }
       i += len;
@@ -92,7 +94,7 @@ struct Repetition : IGrammarElement {
 template <typename Element>
   requires(IsGrammarElement<Element>)
 constexpr auto opt(Element &&element) {
-  return Repetition<0, 1, GrammarElementType<Element>>{
+  return Repetition<0, 1, Element>{
       std::forward<Element>(element)};
 }
 
@@ -104,7 +106,7 @@ template <typename Element>
   requires(IsGrammarElement<Element>)
 constexpr auto many(Element &&element) {
   return Repetition<0, std::numeric_limits<std::size_t>::max(),
-                    GrammarElementType<Element>>{
+                    Element>{
       std::forward<Element>(element)};
 }
 
@@ -116,7 +118,7 @@ template <typename Element>
   requires(IsGrammarElement<Element>)
 constexpr auto at_least_one(Element &&element) {
   return Repetition<1, std::numeric_limits<std::size_t>::max(),
-                    GrammarElementType<Element>>{
+                    Element>{
       std::forward<Element>(element)};
 }
 
@@ -129,7 +131,8 @@ constexpr auto at_least_one(Element &&element) {
 template <typename Element, typename Sep>
   requires IsGrammarElement<Sep> && (IsGrammarElement<Element>)
 constexpr auto at_least_one_sep(Element &&element, Sep &&sep) {
-  return std::forward<Element>(element) + many(std::forward<Sep>(sep) + std::forward<Element>(element));
+  return std::forward<Element>(element) +
+         many(std::forward<Sep>(sep) + std::forward<Element>(element));
 }
 
 /// Create a repetition of zero or more elements with a separator
@@ -141,8 +144,8 @@ constexpr auto at_least_one_sep(Element &&element, Sep &&sep) {
 template <typename Element, typename Sep>
   requires IsGrammarElement<Sep> && (IsGrammarElement<Element>)
 constexpr auto many_sep(Element &&element, Sep &&sep) {
-  return opt(at_least_one_sep(std::forward<Element>(element),
-             std::forward<Sep>(sep)));
+  return opt(
+      at_least_one_sep(std::forward<Element>(element), std::forward<Sep>(sep)));
 }
 
 /// Create a custom repetition with count elements.
@@ -153,7 +156,7 @@ constexpr auto many_sep(Element &&element, Sep &&sep) {
 template <std::size_t count, typename Element>
   requires(IsGrammarElement<Element>)
 constexpr auto rep(Element &&element) {
-  return Repetition<count, count, GrammarElementType<Element>>{
+  return Repetition<count, count, Element>{
       std::forward<Element>(element)};
 }
 
@@ -166,7 +169,7 @@ constexpr auto rep(Element &&element) {
 template <std::size_t min, std::size_t max, typename Element>
   requires(IsGrammarElement<Element>)
 constexpr auto rep(Element &&element) {
-  return Repetition<min, max, GrammarElementType<Element>>{
+  return Repetition<min, max, Element>{
       std::forward<Element>(element)};
 }
 

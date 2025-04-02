@@ -19,7 +19,7 @@ struct MyParser : pegium::Parser {
   TERM(ID);
   TERM(ML_COMMENT);
   RULE(QualifiedName);
-  RULE(Attribute, std::shared_ptr<::Attribute>);
+  RULE(Attribute, ::Attribute);
   RULE(Attributes, ::Attributes);
 #include <pegium/rule_macros_end.h>
 
@@ -60,7 +60,7 @@ TEST(GrammarTest, Attributes) {
   EXPECT_TRUE(result.ret);
   auto &attribute = result.value;
   //  ASSERT_TRUE(attribute);
-  EXPECT_EQ(attribute.attributes.size(), 1);
+  EXPECT_EQ(attribute->attributes.size(), 1);
 
   constexpr std::size_t SIZE = 5;
   std::string input;

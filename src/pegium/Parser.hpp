@@ -55,7 +55,7 @@ constexpr auto operator<=>(T &&from, U &&to) {
 namespace pegium {
 class Parser : public IParser {
 public:
-  GenericParseResult parse(const std::string &input) const {
+  GenericParseResult parse(const std::string &input) const override {
     if (!entryRule)
       throw std::logic_error("The entry rule is not defined");
     return entryRule->parseGeneric(input, createContext());
@@ -103,7 +103,7 @@ protected:
    // requires std::derived_from<T, AstNode>
   using ParserRule = pegium::grammar::ParserRule<T>;*/
 
-  template <typename T = std::string>
+  template <typename T = std::string_view>
   using Terminal = pegium::grammar::TerminalRule<T>;
 
   // Alias principal

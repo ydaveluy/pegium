@@ -1,20 +1,49 @@
 #pragma once
 
+#include <cassert>
 #include <pegium/grammar/IAssignment.hpp>
 #include <pegium/grammar/IRule.hpp>
+#include <pegium/grammar/OrderedChoice.hpp>
 #include <source_location>
+#include <type_traits>
 
 namespace pegium::grammar {
 
-template <typename Element, typename AttrType>
-concept IsValidRule = IsGrammarElement<Element> &&
-                          requires(Element &rule, const pegium::CstNode &node) {
-                            {
-                              rule.getValue(node)
-                            } -> std::convertible_to<AttrType>;
-                          } ||
-                      std::same_as<bool, AttrType>;
+template <auto feature, typename Element>
+struct IsValidAssignment
+    : std::bool_constant<
+          IsGrammarElement<Element> &&
+          ((
+               // If the Element type is an AstNode
+               std::derived_from<helpers::AttrType<feature>, AstNode> &&
+               (
+                   // Check that the element type is convertible to AttrType
+                   std::derived_from<
+                       typename std::remove_cvref_t<Element>::type,
+                       helpers::AttrType<feature>>)) ||
+           // If the element Type is not an AstType
+           (
+               // Check that the type is convertible to AttrType
+               std::convertible_to<typename std::remove_cvref_t<Element>::type,
+                                   helpers::AttrType<feature>> ||
+               // or AttrType constructible from the givent type
+               std::constructible_from<
+                   helpers::AttrType<feature>,
+                   typename std::remove_cvref_t<Element>::type> ||
+               // Or that the AttrType is a boolean
+               std::same_as<bool, helpers::AttrType<feature>>))> {};
 
+template <auto feature, typename... Element>
+struct IsValidAssignment<feature, OrderedChoice<Element...>>
+    : std::bool_constant<(IsValidAssignment<feature, Element>::value && ...)> {
+};
+
+// si AttrType est un AstNode
+// la règle doit étre une ParserRule avec un type compatible avec AttrType ou un
+// OrderedChoice dont tous les éléments sont des ParserRule avec un type
+// compatible autrement la règle doit avoir un élément dont le type est
+// identique ou convertible en AttrType ou un OrderedChoice dont tous les
+// éléments sont du même type que AttrType
 template <auto feature, typename Element>
 // requires IsValidRule<Element, AttrType>
 struct Assignment final : IAssignment {
@@ -24,13 +53,25 @@ struct Assignment final : IAssignment {
   constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
 
-    auto index = parent.content.size();
-    auto i = _element.parse_rule(sv, parent, c);
-    if (success(i)) {
-      // override the grammar source
-      parent.content[index].grammarSource = this;
+    if constexpr (IsOrderedChoice<Element>::value) {
+      CstNode node;
+      auto i = _element.parse_rule(sv, node, c);
+      if (success(i)) {
+        node.grammarSource = this;
+        parent.content.emplace_back(std::move(node));
+      }
+      return i;
+    } else {
+      // if the element is not an ordered choice we can save one CstNode by
+      // overriding the grammar source of the first inserted sub node
+      auto index = parent.content.size();
+      auto i = _element.parse_rule(sv, parent, c);
+      if (success(i)) {
+        // override the grammar source
+        parent.content[index].grammarSource = this;
+      }
+      return i;
     }
-    return i;
   }
   constexpr std::size_t
   parse_terminal(std::string_view) const noexcept override {
@@ -51,27 +92,43 @@ struct Assignment final : IAssignment {
   }
 
 private:
-  Element _element;
+  GrammarElementType<Element> _element;
   template <typename ClassType, typename AttrType>
   void do_execute(AstNode *current, AttrType ClassType::*member,
                   const CstNode &node) const {
-    auto *value = dynamic_cast<ClassType *>(current);
-    if(!value)
+    assert(dynamic_cast<ClassType *>(current) &&
+           "Tryed to assign a feature on an AstNode with wrong type.");
 
-    assert(value && "Tryed to assign a feature on an AstNode with wrong type.");
+    auto *astNode = static_cast<ClassType *>(current);
+    if constexpr (IsOrderedChoice<Element>::value) {
+      if constexpr (std::is_base_of_v<AstNode, helpers::AttrType<feature>>) {
+        assert(dynamic_cast<const IRule *>(node.content[0].grammarSource));
+        const auto *rule =
+            static_cast<const IRule *>(node.content[0].grammarSource);
+        helpers::AssignmentHelper<AttrType>{}(
+            astNode->*feature,
+            std::dynamic_pointer_cast<helpers::AttrType<feature>>(
+                std::any_cast<std::shared_ptr<AstNode>>(
+                    rule->getAnyValue(node))));
+      }
+    } else if constexpr (std::is_same_v<bool, AttrType> &&
+                         !std::is_same_v<bool, typename std::remove_cvref_t<
+                                                   Element>::type>) {
+      helpers::AssignmentHelper<AttrType>{}(astNode->*feature, true);
+    } else if constexpr (std::is_base_of_v<AstNode,
+                                           helpers::AttrType<feature>>) {
 
-    if constexpr (std::is_same_v<bool, AttrType> &&
-                  !std::is_same_v<
-                      bool, typename std::remove_cvref_t<Element>::type>) {
+      helpers::AssignmentHelper<AttrType>{}(astNode->*feature,
+                                            _element.getValue(node));
+    } else if constexpr (std::is_base_of_v<IRule,
+                                           std::remove_cvref_t<Element>>) {
 
-      value->*feature = true;
-    } else if constexpr (std::is_base_of_v<IRule, std::remove_cvref_t<Element>>){
-
-        helpers::AssignmentHelper<AttrType>{}(value->*feature, _element.getValue(node));
-     // value->*feature = _element.getValue(node);
-    }else
-    {
-        helpers::AssignmentHelper<AttrType>{}(value->*feature, std::string(node.text));
+      helpers::AssignmentHelper<AttrType>{}(astNode->*feature,
+                                            _element.getValue(node));
+      // value->*feature = _element.getValue(node);
+    } else {
+      helpers::AssignmentHelper<AttrType>{}(astNode->*feature,
+                                            std::string(node.text));
     }
     // TODO set _container on new value if AstNode + index if vector + feature
   }
@@ -109,20 +166,10 @@ private:
 /// @tparam e the member pointer
 /// @param args the list of grammar elements
 /// @return
-template <auto e, typename Element>
-// requires IsValidRule<Element, e>
-  requires std::is_member_pointer_v<decltype(e)>
+template <auto feature, typename Element>
+  requires IsValidAssignment<feature, Element>::value
 static constexpr auto assign(Element &&element) {
-  return Assignment<e, GrammarElementType<Element>>(
-      std::forward<Element>(element));
+  return Assignment<feature, Element>(std::forward<Element>(element));
 }
-
-/*template <typename T, typename Element>
-// requires IsValidRule<Element, e>
-// requires std::is_member_pointer_v<decltype(e)>
-static constexpr auto assign(Element &&element) {
-  return Assignment<nullptr, GrammarElementType<Element>>(
-      std::forward<Element>(element));
-}*/
 
 } // namespace pegium::grammar
