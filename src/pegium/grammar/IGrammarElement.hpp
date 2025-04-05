@@ -11,12 +11,12 @@
 namespace pegium::grammar {
 
 /// parse functions returns PARSE_ERROR in case of error
-static constexpr std::size_t PARSE_ERROR =
+/*static constexpr std::size_t PARSE_ERROR =
     std::numeric_limits<std::size_t>::max();
 /// check if the result of parsing succeeded
 constexpr bool success(std::size_t len) { return len != PARSE_ERROR; }
 /// check if the result of parsing failed
-constexpr bool fail(std::size_t len) { return len == PARSE_ERROR; }
+constexpr bool fail(std::size_t len) { return len == PARSE_ERROR; }*/
 
 enum class GrammarElementKind {
   Action,
@@ -36,15 +36,49 @@ enum class GrammarElementKind {
   UnorderedGroup
 };
 
+struct MatchResult {
+  const char *offset;
+  bool valid;
+  constexpr operator bool() const { return valid; }
+
+  constexpr static MatchResult failure(const char *off) { return {off, false}; }
+
+  constexpr static MatchResult success(const char *off) { return {off, true}; }
+  friend constexpr MatchResult operator+(const MatchResult &r, std::size_t n) {
+    return {r.offset + n, r.valid};
+  }
+  constexpr MatchResult &operator+=(std::size_t n) {
+    offset += n;
+    return *this;
+  }
+
+  constexpr MatchResult &operator|=(const MatchResult &other) {
+    if (other.offset > offset) {
+      offset = other.offset;
+    }
+    valid |= other.valid;
+    return *this;
+  }
+
+  constexpr MatchResult &operator&=(const MatchResult &other) {
+    if (other.offset > offset) {
+      offset = other.offset;
+    }
+    valid &= other.valid;
+    return *this;
+  }
+};
+
 struct IGrammarElement {
   constexpr virtual ~IGrammarElement() noexcept = default;
   // parse the input text from a terminal: no hidden/ignored token between
   // elements
-  constexpr virtual std::size_t
+  // return the end position and error position
+  constexpr virtual MatchResult
   parse_terminal(std::string_view sv) const noexcept = 0;
   // parse the input text from a rule: hidden/ignored token between elements are
   // skipped
-  constexpr virtual std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  constexpr virtual MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                            IContext &c) const = 0;
 
   constexpr virtual void print(std::ostream &os) const = 0;
@@ -59,42 +93,32 @@ struct IGrammarElement {
 
 template <typename T>
 constexpr bool IsGrammarElement =
-    // std::is_base_of_v<IGrammarElement, std::remove_cvref_t<T>>;
     std::derived_from<std::remove_cvref_t<T>, IGrammarElement>;
 
-// GrammarElementType<T> ensures that if T is an lvalue reference, it is
-// preserved. Otherwise, it removes const, volatile, and reference qualifiers,
-// keeping the base type.
 template <typename T>
   requires IsGrammarElement<T>
-/*using GrammarElementType = std::conditional_t<
-    std::is_lvalue_reference_v<T>,
-    std::conditional_t<
-    std::is_copy_constructible_v<std::remove_reference_t<T>>,
-    std::remove_reference_t<T>,  // copie
-    T                            // sinon, référence
->,
-    std::remove_cvref_t<T>>;*/
+
 using GrammarElementType =
-    // std::conditional_t<std::is_copy_constructible_v<std::remove_cvref_t<T>>
-    // || !std::is_lvalue_reference_v<T>, std::remove_cvref_t<T>, T>;
     std::conditional_t<std::is_copy_constructible_v<std::remove_cvref_t<T>>,
                        std::remove_cvref_t<T>, T>;
 
-template <typename T>
+/*template <typename T>
   requires IsGrammarElement<T>
 [[nodiscard]] constexpr auto forwardGrammarElement(
-    typename std::remove_reference<T>::type &element) noexcept {
-  if constexpr (std::is_copy_constructible_v<std::remove_cvref_t<T>> &&
-                std::is_lvalue_reference_v<T>)
-    return std::remove_cvref_t<T>{element};
-  else
-    return static_cast<T &&>(element);
-}
+    typename std::remove_reference<T>::type &&element) noexcept {
 
-/*template <typename T> constexpr GrammarElementType<T> forwardGrammarElement(T
-&&value) { return std::forward<T>(value);
+ // std::forward
+  if constexpr (std::is_copy_constructible_v<std::remove_cvref_t<T>> &&
+                std::is_lvalue_reference_v<T>) {
+    return std::remove_cvref_t<T>{element};
+  } else {
+    static_assert(
+        !std::is_lvalue_reference<T>::value,
+        "forwardGrammarElement must not be used to convert an rvalue to an lvalue");
+    return static_cast<T &&>(element);
+  }
 }*/
+
 /// Build an array of char (remove the ending '\0')
 /// @tparam N the number of char without the ending '\0'
 template <std::size_t N> struct range_array_builder {
@@ -206,7 +230,7 @@ template <typename T> struct AssignmentHelper<std::shared_ptr<T>> {
 };
 
 template <typename T> struct AssignmentHelper<std::vector<T>> {
-    template<typename U>
+  template <typename U>
   void operator()(std::vector<T> &member, U &&value) const {
     if constexpr (std::is_convertible_v<U, T>) {
       member.emplace_back(std::move(value));

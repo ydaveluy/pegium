@@ -19,7 +19,7 @@ struct UnorderedGroup : IGrammarElement {
   template <typename T>
   static constexpr bool
   parse_rule_element(const T &element, std::string_view sv, CstNode &parent,
-                     IContext &c, std::size_t &i, ProcessedFlags &processed,
+                     IContext &c, MatchResult &i, ProcessedFlags &processed,
                      std::size_t index) {
     if (processed[index]) {
       return false;
@@ -35,9 +35,9 @@ struct UnorderedGroup : IGrammarElement {
     return false;
   }
 
-  constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
-    std::size_t i = 0;
+                                    MatchResult i = 0;
     ProcessedFlags processed{};
 
     while (!std::ranges::all_of(processed, [](bool p) { return p; })) {
@@ -54,14 +54,15 @@ struct UnorderedGroup : IGrammarElement {
         break;
       }
     }
+    
     return std::ranges::all_of(processed, [](bool p) { return p; })
-               ? i
-               : PARSE_ERROR;
+               ? MatchResult::success(i)
+               : MatchResult::failure(i);
   }
 
   template <typename T>
   static constexpr bool
-  parse_terminal_element(const T &element, std::string_view sv, std::size_t &i,
+  parse_terminal_element(const T &element, std::string_view sv, MatchResult &i,
                          ProcessedFlags &processed,
                          std::size_t index) noexcept {
     if (processed[index]) {
@@ -77,9 +78,9 @@ struct UnorderedGroup : IGrammarElement {
     return false;
   }
 
-  constexpr std::size_t
+  constexpr MatchResult
   parse_terminal(std::string_view sv) const noexcept override {
-    std::size_t i = 0;
+    MatchResult i = 0;
     ProcessedFlags processed{};
 
     while (!std::ranges::all_of(processed, [](bool p) { return p; })) {
@@ -97,8 +98,8 @@ struct UnorderedGroup : IGrammarElement {
       }
     }
     return std::ranges::all_of(processed, [](bool p) { return p; })
-               ? i
-               : PARSE_ERROR;
+               ? MatchResult::success(i)
+               : MatchResult::failure(i);
   }
   void print(std::ostream &os) const override {
     os << '(';

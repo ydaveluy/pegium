@@ -50,13 +50,13 @@ struct Assignment final : IAssignment {
 
   constexpr explicit Assignment(Element &&element)
       : _element{std::forward<Element>(element)} {}
-  constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
 
     if constexpr (IsOrderedChoice<Element>::value) {
       CstNode node;
       auto i = _element.parse_rule(sv, node, c);
-      if (success(i)) {
+      if (i) {
         node.grammarSource = this;
         parent.content.emplace_back(std::move(node));
       }
@@ -66,17 +66,17 @@ struct Assignment final : IAssignment {
       // overriding the grammar source of the first inserted sub node
       auto index = parent.content.size();
       auto i = _element.parse_rule(sv, parent, c);
-      if (success(i)) {
+      if (i) {
         // override the grammar source
         parent.content[index].grammarSource = this;
       }
       return i;
     }
   }
-  constexpr std::size_t
-  parse_terminal(std::string_view) const noexcept override {
+  constexpr MatchResult
+  parse_terminal(std::string_view sv) const noexcept override {
     assert(false && "An Assignment cannot be in a terminal.");
-    return PARSE_ERROR;
+    return MatchResult::failure(sv.begin());
   }
 
   void execute(AstNode *current, const CstNode &node) const override {

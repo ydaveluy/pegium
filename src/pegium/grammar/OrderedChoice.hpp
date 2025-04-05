@@ -12,25 +12,26 @@ struct OrderedChoice final : IGrammarElement {
   constexpr explicit OrderedChoice(std::tuple<Elements...> &&elems)
       : elements{std::move(elems)} {}
 
-  constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
-    std::size_t i = PARSE_ERROR;
+
+    MatchResult i = MatchResult::failure(sv.begin());
     std::apply(
         [&](const auto &...element) {
-          (success(i = element.parse_rule(sv, parent, c)) || ...);
+          ((i |= element.parse_rule(sv, parent, c)) || ...);
         },
         elements);
 
     return i;
   }
 
-  constexpr std::size_t
+  constexpr MatchResult
   parse_terminal(std::string_view sv) const noexcept override {
-    std::size_t i = PARSE_ERROR;
+    MatchResult i = MatchResult::failure(sv.begin());
 
     std::apply(
         [&](const auto &...element) {
-          (success(i = element.parse_terminal(sv)) || ...);
+          ((i |= element.parse_terminal(sv)) || ...);
         },
         elements);
     return i;
