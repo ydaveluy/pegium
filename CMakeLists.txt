@@ -47,11 +47,14 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(googletest)
 
     file(GLOB_RECURSE SRC-TEST CONFIGURE_DEPENDS 
-    tests/pegium/test.cpp 
-    tests/pegium/pegium.cpp
-    tests/pegium/xsmp.cpp
-    
-    )# tests/pegium/grammar.cpp 
+    #tests/pegium/test.cpp 
+    #tests/pegium/pegium.cpp
+    #tests/pegium/assert.cpp
+    #tests/pegium/xsmp2.cpp
+   tests/pegium/xsmp.cpp
+    #tests/pegium/grammar.cpp 
+    tests/pegium/recovery.cpp
+    )# 
     add_executable (PegiumTest ${SRC-TEST})
 
     target_include_directories(PegiumTest PRIVATE tests)

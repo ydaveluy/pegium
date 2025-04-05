@@ -11,33 +11,34 @@ struct Literal final : IGrammarElement {
   using type = std::string;
   constexpr ~Literal() override = default;
 
-  constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
 
     auto i = Literal::parse_terminal(sv);
-    if (fail(i) || (isword(literal.back()) && isword(sv[i]))) {
-      return PARSE_ERROR;
+ 
+    if (!i || (isword(literal.back()) && isword(*i.offset))) {
+      return i;
     }
 
     auto &node = parent.content.emplace_back();
     node.grammarSource = this;
-    node.text = {sv.data(), i};
+    node.text = {sv.begin(), i.offset};
 
-    return i + c.skipHiddenNodes({sv.data() + i, sv.size() - i}, parent);
+    return  c.skipHiddenNodes({i.offset, sv.end()}, parent);
   }
-  constexpr std::size_t
+  constexpr MatchResult
   parse_terminal(std::string_view sv) const noexcept override {
 
     if (literal.size() > sv.size()) {
-      return PARSE_ERROR;
+      return MatchResult::failure(sv.begin());
     }
     std::size_t i = 0;
     for (; i < literal.size(); i++) {
       if ((isCaseSensitive() ? sv[i] : tolower(sv[i])) != literal[i]) {
-        return PARSE_ERROR;
+        return MatchResult::failure(sv.begin() + i);
       }
     }
-    return i;
+    return MatchResult::success(sv.begin() + i);
   }
 
   /// Create an insensitive Literal

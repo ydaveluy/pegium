@@ -9,8 +9,23 @@ namespace pegium::grammar {
 
 struct AbstractRule : IRule {
 
-  AbstractRule(std::string_view name, std::string_view description = "")
-      : _name{name}, _description{description} {}
+  template <typename Element>
+    requires(IsGrammarElement<Element> && !IsRule<Element>)
+  constexpr AbstractRule(std::string_view name, Element &&element)
+      : _name{name} {
+
+    *this = element;
+  }
+
+  template <typename Element>
+    requires IsRule<Element>
+  constexpr AbstractRule(std::string_view name, Element &&element)
+      : _name{name} {
+
+    *this = element;
+  }
+  /*AbstractRule(std::string_view name, std::string_view description = "")
+      : _name{name}, _description{description} {}*/
   AbstractRule(const AbstractRule &) = delete;
   AbstractRule &operator=(const AbstractRule &) = delete;
 
@@ -32,13 +47,13 @@ struct AbstractRule : IRule {
   AbstractRule &operator=(Element &&element) {
     this->element =
         _elements
-            .emplace_back(std::make_unique<GrammarElementType<Element>>(
-                forwardGrammarElement<Element>(element)))
+            .emplace_back(
+                std::make_unique<GrammarElementType<Element>>(element))
             .get();
     return *this;
   }
 
-  std::size_t parse_terminal(std::string_view sv) const noexcept final {
+  MatchResult parse_terminal(std::string_view sv) const noexcept final {
     assert(element && "The rule definition is missing !");
     return element->parse_terminal(sv);
   }
@@ -57,6 +72,5 @@ protected:
 private:
   std::vector<std::unique_ptr<IGrammarElement>> _elements;
   std::string _name;
-  std::string _description;
 };
 } // namespace pegium::grammar

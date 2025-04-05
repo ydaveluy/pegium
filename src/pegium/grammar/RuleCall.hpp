@@ -14,12 +14,12 @@ struct RuleCall : IGrammarElement {
   //using type = typename Rule::type;
   constexpr ~RuleCall() override = default;
   explicit constexpr RuleCall(const Rule &rule) : _rule{rule} {}
-  constexpr std::size_t parse_rule(std::string_view sv, CstNode &node,
+  constexpr MatchResult parse_rule(std::string_view sv, CstNode &node,
                                    IContext &c) const override {
     return _rule.parse_rule(sv, node, c);
   }
 
-  constexpr std::size_t
+  constexpr MatchResult
   parse_terminal(std::string_view sv) const noexcept override {
     return _rule.parse_terminal(sv);
   }

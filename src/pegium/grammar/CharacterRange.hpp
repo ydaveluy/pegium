@@ -12,25 +12,27 @@ struct CharacterRange final : IGrammarElement {
   using type = std::string;
   constexpr ~CharacterRange() override = default;
 
-  constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  constexpr  MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
     auto i = CharacterRange::parse_terminal(sv);
-    if (fail(i) || (sv.size() > i && isword(sv[i - 1]) && isword(sv[i]))) {
-      return PARSE_ERROR;
+    if (!i ) {
+      return i;
     }
-
+    if (sv.end() > i.offset && isword(*(i.offset-1)) && isword(*i.offset)) {
+      return MatchResult::failure(i.offset);
+    }
     auto &node = parent.content.emplace_back();
-    node.text = {sv.data(), i};
+    node.text = {sv.data(), i.offset};
     node.grammarSource = this;
 
-    return i + c.skipHiddenNodes({sv.data() + i, sv.size() - i}, parent);
+    return c.skipHiddenNodes({i.offset, sv.end()}, parent);
   }
-  constexpr std::size_t
+  constexpr MatchResult
   parse_terminal(std::string_view sv) const noexcept override {
 
     return (!sv.empty() && lookup[static_cast<unsigned char>(sv[0])])
-               ? 1
-               : PARSE_ERROR;
+               ? MatchResult::success(sv.begin()+1)
+               : MatchResult::failure(sv.begin());
   }
   /// Create an insensitive Characters Ranges
   /// @return the insensitive Characters Ranges

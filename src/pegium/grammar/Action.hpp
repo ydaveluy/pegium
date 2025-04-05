@@ -17,18 +17,17 @@ template <typename T, auto feature> struct Action final: IAction {
       return do_execute(current, feature);
     }
   }
-  constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
 
     auto &node = parent.content.emplace_back();
     node.grammarSource = this;
     node.text = {sv.data(), 0};
-
-    return 0;
+    return MatchResult::success(sv.begin());
   }
-  constexpr std::size_t
+  constexpr MatchResult
   parse_terminal(std::string_view sv) const noexcept override {
-    return 0;
+    return MatchResult::success(sv.begin());
   }
   void print(std::ostream &os) const override {
     os << "Action(" << typeid(T).name() << ")";

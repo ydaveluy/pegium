@@ -11,55 +11,53 @@ struct Repetition : IGrammarElement {
   constexpr ~Repetition() override = default;
   GrammarElementType<Element> element;
   constexpr explicit Repetition(Element &&element)
-      : element{forwardGrammarElement<Element>(element)} {}
+      : element{element} {}
 
-  constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
     std::size_t count = 0;
-    std::size_t i = 0;
-    //auto size = parent.content.size();
+    MatchResult i = MatchResult::success(sv.begin());
+    // auto size = parent.content.size();
     while (count < min) {
-      auto len = element.parse_rule({sv.data() + i, sv.size() - i}, parent, c);
-      if (fail(len)) {
+      i = element.parse_rule({i.offset, sv.end()}, parent, c);
+      if (!i) {
         // parent.content.resize(size);
-        //assert(size == parent.content.size());
-        return len;
+        // assert(size == parent.content.size());
+        return i;
       }
-      i += len;
       count++;
     }
     while (count < max) {
-      //size = parent.content.size();
-      auto len = element.parse_rule({sv.data() + i, sv.size() - i}, parent, c);
-      if (fail(len)) {
+      // size = parent.content.size();
+      auto len = element.parse_rule({i.offset, sv.end()}, parent, c);
+      if (!len) {
         // parent.content.resize(size);
-        //assert(size == parent.content.size());
+        // assert(size == parent.content.size());
         break;
       }
-      i += len;
+      i = len;
       count++;
     }
     return i;
   }
 
-  constexpr std::size_t
+  constexpr MatchResult
   parse_terminal(std::string_view sv) const noexcept override {
     std::size_t count = 0;
-    std::size_t i = 0;
+    MatchResult i = MatchResult::success(sv.begin());
     while (count < min) {
-      auto len = element.parse_terminal({sv.data() + i, sv.size() - i});
-      if (fail(len)) {
-        return len;
+      i = element.parse_terminal({i.offset, sv.end()});
+      if (!i) {
+        return i;
       }
-      i += len;
       count++;
     }
     while (count < max) {
-      auto len = element.parse_terminal({sv.data() + i, sv.size() - i});
-      if (fail(len)) {
+      auto len = element.parse_terminal({i.offset, sv.end()});
+      if (!len) {
         break;
       }
-      i += len;
+      i = len;
       count++;
     }
     return i;
@@ -94,8 +92,7 @@ struct Repetition : IGrammarElement {
 template <typename Element>
   requires(IsGrammarElement<Element>)
 constexpr auto opt(Element &&element) {
-  return Repetition<0, 1, Element>{
-      std::forward<Element>(element)};
+  return Repetition<0, 1, Element>{std::forward<Element>(element)};
 }
 
 /// Create a repetition of zero or more elements
@@ -105,8 +102,7 @@ constexpr auto opt(Element &&element) {
 template <typename Element>
   requires(IsGrammarElement<Element>)
 constexpr auto many(Element &&element) {
-  return Repetition<0, std::numeric_limits<std::size_t>::max(),
-                    Element>{
+  return Repetition<0, std::numeric_limits<std::size_t>::max(), Element>{
       std::forward<Element>(element)};
 }
 
@@ -117,8 +113,7 @@ constexpr auto many(Element &&element) {
 template <typename Element>
   requires(IsGrammarElement<Element>)
 constexpr auto at_least_one(Element &&element) {
-  return Repetition<1, std::numeric_limits<std::size_t>::max(),
-                    Element>{
+  return Repetition<1, std::numeric_limits<std::size_t>::max(), Element>{
       std::forward<Element>(element)};
 }
 
@@ -156,8 +151,7 @@ constexpr auto many_sep(Element &&element, Sep &&sep) {
 template <std::size_t count, typename Element>
   requires(IsGrammarElement<Element>)
 constexpr auto rep(Element &&element) {
-  return Repetition<count, count, Element>{
-      std::forward<Element>(element)};
+  return Repetition<count, count, Element>{std::forward<Element>(element)};
 }
 
 /// Create a custom repetition with min and max.
@@ -169,8 +163,7 @@ constexpr auto rep(Element &&element) {
 template <std::size_t min, std::size_t max, typename Element>
   requires(IsGrammarElement<Element>)
 constexpr auto rep(Element &&element) {
-  return Repetition<min, max, Element>{
-      std::forward<Element>(element)};
+  return Repetition<min, max, Element>{std::forward<Element>(element)};
 }
 
 } // namespace pegium::grammar

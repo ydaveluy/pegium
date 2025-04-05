@@ -9,6 +9,8 @@ template <typename T = std::string>
            std::is_integral_v<T> || std::is_enum_v<T>)
 struct DataTypeRule final : AbstractRule {
   using type = T;
+
+  using AbstractRule::AbstractRule;
   DataTypeRule(std::string_view name, std::string_view description = "")
       : AbstractRule{name, description} {
 
@@ -86,28 +88,25 @@ struct DataTypeRule final : AbstractRule {
     // skip leading hidden nodes
     auto i = context->skipHiddenNodes(sv, *result.root_node);
 
-    result.len = i + parse_rule({sv.data() + i, sv.size() - i},
-                                *result.root_node, *context);
+    auto match = parse_rule({i.offset, sv.end()}, *result.root_node, *context);
 
     // std::cout << *result.root_node << std::endl;
-    result.ret = result.len == sv.size();
+    result.ret = match.valid;
     if (result.ret)
       result.value = getValue(*result.root_node);
 
     return result;
   }
-  std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  MatchResult parse_rule(std::string_view sv, CstNode &parent,
                          IContext &c) const override {
     assert(element && "The rule definition is missing !");
     CstNode node;
     auto i = element->parse_rule(sv, node, c);
-    if (fail(i)) {
-      return PARSE_ERROR;
+    if (i) {
+      node.text = {sv.begin(), i.offset};
+      node.grammarSource = this;
+      parent.content.emplace_back(std::move(node));
     }
-    node.text = {sv.data(), i};
-    node.grammarSource = this;
-    parent.content.emplace_back(std::move(node));
-
     return i;
   }
 
@@ -118,7 +117,56 @@ struct DataTypeRule final : AbstractRule {
   }
 
 private:
-  std::function<T(const CstNode &)> _value_converter;
+  std::function<T(const CstNode &)> _value_converter =
+      initializeDefaultValueConverter();
+
+  static std::function<T(const CstNode &)> initializeDefaultValueConverter() {
+    if constexpr (std::is_same_v<T, std::string>) {
+      return [](const CstNode &node) {
+        std::string value;
+        value.reserve(node.text.size());
+
+        for (auto &it : node.content) {
+          assert(it.grammarSource);
+          // std::cout << n << std::endl;
+          if (!it.hidden) {
+            switch (it.grammarSource->getKind()) {
+            case GrammarElementKind::TerminalRule: {
+              auto any =
+                  static_cast<const IRule *>(it.grammarSource)->getAnyValue(it);
+              if (auto ptr = std::any_cast<std::string_view>(&any)) {
+                value += *ptr;
+              } else if (auto ptr = std::any_cast<std::string>(&any)) {
+                value += *ptr;
+              } else {
+                value += it.text;
+              }
+              break;
+            }
+            case GrammarElementKind::DataTypeRule:
+            case GrammarElementKind::ParserRule: {
+              auto any =
+                  static_cast<const IRule *>(it.grammarSource)->getAnyValue(it);
+              if (auto ptr = std::any_cast<std::string>(&any)) {
+                value += *ptr;
+              } else {
+                value += it.text;
+              }
+              break;
+            }
+            default:
+              assert(it.isLeaf());
+              value += it.text;
+              break;
+            }
+          }
+        }
+
+        return value;
+      };
+      return {};
+    }
+  }
 };
 
 } // namespace pegium::grammar

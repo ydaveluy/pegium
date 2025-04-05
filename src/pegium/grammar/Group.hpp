@@ -13,55 +13,28 @@ struct Group final : IGrammarElement {
   constexpr explicit Group(std::tuple<Elements...> &&elems)
       : elements{std::move(elems)} {}
 
-  template <typename T>
-  constexpr bool parse_rule_element(const T &element, std::string_view sv,
-                                    CstNode &parent, IContext &c,
-                                    std::size_t size, std::size_t &i) const {
-
-    auto len = element.parse_rule({sv.data() + i, sv.size() - i}, parent, c);
-    if (fail(len)) {
-      parent.content.resize(size);
-      i = len;
-      return false;
-    }
-    i += len;
-    return true;
-  }
-
-  constexpr std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
-    std::size_t i = 0;
-
+    MatchResult i = MatchResult::success(sv.begin());
+    auto size = parent.content.size();
     std::apply(
         [&](const auto &...element) {
-          auto size = parent.content.size();
-          (parse_rule_element(element, sv, parent, c, size, i) && ...);
+          ((i &= element.parse_rule({i.offset, sv.end()}, parent, c)) && ...);
         },
         elements);
-
+    if (!i) {
+      parent.content.resize(size);
+    }
     return i;
   }
 
-  template <typename T>
-  constexpr bool parse_terminal_element(const T &element, std::string_view sv,
-                                        std::size_t &i) const noexcept {
-
-    auto len = element.parse_terminal({sv.data() + i, sv.size() - i});
-    if (fail(len)) {
-      i = len;
-      return false;
-    }
-    i += len;
-    return true;
-  }
-
-  constexpr std::size_t
+  constexpr MatchResult
   parse_terminal(std::string_view sv) const noexcept override {
-    std::size_t i = 0;
+    MatchResult i = MatchResult::success(sv.begin());
 
     std::apply(
         [&](const auto &...element) {
-          (parse_terminal_element(element, sv, i) && ...);
+          ((i = element.parse_terminal({i.offset, sv.end()})) && ...);
         },
         elements);
 
@@ -82,7 +55,7 @@ struct Group final : IGrammarElement {
     return GrammarElementKind::Group;
   }
 
-//private:
+  // private:
   std::tuple<Elements...> elements;
 };
 

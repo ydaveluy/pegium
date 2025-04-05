@@ -2,6 +2,7 @@
 
 #pragma once
 #include <cassert>
+#include <map>
 #include <pegium/grammar/IContext.hpp>
 #include <pegium/grammar/TerminalRule.hpp>
 #include <pegium/syntax-tree.hpp>
@@ -17,10 +18,10 @@ void for_each(Tuple &&tuple, Func &&func) {
 
 template <typename HiddenTuple, typename IgnoredTuple> struct Context;
 template <typename... Hidden, typename... Ignored>
-  /*requires(std::derived_from<std::remove_cvref_t<Hidden>, TerminalRule<>> &&
-           ...) &&
-          (std::derived_from<std::remove_cvref_t<Ignored>, TerminalRule<>> &&
-           ...)*/
+/*requires(std::derived_from<std::remove_cvref_t<Hidden>, TerminalRule<>> &&
+         ...) &&
+        (std::derived_from<std::remove_cvref_t<Ignored>, TerminalRule<>> &&
+         ...)*/
 struct Context<std::tuple<Hidden &...>, std::tuple<Ignored &...>> final
     : IContext {
 
@@ -29,51 +30,51 @@ struct Context<std::tuple<Hidden &...>, std::tuple<Ignored &...>> final
       : _hidden{std::forward<std::tuple<H &...>>(hiddens)},
         _ignored{std::forward<std::tuple<I &...>>(ignored)} {}
 
-  std::size_t skipHiddenNodes(std::string_view sv,
+  MatchResult skipHiddenNodes(std::string_view sv,
                               CstNode &node) const override {
 
-    std::size_t i = 0;
+    MatchResult i = MatchResult::success(sv.begin());
 
-    while (true) {
-      bool matched = false;
+    do {
+
+      for_each(_ignored, [&](const auto &rule) {
+        i |= rule.parse_terminal({i.offset, sv.end()});
+      });
+      i.valid = false;
 
       for_each(_hidden, [&](const auto &rule) {
-        const auto len = rule.parse_terminal({sv.data() + i, sv.size() - i});
-        if (success(len)) {
-          assert(len &&
-                 "A hidden terminal rule must consume at least one character.");
-
+        const auto len = rule.parse_terminal({i.offset, sv.end()});
+        if (len) {
           auto &hiddenNode = node.content.emplace_back();
-          hiddenNode.text = {sv.data() + i, len};
+          hiddenNode.text = {i.offset, len.offset};
           hiddenNode.grammarSource = &rule;
           hiddenNode.hidden = true;
 
-          i += len;
-          matched = true;
+          i |= len;
         }
       });
 
-      // Itération sur _ignored
-      for_each(_ignored, [&](const auto &rule) {
-        const auto len = rule.parse_terminal({sv.data() + i, sv.size() - i});
-        if (success(len)) {
-          assert(
-              len &&
-              "An ignored terminal rule must consume at least one character.");
-
-          i += len;
-          matched = true;
-        }
-      });
-      if (!matched) {
-        break;
-      }
-    }
+    } while (i);
+    i.valid = true;
 
     return i;
   }
 
+  void addRecovery(std::string_view expected,
+                   std::string_view position) override {
+    recoveries.emplace_back(RecoveryEntry{std::string(expected), position});
+  }
+  virtual void clearRecovery() override { recoveries.clear(); }
+
+  void setInputText(std::string_view text) override { _text = text; }
+
 private:
+  std::string_view _text;
+  struct RecoveryEntry {
+    std::string expected;
+    std::string_view position;
+  };
+  std::vector<RecoveryEntry> recoveries;
   std::tuple<Hidden &...> _hidden;
   std::tuple<Ignored &...> _ignored;
 };
@@ -85,8 +86,8 @@ struct ContextBuilder {
       : _hidden{std::move(hiddens)}, _ignored{std::move(ignored)} {}
 
   template <typename... Ignored>
-    /*requires (std::derived_from<std::remove_cvref_t<Ignored>, TerminalRule<>> &&
-             ...) && (std::tuple_size<IgnoredTuple>::value == 0)*/
+  /*requires (std::derived_from<std::remove_cvref_t<Ignored>, TerminalRule<>> &&
+           ...) && (std::tuple_size<IgnoredTuple>::value == 0)*/
   ContextBuilder<HiddenTuple, std::tuple<Ignored &...>>
   ignore(Ignored &&...ignored) {
     return ContextBuilder<HiddenTuple, std::tuple<Ignored &...>>{
@@ -95,8 +96,8 @@ struct ContextBuilder {
   }
 
   template <typename... Hidden>
-    /*requires(std::derived_from<std::remove_cvref_t<Hidden>, TerminalRule<>> &&
-             ...) && (std::tuple_size<HiddenTuple>::value == 0)*/
+  /*requires(std::derived_from<std::remove_cvref_t<Hidden>, TerminalRule<>> &&
+           ...) && (std::tuple_size<HiddenTuple>::value == 0)*/
   ContextBuilder<std::tuple<Hidden &...>, IgnoredTuple>
   hide(Hidden &&...hidden) {
     return ContextBuilder<std::tuple<Hidden &...>, IgnoredTuple>{

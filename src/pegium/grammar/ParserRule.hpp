@@ -11,8 +11,11 @@ template <typename T>
   requires std::derived_from<T, AstNode>
 struct ParserRule final : AbstractRule {
   using type = T;
-  ParserRule(std::string_view name = "", std::string_view description = "")
-      : AbstractRule{name, description} {}
+
+  using AbstractRule::AbstractRule;
+
+  /*ParserRule(std::string_view name = "", std::string_view description = "")
+      : AbstractRule{name, description} {}*/
   ParserRule(const ParserRule &) = delete;
   ParserRule &operator=(const ParserRule &) = delete;
 
@@ -30,7 +33,7 @@ struct ParserRule final : AbstractRule {
         case pegium::grammar::GrammarElementKind::Assignment: {
           const auto *assignment =
               static_cast<const IAssignment *>(it.grammarSource);
-          if (value)
+          if (value) // TODO only execute at end or before assignment/action ?
             assignment->execute(value.get(), it);
           else
             assignments.emplace_back(assignment, &it);
@@ -84,27 +87,29 @@ struct ParserRule final : AbstractRule {
 
     auto i = context->skipHiddenNodes(sv, *result.root_node);
     auto skipped = result.root_node->content.size();
-    result.len = i + parse_rule({sv.data() + i, sv.size() - i},
-                                *result.root_node, *context);
+
+    auto match = parse_rule({i.offset, sv.end()}, *result.root_node, *context);
+
+    result.len = match.offset - sv.begin();
 
     // std::cout << *result.root_node << std::endl;
-    result.ret = result.len == sv.size();
+    result.ret = match;
     if (result.ret) {
       result.value = getValue(result.root_node->content.at(skipped));
     }
 
     return result;
   }
-  std::size_t parse_rule(std::string_view sv, CstNode &parent,
+  MatchResult parse_rule(std::string_view sv, CstNode &parent,
                          IContext &c) const override {
+    assert(element);
     CstNode node;
     auto i = element->parse_rule(sv, node, c);
-    if (fail(i)) {
-      return PARSE_ERROR;
+    if (i) {
+      node.grammarSource = this;
+      node.text = {sv.begin(), i.offset};
+      parent.content.emplace_back(std::move(node));
     }
-    node.grammarSource = this;
-    node.text = {sv.data(), i};
-    parent.content.emplace_back(std::move(node));
     return i;
   }
   using AbstractRule::operator=;
@@ -114,9 +119,9 @@ struct ParserRule final : AbstractRule {
   }
 
 private:
-  template <typename U> struct is_shared_ptr : std::false_type {};
+  /*template <typename U> struct is_shared_ptr : std::false_type {};
 
   template <typename U>
-  struct is_shared_ptr<std::shared_ptr<U>> : std::true_type {};
+  struct is_shared_ptr<std::shared_ptr<U>> : std::true_type {};*/
 };
 } // namespace pegium::grammar
