@@ -14,7 +14,7 @@
 #include <pegium/grammar/ParserRule.hpp>
 #include <pegium/grammar/Repetition.hpp>
 #include <pegium/grammar/TerminalRule.hpp>
-//#include <pegium/grammar/UnorderedGroup.hpp>
+// #include <pegium/grammar/UnorderedGroup.hpp>
 #include <pegium/IParser.hpp>
 #include <pegium/syntax-tree.hpp>
 #include <type_traits>
@@ -39,6 +39,7 @@ static constexpr auto W = !w;
 static constexpr auto d = "0-9"_cr;
 /// a non-digit character equivalent to regex `\D`
 static constexpr auto D = !d;
+
 /// An until operation that starts from element `from` and ends to element
 /// `to`. e.g `"#*"_kw >> "*#"_kw` to match a multiline comment
 /// @param from the starting element
@@ -81,35 +82,19 @@ private:
   struct RuleHelper<T, std::enable_if_t<std::derived_from<T, AstNode>>> {
     using type = pegium::grammar::ParserRule<T>;
   };
-  template <typename T>
-  struct RuleHelper<std::shared_ptr<T>,
-                    std::enable_if_t<std::derived_from<T, AstNode>>> {
-    using type = pegium::grammar::ParserRule<std::shared_ptr<T>>;
-  };
+
   const grammar::IRule *entryRule = nullptr;
 
 protected:
-  void setEntryRule(const grammar::IRule *entryRule) {
+  /*void setEntryRule(const grammar::IRule *entryRule) {
     this->entryRule = entryRule;
-  }
+  }*/
   void setEntryRule(const grammar::IRule &entryRule) {
     this->entryRule = &entryRule;
   }
-  /*template <typename T = std::string>
-  using TerminalRule = pegium::grammar::TerminalRule<T>;
-  template <typename T = std::string>
-  using DataTypeRule = pegium::grammar::DataTypeRule<T>;
-  template <typename T>
-   // requires std::derived_from<T, AstNode>
-  using ParserRule = pegium::grammar::ParserRule<T>;*/
 
   template <typename T = std::string_view>
   using Terminal = pegium::grammar::TerminalRule<T>;
-
-
-
-
-  // Alias principal
   template <typename T = std::string> using Rule = typename RuleHelper<T>::type;
 
   using ContextBuilder = pegium::grammar::ContextBuilder<>;

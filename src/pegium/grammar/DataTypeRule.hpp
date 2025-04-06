@@ -11,60 +11,8 @@ struct DataTypeRule final : AbstractRule {
   using type = T;
 
   using AbstractRule::AbstractRule;
-  DataTypeRule(std::string_view name, std::string_view description = "")
-      : AbstractRule{name, description} {
-
-    if constexpr (std::is_same_v<T, std::string>) {
-      _value_converter = [this](const CstNode &node) {
-        std::string value;
-        value.reserve(node.text.size());
-
-        for (auto &it : node.content) {
-          assert(it.grammarSource);
-          // std::cout << n << std::endl;
-          if (!it.hidden) {
-            switch (it.grammarSource->getKind()) {
-            case GrammarElementKind::TerminalRule: {
-              auto any =
-                  static_cast<const IRule *>(it.grammarSource)->getAnyValue(it);
-              if (auto ptr = std::any_cast<std::string_view>(&any)) {
-                value += *ptr;
-              } else if (auto ptr = std::any_cast<std::string>(&any)) {
-                value += *ptr;
-              } else {
-                value += it.text;
-              }
-              break;
-            }
-            case GrammarElementKind::DataTypeRule:
-            case GrammarElementKind::ParserRule: {
-              auto any =
-                  static_cast<const IRule *>(it.grammarSource)->getAnyValue(it);
-              if (auto ptr = std::any_cast<std::string>(&any)) {
-                value += *ptr;
-              } else {
-                value += it.text;
-              }
-              break;
-            }
-            default:
-              assert(it.isLeaf());
-              value += it.text;
-              break;
-            }
-          }
-        }
-
-        return value;
-      };
-    }
-  }
-
-  DataTypeRule(const DataTypeRule &) = delete;
-  DataTypeRule &operator=(const DataTypeRule &) = delete;
 
   T getValue(const CstNode &node) const {
-    assert(_value_converter);
     // TODO protect with try catch and store error in context
     return _value_converter(node);
   }
@@ -120,13 +68,11 @@ private:
   std::function<T(const CstNode &)> _value_converter =
       initializeDefaultValueConverter();
 
-  static std::function<T(const CstNode &)> initializeDefaultValueConverter() {
+  std::function<T(const CstNode &)> initializeDefaultValueConverter() {
     if constexpr (std::is_same_v<T, std::string>) {
       return [](const CstNode &node) {
         std::string value;
-        value.reserve(node.text.size());
-
-        for (auto &it : node.content) {
+        for (const auto &it : node.content) {
           assert(it.grammarSource);
           // std::cout << n << std::endl;
           if (!it.hidden) {
@@ -164,7 +110,10 @@ private:
 
         return value;
       };
-      return {};
+      return [this](const CstNode &node) -> T {
+        throw std::logic_error("ValueConvert not provided for rule " +
+                               getName());
+      };
     }
   }
 };

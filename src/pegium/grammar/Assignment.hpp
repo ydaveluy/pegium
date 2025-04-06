@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cassert>
-#include <pegium/grammar/IAssignment.hpp>
+#include <pegium/grammar/IGrammarElement.hpp>
 #include <pegium/grammar/IRule.hpp>
 #include <pegium/grammar/OrderedChoice.hpp>
 #include <source_location>
@@ -37,19 +37,34 @@ template <auto feature, typename... Element>
 struct IsValidAssignment<feature, OrderedChoice<Element...>>
     : std::bool_constant<(IsValidAssignment<feature, Element>::value && ...)> {
 };
+struct IAssignment : IGrammarElement {
+  virtual void execute(AstNode *current, const CstNode &node) const = 0;
+};
+struct AbstractAssignment : IAssignment {
+  constexpr AbstractAssignment(const IGrammarElement *element,
+                               std::string_view name)
+      : _element{element}, _name{name} {}
 
-// si AttrType est un AstNode
-// la règle doit étre une ParserRule avec un type compatible avec AttrType ou un
-// OrderedChoice dont tous les éléments sont des ParserRule avec un type
-// compatible autrement la règle doit avoir un élément dont le type est
-// identique ou convertible en AttrType ou un OrderedChoice dont tous les
-// éléments sont du même type que AttrType
+  const IGrammarElement *getElement() const noexcept;
+  std::string_view getName() const noexcept;
+
+  void print(std::ostream &os) const final;
+
+  GrammarElementKind getKind() const noexcept final;
+
+private:
+  const IGrammarElement *_element;
+  std::string _name;
+};
+
 template <auto feature, typename Element>
 // requires IsValidRule<Element, AttrType>
-struct Assignment final : IAssignment {
+struct Assignment final : AbstractAssignment {
 
   constexpr explicit Assignment(Element &&element)
-      : _element{std::forward<Element>(element)} {}
+      : AbstractAssignment{&_element, member_name<feature>()},
+        _element{std::forward<Element>(element)} {}
+
   constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
 
@@ -81,14 +96,6 @@ struct Assignment final : IAssignment {
 
   void execute(AstNode *current, const CstNode &node) const override {
     do_execute(current, feature, node);
-  }
-
-  void print(std::ostream &os) const override {
-    os << member_name<feature>() << "=" << _element;
-  }
-
-  constexpr GrammarElementKind getKind() const noexcept override {
-    return GrammarElementKind::Assignment;
   }
 
 private:

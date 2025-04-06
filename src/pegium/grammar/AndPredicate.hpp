@@ -2,12 +2,24 @@
 #include <pegium/grammar/IGrammarElement.hpp>
 namespace pegium::grammar {
 
+struct AbstractAndPredicate : IGrammarElement {
+  constexpr AbstractAndPredicate(const IGrammarElement *element)
+      : _element{element} {}
+  const IGrammarElement *getElement() const noexcept;
+  void print(std::ostream &os) const final;
+
+  GrammarElementKind getKind() const noexcept final;
+
+private:
+  const IGrammarElement *_element;
+};
+
 template <typename Element>
   requires IsGrammarElement<Element>
-struct AndPredicate final : IGrammarElement {
+struct AndPredicate final : AbstractAndPredicate {
   constexpr ~AndPredicate() override = default;
   explicit constexpr AndPredicate(Element &&element)
-      : _element{element} {}
+      : AbstractAndPredicate{&_element}, _element{element} {}
 
   constexpr MatchResult parse_rule(std::string_view sv, CstNode &,
                                    IContext &c) const override {
@@ -19,11 +31,6 @@ struct AndPredicate final : IGrammarElement {
   parse_terminal(std::string_view sv) const noexcept override {
     return _element.parse_terminal(sv) ? MatchResult::success(sv.begin())
                                        : MatchResult::failure(sv.begin());
-  }
-  void print(std::ostream &os) const override { os << '&' << _element; }
-
-  constexpr GrammarElementKind getKind() const noexcept override {
-    return GrammarElementKind::AndPredicate;
   }
 
 private:

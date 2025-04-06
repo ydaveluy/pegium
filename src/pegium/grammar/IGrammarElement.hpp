@@ -31,7 +31,6 @@ enum class GrammarElementKind {
   OrderedChoice,
   ParserRule,
   Repetition,
-  RuleCall,
   TerminalRule,
   UnorderedGroup
 };
@@ -44,13 +43,13 @@ struct MatchResult {
   constexpr static MatchResult failure(const char *off) { return {off, false}; }
 
   constexpr static MatchResult success(const char *off) { return {off, true}; }
-  friend constexpr MatchResult operator+(const MatchResult &r, std::size_t n) {
+  /*friend constexpr MatchResult operator+(const MatchResult &r, std::size_t n) {
     return {r.offset + n, r.valid};
-  }
-  constexpr MatchResult &operator+=(std::size_t n) {
+  }*/
+  /*constexpr MatchResult &operator+=(std::size_t n) {
     offset += n;
     return *this;
-  }
+  }*/
 
   constexpr MatchResult &operator|=(const MatchResult &other) {
     if (other.offset > offset) {
@@ -60,13 +59,13 @@ struct MatchResult {
     return *this;
   }
 
-  constexpr MatchResult &operator&=(const MatchResult &other) {
+  /*constexpr MatchResult &operator&=(const MatchResult &other) {
     if (other.offset > offset) {
       offset = other.offset;
     }
     valid &= other.valid;
     return *this;
-  }
+  }*/
 };
 
 struct IGrammarElement {

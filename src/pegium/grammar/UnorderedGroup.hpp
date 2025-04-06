@@ -5,7 +5,7 @@ namespace pegium::grammar {
 
 template <typename... Elements>
   requires(IsGrammarElement<Elements> && ...)
-struct UnorderedGroup : IGrammarElement {
+struct UnorderedGroup final: IGrammarElement {
   static_assert(sizeof...(Elements) > 1,
                 "An UnorderedGroup shall contains at least 2 elements.");
   constexpr ~UnorderedGroup() override = default;

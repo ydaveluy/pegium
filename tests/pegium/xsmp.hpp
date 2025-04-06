@@ -41,7 +41,7 @@ struct Interface : public Type {
   vector<pointer<NamedElement>> members;
 };
 struct Component : public Type {
-  string base;
+  optional<string> base;
   vector<string> interfaces;
   vector<pointer<NamedElement>> members;
 };

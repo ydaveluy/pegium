@@ -31,18 +31,19 @@ struct AnyCharacter final : IGrammarElement {
 
 private:
   static constexpr MatchResult codepoint_length(std::string_view sv) noexcept {
-    if (!sv.empty()) {
+    const auto size = sv.size();
+    if (size) {
       auto b = static_cast<std::byte>(sv.front());
       if ((b & std::byte{0x80}) == std::byte{0}) {
         return MatchResult::success(sv.begin() + 1);
       }
-      if ((b & std::byte{0xE0}) == std::byte{0xC0} && sv.size() >= 2) {
+      if ((b & std::byte{0xE0}) == std::byte{0xC0} && size >= 2) {
         return MatchResult::success(sv.begin() + 2);
       }
-      if ((b & std::byte{0xF0}) == std::byte{0xE0} && sv.size() >= 3) {
+      if ((b & std::byte{0xF0}) == std::byte{0xE0} && size >= 3) {
         return MatchResult::success(sv.begin() + 3);
       }
-      if ((b & std::byte{0xF8}) == std::byte{0xF0} && sv.size() >= 4) {
+      if ((b & std::byte{0xF8}) == std::byte{0xF0} && size >= 4) {
         return MatchResult::success(sv.begin() + 4);
       }
     }

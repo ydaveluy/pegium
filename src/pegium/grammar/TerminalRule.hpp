@@ -11,35 +11,7 @@ template <typename T = std::string> struct TerminalRule final : AbstractRule {
 
   using AbstractRule::AbstractRule;
 
-  constexpr TerminalRule(std::string_view name = "",
-                         std::string_view description = "")
-      : AbstractRule{name, description} {
-
-    // initialize the value converter for standard types
-    if constexpr (std::is_same_v<T, std::string_view>) {
-      _value_converter = [](std::string_view sv) { return sv; };
-    } else if constexpr (std::is_same_v<T, std::string>) {
-      _value_converter = [](std::string_view sv) { return std::string(sv); };
-    } else if constexpr (std::is_same_v<T, bool>) {
-      _value_converter = [](std::string_view sv) { return sv == "true"; };
-    } else if constexpr (std::is_integral_v<T>) {
-      _value_converter = [](std::string_view sv) {
-        T value;
-        auto [ptr, ec] =
-            std::from_chars(sv.data(), sv.data() + sv.size(), value);
-        if (ec != std::errc()) {
-          throw std::invalid_argument("Conversion failed");
-        }
-        return value;
-      };
-    }
-  }
-
-  TerminalRule(const TerminalRule &) = delete;
-  TerminalRule &operator=(const TerminalRule &) = delete;
-
   T getValue(const CstNode &node) const {
-    assert(_value_converter);
     // TODO protect with try catch and store error in context
     return _value_converter(node.text);
   }
@@ -100,7 +72,7 @@ private:
   std::function<T(std::string_view)> _value_converter =
       initializeDefaultValueConverter();
 
-  static std::function<T(std::string_view)> initializeDefaultValueConverter() {
+  std::function<T(std::string_view)> initializeDefaultValueConverter() {
     // initialize the value converter for standard types
     if constexpr (std::is_same_v<T, std::string_view>) {
       return [](std::string_view sv) { return sv; };
@@ -119,7 +91,9 @@ private:
         return value;
       };
     }
-    return {};
+    return [this](std::string_view) -> T {
+      throw std::logic_error("ValueConvert not provided for rule " + getName());
+    };
   }
 };
 } // namespace pegium::grammar
