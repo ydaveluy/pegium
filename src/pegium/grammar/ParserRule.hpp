@@ -1,8 +1,8 @@
 #pragma once
 #include <iostream>
 #include <pegium/grammar/AbstractRule.hpp>
-#include <pegium/grammar/IAction.hpp>
-#include <pegium/grammar/IAssignment.hpp>
+#include <pegium/grammar/Action.hpp>
+#include <pegium/grammar/Assignment.hpp>
 #include <string_view>
 
 namespace pegium::grammar {
@@ -11,13 +11,7 @@ template <typename T>
   requires std::derived_from<T, AstNode>
 struct ParserRule final : AbstractRule {
   using type = T;
-
   using AbstractRule::AbstractRule;
-
-  /*ParserRule(std::string_view name = "", std::string_view description = "")
-      : AbstractRule{name, description} {}*/
-  ParserRule(const ParserRule &) = delete;
-  ParserRule &operator=(const ParserRule &) = delete;
 
   std::any getAnyValue(const CstNode &node) const override {
 

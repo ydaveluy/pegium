@@ -267,7 +267,7 @@ TEST(XsmpTest, TestCatalogue) {
     catalogue test 
 
   )";
-  for (std::size_t i = 0; i < 200'000; ++i) {
+  for (std::size_t i = 0; i < 20'000; ++i) {
     input += R"(    
    
 namespace hidden

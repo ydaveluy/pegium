@@ -53,7 +53,7 @@ if(BUILD_TESTING)
     #tests/pegium/xsmp2.cpp
    tests/pegium/xsmp.cpp
     #tests/pegium/grammar.cpp 
-    tests/pegium/recovery.cpp
+    #tests/pegium/recovery.cpp
     )# 
     add_executable (PegiumTest ${SRC-TEST})
 

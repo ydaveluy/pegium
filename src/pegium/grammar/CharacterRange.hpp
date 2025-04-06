@@ -12,13 +12,13 @@ struct CharacterRange final : IGrammarElement {
   using type = std::string;
   constexpr ~CharacterRange() override = default;
 
-  constexpr  MatchResult parse_rule(std::string_view sv, CstNode &parent,
+  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
     auto i = CharacterRange::parse_terminal(sv);
-    if (!i ) {
+    if (!i) {
       return i;
     }
-    if (sv.end() > i.offset && isword(*(i.offset-1)) && isword(*i.offset)) {
+    if (sv.end() > i.offset && isword(*(i.offset - 1)) && isword(*i.offset)) {
       return MatchResult::failure(i.offset);
     }
     auto &node = parent.content.emplace_back();
@@ -31,7 +31,7 @@ struct CharacterRange final : IGrammarElement {
   parse_terminal(std::string_view sv) const noexcept override {
 
     return (!sv.empty() && lookup[static_cast<unsigned char>(sv[0])])
-               ? MatchResult::success(sv.begin()+1)
+               ? MatchResult::success(sv.begin() + 1)
                : MatchResult::failure(sv.begin());
   }
   /// Create an insensitive Characters Ranges

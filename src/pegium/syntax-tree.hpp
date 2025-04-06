@@ -69,7 +69,7 @@ struct AstNode {
 
   /// An attribute of type T.
   /// @tparam T the attribute type
-  template <typename T> using attribute = T;
+  //template <typename T> using attribute = T;
 
   /// A reference to an AstNode of type T.
   /// @tparam T the AstNode type

@@ -1,8 +1,8 @@
 #pragma once
 #include <cassert>
+#include <pegium/grammar/Group.hpp>
 #include <pegium/grammar/IGrammarElement.hpp>
 #include <pegium/grammar/IRule.hpp>
-#include <pegium/grammar/RuleCall.hpp>
 #include <string_view>
 
 namespace pegium::grammar {
@@ -10,31 +10,25 @@ namespace pegium::grammar {
 struct AbstractRule : IRule {
 
   template <typename Element>
-    requires(IsGrammarElement<Element> && !IsRule<Element>)
+    requires(IsGrammarElement<Element>)
   constexpr AbstractRule(std::string_view name, Element &&element)
       : _name{name} {
 
     *this = element;
   }
 
-  template <typename Element>
-    requires IsRule<Element>
-  constexpr AbstractRule(std::string_view name, Element &&element)
-      : _name{name} {
-
-    *this = element;
-  }
-  /*AbstractRule(std::string_view name, std::string_view description = "")
-      : _name{name}, _description{description} {}*/
   AbstractRule(const AbstractRule &) = delete;
   AbstractRule &operator=(const AbstractRule &) = delete;
+
+  AbstractRule(AbstractRule &&) = delete;
+  AbstractRule &operator=(AbstractRule &&) = delete;
 
   template <typename Element>
     requires IsRule<Element>
   AbstractRule &operator=(Element &&element) {
     this->element = _elements
-                        .emplace_back(std::make_unique<RuleCall<Element>>(
-                            std::forward<Element>(element)))
+                        .emplace_back(std::make_unique<Group<Element>>(
+                            std::forward_as_tuple<Element>(element)))
                         .get();
     return *this;
   }

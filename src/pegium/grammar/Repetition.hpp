@@ -5,13 +5,29 @@
 
 namespace pegium::grammar {
 
+struct AbstractRepetition : IGrammarElement {
+  constexpr AbstractRepetition(const IGrammarElement *element, std::size_t min,
+                               std::size_t max)
+      : _element{element}, _min{min}, _max{max} {}
+  const IGrammarElement *getElement() const noexcept;
+  std::size_t getMin() const noexcept;
+  std::size_t getMax() const noexcept;
+  void print(std::ostream &os) const final;
+
+  GrammarElementKind getKind() const noexcept final;
+
+private:
+  const IGrammarElement *_element;
+  std::size_t _min;
+  std::size_t _max;
+};
+
 template <std::size_t min, std::size_t max, typename Element>
   requires IsGrammarElement<Element>
-struct Repetition : IGrammarElement {
+struct Repetition final : AbstractRepetition {
   constexpr ~Repetition() override = default;
-  GrammarElementType<Element> element;
   constexpr explicit Repetition(Element &&element)
-      : element{element} {}
+      : AbstractRepetition{&_element, min, max}, _element{element} {}
 
   constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const override {
@@ -19,7 +35,7 @@ struct Repetition : IGrammarElement {
     MatchResult i = MatchResult::success(sv.begin());
     // auto size = parent.content.size();
     while (count < min) {
-      i = element.parse_rule({i.offset, sv.end()}, parent, c);
+      i = _element.parse_rule({i.offset, sv.end()}, parent, c);
       if (!i) {
         // parent.content.resize(size);
         // assert(size == parent.content.size());
@@ -29,7 +45,7 @@ struct Repetition : IGrammarElement {
     }
     while (count < max) {
       // size = parent.content.size();
-      auto len = element.parse_rule({i.offset, sv.end()}, parent, c);
+      auto len = _element.parse_rule({i.offset, sv.end()}, parent, c);
       if (!len) {
         // parent.content.resize(size);
         // assert(size == parent.content.size());
@@ -46,14 +62,14 @@ struct Repetition : IGrammarElement {
     std::size_t count = 0;
     MatchResult i = MatchResult::success(sv.begin());
     while (count < min) {
-      i = element.parse_terminal({i.offset, sv.end()});
+      i = _element.parse_terminal({i.offset, sv.end()});
       if (!i) {
         return i;
       }
       count++;
     }
     while (count < max) {
-      auto len = element.parse_terminal({i.offset, sv.end()});
+      auto len = _element.parse_terminal({i.offset, sv.end()});
       if (!len) {
         break;
       }
@@ -62,27 +78,9 @@ struct Repetition : IGrammarElement {
     }
     return i;
   }
-  void print(std::ostream &os) const override {
-    os << element;
-    if constexpr (min == 0 && max == 1)
-      os << '?';
-    else if constexpr (min == 0 &&
-                       max == std::numeric_limits<std::size_t>::max())
-      os << '*';
-    else if constexpr (min == 1 &&
-                       max == std::numeric_limits<std::size_t>::max())
-      os << '+';
-    else if constexpr (min == max)
-      os << '{' << min << '}';
-    else if constexpr (max == std::numeric_limits<std::size_t>::max())
-      os << '{' << min << ",}";
-    else
-      os << '{' << min << ',' << max << '}';
-  }
 
-  constexpr GrammarElementKind getKind() const noexcept override {
-    return GrammarElementKind::Repetition;
-  }
+private:
+  GrammarElementType<Element> _element;
 };
 
 /// Create an option (zero or one)

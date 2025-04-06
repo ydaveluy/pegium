@@ -1,9 +1,15 @@
 #pragma once
 
-#include <pegium/grammar/IAction.hpp>
+#include <pegium/grammar/IGrammarElement.hpp>
 #include <type_traits>
 
 namespace pegium::grammar {
+
+  struct IAction : IGrammarElement {
+    virtual std::shared_ptr<AstNode>
+    execute(std::shared_ptr<AstNode> current) const = 0;
+  };
+
 template <typename T, auto feature> struct Action final: IAction {
 
   explicit Action() {}
