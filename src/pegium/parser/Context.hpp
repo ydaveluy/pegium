@@ -3,18 +3,19 @@
 #pragma once
 #include <cassert>
 #include <map>
-#include <pegium/grammar/IContext.hpp>
-#include <pegium/grammar/TerminalRule.hpp>
+#include <pegium/parser/IContext.hpp>
+#include <pegium/parser/TerminalRule.hpp>
+#include <pegium/parser/AbstractElement.hpp>
 #include <pegium/syntax-tree.hpp>
 #include <string_view>
 #include <tuple>
 
-namespace pegium::grammar {
+namespace pegium::parser {
 
-template <typename Tuple, typename Func>
+/*template <typename Tuple, typename Func>
 void for_each(Tuple &&tuple, Func &&func) {
   std::apply([&](auto &...elems) { (func(elems), ...); }, tuple);
-}
+}*/
 
 template <typename HiddenTuple, typename IgnoredTuple> struct Context;
 template <typename... Hidden, typename... Ignored>
@@ -30,33 +31,50 @@ struct Context<std::tuple<Hidden &...>, std::tuple<Ignored &...>> final
       : _hidden{std::forward<std::tuple<H &...>>(hiddens)},
         _ignored{std::forward<std::tuple<I &...>>(ignored)} {}
 
+  template <std::size_t I = 0>
+  void skip_ignored(std::string_view sv, MatchResult &i) const {
+    if constexpr (I < sizeof...(Ignored)) {
+      i = std::get<I>(_ignored).parse_terminal({i.offset, sv.end()});
+      if (!i)
+        skip_ignored<I + 1>(sv, i);
+    }
+  }
+
+  template <std::size_t I = 0>
+  void skip_hidden(std::string_view sv, MatchResult &i, CstNode &node) const {
+    if constexpr (I < sizeof...(Hidden)) {
+      const auto &rule = std::get<I>(_hidden);
+      const auto len = rule.parse_terminal({i.offset, sv.end()});
+      if (len) {
+        auto &hiddenNode = node.content.emplace_back();
+        hiddenNode.text = {i.offset, len.offset};
+        hiddenNode.grammarSource = std::addressof(rule);
+        hiddenNode.hidden = true;
+
+        i = len;
+      } else {
+
+        i = len;
+        skip_hidden<I + 1>(sv, i, node);
+      }
+    }
+  }
   MatchResult skipHiddenNodes(std::string_view sv,
                               CstNode &node) const override {
-
-    MatchResult i = MatchResult::success(sv.begin());
+    MatchResult i = MatchResult::failure(sv.begin());
 
     do {
+      skip_ignored(sv, i);
+      // in case there is only one Ignored element all alternatives are already
+      // parsed so exit early if no hidden node
+      if constexpr (sizeof...(Ignored) == 1)
+        i.valid = false;
 
-      for_each(_ignored, [&](const auto &rule) {
-        i |= rule.parse_terminal({i.offset, sv.end()});
-      });
-      i.valid = false;
-
-      for_each(_hidden, [&](const auto &rule) {
-        const auto len = rule.parse_terminal({i.offset, sv.end()});
-        if (len) {
-          auto &hiddenNode = node.content.emplace_back();
-          hiddenNode.text = {i.offset, len.offset};
-          hiddenNode.grammarSource = &rule;
-          hiddenNode.hidden = true;
-
-          i |= len;
-        }
-      });
+      skip_hidden(sv, i, node);
 
     } while (i);
-    i.valid = true;
 
+    i.valid = true;
     return i;
   }
 

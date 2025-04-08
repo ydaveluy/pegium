@@ -1,8 +1,8 @@
-#include <pegium/grammar/AndPredicate.hpp>
+#include <pegium/parser/AndPredicate.hpp>
 
-namespace pegium::grammar {
+namespace pegium::parser {
 
-const IGrammarElement *AbstractAndPredicate::getElement() const noexcept {
+/*const IGrammarElement *AbstractAndPredicate::getElement() const noexcept {
   return _element;
 }
 void AbstractAndPredicate::print(std::ostream &os) const {
@@ -11,6 +11,6 @@ void AbstractAndPredicate::print(std::ostream &os) const {
 
 GrammarElementKind AbstractAndPredicate::getKind() const noexcept {
   return GrammarElementKind::AndPredicate;
-}
+}*/
 
-} // namespace pegium::grammar
+} // namespace pegium::parser

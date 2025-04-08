@@ -82,8 +82,14 @@
         "cassert": "cpp",
         "stack": "cpp",
         "source_location": "cpp",
-        "hash_map": "cpp"
+        "hash_map": "cpp",
+        "shared_mutex": "cpp",
+        "future": "cpp"
     },
     "sonarlint.pathToCompileCommands": "${workspaceFolder}/build/compile_commands.json",
-    "C_Cpp.errorSquiggles": "enabledIfIncludesResolve"
+    "C_Cpp.errorSquiggles": "enabledIfIncludesResolve",
+    "sonarlint.connectedMode.project": {
+        "connectionId": "pegium",
+        "projectKey": "ydaveluy_pegium"
+    }
 }
