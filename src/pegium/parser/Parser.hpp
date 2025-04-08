@@ -1,28 +1,28 @@
 #pragma once
 
-#include <pegium/grammar/Action.hpp>
-#include <pegium/grammar/AndPredicate.hpp>
-#include <pegium/grammar/AnyCharacter.hpp>
-#include <pegium/grammar/Assignment.hpp>
-#include <pegium/grammar/CharacterRange.hpp>
-#include <pegium/grammar/Context.hpp>
-#include <pegium/grammar/DataTypeRule.hpp>
-#include <pegium/grammar/Group.hpp>
-#include <pegium/grammar/Literal.hpp>
-#include <pegium/grammar/NotPredicate.hpp>
-#include <pegium/grammar/OrderedChoice.hpp>
-#include <pegium/grammar/ParserRule.hpp>
-#include <pegium/grammar/Repetition.hpp>
-#include <pegium/grammar/TerminalRule.hpp>
-// #include <pegium/grammar/UnorderedGroup.hpp>
-#include <pegium/IParser.hpp>
+#include <pegium/parser/Action.hpp>
+#include <pegium/parser/AndPredicate.hpp>
+#include <pegium/parser/AnyCharacter.hpp>
+#include <pegium/parser/Assignment.hpp>
+#include <pegium/parser/CharacterRange.hpp>
+#include <pegium/parser/Context.hpp>
+#include <pegium/parser/DataTypeRule.hpp>
+#include <pegium/parser/Group.hpp>
+#include <pegium/parser/Literal.hpp>
+#include <pegium/parser/NotPredicate.hpp>
+#include <pegium/parser/OrderedChoice.hpp>
+#include <pegium/parser/ParserRule.hpp>
+#include <pegium/parser/Repetition.hpp>
+#include <pegium/parser/TerminalRule.hpp>
+// #include <pegium/parser/UnorderedGroup.hpp>
+#include <pegium/parser/IParser.hpp>
 #include <pegium/syntax-tree.hpp>
 #include <type_traits>
 
-namespace pegium::grammar {
+namespace pegium::parser {
 
 /// any character equivalent to regex `.`
-static constexpr AnyCharacter dot{};
+static constexpr AnyCharacter dot;
 /// The end of file token
 static constexpr auto eof = !dot;
 /// The end of line token
@@ -45,23 +45,22 @@ static constexpr auto D = !d;
 /// @param from the starting element
 /// @param to the ending element
 /// @return the until element
-template <typename T, typename U>
-  requires IsGrammarElement<T> && IsGrammarElement<U>
+template <ParserExpression T, ParserExpression U>
 constexpr auto operator<=>(T &&from, U &&to) {
   return std::forward<T>(from) + many(!std::forward<U>(to) + dot) +
          std::forward<U>(to);
 }
 } // namespace pegium::grammar
 
-namespace pegium {
+namespace pegium::parser {
 class Parser : public IParser {
 public:
-  GenericParseResult parse(const std::string &input) const override {
+  /*GenericParseResult parse(const std::string &input) const override {
     if (!entryRule)
       throw std::logic_error("The entry rule is not defined");
     return entryRule->parseGeneric(input, createContext());
-  }
-  std::unique_ptr<pegium::grammar::IContext> createContext() const override {
+  }*/
+  std::unique_ptr<IContext> createContext() const override {
     return ContextBuilder().build();
   }
 
@@ -71,33 +70,30 @@ private:
   };
 
   template <typename T>
-  struct RuleHelper<
-      T,
-      std::enable_if_t<std::same_as<T, bool> || std::same_as<T, std::string> ||
-                       std::is_integral_v<T> || std::is_enum_v<T>>> {
-    using type = pegium::grammar::DataTypeRule<T>;
+  struct RuleHelper<T, std::enable_if_t<!std::derived_from<T, AstNode>>> {
+    using type = DataTypeRule<T>;
   };
 
   template <typename T>
   struct RuleHelper<T, std::enable_if_t<std::derived_from<T, AstNode>>> {
-    using type = pegium::grammar::ParserRule<T>;
+    using type = ParserRule<T>;
   };
 
-  const grammar::IRule *entryRule = nullptr;
+  const grammar::Rule *entryRule = nullptr;
 
 protected:
   /*void setEntryRule(const grammar::IRule *entryRule) {
     this->entryRule = entryRule;
   }*/
-  void setEntryRule(const grammar::IRule &entryRule) {
+  void setEntryRule(const grammar::Rule &entryRule) {
     this->entryRule = &entryRule;
   }
 
   template <typename T = std::string_view>
-  using Terminal = pegium::grammar::TerminalRule<T>;
+  using Terminal = TerminalRule<T>;
   template <typename T = std::string> using Rule = typename RuleHelper<T>::type;
 
-  using ContextBuilder = pegium::grammar::ContextBuilder<>;
+  //using ContextBuilder = ContextBuilder<>;
 };
 
-} // namespace pegium
+} // namespace pegium::parser

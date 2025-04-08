@@ -2,12 +2,12 @@
 #include <chrono>
 #include <gtest/gtest.h>
 #include <iostream>
-#include <pegium/Parser.hpp>
+#include <pegium/parser/Parser.hpp>
 
 namespace Xsmp {
 
-using namespace pegium::grammar;
-class XsmpParser : public pegium::Parser {
+using namespace pegium::parser;
+class XsmpParser : public Parser {
 public:
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wuninitialized"
@@ -251,7 +251,7 @@ public:
       assign<&BooleanLiteral::isTrue>("true"_kw) | "false"_kw};
 
 #pragma clang diagnostic pop
-  std::unique_ptr<pegium::grammar::IContext> createContext() const override {
+  std::unique_ptr<IContext> createContext() const override {
     return ContextBuilder().ignore(WS).hide(ML_COMMENT, SL_COMMENT).build();
   }
 };
@@ -315,8 +315,11 @@ namespace hidden
                 static_cast<double>(1024 * 1024))
             << " Mo/s\n";
 
-  ASSERT_TRUE(result.ret);
+  EXPECT_TRUE(result.ret);
+  ASSERT_TRUE(result.value);
 
   EXPECT_EQ(result.value->name, "test");
-  // EXPECT_EQ(result.value->namespaces.size(), 400'002);
+  // std::cout << "parsed " << result.value->namespaces.size() << "
+  // namespace\n";
+  //  EXPECT_EQ(result.value->namespaces.size(), 400'002);
 }

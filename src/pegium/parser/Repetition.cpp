@@ -1,12 +1,12 @@
-#include <pegium/grammar/Repetition.hpp>
+#include <pegium/parser/Repetition.hpp>
 
-namespace pegium::grammar {
+namespace pegium::parser {
 
 /*AbstractRepetition::AbstractRepetition(const IGrammarElement *element,
                                        std::size_t min, std::size_t max)
     : _element{element}, _min{min}, _max{max} {}*/
 
-const IGrammarElement *AbstractRepetition::getElement() const noexcept {
+/*const IGrammarElement *AbstractRepetition::getElement() const noexcept {
   return _element;
 }
 
@@ -33,6 +33,6 @@ void AbstractRepetition::print(std::ostream &os) const {
 
 GrammarElementKind AbstractRepetition::getKind() const noexcept {
   return GrammarElementKind::Repetition;
-}
+}*/
 
-} // namespace pegium::grammar
+} // namespace pegium::parser

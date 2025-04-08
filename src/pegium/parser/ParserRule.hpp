@@ -1,17 +1,25 @@
 #pragma once
 #include <iostream>
-#include <pegium/grammar/AbstractRule.hpp>
 #include <pegium/grammar/Action.hpp>
 #include <pegium/grammar/Assignment.hpp>
+#include <pegium/parser/AbstractElement.hpp>
+#include <pegium/parser/AbstractRule.hpp>
+#include <pegium/parser/Action.hpp>
+#include <pegium/parser/Assignment.hpp>
+#include <pegium/parser/IParser.hpp>
 #include <string_view>
+#include <vector>
 
-namespace pegium::grammar {
+namespace pegium::parser {
 
 template <typename T>
   requires std::derived_from<T, AstNode>
 struct ParserRule final : AbstractRule {
   using type = T;
   using AbstractRule::AbstractRule;
+  constexpr ElementKind getKind() const noexcept override {
+    return ElementKind::ParserRule;
+  }
 
   std::any getAnyValue(const CstNode &node) const override {
 
@@ -20,37 +28,45 @@ struct ParserRule final : AbstractRule {
 
   std::shared_ptr<T> getValue(const CstNode &node) const {
     std::shared_ptr<T> value;
-    std::vector<std::pair<const IAssignment *, const CstNode *>> assignments;
-    for (auto &it : node.content) {
+    std::vector<std::pair<const grammar::Assignment *, const CstNode *>>
+        assignments;
+    for (const auto &it : node.content) {
       if (it.grammarSource) {
         switch (it.grammarSource->getKind()) {
-        case pegium::grammar::GrammarElementKind::Assignment: {
+        case ElementKind::Assignment: {
           const auto *assignment =
-              static_cast<const IAssignment *>(it.grammarSource);
-          if (value) // TODO only execute at end or before assignment/action ?
-            assignment->execute(value.get(), it);
-          else
-            assignments.emplace_back(assignment, &it);
+              static_cast<const grammar::Assignment *>(it.grammarSource);
+          // if (value) // TODO only execute at end or before assignment/action
+          // ?
+          //   assignment->execute(value.get(), it);
+          // else
+          assignments.emplace_back(assignment, &it);
           break;
         }
-        case pegium::grammar::GrammarElementKind::Action:
-          if (!value)
-            value = std::make_shared<T>();
-          for (auto &assignment : assignments)
-            assignment.first->execute(value.get(), *assignment.second);
-
+        case ElementKind::New:
           value = std::static_pointer_cast<T>(
-              static_cast<const IAction *>(it.grammarSource)
+              static_cast<const grammar::Action *>(it.grammarSource)
                   ->execute(std::static_pointer_cast<AstNode>(value)));
           break;
-        case pegium::grammar::GrammarElementKind::ParserRule:
+        case ElementKind::Init:
+          if (!value)
+            value = std::make_shared<T>();
+          for (const auto &[assignment, node] : assignments)
+            assignment->execute(value.get(), *node);
+          assignments.clear();
+          value = std::static_pointer_cast<T>(
+              static_cast<const grammar::Action *>(it.grammarSource)
+                  ->execute(std::static_pointer_cast<AstNode>(value)));
+          break;
+        case ElementKind::ParserRule:
           value = std::static_pointer_cast<T>(
               std::any_cast<std::shared_ptr<AstNode>>(
-                  static_cast<const IRule *>(it.grammarSource)
+                  static_cast<const grammar::Rule *>(it.grammarSource)
                       ->getAnyValue(it)));
           // apply leading assignments
-          for (auto &assignment : assignments)
-            assignment.first->execute(value.get(), *assignment.second);
+          for (const auto &[assignment, node] : assignments)
+            assignment->execute(value.get(), *node);
+          assignments.clear();
           break;
         default:
           break;
@@ -59,25 +75,23 @@ struct ParserRule final : AbstractRule {
     }
     if (!value)
       value = std::make_shared<T>();
-    for (auto &assignment : assignments)
-      assignment.first->execute(value.get(), *assignment.second);
+    for (const auto &[assignment, node] : assignments)
+      assignment->execute(value.get(), *node);
     return value;
   }
-  pegium::GenericParseResult parseGeneric(
-      std::string_view text,
-      std::unique_ptr<pegium::grammar::IContext> context) const override {
+  GenericParseResult parseGeneric(std::string_view text,
+                                  std::unique_ptr<IContext> context) const
+  /*override */ {
     auto result = parse(text, std::move(context));
     return {.root_node = result.root_node};
   }
-  pegium::ParseResult<std::shared_ptr<T>>
-  parse(std::string_view text,
-        std::unique_ptr<pegium::grammar::IContext> context) const {
-    pegium::ParseResult<std::shared_ptr<T>> result;
+  ParseResult<std::shared_ptr<T>>
+  parse(std::string_view text, std::unique_ptr<IContext> context) const {
+    ParseResult<std::shared_ptr<T>> result;
     result.root_node = std::make_shared<RootCstNode>();
     result.root_node->fullText = text;
     std::string_view sv = result.root_node->fullText;
     result.root_node->text = result.root_node->fullText;
-    // auto c = _parser->createContext();
 
     auto i = context->skipHiddenNodes(sv, *result.root_node);
     auto skipped = result.root_node->content.size();
@@ -95,7 +109,7 @@ struct ParserRule final : AbstractRule {
     return result;
   }
   MatchResult parse_rule(std::string_view sv, CstNode &parent,
-                         IContext &c) const override {
+                         IContext &c) const {
     assert(element);
     CstNode node;
     auto i = element->parse_rule(sv, node, c);
@@ -107,15 +121,5 @@ struct ParserRule final : AbstractRule {
     return i;
   }
   using AbstractRule::operator=;
-
-  constexpr GrammarElementKind getKind() const noexcept override {
-    return GrammarElementKind::ParserRule;
-  }
-
-private:
-  /*template <typename U> struct is_shared_ptr : std::false_type {};
-
-  template <typename U>
-  struct is_shared_ptr<std::shared_ptr<U>> : std::true_type {};*/
 };
-} // namespace pegium::grammar
+} // namespace pegium::parser

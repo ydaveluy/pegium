@@ -1,15 +1,20 @@
 #pragma once
 
 #include <charconv>
-#include <pegium/grammar/AbstractRule.hpp>
+#include <pegium/parser/AbstractElement.hpp>
+#include <pegium/parser/AbstractRule.hpp>
+#include <pegium/parser/IParser.hpp>
 #include <string>
 
-namespace pegium::grammar {
+namespace pegium::parser {
 
 template <typename T = std::string> struct TerminalRule final : AbstractRule {
   using type = T;
 
   using AbstractRule::AbstractRule;
+  constexpr ElementKind getKind() const noexcept override {
+    return ElementKind::TerminalRule;
+  }
 
   T getValue(const CstNode &node) const {
     // TODO protect with try catch and store error in context
@@ -19,15 +24,14 @@ template <typename T = std::string> struct TerminalRule final : AbstractRule {
   std::any getAnyValue(const CstNode &node) const override {
     return getValue(node);
   }
-  pegium::GenericParseResult
-  parseGeneric(std::string_view text,
-               std::unique_ptr<IContext> context) const override {
+  GenericParseResult
+  parseGeneric(std::string_view text, std::unique_ptr<IContext> context) const {
     auto result = parse(text, std::move(context));
     return {.root_node = result.root_node};
   }
-  pegium::ParseResult<T> parse(std::string_view text,
-                               std::unique_ptr<IContext> context) const {
-    pegium::ParseResult<T> result;
+  ParseResult<T>
+  parse(std::string_view text, std::unique_ptr<IContext> context) const {
+    ParseResult<T> result;
     result.root_node = std::make_shared<RootCstNode>();
     result.root_node->fullText = text;
     result.root_node->text = result.root_node->fullText;
@@ -44,7 +48,7 @@ template <typename T = std::string> struct TerminalRule final : AbstractRule {
   }
 
   MatchResult parse_rule(std::string_view sv, CstNode &parent,
-                         IContext &c) const override {
+                         IContext &c) const {
 
     assert(element && "The rule definition is missing !");
     auto i = parse_terminal(sv);
@@ -62,10 +66,6 @@ template <typename T = std::string> struct TerminalRule final : AbstractRule {
   using AbstractRule::operator=;
   void setValueConverter(std::function<T(std::string_view)> &&value_converter) {
     _value_converter = std::move(value_converter);
-  }
-
-  constexpr GrammarElementKind getKind() const noexcept override {
-    return GrammarElementKind::TerminalRule;
   }
 
 private:
@@ -96,4 +96,4 @@ private:
     };
   }
 };
-} // namespace pegium::grammar
+} // namespace pegium::parser

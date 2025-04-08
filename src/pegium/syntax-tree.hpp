@@ -1,9 +1,8 @@
 #pragma once
 
-#include <any>
+//#include <any>
 #include <atomic>
 #include <cstdint>
-#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -11,6 +10,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <pegium/grammar/AbstractElement.hpp>
+#include <ostream>
 
 namespace pegium {
 
@@ -18,7 +19,7 @@ namespace pegium {
 /// @tparam T the AstNode type.
 template <typename T>
 // do not add requirement std::is_base_of_v<AstNode, T> because T may be
-// incomplete at this stage.
+// incomplete at the stage the Reference is declared.
 struct Reference {
   /// Resolve the reference.
   /// @return the resolved reference or nullptr.
@@ -106,9 +107,6 @@ struct AstNode {
 };
 
 struct RootCstNode;
-namespace grammar {
-class IGrammarElement;
-}
 
 
 /**
@@ -118,7 +116,7 @@ struct CstNode {
   /// The actual text */
   std::string_view text;
   /// The grammar element from which this node was parsed
-  const grammar::IGrammarElement *grammarSource;
+  const grammar::AbstractElement *grammarSource;
 
   std::vector<CstNode> content;
 
@@ -127,7 +125,7 @@ struct CstNode {
   /// Whether the token is hidden, i.e. not explicitly part of the containing
   /// grammar rule (e.g: comments)
   bool hidden = false;
-
+private:
   friend std::ostream &operator<<(std::ostream &os, const CstNode &obj);
 };
 
