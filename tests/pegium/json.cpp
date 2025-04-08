@@ -1,11 +1,13 @@
-#include <charconv>
 #include <chrono>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <pegium/parser/Parser.hpp>
+#include <pegium/syntax-tree.hpp>
 #include <string>
 #include <string_view>
 #include <variant>
+
+using namespace pegium::parser;
 
 namespace Json {
 
@@ -26,65 +28,52 @@ struct JsonArray : pegium::AstNode {
 
 struct JsonValue : pegium::AstNode {
 
-  std::variant<std::string, double, pointer<JsonObject>, pointer<JsonArray>,
-               bool, std::monostate>
+  std::variant<std::string, double, std::int32_t, JsonObject, JsonArray, bool,
+               nullptr_t>
       value;
 };
 
-class Parser : public pegium::parser::Parser {
+// @see https://www.json.org/json-en.html
+class JsonParser : public Parser {
 public:
-#include <pegium/rule_macros_begin.h>
-  TERM(WS);
-  TERM(STRING);
-  TERM(Number, double);
-  TERM(TRUE, bool);
-  TERM(FALSE, bool);
-  TERM(NULL_KW, std::monostate);
+  Terminal<> WS{"WS", at_least_one(s)};
+  // "(\\.|[^"\\])*"
+  Terminal<std::string> STRING{
+      "STRING", "\""_kw + many("\\"_kw + dot | "^\"\\"_cr) + "\""_kw};
 
-  RULE(Pair, Json::Pair);
-  RULE(JsonValue, Json::JsonValue);
-  RULE(JsonArray, Json::JsonArray);
-  RULE(JsonObject, Json::JsonObject);
+  Terminal<double> Number{
+      "Number", opt("-"_kw) + ("0"_kw | "1-9"_cr + many(d)) +
+                     opt("."_kw + at_least_one(d)) +
+                     opt("e"_cr.i() + opt("-+"_cr) + at_least_one(d))};
 
-#include <pegium/rule_macros_end.h>
+  Terminal<bool> Bool{"Bool", "true"_kw | "false"_kw};
+  Terminal<nullptr_t> Null{"Null", "null"_kw};
 
-  Parser() {
+  /// STRING ':' value
+  Rule<Json::Pair> Pair{"Pair", assign<&Pair::key>(STRING) + ":"_kw +
+                                    assign<&Pair::value>(JsonValue)};
 
-    using namespace pegium::grammar;
-    WS = at_least_one(s);
+  /// '{' pair (',' pair)* '}' | '{' '}'
+  Rule<Json::JsonObject> JsonObject{
+      "JsonObject",
+      "{"_kw + many_sep(assign<&JsonObject::values>(Pair), ","_kw) + "}"_kw};
 
-    STRING = "\""_kw + many(!"\""_cr) + "\""_kw;
+  /// '[' value (',' value)* ']' | '[' ']'
+  Rule<Json::JsonArray> JsonArray{
+      "JsonArray", "["_kw +
+                       many_sep(assign<&JsonArray::values>(JsonValue), ","_kw) +
+                       "]"_kw};
 
-    Number = opt("-"_kw) + ("0"_kw | "1-9"_cr + many("0-9"_cr)) +
-             opt("."_kw + at_least_one("0-9"_cr)) +
-             opt("e"_kw.i() + opt("-+"_cr) + at_least_one("0-9"_cr));
+  /// STRING | NUMBER | obj | arr | 'true' | 'false' | 'null'
+  Rule<Json::JsonValue> JsonValue{
+      "JsonValue",
+      assign<&JsonValue::value>(STRING | JsonArray | Number |
+                                JsonObject | JsonArray | Bool | Null)};
 
-    TRUE = "true"_kw;
-    TRUE.setValueConverter([](std::string_view) { return true; });
-    FALSE = "false"_kw;
-    FALSE.setValueConverter([](std::string_view) { return false; });
-    NULL_KW = "null"_kw;
-    NULL_KW.setValueConverter(
-        [](std::string_view) { return std::monostate{}; });
-
-    /// STRING ':' value
-    Pair =
-        assign<&Pair::key>(STRING) + ":"_kw + assign<&Pair::value>(JsonValue);
-
-    /// '{' pair (',' pair)* '}' | '{' '}'
-    JsonObject =
-        "{"_kw + many_sep(assign<&JsonObject::values>(Pair), ","_kw) + "}"_kw;
-
-    /// '[' value (',' value)* ']' | '[' ']'
-    JsonArray = "["_kw +
-                many_sep(assign<&JsonArray::values>(JsonValue), ","_kw) +
-                "]"_kw;
-
-    /// STRING | NUMBER | obj | arr | 'true' | 'false' | 'null'
-    JsonValue = assign<&JsonValue::value>(STRING | JsonArray /*| Number | JsonObject |
-                                          JsonArray | TRUE | FALSE | NULL_KW*/);
+  JsonParser() {
+    Null.setValueConverter([](std::string_view) { return nullptr; });
   }
-  std::unique_ptr<pegium::grammar::IContext> createContext() const override {
+  std::unique_ptr<IContext> createContext() const override {
     return ContextBuilder().ignore(WS).build();
   }
 };
@@ -92,20 +81,45 @@ public:
 } // namespace Json
 
 TEST(JsonTest, TestJson) {
-  Json::Parser g;
+  Json::JsonParser g;
 
   std::string input = R"(
-{ "type": "FeatureCollection",
+{ 
+  "type": "FeatureCollection",
   "features": [
-{
-    "type": "Feature",
-"properties": { "name": "Canada" }
-}
-]
-}
+    {
+      "type": "Feature",
+      "properties": { "name": "Canada" }
+    }
+  ],
+
 
   )";
 
+  for (std::size_t i = 0; i < 100'000; ++i) {
+    input += R"(    
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "Canada" },
+      "number": -1.5e3 ,
+      "true": true,
+      "false": false,
+      "null": null
+    }
+  ],
+    )";
+  }
+  input += R"(
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "Canada" }
+    }
+  ]
+})";
   using namespace std::chrono;
   auto start = high_resolution_clock::now();
 

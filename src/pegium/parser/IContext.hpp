@@ -2,7 +2,7 @@
 #include <pegium/syntax-tree.hpp>
 #include <string_view>
 
-namespace pegium::grammar {
+namespace pegium::parser {
 struct MatchResult;
 struct IContext {
 
@@ -15,4 +15,4 @@ struct IContext {
   virtual void setInputText(std::string_view) = 0;
 };
 
-} // namespace pegium::grammar
+} // namespace pegium::parser

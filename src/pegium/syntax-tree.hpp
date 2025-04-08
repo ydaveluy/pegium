@@ -3,11 +3,12 @@
 #include <any>
 #include <atomic>
 #include <cstdint>
-#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ostream>
+#include <pegium/grammar/AbstractElement.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,7 +19,7 @@ namespace pegium {
 /// @tparam T the AstNode type.
 template <typename T>
 // do not add requirement std::is_base_of_v<AstNode, T> because T may be
-// incomplete at this stage.
+// incomplete at the stage the Reference is declared.
 struct Reference {
   /// Resolve the reference.
   /// @return the resolved reference or nullptr.
@@ -59,17 +60,18 @@ private:
 
 /// Helpers to check if an object is a Reference
 template <typename T> struct is_reference : std::false_type {};
-
 template <typename T> struct is_reference<Reference<T>> : std::true_type {};
+template <typename T> struct is_reference<std::vector<Reference<T>>> : std::true_type {};
 template <typename T> constexpr bool is_reference_v = is_reference<T>::value;
 
+struct CstNode;
 /// Represent a node in the AST. Each node in the AST must derived from AstNode
 struct AstNode {
   virtual ~AstNode() noexcept = default;
 
   /// An attribute of type T.
   /// @tparam T the attribute type
-  //template <typename T> using attribute = T;
+  // template <typename T> using attribute = T;
 
   /// A reference to an AstNode of type T.
   /// @tparam T the AstNode type
@@ -98,18 +100,19 @@ struct AstNode {
 
   /// The container node in the AST; every node except the root node has a
   /// container.
-  //std::weak_ptr<AstNode> _container;
-  //std::any _containerProperty;
-  /** In case `$containerProperty` is an array, the array index is stored here.
-   */
-  //std::size_t _containerIndex;
+  AstNode *_container = nullptr;
+  /// The property of the `_container` node that contains this node. This is
+  /// either a direct reference or an array.
+  std::any _containerProperty;
+  /// In case `_containerProperty` is an array, the array index is stored here.
+  std::size_t _containerIndex;
+  /// The Concrete Syntax Tree (CST) node of the text range from which this node
+  /// was parsed.
+  CstNode *_node;
+
 };
 
 struct RootCstNode;
-namespace grammar {
-class IGrammarElement;
-}
-
 
 /**
  * A node in the Concrete Syntax Tree (CST).
@@ -118,7 +121,7 @@ struct CstNode {
   /// The actual text */
   std::string_view text;
   /// The grammar element from which this node was parsed
-  const grammar::IGrammarElement *grammarSource;
+  const grammar::AbstractElement *grammarSource;
 
   std::vector<CstNode> content;
 
@@ -128,6 +131,7 @@ struct CstNode {
   /// grammar rule (e.g: comments)
   bool hidden = false;
 
+private:
   friend std::ostream &operator<<(std::ostream &os, const CstNode &obj);
 };
 

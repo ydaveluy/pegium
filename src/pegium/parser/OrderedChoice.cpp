@@ -1,9 +1,9 @@
 
-#include <pegium/grammar/OrderedChoice.hpp>
+#include <pegium/parser/OrderedChoice.hpp>
 
-namespace pegium::grammar {
+namespace pegium::parser {
 
-const IGrammarElement *const *AbstractOrderedChoice::begin() const noexcept {
+/*const IGrammarElement *const *AbstractOrderedChoice::begin() const noexcept {
   return _begin;
 }
 const IGrammarElement *const *AbstractOrderedChoice::end() const noexcept {
@@ -21,6 +21,6 @@ void AbstractOrderedChoice::print(std::ostream &os) const {
     os << **it;
   }
   os << ')';
-}
+}*/
 
-} // namespace pegium::grammar
+} // namespace pegium::parser

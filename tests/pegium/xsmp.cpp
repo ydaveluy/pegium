@@ -2,17 +2,17 @@
 #include <chrono>
 #include <gtest/gtest.h>
 #include <iostream>
-#include <pegium/Parser.hpp>
+#include <pegium/parser/Parser.hpp>
 
 namespace Xsmp {
 
-using namespace pegium::grammar;
-class XsmpParser : public pegium::Parser {
+using namespace pegium::parser;
+class XsmpParser : public Parser {
 public:
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wuninitialized"
   Terminal<> WS{"WS", at_least_one(s)};
-  Terminal<> SL_COMMENT{"SL_COMMENT", "//"_kw <=> ~(eol | eof)};
+  Terminal<> SL_COMMENT{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
   Terminal<> ML_COMMENT{"ML_COMMENT", "/*"_kw <=> "*/"_kw};
 
   Terminal<> ID{"ID", "a-zA-Z_"_cr + many(w)};
@@ -36,8 +36,7 @@ public:
       many(assign<&NamedElement::attributes>(Attribute)) + Namespace};
 
   Rule<Xsmp::Namespace> Namespace{
-      "Namespace", "namespace"_kw +
-                       assign<&NamedElement::name>(QualifiedName) +         //
+      "Namespace", "namespace"_kw + assign<&NamedElement::name>(ID) +       //
                        "{"_kw +                                             //
                        many(assign<&Namespace::members>(NamespaceMember)) + //
                        "}"_kw};                                             //
@@ -251,14 +250,14 @@ public:
       assign<&BooleanLiteral::isTrue>("true"_kw) | "false"_kw};
 
 #pragma clang diagnostic pop
-  std::unique_ptr<pegium::grammar::IContext> createContext() const override {
+  std::unique_ptr<IContext> createContext() const override {
     return ContextBuilder().ignore(WS).hide(ML_COMMENT, SL_COMMENT).build();
   }
 };
 } // namespace Xsmp
 
 TEST(XsmpTest, TestCatalogue) {
-  Xsmp::XsmpParser g;
+  Xsmp::XsmpParser parser;
 
   std::string input = R"(
     /**
@@ -302,10 +301,12 @@ namespace hidden
     )";
   }
 
+  std::cout << parser.Catalogue << ": "
+            << *parser.Catalogue.getElement() << std::endl;
   using namespace std::chrono;
   auto start = high_resolution_clock::now();
 
-  auto result = g.Catalogue.parse(input, g.createContext());
+  auto result = parser.Catalogue.parse(input, parser.createContext());
   auto end = high_resolution_clock::now();
   auto duration = duration_cast<milliseconds>(end - start).count();
 
@@ -315,8 +316,11 @@ namespace hidden
                 static_cast<double>(1024 * 1024))
             << " Mo/s\n";
 
-  ASSERT_TRUE(result.ret);
+  EXPECT_TRUE(result.ret);
+  ASSERT_TRUE(result.value);
 
   EXPECT_EQ(result.value->name, "test");
-  // EXPECT_EQ(result.value->namespaces.size(), 400'002);
+  // std::cout << "parsed " << result.value->namespaces.size() << "
+  // namespace\n";
+  //  EXPECT_EQ(result.value->namespaces.size(), 400'002);
 }

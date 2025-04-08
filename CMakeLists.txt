@@ -2,7 +2,14 @@ cmake_minimum_required(VERSION 3.14)
 
 project(pegium LANGUAGES CXX)
 
+include(FetchContent)
+FetchContent_Declare(
+    lsp-framework
+    GIT_REPOSITORY https://github.com/leon-bckl/lsp-framework.git
+    GIT_TAG        master
+)
 
+FetchContent_MakeAvailable(lsp-framework)
 #set(CMAKE_CXX_CLANG_TIDY clang-tidy)
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
 #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
@@ -28,7 +35,7 @@ file(GLOB_RECURSE SRC CONFIGURE_DEPENDS src/pegium/**.cpp)
 
 add_library(pegium ${SRC})
 target_include_directories(pegium PUBLIC src)
-target_compile_features(pegium PUBLIC cxx_std_23)
+target_compile_features(pegium PUBLIC cxx_std_20)
 include(CTest)
 
 
@@ -52,6 +59,7 @@ if(BUILD_TESTING)
     #tests/pegium/assert.cpp
     #tests/pegium/xsmp2.cpp
    tests/pegium/xsmp.cpp
+   tests/pegium/json.cpp
     #tests/pegium/grammar.cpp 
     #tests/pegium/recovery.cpp
     )# 
