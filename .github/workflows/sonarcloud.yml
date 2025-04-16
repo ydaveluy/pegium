@@ -30,7 +30,7 @@ jobs:
             python-version: 3.12
       -  name: install gcovr 
          run: |
-            pip install gcovr
+            pip3 install gcovr
       -  name: Configure cmake
          run: |
             cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPEGIUM_ENABLE_CODECOVERAGE=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -S ${{github.workspace}}
