@@ -12,6 +12,7 @@ on:
    workflow_dispatch: null
 permissions:
    pull-requests: read # allows SonarCloud to decorate PRs with analysis results
+   contents: read # access to check out code and install dependencies
 concurrency:
    group: ${{ github.workflow }}-${{ github.ref }}
    cancel-in-progress: true
@@ -19,18 +20,19 @@ concurrency:
 jobs:
    Analysis:
       runs-on: ubuntu-latest
-      container: gcc:14
       steps:
       -  uses: actions/checkout@v4
          with:
             fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
+      -  name: Install g++-14
+         run: echo "CXX=g++-14" >> $GITHUB_ENV
       -  name: Set up Python for gcovr
          uses: actions/setup-python@v5
          with:
             python-version: 3.12
       -  name: install gcovr 
          run: |
-            pip3 install gcovr
+            pip install gcovr
       -  name: Configure cmake
          run: |
             cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPEGIUM_ENABLE_CODECOVERAGE=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -S ${{github.workspace}}
@@ -42,8 +44,7 @@ jobs:
             cd build && ctest -C Debug --output-on-failure
       -  name: Collect coverage into one XML report
          run: |
-            gcovr --sonarqube coverage.xml
-
+            cd build; gcovr --sonarqube coverage.xml -r .. --gcov-ignore-errors=no_working_dir_found
       -  name: SonarQube Scan
          uses: SonarSource/sonarqube-scan-action@v5.1.0
          env:
@@ -54,7 +55,7 @@ jobs:
                -Dsonar.projectKey=ydaveluy_pegium
                -Dsonar.organization=ydaveluy
                -Dsonar.cfamily.compile-commands=build/compile_commands.json
-               -Dsonar.coverageReportPaths=coverage.xml
+               -Dsonar.coverageReportPaths=build/coverage.xml
                -Dsonar.sources=src
                -Dsonar.tests=tests
                -Dsonar.sourceEncoding=UTF-8
