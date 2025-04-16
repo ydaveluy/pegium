@@ -24,13 +24,13 @@ template <typename T = std::string> struct TerminalRule final : AbstractRule {
   std::any getAnyValue(const CstNode &node) const override {
     return getValue(node);
   }
-  GenericParseResult
-  parseGeneric(std::string_view text, std::unique_ptr<IContext> context) const {
+  GenericParseResult parseGeneric(std::string_view text,
+                                  std::unique_ptr<IContext> context) const {
     auto result = parse(text, std::move(context));
     return {.root_node = result.root_node};
   }
-  ParseResult<T>
-  parse(std::string_view text, std::unique_ptr<IContext> context) const {
+  ParseResult<T> parse(std::string_view text,
+                       std::unique_ptr<IContext> context) const {
     ParseResult<T> result;
     result.root_node = std::make_shared<RootCstNode>();
     result.root_node->fullText = text;

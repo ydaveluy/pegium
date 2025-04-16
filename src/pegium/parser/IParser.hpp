@@ -23,7 +23,7 @@ class IParser {
 public:
   virtual ~IParser() noexcept = default;
   virtual std::unique_ptr<IContext> createContext() const = 0;
- // virtual GenericParseResult parse(const std::string &input) const = 0;
+  // virtual GenericParseResult parse(const std::string &input) const = 0;
 };
 
 } // namespace pegium::parser

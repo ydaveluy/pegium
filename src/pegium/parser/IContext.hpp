@@ -10,7 +10,8 @@ struct IContext {
                                       pegium::CstNode &node) const = 0;
   virtual ~IContext() noexcept = default;
 
-  virtual void addRecovery(std::string_view expected, std::string_view position) = 0;
+  virtual void addRecovery(std::string_view expected,
+                           std::string_view position) = 0;
   virtual void clearRecovery() = 0;
   virtual void setInputText(std::string_view) = 0;
 };

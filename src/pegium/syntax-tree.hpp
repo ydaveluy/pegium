@@ -4,16 +4,28 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <generator>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <ostream>
 #include <pegium/grammar/AbstractElement.hpp>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace pegium {
+
+struct AstNode;
+struct ReferenceInfo {
+  virtual ~ReferenceInfo() = default;
+  // reference: Reference
+  virtual const AstNode *getReference() const = 0;
+  const AstNode *container;
+  std::any property;
+  std::size_t index;
+};
 
 /// A Reference to an AstNode of type T.
 /// @tparam T the AstNode type.
@@ -61,7 +73,8 @@ private:
 /// Helpers to check if an object is a Reference
 template <typename T> struct is_reference : std::false_type {};
 template <typename T> struct is_reference<Reference<T>> : std::true_type {};
-template <typename T> struct is_reference<std::vector<Reference<T>>> : std::true_type {};
+template <typename T>
+struct is_reference<std::vector<Reference<T>>> : std::true_type {};
 template <typename T> constexpr bool is_reference_v = is_reference<T>::value;
 
 struct CstNode;
@@ -77,7 +90,7 @@ struct AstNode {
   /// @tparam T the AstNode type
   template <typename T> using reference = Reference<T>;
 
-  /// A pointer on an object of type T (T must be derived from AstNode).
+  /// A pointer on an object of type T.
   /// @tparam T type of the contained object
   template <typename T> using pointer = std::shared_ptr<T>;
 
@@ -98,18 +111,116 @@ struct AstNode {
   /// @tparam T type of element
   template <typename T> using vector = std::vector<T>;
 
+  /// Returns the direct children of this node.
+  std::generator<const AstNode *> getContent() const;
+  /// Returns all descendants of this node.
+  std::generator<const AstNode *> getAllContent() const;
+
+  /// Returns the direct children of this node.
+  std::generator<AstNode *> getContent();
+  /// Returns all descendants of this node.
+  std::generator<AstNode *> getAllContent();
+
+  /// Returns the direct children of type T.
+  template <typename T>
+    requires std::derived_from<T, AstNode>
+  auto getContent() const {
+    return getContent() | std::views::filter([](auto *ptr) {
+             return dynamic_cast<const T *>(ptr) != nullptr;
+           }) |
+           std::views::transform([](auto *ptr) -> const T * {
+             return static_cast<const T *>(ptr);
+           });
+  }
+  /// Returns all descendants of type T.
+  template <typename T>
+    requires std::derived_from<T, AstNode>
+  auto getAllContent() const {
+    return getAllContent() | std::views::filter([](auto *ptr) {
+             return dynamic_cast<const T *>(ptr) != nullptr;
+           }) |
+           std::views::transform([](auto *ptr) -> const T * {
+             return static_cast<const T *>(ptr);
+           });
+  }
+
+  /// Returns the direct children of type T.
+  template <typename T>
+    requires std::derived_from<T, AstNode>
+  auto getContent() {
+    return getContent() | std::views::filter([](auto *ptr) {
+             return dynamic_cast<T *>(ptr) != nullptr;
+           }) |
+           std::views::transform(
+               [](auto *ptr) -> T * { return static_cast<T *>(ptr); });
+  }
+  /// Returns all descendants of type T.
+  template <typename T>
+    requires std::derived_from<T, AstNode>
+  auto getAllContent() {
+    return getAllContent() | std::views::filter([](auto *ptr) {
+             return dynamic_cast<T *>(ptr) != nullptr;
+           }) |
+           std::views::transform(
+               [](auto *ptr) -> T * { return static_cast<T *>(ptr); });
+  }
+  /// Returns the parent node, or nullptr if this is the root.
+  const AstNode *getContainer() const noexcept;
+  /// Returns the parent node, or nullptr if this is the root.
+  AstNode *getContainer() noexcept;
+
+  /// Returns the nearest ancestor of type T, or nullptr if none is found.
+  /// If the current node itself matches, it is returned.
+  template <typename T>
+    requires std::derived_from<T, AstNode>
+  const T *getContainer() const noexcept {
+    const auto *item = this;
+    do {
+      if (const auto *casted = dynamic_cast<const T *>(item)) {
+        return casted;
+      }
+      item = item->getContainer();
+    } while (item);
+    return nullptr;
+  }
+
+  /// Returns the nearest ancestor of type T, or nullptr if none is found.
+  /// If the current node itself matches, it is returned.
+  template <typename T>
+    requires std::derived_from<T, AstNode>
+  T *getContainer() noexcept {
+    auto *item = this;
+    do {
+      if (auto *casted = dynamic_cast<T *>(item)) {
+        return casted;
+      }
+      item = item->getContainer();
+    } while (item);
+    return nullptr;
+  }
+
+  template <typename Node, typename Base, typename T>
+    requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
+  void
+  setContainer(Node *container, T Base::*property,
+               std::size_t index = std::numeric_limits<std::size_t>::max()) {
+    this->setContainer(container, std::any(property), index);
+  }
+
+private:
+  void setContainer(AstNode *container, std::any property, std::size_t index);
+  std::vector<AstNode *> _content;
   /// The container node in the AST; every node except the root node has a
   /// container.
   AstNode *_container = nullptr;
   /// The property of the `_container` node that contains this node. This is
-  /// either a direct reference or an array.
+  /// either a direct reference or a vector.
   std::any _containerProperty;
-  /// In case `_containerProperty` is an array, the array index is stored here.
+  /// In case `_containerProperty` is a vector, the vector index is stored here.
   std::size_t _containerIndex;
   /// The Concrete Syntax Tree (CST) node of the text range from which this node
   /// was parsed.
   CstNode *_node;
-
 };
 
 struct RootCstNode;

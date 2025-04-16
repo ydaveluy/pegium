@@ -84,7 +84,9 @@
         "source_location": "cpp",
         "hash_map": "cpp",
         "shared_mutex": "cpp",
-        "future": "cpp"
+        "future": "cpp",
+        "generator": "cpp",
+        "coroutine": "cpp"
     },
     "sonarlint.pathToCompileCommands": "${workspaceFolder}/build/compile_commands.json",
     "C_Cpp.errorSquiggles": "enabledIfIncludesResolve",

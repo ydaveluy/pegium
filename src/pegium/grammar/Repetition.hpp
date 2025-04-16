@@ -13,7 +13,7 @@ struct Repetition : AbstractElement {
   virtual std::size_t getMin() const noexcept = 0;
   virtual std::size_t getMax() const noexcept = 0;
 
-  virtual const AbstractElement* getElement()const noexcept = 0;
+  virtual const AbstractElement *getElement() const noexcept = 0;
 };
 
 } // namespace pegium::grammar

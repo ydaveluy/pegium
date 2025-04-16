@@ -40,14 +40,14 @@ static_assert(((a + a) + a).parse_terminal("aaaa") == 3);
 static_assert(((a + a) + (a + a)).parse_terminal("aaaa") == 4);
 static_assert((a + (a + a)).parse_terminal("aaaa") == 3);
 
-static_assert(opt(a).parse_terminal("a") == 1);
-static_assert(opt(a).parse_terminal("") == 0);
-static_assert(opt(a).parse_terminal("b") == 0);
+static_assert(option(a).parse_terminal("a") == 1);
+static_assert(option(a).parse_terminal("") == 0);
+static_assert(option(a).parse_terminal("b") == 0);
 
-static_assert((at_least_one(a)).parse_terminal("a") == 1);
-static_assert((at_least_one(a)).parse_terminal("aaa") == 3);
-static_assert((at_least_one(a)).parse_terminal("") == PARSE_ERROR);
-static_assert((at_least_one(a)).parse_terminal("b") == PARSE_ERROR);
+static_assert((some(a)).parse_terminal("a") == 1);
+static_assert((some(a)).parse_terminal("aaa") == 3);
+static_assert((some(a)).parse_terminal("") == PARSE_ERROR);
+static_assert((some(a)).parse_terminal("b") == PARSE_ERROR);
 
 static_assert((many(a)).parse_terminal("a") == 1);
 static_assert((many(a)).parse_terminal("aaa") == 3);
@@ -56,7 +56,5 @@ static_assert((many(a)).parse_terminal("b") == 0);
 
 static_assert("a-z"_cr.i().parse_terminal("B") == 1);
 static_assert(("a-z"_cr | "A-Z"_cr).i().parse_terminal("+") == PARSE_ERROR);
-
-
 
 } // namespace pegium

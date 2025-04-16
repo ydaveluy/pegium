@@ -1,7 +1,7 @@
 #pragma once
 
-#include <pegium/grammar/AbstractElement.hpp>
 #include <pegium/grammar/NotPredicate.hpp>
+#include <pegium/parser/AbstractElement.hpp>
 namespace pegium::parser {
 /*struct AbstractNotPredicate : IGrammarElement {
 

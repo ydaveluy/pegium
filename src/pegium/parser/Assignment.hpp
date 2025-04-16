@@ -112,28 +112,27 @@ private:
         auto ptr = std::any_cast<std::shared_ptr<AstNode>>(any);
         assert(std::dynamic_pointer_cast<helpers::AttrType<feature>>(ptr));
         helpers::AssignmentHelper<AttrType>{}(
-            astNode->*feature,
+            astNode, feature,
             std::static_pointer_cast<helpers::AttrType<feature>>(ptr));
       }
     } else if constexpr (std::is_same_v<bool, AttrType> &&
                          !std::is_same_v<bool, typename std::remove_cvref_t<
                                                    Element>::type>) {
-      helpers::AssignmentHelper<AttrType>{}(astNode->*feature, true);
+      helpers::AssignmentHelper<AttrType>{}(astNode, feature, true);
     } else if constexpr (std::is_base_of_v<AstNode,
                                            helpers::AttrType<feature>>) {
 
-      helpers::AssignmentHelper<AttrType>{}(astNode->*feature,
+      helpers::AssignmentHelper<AttrType>{}(astNode, feature,
                                             _element.getValue(node));
     } else if constexpr (std::is_base_of_v<grammar::Rule,
                                            std::remove_cvref_t<Element>>) {
 
-      helpers::AssignmentHelper<AttrType>{}(astNode->*feature,
+      helpers::AssignmentHelper<AttrType>{}(astNode, feature,
                                             _element.getValue(node));
     } else {
-      helpers::AssignmentHelper<AttrType>{}(astNode->*feature,
+      helpers::AssignmentHelper<AttrType>{}(astNode, feature,
                                             std::string(node.text));
     }
-    // TODO set _container on new value if AstNode + index if vector + feature
   }
   template <auto... Vs>
   [[nodiscard]] static constexpr auto function_name() noexcept

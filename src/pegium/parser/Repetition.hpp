@@ -102,15 +102,15 @@ private:
   ParserExpressionHolder<Element> _element;
 };
 
-/// Create an option (zero or one)
+/// Make the `element` optional (repeated zero or one)
 /// @tparam Element
-/// @param element the element to be repeated
+/// @param element the element to be optional
 /// @return The created Repetition
-template <ParserExpression Element> constexpr auto opt(Element &&element) {
+template <ParserExpression Element> constexpr auto option(Element &&element) {
   return Repetition<0, 1, Element>{std::forward<Element>(element)};
 }
 
-/// Create a repetition of zero or more elements
+/// Repeat the `element` zero or more
 /// @tparam Element
 /// @param element the element to be repeated
 /// @return The created Repetition
@@ -119,43 +119,43 @@ template <ParserExpression Element> constexpr auto many(Element &&element) {
       std::forward<Element>(element)};
 }
 
-/// Create a repetition of one or more elements
+/// Repeat the `element` one or more
 /// @tparam Element
 /// @param element the element to be repeated
 /// @return The created Repetition
 template <ParserExpression Element>
-constexpr auto at_least_one(Element &&element) {
+constexpr auto some(Element &&element) {
   return Repetition<1, std::numeric_limits<std::size_t>::max(), Element>{
       std::forward<Element>(element)};
 }
 
-/// Create a repetition of one or more elements with a separator
-/// `element (sep element)*`
+/// Repeat the `element` one or more using a `separator`:
+/// `element (separator element)*`
 /// @tparam Element
 /// @tparam Sep
 /// @param element the element to be repeated
-/// @param sep the separator to be used between elements
+/// @param separator the separator to be used between elements
 /// @return The created Repetition
 template <ParserExpression Element, ParserExpression Sep>
-constexpr auto at_least_one_sep(Element &&element, Sep &&sep) {
+constexpr auto some(Element &&element, Sep &&separator) {
   return std::forward<Element>(element) +
-         many(std::forward<Sep>(sep) + std::forward<Element>(element));
+         many(std::forward<Sep>(separator) + std::forward<Element>(element));
 }
 
-/// Create a repetition of zero or more elements with a separator
-/// `(element (sep element)*)?`
+/// Repeat the `element` zero or more using a `separator`
+/// `(element (separator element)*)?`
 /// @tparam Element
 /// @tparam Sep
 /// @param element the element to be repeated
-/// @param sep the separator to be used between elements
+/// @param separator the separator to be used between elements
 /// @return The created Repetition
 template <ParserExpression Element, ParserExpression Sep>
-constexpr auto many_sep(Element &&element, Sep &&sep) {
-  return opt(
-      at_least_one_sep(std::forward<Element>(element), std::forward<Sep>(sep)));
+constexpr auto many(Element &&element, Sep &&separator) {
+  return option(
+      some(std::forward<Element>(element), std::forward<Sep>(separator)));
 }
 
-/// Create a custom repetition with count elements.
+/// Repeat the `element` `count` times.
 /// @tparam count the count of repetions
 /// @tparam Element
 /// @param element the elements to be repeated
@@ -165,7 +165,7 @@ constexpr auto rep(Element &&element) {
   return Repetition<count, count, Element>{std::forward<Element>(element)};
 }
 
-/// Create a custom repetition with min and max.
+/// Repeat the `element` between `min` and `max` times.
 /// @tparam min the min number of occurence (inclusive)
 /// @tparam max the maw number of occurence (inclusive)
 /// @tparam Element

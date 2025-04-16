@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <pegium/parser/Parser.hpp>
@@ -29,22 +30,22 @@ struct JsonArray : pegium::AstNode {
 struct JsonValue : pegium::AstNode {
 
   std::variant<std::string, double, std::int32_t, JsonObject, JsonArray, bool,
-               nullptr_t>
+               std::nullptr_t>
       value;
 };
 
 // @see https://www.json.org/json-en.html
 class JsonParser : public Parser {
 public:
-  Terminal<> WS{"WS", at_least_one(s)};
+  Terminal<> WS{"WS", some(s)};
   // "(\\.|[^"\\])*"
   Terminal<std::string> STRING{
-      "STRING", "\""_kw + many("\\"_kw + dot | "^\"\\"_cr) + "\""_kw};
+      "STRING", "\""_kw + many("\\"_kw + dot | R"(^"\)"_cr) + "\""_kw};
 
-  Terminal<double> Number{
-      "Number", opt("-"_kw) + ("0"_kw | "1-9"_cr + many(d)) +
-                     opt("."_kw + at_least_one(d)) +
-                     opt("e"_cr.i() + opt("-+"_cr) + at_least_one(d))};
+  Terminal<double> Number{"Number",
+                          option("-"_kw) + ("0"_kw | "1-9"_cr + many(d)) +
+                              option("."_kw + some(d)) +
+                              option("e"_cr.i() + option("-+"_cr) + some(d))};
 
   Terminal<bool> Bool{"Bool", "true"_kw | "false"_kw};
   Terminal<nullptr_t> Null{"Null", "null"_kw};
@@ -56,19 +57,18 @@ public:
   /// '{' pair (',' pair)* '}' | '{' '}'
   Rule<Json::JsonObject> JsonObject{
       "JsonObject",
-      "{"_kw + many_sep(assign<&JsonObject::values>(Pair), ","_kw) + "}"_kw};
+      "{"_kw + many(assign<&JsonObject::values>(Pair), ","_kw) + "}"_kw};
 
   /// '[' value (',' value)* ']' | '[' ']'
   Rule<Json::JsonArray> JsonArray{
-      "JsonArray", "["_kw +
-                       many_sep(assign<&JsonArray::values>(JsonValue), ","_kw) +
-                       "]"_kw};
+      "JsonArray",
+      "["_kw + many(assign<&JsonArray::values>(JsonValue), ","_kw) + "]"_kw};
 
   /// STRING | NUMBER | obj | arr | 'true' | 'false' | 'null'
   Rule<Json::JsonValue> JsonValue{
       "JsonValue",
-      assign<&JsonValue::value>(STRING | JsonArray | Number |
-                                JsonObject | JsonArray | Bool | Null)};
+      assign<&JsonValue::value>(STRING | JsonArray | Number | JsonObject |
+                                JsonArray | Bool | Null)};
 
   JsonParser() {
     Null.setValueConverter([](std::string_view) { return nullptr; });
@@ -81,7 +81,7 @@ public:
 } // namespace Json
 
 TEST(JsonTest, TestJson) {
-  Json::JsonParser g;
+  Json::JsonParser parser;
 
   std::string input = R"(
 { 
@@ -120,10 +120,13 @@ TEST(JsonTest, TestJson) {
     }
   ]
 })";
+
+  std::cout << parser.STRING << ": " << *parser.STRING.getElement()
+            << std::endl;
   using namespace std::chrono;
   auto start = high_resolution_clock::now();
 
-  auto result = g.JsonValue.parse(input, g.createContext());
+  auto result = parser.JsonValue.parse(input, parser.createContext());
   auto end = high_resolution_clock::now();
   auto duration = duration_cast<milliseconds>(end - start).count();
 

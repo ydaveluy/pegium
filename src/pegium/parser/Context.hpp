@@ -3,9 +3,9 @@
 #pragma once
 #include <cassert>
 #include <map>
+#include <pegium/parser/AbstractElement.hpp>
 #include <pegium/parser/IContext.hpp>
 #include <pegium/parser/TerminalRule.hpp>
-#include <pegium/parser/AbstractElement.hpp>
 #include <pegium/syntax-tree.hpp>
 #include <string_view>
 #include <tuple>
@@ -138,4 +138,4 @@ template <typename... H, typename... I>
 Context(std::tuple<H &...> &&, std::tuple<I &...> &&)
     -> Context<std::tuple<H &...>, std::tuple<I &...>>;
 
-} // namespace pegium::grammar
+} // namespace pegium::parser

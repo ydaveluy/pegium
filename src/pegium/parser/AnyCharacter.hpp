@@ -1,16 +1,17 @@
 #pragma once
 
 #include <pegium/grammar/AnyCharacter.hpp>
+#include <pegium/parser/AbstractElement.hpp>
 
 namespace pegium::parser {
 
 struct AnyCharacter final : grammar::AnyCharacter {
   using type = std::string;
- // constexpr ~AnyCharacter() noexcept override = default;
+  // constexpr ~AnyCharacter() noexcept override = default;
 
   constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const {
-    auto i = codepoint_length(sv);
+    auto i = parse_codepoint(sv);
     if (!i) {
       return i;
     }
@@ -21,11 +22,11 @@ struct AnyCharacter final : grammar::AnyCharacter {
     return c.skipHiddenNodes({i.offset, sv.end()}, parent);
   }
   constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-    return codepoint_length(sv);
+    return parse_codepoint(sv);
   }
 
 private:
-  static constexpr MatchResult codepoint_length(std::string_view sv) noexcept {
+  static constexpr MatchResult parse_codepoint(std::string_view sv) noexcept {
     const auto size = sv.size();
     if (size) {
       auto b = static_cast<std::byte>(sv.front());

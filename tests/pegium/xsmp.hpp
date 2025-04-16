@@ -10,6 +10,8 @@ struct Type;
 struct Expression : pegium::AstNode {};
 struct Attribute : public pegium::AstNode {
   /*reference<Type>*/ string type;
+
+  pointer<Expression> value;
 };
 struct NamedElement : public pegium::AstNode {
   string name;

@@ -23,7 +23,6 @@ enum class ElementKind {
   CrossReference
 };
 
-
 struct AbstractElement {
   using ElementKind = pegium::grammar::ElementKind;
   constexpr virtual ElementKind getKind() const noexcept = 0;
