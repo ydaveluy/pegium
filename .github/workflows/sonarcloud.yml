@@ -19,6 +19,7 @@ concurrency:
 jobs:
    Analysis:
       runs-on: ubuntu-latest
+      container: gcc:14
       steps:
       -  uses: actions/checkout@v4
          with:
@@ -30,8 +31,6 @@ jobs:
       -  name: install gcovr 
          run: |
             pip install gcovr
-      -  name: Install sonar-scanner and build-wrapper
-         uses: SonarSource/sonarcloud-github-c-cpp@v3
       -  name: Configure cmake
          run: |
             cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPEGIUM_ENABLE_CODECOVERAGE=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -S ${{github.workspace}}
@@ -44,17 +43,19 @@ jobs:
       -  name: Collect coverage into one XML report
          run: |
             gcovr --sonarqube coverage.xml
-      -  name: Run sonar-scanner
+
+      -  name: SonarQube Scan
+         uses: SonarSource/sonarqube-scan-action@v5.1.0
          env:
             GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
             SONAR_TOKEN: ${{secrets.SONAR_TOKEN}}
-         run: >
-            sonar-scanner
-            -Dsonar.projectKey=ydaveluy_pegium
-            -Dsonar.organization=ydaveluy
-            -Dsonar.cfamily.compile-commands=build/compile_commands.json
-            -Dsonar.coverageReportPaths=coverage.xml
-            -Dsonar.sources=src
-            -Dsonar.tests=tests
-            -Dsonar.sourceEncoding=UTF-8
-            -Dsonar.cpp.file.suffixes=.cpp,.hpp
+         with:
+            args: >
+               -Dsonar.projectKey=ydaveluy_pegium
+               -Dsonar.organization=ydaveluy
+               -Dsonar.cfamily.compile-commands=build/compile_commands.json
+               -Dsonar.coverageReportPaths=coverage.xml
+               -Dsonar.sources=src
+               -Dsonar.tests=tests
+               -Dsonar.sourceEncoding=UTF-8
+               -Dsonar.cpp.file.suffixes=.cpp,.hpp
