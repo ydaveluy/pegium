@@ -11,24 +11,25 @@ class XsmpParser : public Parser {
 public:
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wuninitialized"
-  Terminal<> WS{"WS", at_least_one(s)};
+  Terminal<> WS{"WS", some(s)};
   Terminal<> SL_COMMENT{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
   Terminal<> ML_COMMENT{"ML_COMMENT", "/*"_kw <=> "*/"_kw};
 
   Terminal<> ID{"ID", "a-zA-Z_"_cr + many(w)};
 
-  Rule<> QualifiedName{"QualifiedName", at_least_one_sep(ID, "."_kw)};
+  Rule<> QualifiedName{"QualifiedName", some(ID, "."_kw)};
 
   Rule<> Visibility{"Visibility", "private"_kw | "protected"_kw | "public"_kw};
 
   Rule<Xsmp::Attribute> Attribute{
       "Attribute",
-      "@"_kw + assign<&Attribute::type>(QualifiedName) + opt("("_kw + ")"_kw)};
-
+      "@"_kw + assign<&Attribute::type>(QualifiedName) +
+          option("("_kw + option(assign<&Attribute::value>(Expression)) +
+                 ")"_kw)};
   Rule<Xsmp::Catalogue> Catalogue{
       "Catalogue",
-      many(assign<&NamedElement::attributes>(Attribute)) + "catalogue"_kw +
-          assign<&NamedElement::name>(ID) +
+      many(assign<&NamedElement::attributes>(Attribute)) +   //
+          "catalogue"_kw + assign<&NamedElement::name>(ID) + //
           many(assign<&Catalogue::namespaces>(NamespaceWithAttributes))};
 
   Rule<Xsmp::Namespace> NamespaceWithAttributes{
@@ -56,7 +57,8 @@ public:
                       Integer | EventType | StringType | PrimitiveType |
                       NativeType | AttributeType | Enumeration |
                       // Types with abstract
-                      opt(assign<&VisibilityElement::modifiers>("abstract"_kw) +
+                      option(
+                          assign<&VisibilityElement::modifiers>("abstract"_kw) +
                           many(assign<&VisibilityElement::modifiers>(
                               Visibility | "abstract"_kw))) +
                           (Class | Exception | Model | Service) //
@@ -65,8 +67,9 @@ public:
               )};
   Rule<Xsmp::Enumeration> Enumeration{
       "Enumeration",
-      "enum"_kw + assign<&NamedElement::name>(ID) + "{"_kw +
-          many_sep(assign<&Enumeration::literals>(EnumerationLiteral), ","_kw) +
+      "enum"_kw + assign<&NamedElement::name>(ID) +                          //
+          "{"_kw +                                                           //
+          many(assign<&Enumeration::literals>(EnumerationLiteral), ","_kw) + //
           "}"_kw};
 
   Rule<Xsmp::EnumerationLiteral> EnumerationLiteral{
@@ -74,8 +77,9 @@ public:
                                 assign<&EnumerationLiteral::value>(Expression)};
 
   Rule<Xsmp::Structure> Structure{
-      "Structure", "struct"_kw + assign<&NamedElement::name>(ID) + "{"_kw +
-                       many(assign<&Structure::members>(StructureMember)) +
+      "Structure", "struct"_kw + assign<&NamedElement::name>(ID) +          //
+                       "{"_kw +                                             //
+                       many(assign<&Structure::members>(StructureMember)) + //
                        "}"_kw};
 
   Rule<Xsmp::NamedElement> StructureMember{
@@ -85,8 +89,10 @@ public:
           (Field | Constant)};
 
   Rule<Xsmp::Class> Class{
-      "Class", "class"_kw + assign<&NamedElement::name>(ID) + "{"_kw +
-                   many(assign<&Structure::members>(ClassMember)) + "}"_kw};
+      "Class", "class"_kw + assign<&NamedElement::name>(ID) +       //
+                   "{"_kw +                                         //
+                   many(assign<&Structure::members>(ClassMember)) + //
+                   "}"_kw};
 
   Rule<Xsmp::NamedElement> ClassMember{
       "ClassMember",
@@ -95,17 +101,20 @@ public:
           (Field | Constant | Property | Association)};
 
   Rule<Xsmp::Exception> Exception{
-      "Exception", "exception"_kw + assign<&NamedElement::name>(ID) + "{"_kw +
-                       many(assign<&Structure::members>(ClassMember)) + "}"_kw};
+      "Exception", "exception"_kw + assign<&NamedElement::name>(ID) +   //
+                       "{"_kw +                                         //
+                       many(assign<&Structure::members>(ClassMember)) + //
+                       "}"_kw};
 
   Rule<Xsmp::Interface> Interface{
       "Interface",
       "interface"_kw + assign<&NamedElement::name>(ID) +
           // base interfaces
-          opt("extends"_kw +
-              at_least_one_sep(assign<&Interface::bases>(QualifiedName),
-                               ","_kw)) +
-          "{"_kw + many(assign<&Structure::members>(InterfaceMember)) + "}"_kw};
+          option("extends"_kw +
+                 some(assign<&Interface::bases>(QualifiedName), ","_kw)) + //
+          "{"_kw +                                                         //
+          many(assign<&Structure::members>(InterfaceMember)) +             //
+          "}"_kw};
 
   Rule<Xsmp::NamedElement> InterfaceMember{
       "InterfaceMember",
@@ -117,23 +126,27 @@ public:
       "Model",
       "model"_kw + assign<&NamedElement::name>(ID) +
           // base class
-          opt("extends"_kw + assign<&Component::base>(QualifiedName)) +
+          option("extends"_kw + assign<&Component::base>(QualifiedName)) +
           // base interfaces
-          opt("implements"_kw +
-              at_least_one_sep(assign<&Component::interfaces>(QualifiedName),
-                               ","_kw)) +
-          "{"_kw + many(assign<&Component::members>(ComponentMember)) + "}"_kw};
+          option(
+              "implements"_kw +
+              some(assign<&Component::interfaces>(QualifiedName), ","_kw)) + //
+          "{"_kw +                                                           //
+          many(assign<&Component::members>(ComponentMember)) +               //
+          "}"_kw};
 
   Rule<Xsmp::Service> Service{
       "Service",
       "service"_kw + assign<&NamedElement::name>(ID) +
           // base class
-          opt("extends"_kw + assign<&Component::base>(QualifiedName)) +
+          option("extends"_kw + assign<&Component::base>(QualifiedName)) +
           // base interfaces
-          opt("implements"_kw +
-              at_least_one_sep(assign<&Component::interfaces>(QualifiedName),
-                               ","_kw)) +
-          "{"_kw + many(assign<&Component::members>(ComponentMember)) + "}"_kw};
+          option(
+              "implements"_kw +
+              some(assign<&Component::interfaces>(QualifiedName), ","_kw)) + //
+          "{"_kw +                                                           //
+          many(assign<&Component::members>(ComponentMember)) +               //
+          "}"_kw};
 
   Rule<Xsmp::NamedElement> ComponentMember{
       "ComponentMember",
@@ -162,20 +175,20 @@ public:
   Rule<Xsmp::Float> Float{
       "Float",
       "float"_kw + assign<&NamedElement::name>(ID) +
-          opt("extends"_kw + assign<&Float::primitiveType>(QualifiedName))
+          option("extends"_kw + assign<&Float::primitiveType>(QualifiedName))
       // TODO add min/max
   };
 
   Rule<Xsmp::Integer> Integer{
       "Integer",
       "integer"_kw + assign<&NamedElement::name>(ID) +
-          opt("extends"_kw + assign<&Integer::primitiveType>(QualifiedName))
+          option("extends"_kw + assign<&Integer::primitiveType>(QualifiedName))
       // TODO add min/max
   };
   Rule<Xsmp::EventType> EventType{
       "EventType",
       "event"_kw + assign<&NamedElement::name>(ID) +
-          opt("extends"_kw + assign<&EventType::eventArg>(QualifiedName))};
+          option("extends"_kw + assign<&EventType::eventArg>(QualifiedName))};
 
   Rule<Xsmp::PrimitiveType> PrimitiveType{
       "PrimitiveType", "primitive"_kw + assign<&NamedElement::name>(ID)};
@@ -187,7 +200,7 @@ public:
       "AttributeType",
       "attribute"_kw + assign<&AttributeType::type>(QualifiedName) +
           assign<&NamedElement::name>(ID) +
-          opt("="_kw + assign<&AttributeType::value>(Expression))};
+          option("="_kw + assign<&AttributeType::value>(Expression))};
 
   Rule<Xsmp::Constant> Constant{
       "Constant", "constant"_kw + assign<&Constant::type>(QualifiedName) +
@@ -196,22 +209,22 @@ public:
 
   Rule<Xsmp::Field> Field{
       "Field",
-      opt(assign<&VisibilityElement::modifiers>("input"_kw | "output"_kw |
-                                                "transient"_kw) +
-          many(assign<&VisibilityElement::modifiers>(
-              Visibility | "input"_kw | "output"_kw | "transient"_kw))) +
+      option(assign<&VisibilityElement::modifiers>("input"_kw | "output"_kw |
+                                                   "transient"_kw) +
+             many(assign<&VisibilityElement::modifiers>(
+                 Visibility | "input"_kw | "output"_kw | "transient"_kw))) +
           "field"_kw + assign<&Field::type>(QualifiedName) +
           assign<&NamedElement::name>(ID) +
-          opt("="_kw + assign<&Field::value>(Expression))};
+          option("="_kw + assign<&Field::value>(Expression))};
 
   Rule<Xsmp::Property> Property{
-      "Property",
-      opt(assign<&VisibilityElement::modifiers>("readWrite"_kw | "readOnly"_kw |
-                                                "writeOnly"_kw) +
-          many(assign<&VisibilityElement::modifiers>(
-              Visibility | "readWrite"_kw | "readOnly"_kw | "writeOnly"_kw))) +
-          "property"_kw + assign<&Property::type>(QualifiedName) +
-          assign<&NamedElement::name>(ID)};
+      "Property", option(assign<&VisibilityElement::modifiers>(
+                             "readWrite"_kw | "readOnly"_kw | "writeOnly"_kw) +
+                         many(assign<&VisibilityElement::modifiers>(
+                             Visibility | "readWrite"_kw | "readOnly"_kw |
+                             "writeOnly"_kw))) +
+                      "property"_kw + assign<&Property::type>(QualifiedName) +
+                      assign<&NamedElement::name>(ID)};
 
   Rule<Xsmp::Association> Association{
       "Association", "association"_kw +
@@ -301,8 +314,8 @@ namespace hidden
     )";
   }
 
-  std::cout << parser.Catalogue << ": "
-            << *parser.Catalogue.getElement() << std::endl;
+  std::cout << parser.Catalogue << ": " << *parser.Catalogue.getElement()
+            << std::endl;
   using namespace std::chrono;
   auto start = high_resolution_clock::now();
 
@@ -320,6 +333,14 @@ namespace hidden
   ASSERT_TRUE(result.value);
 
   EXPECT_EQ(result.value->name, "test");
+  // for (const auto *node : result.value->getAllContent<Xsmp::NamedElement>())
+  //   std::cout << node->name << std::endl;
+
+  /*| std::views::filter([](auto *ptr) {
+         return dynamic_cast<const Xsmp::NamedElement *>(ptr) != nullptr;
+       }) | std::views::transform([](auto *ptr) -> const Xsmp::NamedElement * {
+         return static_cast<const Xsmp::NamedElement *>(ptr);
+       }) */
   // std::cout << "parsed " << result.value->namespaces.size() << "
   // namespace\n";
   //  EXPECT_EQ(result.value->namespaces.size(), 400'002);

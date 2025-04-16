@@ -4,14 +4,18 @@
 #include <array>
 #include <pegium/grammar/CharacterRange.hpp>
 #include <pegium/parser/AbstractElement.hpp>
+#include <pegium/parser/AnyCharacter.hpp>
+#include <pegium/parser/Group.hpp>
+#include <pegium/parser/NotPredicate.hpp>
 #include <ranges>
 
 namespace pegium::parser {
 
 struct CharacterRange final : grammar::CharacterRange {
   using type = std::string;
- // constexpr ~CharacterRange() override = default;
-  constexpr CharacterRange(std::string_view s) : lookup{createCharacterRange(s)} {}
+  // constexpr ~CharacterRange() override = default;
+  constexpr CharacterRange(std::string_view s)
+      : lookup{createCharacterRange(s)} {}
 
   constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const {
@@ -50,38 +54,6 @@ struct CharacterRange final : grammar::CharacterRange {
   }
 
   void print(std::ostream &os) const override {
-    auto escape_char = [](unsigned char c) -> std::string {
-      switch (c) {
-      case '\n':
-        return R"(\n)";
-      case '\r':
-        return R"(\r)";
-      case '\t':
-        return R"(\t)";
-      case '\v':
-        return R"(\v)";
-      case '\f':
-        return R"(\f)";
-      case '\b':
-        return R"(\b)";
-      case '\a':
-        return R"(\a)";
-      case '\\':
-        return R"(\\)";
-      case '\'':
-        return R"(\')";
-      case '\"':
-        return R"(\")";
-      default:
-        if (std::isprint(c)) {
-          return std::string{static_cast<char>(c)};
-        } else {
-          char buf[5];
-          std::snprintf(buf, sizeof(buf), "\\x%02X", c);
-          return buf;
-        }
-      }
-    };
     os << '[';
     int start = -1;
     for (int i = 0; i < 256; ++i) {
@@ -91,23 +63,22 @@ struct CharacterRange final : grammar::CharacterRange {
       } else {
         if (start != -1) {
           if (i - start == 1)
-            os << escape_char(start);
+            os << escape_char(static_cast<char>(start));
           else if (i - start == 2)
-            os << escape_char(start) << escape_char(start + 1);
+            os << escape_char(static_cast<char>(start))
+               << escape_char(static_cast<char>(start + 1));
           else
-            os << escape_char(start) << '-' << escape_char(i - 1);
+            os << escape_char(static_cast<char>(start)) << '-'
+               << escape_char(static_cast<char>(i - 1));
           start = -1;
         }
       }
     }
     os << ']';
   }
+
 private:
   std::array<bool, 256> lookup{};
 };
-
-constexpr CharacterRange operator""_cr(char const *s, std::size_t len) {
-  return CharacterRange{std::string_view{s, len}};
-}
 
 } // namespace pegium::parser

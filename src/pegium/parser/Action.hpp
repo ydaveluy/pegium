@@ -49,7 +49,7 @@ private:
     auto result = std::make_shared<T>();
 
     auto value = std::dynamic_pointer_cast<helpers::AttrType<feature>>(current);
-    helpers::AssignmentHelper<AttrType>{}(result.get()->*member,
+    helpers::AssignmentHelper<AttrType>{}(result.get(), member,
                                           std::move(value));
     return result;
   }

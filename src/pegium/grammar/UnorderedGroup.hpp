@@ -4,12 +4,12 @@
 
 namespace pegium::grammar {
 
-struct OrderedChoice : AbstractElement {
+struct UnorderedGroup : AbstractElement {
   constexpr ElementKind getKind() const noexcept final {
-    return ElementKind::OrderedChoice;
+    return ElementKind::UnorderedGroup;
   }
   // TODO add begin/end
-  constexpr ~OrderedChoice() noexcept override = default;
+  constexpr ~UnorderedGroup() noexcept override = default;
 };
 
 } // namespace pegium::grammar

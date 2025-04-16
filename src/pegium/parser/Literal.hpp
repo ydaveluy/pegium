@@ -63,7 +63,7 @@ struct Literal final : grammar::Literal {
   void print(std::ostream &os) const override {
     os << "'";
     for (auto c : literal)
-      os << c;
+      os << escape_char(c);
     os << "'";
     if (!case_sensitive)
       os << "i";
@@ -90,21 +90,5 @@ struct IsLiteralImpl<Literal<literal, case_sensitive>> : std::true_type {};
 
 template <typename T>
 concept IsLiteral = IsLiteralImpl<T>::value;
-
-/// Build an array of char (remove the traling '\0')
-/// @tparam N the number of char including '\0'
-template <std::size_t N> struct char_array_builder {
-  std::array<char, N - 1> value;
-  explicit(false) consteval char_array_builder(char const (&pp)[N]) {
-    for (std::size_t i = 0; i < value.size(); ++i) {
-      value[i] = pp[i];
-    }
-  }
-};
-
-template <char_array_builder builder> consteval auto operator""_kw() {
-  static_assert(!builder.value.empty(), "A keyword cannot be empty.");
-  return Literal<builder.value>{};
-}
 
 } // namespace pegium::parser

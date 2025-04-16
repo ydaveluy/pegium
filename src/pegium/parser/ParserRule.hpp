@@ -65,6 +65,8 @@ struct ParserRule final : AbstractRule {
                   static_cast<const grammar::Rule *>(it.grammarSource)
                       ->getAnyValue(it)));
           break;
+        default:
+          break;
         }
       }
     }

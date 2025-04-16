@@ -1,34 +1,32 @@
 #pragma once
 #include <algorithm>
-#include <pegium/grammar/IGrammarElement.hpp>
-namespace pegium::grammar {
+#include <pegium/grammar/UnorderedGroup.hpp>
 
-template <typename... Elements>
-  requires(IsGrammarElement<Elements> && ...)
-struct UnorderedGroup final: IGrammarElement {
+#include <pegium/parser/AbstractElement.hpp>
+
+namespace pegium::parser {
+
+template <ParserExpression... Elements>
+struct UnorderedGroup final : grammar::UnorderedGroup {
   static_assert(sizeof...(Elements) > 1,
                 "An UnorderedGroup shall contains at least 2 elements.");
-  constexpr ~UnorderedGroup() override = default;
-  std::tuple<Elements...> elements;
+  // constexpr ~UnorderedGroup() override = default;
 
   constexpr explicit UnorderedGroup(std::tuple<Elements...> &&elems)
-      : elements{std::move(elems)} {}
+      : _elements{std::move(elems)} {}
 
   using ProcessedFlags = std::array<bool, sizeof...(Elements)>;
 
   template <typename T>
   static constexpr bool
   parse_rule_element(const T &element, std::string_view sv, CstNode &parent,
-                     IContext &c, MatchResult &i, ProcessedFlags &processed,
+                     IContext &c, MatchResult &r, ProcessedFlags &processed,
                      std::size_t index) {
-    if (processed[index]) {
+    if (processed[index])
       return false;
-    }
 
-    if (auto len =
-            element.parse_rule({sv.data() + i, sv.size() - i}, parent, c);
-        success(len)) {
-      i += len;
+    if (auto result = element.parse_rule({r.offset, sv.end()}, parent, c)) {
+      r = result;
       processed[index] = true;
       return true;
     }
@@ -36,110 +34,109 @@ struct UnorderedGroup final: IGrammarElement {
   }
 
   constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
-                                   IContext &c) const override {
-                                    MatchResult i = 0;
+                                   IContext &c) const {
+    MatchResult r = MatchResult::success(sv.begin());
     ProcessedFlags processed{};
 
-    while (!std::ranges::all_of(processed, [](bool p) { return p; })) {
-      bool anyProcessed = std::apply(
+    while (true) {
+      bool anyProcessed = false;
+      std::size_t index = 0;
+      std::apply(
           [&](const auto &...element) {
-            std::size_t index = 0;
-            return (parse_rule_element(element, sv, parent, c, i, processed,
-                                       index++) ||
-                    ...);
+            ((anyProcessed |= parse_rule_element(element, sv, parent, c, r,
+                                                 processed, index++)),
+             ...);
           },
-          elements);
+          _elements);
 
-      if (!anyProcessed) {
+      if (!anyProcessed)
         break;
-      }
     }
-    
+
     return std::ranges::all_of(processed, [](bool p) { return p; })
-               ? MatchResult::success(i)
-               : MatchResult::failure(i);
+               ? MatchResult::success(r.offset)
+               : MatchResult::failure(r.offset);
   }
 
   template <typename T>
   static constexpr bool
-  parse_terminal_element(const T &element, std::string_view sv, MatchResult &i,
+  parse_terminal_element(const T &element, std::string_view sv, MatchResult &r,
                          ProcessedFlags &processed,
                          std::size_t index) noexcept {
-    if (processed[index]) {
+    if (processed[index])
       return false;
-    }
 
-    if (auto len = element.parse_terminal({sv.data() + i, sv.size() - i});
-        success(len)) {
-      i += len;
+    if (auto result = element.parse_terminal({r.offset, sv.end()});
+        success(result)) {
+      r = result;
       processed[index] = true;
       return true;
     }
     return false;
   }
 
-  constexpr MatchResult
-  parse_terminal(std::string_view sv) const noexcept override {
-    MatchResult i = 0;
+  constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
+    MatchResult r = MatchResult::success(sv.begin());
     ProcessedFlags processed{};
 
-    while (!std::ranges::all_of(processed, [](bool p) { return p; })) {
-      bool anyProcessed = std::apply(
+    while (true) {
+      bool anyProcessed = false;
+      std::size_t index = 0;
+      std::apply(
           [&](const auto &...element) {
-            std::size_t index = 0;
-            return (
-                parse_terminal_element(element, sv, i, processed, index++) ||
-                ...);
+            ((anyProcessed |=
+              parse_terminal_element(element, sv, r, processed, index++)),
+             ...);
           },
-          elements);
+          _elements);
 
-      if (!anyProcessed) {
+      if (!anyProcessed)
         break;
-      }
     }
+
     return std::ranges::all_of(processed, [](bool p) { return p; })
-               ? MatchResult::success(i)
-               : MatchResult::failure(i);
+               ? MatchResult::success(r.offset)
+               : MatchResult::failure(r.offset);
   }
+
   void print(std::ostream &os) const override {
     os << '(';
-    std::apply([&os](const auto &...args) {
-        bool first = true;
-        ((os << (first ? "" : " & ") << args, first = false), ...);
-    }, elements);
+    bool first = true;
+    std::apply(
+        [&](auto const &...elems) {
+          ((os << (first ? "" : " & "), os << elems, first = false), ...);
+        },
+        _elements);
+
     os << ')';
   }
-  constexpr GrammarElementKind getKind() const noexcept override {
-    return GrammarElementKind::UnorderedGroup;
+
+private:
+  std::tuple<Elements...> _elements;
+
+  template <ParserExpression... Rhs>
+  friend constexpr auto operator&(UnorderedGroup &&lhs,
+                                  UnorderedGroup<Rhs...> &&rhs) {
+    return UnorderedGroup<Elements..., ParserExpressionHolder<Rhs>...>{
+        std::tuple_cat(std::move(lhs._elements), std::move(rhs._elements))};
+  }
+
+  template <ParserExpression Rhs>
+  friend constexpr auto operator&(UnorderedGroup &&lhs, Rhs &&rhs) {
+    return UnorderedGroup<Elements..., ParserExpressionHolder<Rhs>>{
+        std::tuple_cat(std::move(lhs._elements), std::forward_as_tuple(rhs))};
+  }
+  template <ParserExpression Lhs>
+  friend constexpr auto operator&(Lhs &&lhs, UnorderedGroup &&rhs) {
+    return UnorderedGroup<ParserExpressionHolder<Lhs>, Elements...>{
+        std::tuple_cat(std::forward_as_tuple(lhs), std::move(rhs._elements))};
   }
 };
-
-template <typename... Lhs, typename... Rhs>
-  requires(IsGrammarElement<Lhs> && ...) && (IsGrammarElement<Rhs> && ...)
-constexpr auto operator&(UnorderedGroup<Lhs...> &&lhs,
-                         UnorderedGroup<Rhs...> &&rhs) {
-  return UnorderedGroup<GrammarElementType<Lhs>..., GrammarElementType<Rhs>...>{
-      std::tuple_cat(std::move(lhs.elements), std::move(rhs.elements))};
-}
-
-template <typename... Lhs, typename Rhs>
-  requires(IsGrammarElement<Lhs> && ...) && IsGrammarElement<Rhs>
-constexpr auto operator&(UnorderedGroup<Lhs...> &&lhs, Rhs &&rhs) {
-  return UnorderedGroup<GrammarElementType<Lhs>..., GrammarElementType<Rhs>>{
-      std::tuple_cat(std::move(lhs.elements), std::forward_as_tuple(rhs))};
-}
-template <typename Lhs, typename... Rhs>
-  requires IsGrammarElement<Lhs> && (IsGrammarElement<Rhs> && ...)
-constexpr auto operator&(Lhs &&lhs, UnorderedGroup<Rhs...> &&rhs) {
-  return UnorderedGroup<GrammarElementType<Lhs>, GrammarElementType<Rhs>...>{
-      std::tuple_cat(std::forward_as_tuple(lhs), std::move(rhs.elements))};
-}
-
-template <typename Lhs, typename Rhs>
-  requires IsGrammarElement<Lhs> && IsGrammarElement<Rhs>
+template <ParserExpression Lhs, ParserExpression Rhs>
 constexpr auto operator&(Lhs &&lhs, Rhs &&rhs) {
-  return UnorderedGroup<GrammarElementType<Lhs>, GrammarElementType<Rhs>>{
+  return UnorderedGroup<ParserExpressionHolder<Lhs>,
+                        ParserExpressionHolder<Rhs>>{
       std::forward_as_tuple(std::forward<Lhs>(lhs), std::forward<Rhs>(rhs))};
 }
 
-} // namespace pegium::grammar
+} // namespace pegium::parser

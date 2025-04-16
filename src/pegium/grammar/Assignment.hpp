@@ -7,7 +7,8 @@ namespace pegium::grammar {
 
 enum class AssignmentOperator { Assign, Append, EnableIf };
 
-inline constexpr std::ostream &operator<<(std::ostream &os, const AssignmentOperator &op) {
+inline constexpr std::ostream &operator<<(std::ostream &os,
+                                          const AssignmentOperator &op) {
   switch (op) {
   case AssignmentOperator::Assign:
     return os << '=';

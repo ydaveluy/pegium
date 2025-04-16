@@ -3,13 +3,10 @@
 
 namespace pegium {
 
-
 class Services {
 public:
   virtual ~Services() noexcept = default;
 
-  virtual const IParser* getParser() const = 0;
-
-
+  virtual const IParser *getParser() const = 0;
 };
 } // namespace pegium

@@ -1,7 +1,7 @@
 #pragma once
+#include <memory>
 #include <pegium/grammar/AndPredicate.hpp>
 #include <pegium/parser/AbstractElement.hpp>
-#include <memory>
 
 namespace pegium::parser {
 

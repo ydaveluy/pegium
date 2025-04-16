@@ -10,7 +10,7 @@ struct Rule : AbstractElement {
   virtual std::any getAnyValue(const CstNode &node) const = 0;
   constexpr ~Rule() noexcept override = default;
 
-  virtual const AbstractElement* getElement()const noexcept = 0;
+  virtual const AbstractElement *getElement() const noexcept = 0;
 };
 template <typename T>
 concept IsRule = std::derived_from<std::remove_cvref_t<T>, Rule>;

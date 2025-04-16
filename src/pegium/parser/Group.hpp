@@ -6,7 +6,7 @@
 
 namespace pegium::parser {
 
-template <ParserExpression... Elements> struct Group : grammar::Group {
+template <ParserExpression... Elements> struct Group final : grammar::Group {
   static_assert(sizeof...(Elements) > 1,
                 "A Group shall contains at least 2 element2.");
   // constexpr ~Group() override = default;

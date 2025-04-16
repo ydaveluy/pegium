@@ -9,12 +9,16 @@ FetchContent_Declare(
     GIT_TAG        master
 )
 
-FetchContent_MakeAvailable(lsp-framework)
+#FetchContent_MakeAvailable(lsp-framework)
+
+#set(CMAKE_CXX_STANDARD 23)
 #set(CMAKE_CXX_CLANG_TIDY clang-tidy)
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
 #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fmodules-ts")
 
 option(PEGIUM_ENABLE_CODECOVERAGE   "Enable code coverage testing support"            OFF)
+
 
 if(PEGIUM_ENABLE_CODECOVERAGE)
     if(CMAKE_CXX_COMPILER_ID MATCHES "(Apple)?[Cc]lang" )
@@ -35,7 +39,7 @@ file(GLOB_RECURSE SRC CONFIGURE_DEPENDS src/pegium/**.cpp)
 
 add_library(pegium ${SRC})
 target_include_directories(pegium PUBLIC src)
-target_compile_features(pegium PUBLIC cxx_std_20)
+target_compile_features(pegium PUBLIC cxx_std_23)
 include(CTest)
 
 
@@ -60,6 +64,7 @@ if(BUILD_TESTING)
     #tests/pegium/xsmp2.cpp
    tests/pegium/xsmp.cpp
    tests/pegium/json.cpp
+   tests/pegium/parser/*.cpp
     #tests/pegium/grammar.cpp 
     #tests/pegium/recovery.cpp
     )# 
