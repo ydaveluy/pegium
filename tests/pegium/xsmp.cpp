@@ -333,14 +333,10 @@ namespace hidden
   ASSERT_TRUE(result.value);
 
   EXPECT_EQ(result.value->name, "test");
-  // for (const auto *node : result.value->getAllContent<Xsmp::NamedElement>())
-  //   std::cout << node->name << std::endl;
 
-  /*| std::views::filter([](auto *ptr) {
-         return dynamic_cast<const Xsmp::NamedElement *>(ptr) != nullptr;
-       }) | std::views::transform([](auto *ptr) -> const Xsmp::NamedElement * {
-         return static_cast<const Xsmp::NamedElement *>(ptr);
-       }) */
+  //for (const auto *node : result.value->getAllContent<Xsmp::NamedElement>())
+   // std::cout << node->name << std::endl;
+
   // std::cout << "parsed " << result.value->namespaces.size() << "
   // namespace\n";
   //  EXPECT_EQ(result.value->namespaces.size(), 400'002);
