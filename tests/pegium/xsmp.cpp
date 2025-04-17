@@ -334,8 +334,8 @@ namespace hidden
 
   EXPECT_EQ(result.value->name, "test");
 
-  //for (const auto *node : result.value->getAllContent<Xsmp::NamedElement>())
-   // std::cout << node->name << std::endl;
+  // for (const auto *node : result.value->getAllContent<Xsmp::NamedElement>())
+  //   std::cout << node->name << std::endl;
 
   // std::cout << "parsed " << result.value->namespaces.size() << "
   // namespace\n";
