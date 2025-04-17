@@ -80,7 +80,16 @@ template <typename T> constexpr bool is_reference_v = is_reference<T>::value;
 struct CstNode;
 /// Represent a node in the AST. Each node in the AST must derived from AstNode
 struct AstNode {
-  virtual ~AstNode() noexcept;
+  AstNode() = default;
+
+  // Move constructor
+  AstNode(AstNode&& other) noexcept;
+
+  // Move assignment
+  AstNode& operator=(AstNode&& other) noexcept ;
+
+  // Destructeur
+  virtual ~AstNode() noexcept ;
 
   /// An attribute of type T.
   /// @tparam T the attribute type
@@ -116,7 +125,7 @@ struct AstNode {
   /// Returns the direct children of this node.
   auto getContent() const {
     return std::views::transform(
-        _content, [](AstNode *ptr) -> const AstNode * { return ptr; });
+        _content, [](const AstNode *ptr) -> const AstNode * { return ptr; });
   }
 
   /// Returns the direct children of type T.
@@ -210,6 +219,11 @@ private:
   /// was parsed.
   CstNode *_node;
 
+
+  void cleanup() noexcept;
+
+  void moveFrom(AstNode&& other) noexcept;
+
   template <typename T, typename Range> static auto of_type(Range &&range) {
     using Ptr = std::ranges::range_value_t<Range>;
     return std::forward<Range>(range) | std::views::filter([](Ptr ptr) {
@@ -255,10 +269,9 @@ private:
       ++(*this);
       return temp;
     }
-    bool operator==(const Iterator &other) const {
-      return stack == other.stack;
-    }
-    bool operator!=(const Iterator &other) const { return !(*this == other); }
+    bool operator==(const Iterator &other) const = default;
+    // bool operator!=(const Iterator &other) const { return !(*this == other);
+    // }
 
   private:
     std::vector<NodePtr> stack;
