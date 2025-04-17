@@ -39,7 +39,7 @@ file(GLOB_RECURSE SRC CONFIGURE_DEPENDS src/pegium/**.cpp)
 
 add_library(pegium ${SRC})
 target_include_directories(pegium PUBLIC src)
-target_compile_features(pegium PUBLIC cxx_std_23)
+target_compile_features(pegium PUBLIC cxx_std_20)
 include(CTest)
 
 

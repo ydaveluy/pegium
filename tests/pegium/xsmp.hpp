@@ -121,6 +121,6 @@ struct EnumerationLiteral : public NamedElement {
   pointer<Expression> value;
 };
 struct Enumeration : public Type {
-  pointer<EnumerationLiteral> literals;
+  vector<pointer<EnumerationLiteral>> literals;
 };
 } // namespace Xsmp

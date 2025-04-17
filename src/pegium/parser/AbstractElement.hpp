@@ -246,9 +246,11 @@ template <typename T> struct AssignmentHelper<std::vector<T>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, std::vector<T> Base::*member, U &&value) const {
-    if constexpr (std::derived_from<T, AstNode>) {
+
+    static_assert(!std::derived_from<T, AstNode>, "An AstNode must be stored in a std::shared_ptr");
+    /*if constexpr (std::derived_from<T, AstNode>) {
       value.setContainer(node, member, (node->*member).size());
-    }
+    }*/
     if constexpr (std::is_convertible_v<U, T>) {
       (node->*member).emplace_back(std::forward<U>(value));
     } else if constexpr (std::is_constructible_v<T, U>) {

@@ -4,7 +4,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
-#include <generator>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -80,7 +80,7 @@ template <typename T> constexpr bool is_reference_v = is_reference<T>::value;
 struct CstNode;
 /// Represent a node in the AST. Each node in the AST must derived from AstNode
 struct AstNode {
-  virtual ~AstNode() noexcept = default;
+  virtual ~AstNode() noexcept;
 
   /// An attribute of type T.
   /// @tparam T the attribute type
@@ -112,58 +112,46 @@ struct AstNode {
   template <typename T> using vector = std::vector<T>;
 
   /// Returns the direct children of this node.
-  std::generator<const AstNode *> getContent() const;
-  /// Returns all descendants of this node.
-  std::generator<const AstNode *> getAllContent() const;
-
+  auto getContent() { return std::views::all(_content); }
   /// Returns the direct children of this node.
-  std::generator<AstNode *> getContent();
-  /// Returns all descendants of this node.
-  std::generator<AstNode *> getAllContent();
+  auto getContent() const {
+    return std::views::transform(
+        _content, [](AstNode *ptr) -> const AstNode * { return ptr; });
+  }
 
   /// Returns the direct children of type T.
   template <typename T>
     requires std::derived_from<T, AstNode>
   auto getContent() const {
-    return getContent() | std::views::filter([](auto *ptr) {
-             return dynamic_cast<const T *>(ptr) != nullptr;
-           }) |
-           std::views::transform([](auto *ptr) -> const T * {
-             return static_cast<const T *>(ptr);
-           });
+    return of_type<T>(getContent());
   }
-  /// Returns all descendants of type T.
-  template <typename T>
-    requires std::derived_from<T, AstNode>
-  auto getAllContent() const {
-    return getAllContent() | std::views::filter([](auto *ptr) {
-             return dynamic_cast<const T *>(ptr) != nullptr;
-           }) |
-           std::views::transform([](auto *ptr) -> const T * {
-             return static_cast<const T *>(ptr);
-           });
-  }
-
   /// Returns the direct children of type T.
   template <typename T>
     requires std::derived_from<T, AstNode>
   auto getContent() {
-    return getContent() | std::views::filter([](auto *ptr) {
-             return dynamic_cast<T *>(ptr) != nullptr;
-           }) |
-           std::views::transform(
-               [](auto *ptr) -> T * { return static_cast<T *>(ptr); });
+    return of_type<T>(getContent());
   }
+
+  /// Returns all descendants of this node.
+  auto getAllContent() { return Range<AstNode *>(this); }
+
+  /// Returns all descendants of this node.
+  auto getAllContent() const { return Range<const AstNode *>(this); }
+
+  /// Returns all descendants of type T.
+  template <typename T>
+    requires std::derived_from<T, AstNode>
+  auto getAllContent() const {
+    return of_type<T>(getAllContent());
+  }
+
   /// Returns all descendants of type T.
   template <typename T>
     requires std::derived_from<T, AstNode>
   auto getAllContent() {
-    return getAllContent() | std::views::filter([](auto *ptr) {
-             return dynamic_cast<T *>(ptr) != nullptr;
-           }) |
-           std::views::transform(
-               [](auto *ptr) -> T * { return static_cast<T *>(ptr); });
+    return of_type<T>(getAllContent());
   }
+
   /// Returns the parent node, or nullptr if this is the root.
   const AstNode *getContainer() const noexcept;
   /// Returns the parent node, or nullptr if this is the root.
@@ -221,6 +209,71 @@ private:
   /// The Concrete Syntax Tree (CST) node of the text range from which this node
   /// was parsed.
   CstNode *_node;
+
+  template <typename T, typename Range> static auto of_type(Range &&range) {
+    using Ptr = std::ranges::range_value_t<Range>;
+    return std::forward<Range>(range) | std::views::filter([](Ptr ptr) {
+             return dynamic_cast<std::conditional_t<
+                        std::is_const_v<std::remove_pointer_t<Ptr>>, const T *,
+                        T *>>(ptr) != nullptr;
+           }) |
+           std::views::transform([](Ptr ptr) {
+             return static_cast<std::conditional_t<
+                 std::is_const_v<std::remove_pointer_t<Ptr>>, const T *, T *>>(
+                 ptr);
+           });
+  }
+  template <typename NodePtr> class Iterator {
+  public:
+    using value_type = NodePtr;
+    using difference_type = std::ptrdiff_t;
+    using iterator_category = std::input_iterator_tag;
+    using reference = NodePtr;
+    using pointer = void;
+    Iterator() = default;
+    explicit Iterator(NodePtr root) {
+      if (root) {
+        for (auto it = root->_content.rbegin(); it != root->_content.rend();
+             ++it) {
+          stack.push_back(*it);
+        }
+      }
+    }
+    reference operator*() const { return stack.back(); }
+    Iterator &operator++() {
+      NodePtr current = stack.back();
+      stack.pop_back();
+      for (auto it = current->_content.rbegin(); it != current->_content.rend();
+           ++it) {
+        assert((*it)->getContainer() == current);
+        stack.push_back(*it);
+      }
+      return *this;
+    }
+    Iterator operator++(int) {
+      Iterator temp = *this;
+      ++(*this);
+      return temp;
+    }
+    bool operator==(const Iterator &other) const {
+      return stack == other.stack;
+    }
+    bool operator!=(const Iterator &other) const { return !(*this == other); }
+
+  private:
+    std::vector<NodePtr> stack;
+  };
+  template <typename NodePtr>
+  class Range : public std::ranges::view_interface<Range<NodePtr>> {
+  public:
+    using iterator = Iterator<NodePtr>;
+    explicit Range(NodePtr root) : root_(root) {}
+    iterator begin() const { return iterator(root_); }
+    iterator end() const { return iterator(); }
+
+  private:
+    NodePtr root_;
+  };
 };
 
 struct RootCstNode;
