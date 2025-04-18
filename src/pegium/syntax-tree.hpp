@@ -270,9 +270,6 @@ private:
       return temp;
     }
     bool operator==(const Iterator &other) const = default;
-    // bool operator!=(const Iterator &other) const { return !(*this == other);
-    // }
-
   private:
     std::vector<NodePtr> stack;
   };

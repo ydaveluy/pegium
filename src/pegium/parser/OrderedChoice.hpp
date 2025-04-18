@@ -13,6 +13,10 @@ struct OrderedChoice final : grammar::OrderedChoice {
 
   constexpr explicit OrderedChoice(std::tuple<Elements...> &&elems)
       : _elements{std::move(elems)} {}
+  constexpr OrderedChoice(OrderedChoice &&) = default;
+  constexpr OrderedChoice(const OrderedChoice &) = default;
+  constexpr OrderedChoice &operator=(OrderedChoice &&) = default;
+  constexpr OrderedChoice &operator=(const OrderedChoice &) = default;
 
   template <std::size_t I = 0>
   constexpr MatchResult parse_rule_impl(std::string_view sv, CstNode &parent,

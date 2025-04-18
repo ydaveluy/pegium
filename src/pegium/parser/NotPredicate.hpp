@@ -19,7 +19,11 @@ struct NotPredicate final : grammar::NotPredicate {
   // constexpr ~NotPredicate() override = default;
   explicit constexpr NotPredicate(Element &&element)
       : _element{std::forward<Element>(element)} {}
-
+  constexpr NotPredicate(NotPredicate &&) = default;
+  constexpr NotPredicate(const NotPredicate &) = default;
+  constexpr NotPredicate &operator=(NotPredicate &&) = default;
+  constexpr NotPredicate &operator=(const NotPredicate &) = default;
+  
   const AbstractElement *getElement() const noexcept override {
     return std::addressof(_element);
   }

@@ -8,29 +8,24 @@
 namespace pegium::parser {
 
 struct AbstractWrapper {
-  constexpr virtual ~AbstractWrapper() noexcept = default;
-  constexpr virtual MatchResult
-  parse_terminal(std::string_view sv) const noexcept = 0;
+  virtual ~AbstractWrapper() noexcept = default;
+  virtual MatchResult parse_terminal(std::string_view sv) const noexcept = 0;
 
-  constexpr virtual MatchResult parse_rule(std::string_view sv, CstNode &parent,
-                                           IContext &c) const = 0;
+  virtual MatchResult parse_rule(std::string_view sv, CstNode &parent,
+                                 IContext &c) const = 0;
 
-  constexpr virtual const grammar::AbstractElement *
-  getElement() const noexcept = 0;
+  virtual const grammar::AbstractElement *getElement() const noexcept = 0;
 };
 template <ParserExpression Element> struct Wrapper final : AbstractWrapper {
   Wrapper(Element &&element) : holder{std::forward<Element>(element)} {}
-  constexpr MatchResult
-  parse_terminal(std::string_view sv) const noexcept override {
+  MatchResult parse_terminal(std::string_view sv) const noexcept override {
     return holder.parse_terminal(sv);
   }
-
-  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
-                                   IContext &c) const override {
+  MatchResult parse_rule(std::string_view sv, CstNode &parent,
+                         IContext &c) const override {
     return holder.parse_rule(sv, parent, c);
   }
-  constexpr const grammar::AbstractElement *
-  getElement() const noexcept override {
+  const grammar::AbstractElement *getElement() const noexcept override {
     return std::addressof(holder);
   }
 
@@ -80,7 +75,7 @@ struct AbstractRule : grammar::Rule {
            "cannot call super on a rule if it is not already defined.");
     return *element;
   }
-  void print(std::ostream &os) const { os << _name; }
+  void print(std::ostream &os) const override { os << _name; }
 
 protected:
   AbstractWrapper *element = nullptr;

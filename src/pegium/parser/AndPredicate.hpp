@@ -10,6 +10,10 @@ struct AndPredicate final : grammar::AndPredicate {
   // constexpr ~AndPredicate() override = default;
   explicit constexpr AndPredicate(Element &&element)
       : _element{std::forward<Element>(element)} {}
+  constexpr AndPredicate(AndPredicate &&) = default;
+  constexpr AndPredicate(const AndPredicate &) = default;
+  constexpr AndPredicate &operator=(AndPredicate &&) = default;
+  constexpr AndPredicate &operator=(const AndPredicate &) = default;
 
   const AbstractElement *getElement() const noexcept override {
     return std::addressof(_element);

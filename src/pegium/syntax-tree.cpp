@@ -6,8 +6,8 @@ namespace pegium {
 
 std::ostream &operator<<(std::ostream &os, const CstNode &obj) {
   os << "{\n";
-  // if (obj.grammarSource)
-  //  os << "\"grammarSource\": \"" << *obj.grammarSource << "\",\n";
+   if (obj.grammarSource)
+    os << "\"grammarSource\": \"" << *obj.grammarSource << "\",\n";
 
   if (obj.isLeaf()) {
     os << "\"text\": \"" << obj.text << "\",\n";
@@ -57,7 +57,12 @@ void AstNode::setContainer(AstNode *container, std::any property,
 
 void AstNode::cleanup() noexcept {
   if (_container) {
-    std::erase(_container->_content, this);
+    auto &vec = _container->_content;
+    auto it = std::find(vec.begin(), vec.end(), this);
+    if (it != vec.end()) {
+      std::iter_swap(it, vec.end() - 1);
+      vec.pop_back();                    
+    }
     _container = nullptr;
   }
 }

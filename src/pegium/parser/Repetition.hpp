@@ -12,6 +12,11 @@ struct Repetition final : grammar::Repetition {
   constexpr explicit Repetition(Element &&element)
       : _element{std::forward<Element>(element)} {}
 
+  constexpr Repetition(Repetition &&) = default;
+  constexpr Repetition(const Repetition &) = default;
+  constexpr Repetition &operator=(Repetition &&) = default;
+  constexpr Repetition &operator=(const Repetition &) = default;
+
   const AbstractElement *getElement() const noexcept override {
     return std::addressof(_element);
   }
@@ -20,64 +25,119 @@ struct Repetition final : grammar::Repetition {
 
   constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const {
-    std::size_t count = 0;
-    MatchResult i = MatchResult::success(sv.begin());
-    // auto size = parent.content.size();
-    while (count < min) {
-      i = _element.parse_rule({i.offset, sv.end()}, parent, c);
-      if (!i) {
-        // parent.content.resize(size);
-        // assert(size == parent.content.size());
-        return i;
-      }
-      count++;
+
+    // optional
+    if constexpr (min == 0 && max == 1) {
+      auto result = _element.parse_rule(sv, parent, c);
+      return result ? result : MatchResult::success(sv.begin());
     }
-    if constexpr (max == std::numeric_limits<std::size_t>::max()) {
-      while (auto len = _element.parse_rule({i.offset, sv.end()}, parent, c)) {
-        i = len;
+    // zero or more
+    else if constexpr (min == 0 &&
+                       max == std::numeric_limits<std::size_t>::max()) {
+
+      MatchResult result = MatchResult::success(sv.begin());
+      const auto end = sv.end();
+      while (auto len = _element.parse_rule({result.offset, end}, parent, c)) {
+        result = len;
       }
-    } else {
-      while (count < max) {
-        // size = parent.content.size();
-        auto len = _element.parse_rule({i.offset, sv.end()}, parent, c);
-        if (!len) {
-          // parent.content.resize(size);
-          // assert(size == parent.content.size());
-          break;
+      return result;
+    }
+    // one or more
+    else if constexpr (min == 1 &&
+                       max == std::numeric_limits<std::size_t>::max()) {
+
+      auto result = _element.parse_rule(sv, parent, c);
+      if (!result)
+        return result;
+      const auto end = sv.end();
+      while (auto len = _element.parse_rule({result.offset, end}, parent, c)) {
+        result = len;
+      }
+      return result;
+    }
+    // other cases
+    else {
+      std::size_t count = 0;
+      MatchResult result = MatchResult::success(sv.begin());
+      const auto end = sv.end();
+
+      while (count < min) {
+        result = _element.parse_rule({result.offset, end}, parent, c);
+        if (!result) {
+          return result;
         }
-        i = len;
         count++;
       }
+      while (count < max) {
+        auto len = _element.parse_rule({result.offset, end}, parent, c);
+        if (!len) {
+
+          break;
+        }
+        result = len;
+        count++;
+      }
+      return result;
     }
-    return i;
   }
 
   constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-    std::size_t count = 0;
-    MatchResult i = MatchResult::success(sv.begin());
-    while (count < min) {
-      i = _element.parse_terminal({i.offset, sv.end()});
-      if (!i) {
-        return i;
-      }
-      count++;
+    // optional
+    if constexpr (min == 0 && max == 1) {
+      auto result = _element.parse_terminal(sv);
+      return result ? result : MatchResult::success(sv.begin());
     }
+    // zero or more
+    else if constexpr (min == 0 &&
+                       max == std::numeric_limits<std::size_t>::max()) {
 
-    if constexpr (max == std::numeric_limits<std::size_t>::max()) {
-      while (auto len = _element.parse_terminal({i.offset, sv.end()})) {
-        i = len;
+      MatchResult result = MatchResult::success(sv.begin());
+
+      const auto end = sv.end();
+      while (auto len = _element.parse_terminal({result.offset, end})) {
+        result = len;
       }
-    } else {
+      return result;
+    }
+    // one or more
+    else if constexpr (min == 1 &&
+                       max == std::numeric_limits<std::size_t>::max()) {
+
+      auto result = _element.parse_terminal(sv);
+      if (!result)
+        return result;
+
+      const auto end = sv.end();
+      while (auto len = _element.parse_terminal({result.offset, end})) {
+        result = len;
+      }
+      return result;
+    }
+    // other cases
+    else {
+
+      MatchResult result = MatchResult::success(sv.begin());
+      std::size_t count = 0;
+      const auto end = sv.end();
+      while (count < min) {
+        result = _element.parse_terminal({result.offset, end});
+        if (!result) {
+          return result;
+        }
+        count++;
+      }
+
       while (count < max) {
-        auto len = _element.parse_terminal({i.offset, sv.end()});
+        auto len = _element.parse_terminal({result.offset, end});
         if (!len) {
           break;
         }
-        i = len;
+        result = len;
         count++;
       }
+
+      return result;
     }
-    return i;
   }
   void print(std::ostream &os) const override {
     os << _element;
@@ -123,8 +183,7 @@ template <ParserExpression Element> constexpr auto many(Element &&element) {
 /// @tparam Element
 /// @param element the element to be repeated
 /// @return The created Repetition
-template <ParserExpression Element>
-constexpr auto some(Element &&element) {
+template <ParserExpression Element> constexpr auto some(Element &&element) {
   return Repetition<1, std::numeric_limits<std::size_t>::max(), Element>{
       std::forward<Element>(element)};
 }

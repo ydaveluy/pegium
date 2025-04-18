@@ -15,6 +15,11 @@ struct UnorderedGroup final : grammar::UnorderedGroup {
   constexpr explicit UnorderedGroup(std::tuple<Elements...> &&elems)
       : _elements{std::move(elems)} {}
 
+  constexpr UnorderedGroup(UnorderedGroup &&) = default;
+  constexpr UnorderedGroup(const UnorderedGroup &) = default;
+  constexpr UnorderedGroup &operator=(UnorderedGroup &&) = default;
+  constexpr UnorderedGroup &operator=(const UnorderedGroup &) = default;
+
   using ProcessedFlags = std::array<bool, sizeof...(Elements)>;
 
   template <typename T>
