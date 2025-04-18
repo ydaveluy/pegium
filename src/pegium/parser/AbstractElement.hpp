@@ -37,11 +37,8 @@ concept ParserExpression =
     };
 
 template <ParserExpression T>
-using ParserExpressionHolder =
-    std::conditional_t<std::is_copy_constructible_v<std::remove_cvref_t<T>>,
-                       std::remove_cvref_t<T>, T>;
-// std::conditional_t<std::is_rvalue_reference_v<T>,
-// std::remove_cvref_t<T>, T>;
+using ParserExpressionHolder = std::conditional_t<std::is_lvalue_reference_v<T>,
+                                                  T, std::remove_cvref_t<T>>;
 
 /// Build an array of char (remove the traling '\0')
 /// @tparam N the number of char including '\0'
@@ -247,7 +244,8 @@ template <typename T> struct AssignmentHelper<std::vector<T>> {
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, std::vector<T> Base::*member, U &&value) const {
 
-    static_assert(!std::derived_from<T, AstNode>, "An AstNode must be stored in a std::shared_ptr");
+    static_assert(!std::derived_from<T, AstNode>,
+                  "An AstNode must be stored in a std::shared_ptr");
     /*if constexpr (std::derived_from<T, AstNode>) {
       value.setContainer(node, member, (node->*member).size());
     }*/

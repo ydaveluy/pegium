@@ -13,9 +13,14 @@ namespace pegium::parser {
 
 struct CharacterRange final : grammar::CharacterRange {
   using type = std::string;
-  // constexpr ~CharacterRange() override = default;
+  constexpr ~CharacterRange() override = default;
   constexpr CharacterRange(std::string_view s)
       : lookup{createCharacterRange(s)} {}
+
+  constexpr CharacterRange(CharacterRange &&) = default;
+  constexpr CharacterRange(const CharacterRange &) = default;
+  constexpr CharacterRange &operator=(CharacterRange &&) = default;
+  constexpr CharacterRange &operator=(const CharacterRange &) = default;
 
   constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const {
@@ -42,15 +47,15 @@ struct CharacterRange final : grammar::CharacterRange {
 
   /// Create an insensitive Characters Ranges
   /// @return the insensitive Characters Ranges
-  constexpr CharacterRange &i() noexcept {
-    for (char c = 'a'; c <= 'z'; ++c) {
-      auto lower = static_cast<unsigned char>(c);
-      auto upper = static_cast<unsigned char>(c - 'a' + 'A');
-
-      lookup[lower] |= lookup[upper];
-      lookup[upper] |= lookup[lower];
-    }
+  constexpr CharacterRange &i() & noexcept {
+    make_insensitive();
     return *this;
+  }
+  /// Create an insensitive Characters Ranges
+  /// @return the insensitive Characters Ranges
+  constexpr CharacterRange &&i() && noexcept {
+    make_insensitive();
+    return std::move(*this);
   }
 
   void print(std::ostream &os) const override {
@@ -78,6 +83,15 @@ struct CharacterRange final : grammar::CharacterRange {
   }
 
 private:
+  constexpr void make_insensitive() noexcept {
+    for (char c = 'a'; c <= 'z'; ++c) {
+      auto lower = static_cast<unsigned char>(c);
+      auto upper = static_cast<unsigned char>(c - 'a' + 'A');
+
+      lookup[lower] |= lookup[upper];
+      lookup[upper] |= lookup[lower];
+    }
+  }
   std::array<bool, 256> lookup{};
 };
 

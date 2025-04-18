@@ -11,6 +11,11 @@ struct CrossReference final : grammar::CrossReference {
   explicit constexpr CrossReference(Element &&element)
       : _element{std::forward<Element>(element)} {}
 
+      constexpr CrossReference(CrossReference &&) = default;
+      constexpr CrossReference(const CrossReference &) = default;
+      constexpr CrossReference &operator=(CrossReference &&) = default;
+      constexpr CrossReference &operator=(const CrossReference &) = default;
+      
   const AbstractElement *getElement() const noexcept override {
     return std::addressof(_element);
   }

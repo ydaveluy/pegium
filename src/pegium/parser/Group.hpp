@@ -8,12 +8,16 @@ namespace pegium::parser {
 
 template <ParserExpression... Elements> struct Group final : grammar::Group {
   static_assert(sizeof...(Elements) > 1,
-                "A Group shall contains at least 2 element2.");
+                "A Group shall contains at least 2 elements.");
   // constexpr ~Group() override = default;
 
   constexpr explicit Group(std::tuple<Elements...> &&elems)
       : _elements{std::move(elems)} {}
 
+      constexpr Group(Group &&) = default;
+      constexpr Group(const Group &) = default;
+      constexpr Group &operator=(Group &&) = default;
+      constexpr Group &operator=(const Group &) = default;
   template <std::size_t I = 0>
   constexpr MatchResult parse_rule_impl(std::string_view sv, CstNode &parent,
                                         IContext &c, MatchResult r) const {

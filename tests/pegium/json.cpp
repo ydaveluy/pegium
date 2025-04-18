@@ -48,7 +48,7 @@ public:
                               option("e"_cr.i() + option("-+"_cr) + some(d))};
 
   Terminal<bool> Bool{"Bool", "true"_kw | "false"_kw};
-  Terminal<nullptr_t> Null{"Null", "null"_kw};
+  Terminal<std::nullptr_t> Null{"Null", "null"_kw};
 
   /// STRING ':' value
   Rule<Json::Pair> Pair{"Pair", assign<&Pair::key>(STRING) + ":"_kw +

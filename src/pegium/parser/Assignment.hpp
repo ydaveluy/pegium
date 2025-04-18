@@ -49,6 +49,11 @@ struct Assignment final : grammar::Assignment {
   constexpr explicit Assignment(Element &&element)
       : _element{std::forward<Element>(element)} {}
 
+  constexpr Assignment(Assignment &&) = default;
+  constexpr Assignment(const Assignment &) = default;
+  constexpr Assignment &operator=(Assignment &&) = default;
+  constexpr Assignment &operator=(const Assignment &) = default;
+
   const grammar::AbstractElement *getElement() const noexcept override {
     return std::addressof(_element);
   }
