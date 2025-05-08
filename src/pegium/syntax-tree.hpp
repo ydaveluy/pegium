@@ -2,6 +2,7 @@
 
 #include <any>
 #include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <functional>
 #include <iostream>
@@ -23,45 +24,61 @@ struct AstNode;
 /// @tparam T the AstNode type.
 template <typename T> struct Reference {
   Reference() = default;
-  Reference(Reference &&) = default;
-  Reference(const Reference &) = default;
-  Reference &operator=(Reference &&) = default;
-  Reference &operator=(const Reference &) = default;
   /// Create a reference with a reference text. (used by parser to initialize a
   /// reference)
   /// @param refText the reference text
-  Reference(std::string refText) noexcept : _refText{std::move(refText)} {}
+  explicit Reference(std::string refText) noexcept
+      : _refText{std::move(refText)} {}
+
+  Reference(const Reference &) = delete;
+  Reference &operator=(const Reference &) = delete;
+  Reference(Reference &&other) noexcept
+      : _refText(std::move(other._refText)),
+        _resolver(std::move(other._resolver)),
+        _resolved(other._resolved.load()), _ref(other._ref) {}
+
+  Reference &operator=(Reference &&other) noexcept {
+    if (this != &other) {
+      std::scoped_lock lock(_mutex, other._mutex);
+      _refText = std::move(other._refText);
+      _resolver = std::move(other._resolver);
+      _resolved.store(other._resolved.load());
+      _ref = other._ref;
+    }
+    return *this;
+  }
 
   /// Resolve the reference.
   /// @return the resolved reference or nullptr.
   T *get() const {
-    /*if (resolved.load(std::memory_order_acquire)) {
-      return ref;
+    if (_resolved.load(std::memory_order_acquire)) {
+      return _ref;
     }
-    std::scoped_lock lock(mutex);
-    if (!resolved.load(std::memory_order_relaxed)) {
-      ref = resolve(_refText);
-      resolved.store(true, std::memory_order_release);
-    }*/
-    return ref;
+    std::scoped_lock lock(_mutex);
+    if (!_resolved.load(std::memory_order_relaxed)) {
+      assert(_resolver &&
+             "The resolver must be installed before accessing the reference.");
+      // TODO probably safe to use static_cast here ?
+      _ref = dynamic_cast<T *>(_resolver(_refText));
+      _resolved.store(true, std::memory_order_release);
+    }
+    return _ref;
   }
   T &operator->() {
-    // TODO add assert ?
-    return *get();
+    T *ptr = get();
+    assert(ptr);
+    return *ptr;
   }
 
   /// Check if the reference is resolved
   explicit operator bool() const { return get(); }
 
-  std::string_view getReferenceText() const noexcept { return _refText; }
-
 private:
   std::string _refText;
-  T *ref = nullptr;
-  /*std::function<T *(const std::string &)> resolve;
-  mutable std::atomic_bool resolved = false;
-  mutable T *ref = nullptr;
-  mutable std::mutex mutex;*/
+  std::function<AstNode *(const std::string &)> _resolver;
+  mutable std::atomic_bool _resolved = false;
+  mutable T *_ref = nullptr;
+  mutable std::mutex _mutex;
   friend class ReferenceInfo;
 };
 
@@ -73,26 +90,46 @@ struct is_reference<std::vector<Reference<T>>> : std::true_type {};
 template <typename T> constexpr bool is_reference_v = is_reference<T>::value;
 
 struct ReferenceInfo {
+
   template <typename T, typename Class>
-  ReferenceInfo(AstNode *container, Reference<T> Class::*feature);
+  ReferenceInfo(AstNode *container, Reference<T> Class::*feature)
+      : container{container}, property{feature}, index{npos} {
+    assert(dynamic_cast<Class *>(container));
+
+    _isInstance = makeIsInstance<T>();
+    auto *typedContainer = static_cast<Class *>(container);
+    _installResolver =
+        [typedContainer,
+         feature](std::function<AstNode *(const std::string &)> resolver) {
+          (typedContainer->*feature)._resolver = std::move(resolver);
+        };
+  }
   template <typename T, typename Class>
   ReferenceInfo(AstNode *container, std::vector<Reference<T>> Class::*feature,
-                std::size_t index);
-  ReferenceInfo(ReferenceInfo &&) = default;
+                std::size_t index)
+      : container{container}, property{feature}, index{index} {
+    assert(dynamic_cast<Class *>(container));
+    _isInstance = makeIsInstance<T>();
+
+    auto *typedContainer = static_cast<Class *>(container);
+    _installResolver =
+        [typedContainer, feature,
+         index](std::function<AstNode *(const std::string &)> resolver) {
+          (typedContainer->*feature)[index]._resolver = std::move(resolver);
+        };
+  }
+  ReferenceInfo(ReferenceInfo &&) noexcept = default;
   ReferenceInfo(const ReferenceInfo &) = default;
-  ReferenceInfo &operator=(ReferenceInfo &&) = default;
+  ReferenceInfo &operator=(ReferenceInfo &&) noexcept = default;
   ReferenceInfo &operator=(const ReferenceInfo &) = default;
   ReferenceInfo() = default;
-  ~ReferenceInfo() = default;
-  std::string_view getReferenceText() const noexcept {
-    return _referenceText(this);
-  }
+
   bool isInstance(const AstNode *node) const noexcept {
     return _isInstance(node);
   }
-  const AstNode *getValue() const noexcept { return _getValue(this); }
-  AstNode *getValue() noexcept { return _getValue(this); }
-  void setValue(AstNode *value) { _setValue(this, value); }
+  void installResolver(std::function<AstNode *(const std::string &)> resolver) {
+    _installResolver(std::move(resolver));
+  }
 
   static constexpr std::size_t npos = std::numeric_limits<std::size_t>::max();
 
@@ -100,10 +137,14 @@ private:
   AstNode *container;
   std::any property;
   std::size_t index;
-  std::function<std::string_view(const ReferenceInfo *)> _referenceText;
   std::function<bool(const AstNode *)> _isInstance;
-  std::function<void(const ReferenceInfo *, AstNode *)> _setValue;
-  std::function<AstNode *(const ReferenceInfo *)> _getValue;
+  std::function<void(std::function<AstNode *(const std::string &)>)>
+      _installResolver;
+  template <typename T> static constexpr auto makeIsInstance() noexcept {
+    return [](const AstNode *node) {
+      return dynamic_cast<const T *>(node) != nullptr;
+    };
+  }
 };
 
 struct CstNode;
@@ -362,48 +403,4 @@ struct RootCstNode : public CstNode {
   std::string fullText;
 };
 
-template <typename T, typename Class>
-ReferenceInfo::ReferenceInfo(AstNode *container, Reference<T> Class::*feature)
-    : container{container}, property{feature}, index{npos} {
-  assert(dynamic_cast<Class *>(container));
-
-  _referenceText = [feature](const ReferenceInfo *refInfo) -> std::string_view {
-    return (static_cast<const Class *>(refInfo->container)->*feature)
-        .getReferenceText();
-  };
-
-  _isInstance = [](const AstNode *node) -> bool {
-    return dynamic_cast<const T *>(node) != nullptr;
-  };
-  _setValue = [feature](const ReferenceInfo *refInfo, AstNode *value) -> void {
-    (static_cast<Class *>(refInfo->container)->*feature).ref =
-        dynamic_cast<T *>(value);
-  };
-  _getValue = [feature](const ReferenceInfo *refInfo) -> AstNode * {
-    return (static_cast<Class *>(refInfo->container)->*feature).get();
-  };
-}
-template <typename T, typename Class>
-ReferenceInfo::ReferenceInfo(AstNode *container,
-                             std::vector<Reference<T>> Class::*feature,
-                             std::size_t index)
-    : container{container}, property{feature}, index{index} {
-  assert(dynamic_cast<Class *>(container));
-  _referenceText = [feature](const ReferenceInfo *refInfo) -> std::string_view {
-    return (static_cast<const Class *>(refInfo->container)
-                ->*feature)[refInfo->index]
-        .getReferenceText();
-  };
-  _isInstance = [](const AstNode *node) -> bool {
-    return dynamic_cast<const T *>(node) != nullptr;
-  };
-  _setValue = [feature](const ReferenceInfo *refInfo, AstNode *value) -> void {
-    (static_cast<Class *>(refInfo->container)->*feature)[refInfo->index].ref =
-        dynamic_cast<T *>(value);
-  };
-  _getValue = [feature](const ReferenceInfo *refInfo) -> AstNode * {
-    return (static_cast<Class *>(refInfo->container)->*feature)[refInfo->index]
-        .get();
-  };
-}
 } // namespace pegium
