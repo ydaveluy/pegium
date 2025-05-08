@@ -57,12 +57,12 @@ public:
   /// '{' pair (',' pair)* '}' | '{' '}'
   Rule<Json::JsonObject> JsonObject{
       "JsonObject",
-      "{"_kw + many(assign<&JsonObject::values>(Pair), ","_kw) + "}"_kw};
+      "{"_kw + many(append<&JsonObject::values>(Pair), ","_kw) + "}"_kw};
 
   /// '[' value (',' value)* ']' | '[' ']'
   Rule<Json::JsonArray> JsonArray{
       "JsonArray",
-      "["_kw + many(assign<&JsonArray::values>(JsonValue), ","_kw) + "]"_kw};
+      "["_kw + many(append<&JsonArray::values>(JsonValue), ","_kw) + "]"_kw};
 
   /// STRING | NUMBER | obj | arr | 'true' | 'false' | 'null'
   Rule<Json::JsonValue> JsonValue{

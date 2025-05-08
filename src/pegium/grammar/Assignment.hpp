@@ -19,6 +19,7 @@ inline constexpr std::ostream &operator<<(std::ostream &os,
   }
   return os;
 }
+
 struct Assignment : AbstractElement {
   using AssignmentOperator = pegium::grammar::AssignmentOperator;
   constexpr ElementKind getKind() const noexcept final {

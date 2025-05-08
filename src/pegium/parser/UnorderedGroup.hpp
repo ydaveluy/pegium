@@ -6,7 +6,7 @@
 
 namespace pegium::parser {
 
-template <ParserExpression... Elements>
+template <ParseExpression... Elements>
 struct UnorderedGroup final : grammar::UnorderedGroup {
   static_assert(sizeof...(Elements) > 1,
                 "An UnorderedGroup shall contains at least 2 elements.");
@@ -119,28 +119,28 @@ struct UnorderedGroup final : grammar::UnorderedGroup {
 private:
   std::tuple<Elements...> _elements;
 
-  template <ParserExpression... Rhs>
+  template <ParseExpression... Rhs>
   friend constexpr auto operator&(UnorderedGroup &&lhs,
                                   UnorderedGroup<Rhs...> &&rhs) {
-    return UnorderedGroup<Elements..., ParserExpressionHolder<Rhs>...>{
+    return UnorderedGroup<Elements..., ParseExpressionHolder<Rhs>...>{
         std::tuple_cat(std::move(lhs._elements), std::move(rhs._elements))};
   }
 
-  template <ParserExpression Rhs>
+  template <ParseExpression Rhs>
   friend constexpr auto operator&(UnorderedGroup &&lhs, Rhs &&rhs) {
-    return UnorderedGroup<Elements..., ParserExpressionHolder<Rhs>>{
+    return UnorderedGroup<Elements..., ParseExpressionHolder<Rhs>>{
         std::tuple_cat(std::move(lhs._elements), std::forward_as_tuple(rhs))};
   }
-  template <ParserExpression Lhs>
+  template <ParseExpression Lhs>
   friend constexpr auto operator&(Lhs &&lhs, UnorderedGroup &&rhs) {
-    return UnorderedGroup<ParserExpressionHolder<Lhs>, Elements...>{
+    return UnorderedGroup<ParseExpressionHolder<Lhs>, Elements...>{
         std::tuple_cat(std::forward_as_tuple(lhs), std::move(rhs._elements))};
   }
 };
-template <ParserExpression Lhs, ParserExpression Rhs>
+template <ParseExpression Lhs, ParseExpression Rhs>
 constexpr auto operator&(Lhs &&lhs, Rhs &&rhs) {
-  return UnorderedGroup<ParserExpressionHolder<Lhs>,
-                        ParserExpressionHolder<Rhs>>{
+  return UnorderedGroup<ParseExpressionHolder<Lhs>,
+                        ParseExpressionHolder<Rhs>>{
       std::forward_as_tuple(std::forward<Lhs>(lhs), std::forward<Rhs>(rhs))};
 }
 

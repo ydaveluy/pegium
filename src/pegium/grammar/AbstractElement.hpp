@@ -4,9 +4,8 @@ namespace pegium::grammar {
 
 enum class ElementKind {
 
-  New,  // an Action that create a new instance
-  Init, // an action that create a new instance and init a feature with current
-        // value
+  New,        // create a new instance
+  Init,       // create a new instance and init a feature with current value
   Assignment, // assign a feature of the current element
   AndPredicate,
   AnyCharacter,

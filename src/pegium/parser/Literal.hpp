@@ -40,7 +40,7 @@ struct Literal final : grammar::Literal {
       return MatchResult::failure(sv.begin());
     }
 
-    for (std::size_t i = 0; i < literal.size(); i++) {
+    for (std::size_t i = 0; i < literal.size(); ++i) {
       if constexpr (case_sensitive) {
         if (sv[i] != literal[i]) {
           return MatchResult::failure(sv.begin() + i);

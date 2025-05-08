@@ -14,7 +14,7 @@ namespace pegium::parser {
 protected:
   const IGrammarElement *_element;
 };*/
-template <ParserExpression Element>
+template <ParseExpression Element>
 struct NotPredicate final : grammar::NotPredicate {
   // constexpr ~NotPredicate() override = default;
   explicit constexpr NotPredicate(Element &&element)
@@ -41,10 +41,10 @@ struct NotPredicate final : grammar::NotPredicate {
   }
 
 private:
-  ParserExpressionHolder<Element> _element;
+  ParseExpressionHolder<Element> _element;
 };
 
-template <ParserExpression Element>
+template <ParseExpression Element>
 constexpr auto operator!(Element &&element) {
   return NotPredicate<Element>{std::forward<Element>(element)};
 }

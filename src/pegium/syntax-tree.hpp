@@ -27,23 +27,30 @@ struct ReferenceInfo {
   std::size_t index;
 };
 
-/// A Reference to an AstNode of type T.
+/// A Reference of type T.
 /// @tparam T the AstNode type.
-template <typename T>
-// do not add requirement std::is_base_of_v<AstNode, T> because T may be
-// incomplete at the stage the Reference is declared.
-struct Reference {
+template <typename T> struct Reference {
+  Reference() = default;
+  Reference(Reference &&) = default;
+  Reference(const Reference &) = default;
+  Reference &operator=(Reference &&) = default;
+  Reference &operator=(const Reference &) = default;
+  /// Create a reference with a reference text. (used by parser to initialize a
+  /// reference)
+  /// @param refText the reference text
+  Reference(std::string refText) noexcept : _refText{std::move(refText)} {}
+
   /// Resolve the reference.
   /// @return the resolved reference or nullptr.
   T *get() const {
-    if (resolved.load(std::memory_order_acquire)) {
+    /*if (resolved.load(std::memory_order_acquire)) {
       return ref;
     }
     std::scoped_lock lock(mutex);
     if (!resolved.load(std::memory_order_relaxed)) {
       ref = resolve(_refText);
       resolved.store(true, std::memory_order_release);
-    }
+    }*/
     return ref;
   }
   T &operator->() {
@@ -57,17 +64,18 @@ struct Reference {
   /// Set the text of the reference (internally used by parser)
   /// @param refText the reference text
   /// @return the current object.
-  Reference &operator=(std::string refText) noexcept {
+  /*Reference &operator=(std::string refText) noexcept {
     _refText = std::move(refText);
     return *this;
-  }
+  }*/
 
 private:
   std::string _refText;
-  std::function<T *(const std::string &)> resolve;
+  T *ref = nullptr;
+  /*std::function<T *(const std::string &)> resolve;
   mutable std::atomic_bool resolved = false;
   mutable T *ref = nullptr;
-  mutable std::mutex mutex;
+  mutable std::mutex mutex;*/
 };
 
 /// Helpers to check if an object is a Reference
@@ -83,13 +91,13 @@ struct AstNode {
   AstNode() = default;
 
   // Move constructor
-  AstNode(AstNode&& other) noexcept;
+  AstNode(AstNode &&other) noexcept;
 
   // Move assignment
-  AstNode& operator=(AstNode&& other) noexcept ;
+  AstNode &operator=(AstNode &&other) noexcept;
 
   // Destructeur
-  virtual ~AstNode() noexcept ;
+  virtual ~AstNode() noexcept;
 
   /// An attribute of type T.
   /// @tparam T the attribute type
@@ -219,10 +227,9 @@ private:
   /// was parsed.
   CstNode *_node;
 
-
   void cleanup() noexcept;
 
-  void moveFrom(AstNode&& other) noexcept;
+  void moveFrom(AstNode &&other) noexcept;
 
   template <typename T, typename Range> static auto of_type(Range &&range) {
     using Ptr = std::ranges::range_value_t<Range>;
@@ -270,6 +277,7 @@ private:
       return temp;
     }
     bool operator==(const Iterator &other) const = default;
+
   private:
     std::vector<NodePtr> stack;
   };

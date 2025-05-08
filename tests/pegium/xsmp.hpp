@@ -9,7 +9,7 @@ struct Type;
 
 struct Expression : pegium::AstNode {};
 struct Attribute : public pegium::AstNode {
-  /*reference<Type>*/ string type;
+  reference<Type> type;
 
   pointer<Expression> value;
 };
@@ -39,12 +39,12 @@ struct Class : public Structure {};
 struct Exception : public Class {};
 
 struct Interface : public Type {
-  vector<string> bases;
+  vector<reference<Type>> bases;
   vector<pointer<NamedElement>> members;
 };
 struct Component : public Type {
-  optional<string> base;
-  vector<string> interfaces;
+  optional<reference<Type>> base;
+  vector<reference<Type>> interfaces;
   vector<pointer<NamedElement>> members;
 };
 
@@ -52,26 +52,26 @@ struct Model : public Component {};
 struct Service : public Component {};
 
 struct Array : public Type {
-  string itemType;
+  reference<Type> itemType;
   pointer<Expression> size;
 };
 
 struct ValueReference : public Type {
-  string type;
+  reference<Type> type;
 };
 struct Integer : public Type {
-  string primitiveType;
+  optional<reference<Type>> primitiveType;
   pointer<Expression> minimum;
   pointer<Expression> maximum;
 };
 struct Float : public Type {
-  string primitiveType;
+  optional<reference<Type>> primitiveType;
   pointer<Expression> minimum;
   pointer<Expression> maximum;
   string kind;
 };
 struct EventType : public Type {
-  string eventArg;
+  reference<Type> eventArg;
 };
 struct StringType : public Type {
   pointer<Expression> size;
@@ -88,33 +88,33 @@ struct BooleanLiteral : Expression {
   bool isTrue;
 };
 struct Constant : public VisibilityElement {
-  string type;
+  reference<Type> type;
   pointer<Expression> value;
 };
 
 struct Field : public VisibilityElement {
-  string type;
+  reference<Type> type;
   pointer<Expression> value;
 };
 
 struct Property : public VisibilityElement {
-  string type;
+  reference<Type> type;
   // TODO add attached field + throws
 };
 struct Association : public VisibilityElement {
-  string type;
+  reference<Type> type;
 };
 
 struct Container : public NamedElement {
-  string type;
+  reference<Type> type;
 };
 
 struct Reference : public NamedElement {
-  string type;
+  reference<Type> type;
 };
 
 struct AttributeType : public Type {
-  string type;
+  reference<Type> type;
   pointer<Expression> value;
 };
 struct EnumerationLiteral : public NamedElement {
