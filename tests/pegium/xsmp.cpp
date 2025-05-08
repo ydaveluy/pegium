@@ -30,10 +30,10 @@ public:
       "Catalogue",
       many(append<&NamedElement::attributes>(Attribute)) +   //
           "catalogue"_kw + assign<&NamedElement::name>(ID) + //
-          many(append<&Catalogue::namespaces>(NamespaceWithAttributes))};
+          many(append<&Catalogue::namespaces>(RootNamespace))};
 
-  Rule<Xsmp::Namespace> NamespaceWithAttributes{
-      "NamespaceWithAttributes",
+  Rule<Xsmp::Namespace> RootNamespace{
+      "RootNamespace",
       many(append<&NamedElement::attributes>(Attribute)) + Namespace};
 
   Rule<Xsmp::Namespace> Namespace{

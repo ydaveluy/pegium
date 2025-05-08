@@ -86,7 +86,8 @@
         "shared_mutex": "cpp",
         "future": "cpp",
         "generator": "cpp",
-        "coroutine": "cpp"
+        "coroutine": "cpp",
+        "queue": "cpp"
     },
     "sonarlint.pathToCompileCommands": "${workspaceFolder}/build/compile_commands.json",
     "C_Cpp.errorSquiggles": "enabledIfIncludesResolve",
