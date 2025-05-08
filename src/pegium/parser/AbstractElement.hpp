@@ -28,7 +28,7 @@ struct MatchResult {
 };
 
 template <typename T>
-concept ParserExpression =
+concept ParseExpression =
     std::derived_from<std::remove_cvref_t<T>, grammar::AbstractElement> &&
     requires(const std::remove_cvref_t<T> &t, std::string_view sv,
              CstNode &node, IContext &ctx, std::ostream &os) {
@@ -36,9 +36,9 @@ concept ParserExpression =
       { t.parse_rule(sv, node, ctx) } -> std::same_as<MatchResult>;
     };
 
-template <ParserExpression T>
-using ParserExpressionHolder = std::conditional_t<std::is_lvalue_reference_v<T>,
-                                                  T, std::remove_cvref_t<T>>;
+template <ParseExpression T>
+using ParseExpressionHolder = std::conditional_t<std::is_lvalue_reference_v<T>,
+                                                 T, std::remove_cvref_t<T>>;
 
 /// Build an array of char (remove the traling '\0')
 /// @tparam N the number of char including '\0'
@@ -162,27 +162,34 @@ struct MemberTraits<Member> {
 
   template <typename T> struct AttributeType {
     using type = T;
+    static constexpr bool isMany = false;
   };
   template <typename T> struct AttributeType<std::shared_ptr<T>> {
     using type = T;
+    static constexpr bool isMany = false;
   };
   template <typename T> struct AttributeType<std::vector<T>> {
     using type = T;
+    static constexpr bool isMany = true;
   };
   template <typename T> struct AttributeType<Reference<T>> {
     using type = std::string;
+    static constexpr bool isMany = false;
   };
   template <typename T> struct AttributeType<std::vector<std::shared_ptr<T>>> {
     using type = T;
+    static constexpr bool isMany = true;
   };
 
   using AttrType = AttributeType<Type>::type;
+  static constexpr bool IsMany = AttributeType<Type>::isMany;
 };
 
 template <auto Member>
 using ClassType = typename MemberTraits<Member>::ClassType;
 
 template <auto Member> using AttrType = typename MemberTraits<Member>::AttrType;
+template <auto Member> static constexpr bool IsMany = MemberTraits<Member>::IsMany;
 
 // Generic
 template <typename T> struct AssignmentHelper {
@@ -204,14 +211,14 @@ template <typename T> struct AssignmentHelper {
   }
 };
 
-template <typename T> struct AssignmentHelper<Reference<T>> {
+/*template <typename T> struct AssignmentHelper<Reference<T>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, Reference<T> Base::*member, U &&value) const {
     // node->*member = std::forward<U>(value);
     static_assert(false, "not implemented");
   }
-};
+};*/
 
 template <typename T> struct AssignmentHelper<std::shared_ptr<T>> {
   template <typename Node, typename Base, typename U>

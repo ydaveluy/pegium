@@ -16,7 +16,7 @@ struct AbstractWrapper {
 
   virtual const grammar::AbstractElement *getElement() const noexcept = 0;
 };
-template <ParserExpression Element> struct Wrapper final : AbstractWrapper {
+template <ParseExpression Element> struct Wrapper final : AbstractWrapper {
   Wrapper(Element &&element) : holder{std::forward<Element>(element)} {}
   MatchResult parse_terminal(std::string_view sv) const noexcept override {
     return holder.parse_terminal(sv);
@@ -30,12 +30,12 @@ template <ParserExpression Element> struct Wrapper final : AbstractWrapper {
   }
 
 private:
-  ParserExpressionHolder<Element> holder;
+  ParseExpressionHolder<Element> holder;
 };
 
 struct AbstractRule : grammar::Rule {
 
-  template <ParserExpression Element>
+  template <ParseExpression Element>
   constexpr AbstractRule(std::string_view name, Element &&element)
       : _name{name} {
 
@@ -55,8 +55,7 @@ struct AbstractRule : grammar::Rule {
   /// @tparam Element
   /// @param element the element
   /// @return a reference to the rule
-  template <ParserExpression Element>
-  // requires(!grammar::IsRule<Element>)
+  template <ParseExpression Element>
   AbstractRule &operator=(Element &&element) {
     this->element = _elements
                         .emplace_back(std::make_unique<Wrapper<Element>>(

@@ -28,29 +28,29 @@ public:
                  ")"_kw)};
   Rule<Xsmp::Catalogue> Catalogue{
       "Catalogue",
-      many(assign<&NamedElement::attributes>(Attribute)) +   //
+      many(append<&NamedElement::attributes>(Attribute)) +   //
           "catalogue"_kw + assign<&NamedElement::name>(ID) + //
-          many(assign<&Catalogue::namespaces>(NamespaceWithAttributes))};
+          many(append<&Catalogue::namespaces>(NamespaceWithAttributes))};
 
   Rule<Xsmp::Namespace> NamespaceWithAttributes{
       "NamespaceWithAttributes",
-      many(assign<&NamedElement::attributes>(Attribute)) + Namespace};
+      many(append<&NamedElement::attributes>(Attribute)) + Namespace};
 
   Rule<Xsmp::Namespace> Namespace{
       "Namespace", "namespace"_kw + assign<&NamedElement::name>(ID) +       //
                        "{"_kw +                                             //
-                       many(assign<&Namespace::members>(NamespaceMember)) + //
+                       many(append<&Namespace::members>(NamespaceMember)) + //
                        "}"_kw};                                             //
 
   Rule<Xsmp::NamedElement> NamespaceMember{
       "NamespaceMember",
       // attributes
-      many(assign<&NamedElement::attributes>(Attribute)) +
+      many(append<&NamedElement::attributes>(Attribute)) +
           (
               // Namespace
               Namespace |
               // elements with visibility
-              many(assign<&VisibilityElement::modifiers>(Visibility)) +
+              many(append<&VisibilityElement::modifiers>(Visibility)) +
                   (
                       // Types
                       Structure | Interface | Array | ValueReference | Float |
@@ -58,8 +58,8 @@ public:
                       NativeType | AttributeType | Enumeration |
                       // Types with abstract
                       option(
-                          assign<&VisibilityElement::modifiers>("abstract"_kw) +
-                          many(assign<&VisibilityElement::modifiers>(
+                          append<&VisibilityElement::modifiers>("abstract"_kw) +
+                          many(append<&VisibilityElement::modifiers>(
                               Visibility | "abstract"_kw))) +
                           (Class | Exception | Model | Service) //
                       )
@@ -69,7 +69,7 @@ public:
       "Enumeration",
       "enum"_kw + assign<&NamedElement::name>(ID) +                          //
           "{"_kw +                                                           //
-          many(assign<&Enumeration::literals>(EnumerationLiteral), ","_kw) + //
+          many(append<&Enumeration::literals>(EnumerationLiteral), ","_kw) + //
           "}"_kw};
 
   Rule<Xsmp::EnumerationLiteral> EnumerationLiteral{
@@ -79,31 +79,31 @@ public:
   Rule<Xsmp::Structure> Structure{
       "Structure", "struct"_kw + assign<&NamedElement::name>(ID) +          //
                        "{"_kw +                                             //
-                       many(assign<&Structure::members>(StructureMember)) + //
+                       many(append<&Structure::members>(StructureMember)) + //
                        "}"_kw};
 
   Rule<Xsmp::NamedElement> StructureMember{
       "StructureMember",
-      many(assign<&NamedElement::attributes>(Attribute)) +
-          many(assign<&VisibilityElement::modifiers>(Visibility)) +
+      many(append<&NamedElement::attributes>(Attribute)) +
+          many(append<&VisibilityElement::modifiers>(Visibility)) +
           (Field | Constant)};
 
   Rule<Xsmp::Class> Class{
       "Class", "class"_kw + assign<&NamedElement::name>(ID) +       //
                    "{"_kw +                                         //
-                   many(assign<&Structure::members>(ClassMember)) + //
+                   many(append<&Structure::members>(ClassMember)) + //
                    "}"_kw};
 
   Rule<Xsmp::NamedElement> ClassMember{
       "ClassMember",
-      many(assign<&NamedElement::attributes>(Attribute)) +
-          many(assign<&VisibilityElement::modifiers>(Visibility)) +
+      many(append<&NamedElement::attributes>(Attribute)) +
+          many(append<&VisibilityElement::modifiers>(Visibility)) +
           (Field | Constant | Property | Association)};
 
   Rule<Xsmp::Exception> Exception{
       "Exception", "exception"_kw + assign<&NamedElement::name>(ID) +   //
                        "{"_kw +                                         //
-                       many(assign<&Structure::members>(ClassMember)) + //
+                       many(append<&Structure::members>(ClassMember)) + //
                        "}"_kw};
 
   Rule<Xsmp::Interface> Interface{
@@ -111,15 +111,15 @@ public:
       "interface"_kw + assign<&NamedElement::name>(ID) +
           // base interfaces
           option("extends"_kw +
-                 some(assign<&Interface::bases>(QualifiedName), ","_kw)) + //
+                 some(append<&Interface::bases>(QualifiedName), ","_kw)) + //
           "{"_kw +                                                         //
-          many(assign<&Structure::members>(InterfaceMember)) +             //
+          many(append<&Structure::members>(InterfaceMember)) +             //
           "}"_kw};
 
   Rule<Xsmp::NamedElement> InterfaceMember{
       "InterfaceMember",
-      many(assign<&NamedElement::attributes>(Attribute)) +
-          many(assign<&VisibilityElement::modifiers>(Visibility)) +
+      many(append<&NamedElement::attributes>(Attribute)) +
+          many(append<&VisibilityElement::modifiers>(Visibility)) +
           (Constant | Property)};
 
   Rule<Xsmp::Model> Model{
@@ -130,9 +130,9 @@ public:
           // base interfaces
           option(
               "implements"_kw +
-              some(assign<&Component::interfaces>(QualifiedName), ","_kw)) + //
+              some(append<&Component::interfaces>(QualifiedName), ","_kw)) + //
           "{"_kw +                                                           //
-          many(assign<&Component::members>(ComponentMember)) +               //
+          many(append<&Component::members>(ComponentMember)) +               //
           "}"_kw};
 
   Rule<Xsmp::Service> Service{
@@ -143,17 +143,17 @@ public:
           // base interfaces
           option(
               "implements"_kw +
-              some(assign<&Component::interfaces>(QualifiedName), ","_kw)) + //
+              some(append<&Component::interfaces>(QualifiedName), ","_kw)) + //
           "{"_kw +                                                           //
-          many(assign<&Component::members>(ComponentMember)) +               //
+          many(append<&Component::members>(ComponentMember)) +               //
           "}"_kw};
 
   Rule<Xsmp::NamedElement> ComponentMember{
       "ComponentMember",
-      many(assign<&NamedElement::attributes>(Attribute)) +
+      many(append<&NamedElement::attributes>(Attribute)) +
           (
               // elemenst with visibility
-              many(assign<&VisibilityElement::modifiers>(Visibility)) +
+              many(append<&VisibilityElement::modifiers>(Visibility)) +
                   (Constant | Association | Field | Property) |
               Container | Reference)};
 
@@ -209,18 +209,18 @@ public:
 
   Rule<Xsmp::Field> Field{
       "Field",
-      option(assign<&VisibilityElement::modifiers>("input"_kw | "output"_kw |
+      option(append<&VisibilityElement::modifiers>("input"_kw | "output"_kw |
                                                    "transient"_kw) +
-             many(assign<&VisibilityElement::modifiers>(
+             many(append<&VisibilityElement::modifiers>(
                  Visibility | "input"_kw | "output"_kw | "transient"_kw))) +
           "field"_kw + assign<&Field::type>(QualifiedName) +
           assign<&NamedElement::name>(ID) +
           option("="_kw + assign<&Field::value>(Expression))};
 
   Rule<Xsmp::Property> Property{
-      "Property", option(assign<&VisibilityElement::modifiers>(
+      "Property", option(append<&VisibilityElement::modifiers>(
                              "readWrite"_kw | "readOnly"_kw | "writeOnly"_kw) +
-                         many(assign<&VisibilityElement::modifiers>(
+                         many(append<&VisibilityElement::modifiers>(
                              Visibility | "readWrite"_kw | "readOnly"_kw |
                              "writeOnly"_kw))) +
                       "property"_kw + assign<&Property::type>(QualifiedName) +
@@ -260,7 +260,7 @@ public:
 
   Rule<Xsmp::BooleanLiteral> BooleanLiteral{
       "BooleanLiteral",
-      assign<&BooleanLiteral::isTrue>("true"_kw) | "false"_kw};
+      enable_if<&BooleanLiteral::isTrue>("true"_kw) | "false"_kw};
 
 #pragma clang diagnostic pop
   std::unique_ptr<IContext> createContext() const override {

@@ -11,16 +11,16 @@
 
 namespace pegium::parser {
 
-template <auto feature, ParserExpression Element>
+template <auto feature, ParseExpression Element>
 struct IsValidAssignment
-    : std::bool_constant<(
+    : std::bool_constant<
           (
               // If the Element type is an AstNode
               std::derived_from<helpers::AttrType<feature>, AstNode> &&
-              (
-                  // Check that the element type is convertible to AttrType
-                  std::derived_from<typename std::remove_cvref_t<Element>::type,
-                                    helpers::AttrType<feature>>)) ||
+
+              // Check that the element type is convertible to AttrType
+              std::derived_from<typename std::remove_cvref_t<Element>::type,
+                                helpers::AttrType<feature>>) ||
           // If the element Type is not an AstType
           (
               // Check that the type is convertible to AttrType
@@ -29,25 +29,18 @@ struct IsValidAssignment
               // or AttrType constructible from the givent type
               std::constructible_from<
                   helpers::AttrType<feature>,
-                  typename std::remove_cvref_t<Element>::type> ||
-              // or the feature is callable with the givent type
-              /*std::is_invocable_v<
-                  decltype(feature), helpers::ClassType<feature>,
-                  typename std::remove_cvref_t<Element>::type> ||*/
-              // Or the AttrType is a boolean
-              std::same_as<bool, helpers::AttrType<feature>>))> {};
+                  typename std::remove_cvref_t<Element>::type>)> {};
 
 template <auto feature, typename... Element>
 struct IsValidAssignment<feature, OrderedChoice<Element...>>
     : std::bool_constant<(IsValidAssignment<feature, Element>::value && ...)> {
 };
 
-template <auto feature, typename Element>
-// requires IsValidRule<Element, AttrType>
+template <auto feature, ParseExpression Element>
 struct Assignment final : grammar::Assignment {
 
-  constexpr explicit Assignment(Element &&element)
-      : _element{std::forward<Element>(element)} {}
+  constexpr explicit Assignment(Element &&element, AssignmentOperator ope)
+      : _element{std::forward<Element>(element)}, _operator{ope} {}
 
   constexpr Assignment(Assignment &&) = default;
   constexpr Assignment(const Assignment &) = default;
@@ -61,8 +54,7 @@ struct Assignment final : grammar::Assignment {
     return member_name<feature>();
   }
   constexpr AssignmentOperator getOperator() const noexcept override {
-    // TODO return the correct operator depending on feature type
-    return AssignmentOperator::Append;
+    return _operator;
   }
 
   constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
@@ -98,7 +90,8 @@ struct Assignment final : grammar::Assignment {
   }
 
 private:
-  ParserExpressionHolder<Element> _element;
+  ParseExpressionHolder<Element> _element;
+  AssignmentOperator _operator;
   template <typename ClassType, typename AttrType>
   void do_execute(AstNode *current, AttrType ClassType::*,
                   const CstNode &node) const {
@@ -169,14 +162,43 @@ private:
 };
 
 /// Assign an element to a member of the current object
-/// @tparam Element
-/// @tparam e the member pointer
-/// @param args the list of grammar elements
-/// @return
-template <auto feature, typename Element>
-  requires IsValidAssignment<feature, Element>::value
+/// @tparam feature the member pointer
+/// @tparam Element the parse expression
+/// @param element the expression
+/// @return the assignment
+template <auto feature, ParseExpression Element>
+  requires(IsValidAssignment<feature, Element>::value &&
+           !helpers::IsMany<feature>)
 static constexpr auto assign(Element &&element) {
-  return Assignment<feature, Element>(std::forward<Element>(element));
+  return Assignment<feature, Element>(
+      std::forward<Element>(element),
+      pegium::grammar::AssignmentOperator::Assign);
 }
 
+/// Append an element to a member of the current object
+/// @tparam feature the member pointer
+/// @tparam Element the parse expression
+/// @param element the expression
+/// @return the assignment
+template <auto feature, ParseExpression Element>
+  requires IsValidAssignment<feature, Element>::value &&
+           helpers::IsMany<feature>
+static constexpr auto append(Element &&element) {
+  return Assignment<feature, Element>(
+      std::forward<Element>(element),
+      pegium::grammar::AssignmentOperator::Append);
+}
+
+/// Enable a member of the current object
+/// @tparam feature the boolean member pointer
+/// @tparam Element the parse expression
+/// @param element the expression
+/// @return the assignment
+template <auto feature, ParseExpression Element>
+  requires std::same_as<bool, helpers::AttrType<feature>>
+static constexpr auto enable_if(Element &&element) {
+  return Assignment<feature, Element>(
+      std::forward<Element>(element),
+      pegium::grammar::AssignmentOperator::EnableIf);
+}
 } // namespace pegium::parser

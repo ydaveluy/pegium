@@ -5,7 +5,7 @@
 
 namespace pegium::parser {
 
-template <typename T, ParserExpression Element>
+template <typename T, ParseExpression Element>
 struct CrossReference final : grammar::CrossReference {
   // constexpr ~AndPredicate() override = default;
   explicit constexpr CrossReference(Element &&element)
@@ -30,10 +30,10 @@ struct CrossReference final : grammar::CrossReference {
   }
 
 private:
-  ParserExpressionHolder<Element> _element;
+  ParseExpressionHolder<Element> _element;
 };
 
-template <typename T, ParserExpression Element>
+template <typename T, ParseExpression Element>
 constexpr auto xref(Element &&element) {
   return CrossReference<T, Element>{std::forward<Element>(element)};
 }

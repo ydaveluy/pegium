@@ -45,9 +45,9 @@ template <char_array_builder builder> consteval auto operator""_kw() {
   return Literal<builder.value>{};
 }
 
-/// The end of file token
+/// The end of file
 static constexpr auto eof = !dot;
-/// The end of line token
+/// The end of line
 static constexpr auto eol = "\n"_kw | "\r\n"_kw | "\r"_kw;
 /// a space character equivalent to regex `\s`
 static constexpr auto s = " \t\r\n\f\v"_cr;
@@ -63,11 +63,13 @@ static constexpr auto d = "0-9"_cr;
 static constexpr auto D = !d + dot;
 
 /// An until operation that starts from element `from` and ends to element
-/// `to`. e.g `"#*"_kw >> "*#"_kw` to match a multiline comment
+/// `to`. e.g `"from"_kw <=> "to"_kw`.
+/// This operation is non-greedy, it will stop as soon as it finds the `to`
+/// element.
 /// @param from the starting element
 /// @param to the ending element
 /// @return the until element
-template <ParserExpression T, ParserExpression U>
+template <ParseExpression T, ParseExpression U>
 constexpr auto operator<=>(T &&from, U &&to) {
   return std::forward<T>(from) + many(!std::forward<U>(to) + dot) +
          std::forward<U>(to);

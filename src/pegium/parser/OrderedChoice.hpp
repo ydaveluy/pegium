@@ -5,43 +5,22 @@
 
 namespace pegium::parser {
 
-template <ParserExpression... Elements>
+template <ParseExpression... Elements>
 struct OrderedChoice final : grammar::OrderedChoice {
   static_assert(sizeof...(Elements) > 1,
                 "An OrderedChoice shall contains at least 2 elements.");
   // constexpr ~OrderedChoice() override = default;
 
-  constexpr explicit OrderedChoice(std::tuple<Elements...> &&elems)
-      : _elements{std::move(elems)} {}
+  constexpr explicit OrderedChoice(std::tuple<Elements...> &&elements)
+      : _elements{std::move(elements)} {}
   constexpr OrderedChoice(OrderedChoice &&) = default;
   constexpr OrderedChoice(const OrderedChoice &) = default;
   constexpr OrderedChoice &operator=(OrderedChoice &&) = default;
   constexpr OrderedChoice &operator=(const OrderedChoice &) = default;
 
-  template <std::size_t I = 0>
-  constexpr MatchResult parse_rule_impl(std::string_view sv, CstNode &parent,
-                                        IContext &c) const {
-    if constexpr (I == sizeof...(Elements)) {
-      return MatchResult::failure(sv.begin());
-    } else {
-      auto r = std::get<I>(_elements).parse_rule(sv, parent, c);
-      return r ? r : parse_rule_impl<I + 1>(sv, parent, c);
-    }
-  }
   constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
                                    IContext &c) const {
     return parse_rule_impl(sv, parent, c);
-  }
-
-  template <std::size_t I = 0>
-  constexpr MatchResult
-  parse_terminal_impl(std::string_view sv) const noexcept {
-    if constexpr (I == sizeof...(Elements)) {
-      return MatchResult::failure(sv.begin());
-    } else {
-      auto r = std::get<I>(_elements).parse_terminal(sv);
-      return r ? r : parse_terminal_impl<I + 1>(sv);
-    }
   }
 
   constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
@@ -63,29 +42,50 @@ struct OrderedChoice final : grammar::OrderedChoice {
 private:
   std::tuple<Elements...> _elements;
 
-  template <ParserExpression... Rhs>
+  template <std::size_t I = 0>
+  constexpr MatchResult
+  parse_terminal_impl(std::string_view sv) const noexcept {
+    if constexpr (I == sizeof...(Elements)) {
+      return MatchResult::failure(sv.begin());
+    } else {
+      auto r = std::get<I>(_elements).parse_terminal(sv);
+      return r ? r : parse_terminal_impl<I + 1>(sv);
+    }
+  }
+
+  template <std::size_t I = 0>
+  constexpr MatchResult parse_rule_impl(std::string_view sv, CstNode &parent,
+                                        IContext &c) const {
+    if constexpr (I == sizeof...(Elements)) {
+      return MatchResult::failure(sv.begin());
+    } else {
+      auto r = std::get<I>(_elements).parse_rule(sv, parent, c);
+      return r ? r : parse_rule_impl<I + 1>(sv, parent, c);
+    }
+  }
+
+  template <ParseExpression... Rhs>
   friend constexpr auto operator|(OrderedChoice &&lhs,
                                   OrderedChoice<Rhs...> &&rhs) {
-    return OrderedChoice<Elements..., ParserExpressionHolder<Rhs>...>{
+    return OrderedChoice<Elements..., ParseExpressionHolder<Rhs>...>{
         std::tuple_cat(std::move(lhs._elements), std::move(rhs._elements))};
   }
 
-  template <ParserExpression Rhs>
+  template <ParseExpression Rhs>
   friend constexpr auto operator|(OrderedChoice &&lhs, Rhs &&rhs) {
-    return OrderedChoice<Elements..., ParserExpressionHolder<Rhs>>{
+    return OrderedChoice<Elements..., ParseExpressionHolder<Rhs>>{
         std::tuple_cat(std::move(lhs._elements), std::forward_as_tuple(rhs))};
   }
-  template <ParserExpression Lhs>
+  template <ParseExpression Lhs>
   friend constexpr auto operator|(Lhs &&lhs, OrderedChoice &&rhs) {
-    return OrderedChoice<ParserExpressionHolder<Lhs>, Elements...>{
+    return OrderedChoice<ParseExpressionHolder<Lhs>, Elements...>{
         std::tuple_cat(std::forward_as_tuple(lhs), std::move(rhs._elements))};
   }
 };
 
-template <ParserExpression Lhs, ParserExpression Rhs>
+template <ParseExpression Lhs, ParseExpression Rhs>
 constexpr auto operator|(Lhs &&lhs, Rhs &&rhs) {
-  return OrderedChoice<ParserExpressionHolder<Lhs>,
-                       ParserExpressionHolder<Rhs>>{
+  return OrderedChoice<ParseExpressionHolder<Lhs>, ParseExpressionHolder<Rhs>>{
       std::forward_as_tuple(std::forward<Lhs>(lhs), std::forward<Rhs>(rhs))};
 }
 

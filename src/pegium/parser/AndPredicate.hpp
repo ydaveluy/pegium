@@ -5,7 +5,7 @@
 
 namespace pegium::parser {
 
-template <ParserExpression Element>
+template <ParseExpression Element>
 struct AndPredicate final : grammar::AndPredicate {
   // constexpr ~AndPredicate() override = default;
   explicit constexpr AndPredicate(Element &&element)
@@ -31,11 +31,10 @@ struct AndPredicate final : grammar::AndPredicate {
   }
 
 private:
-  ParserExpressionHolder<Element> _element;
+  ParseExpressionHolder<Element> _element;
 };
 
-template <ParserExpression Element>
-constexpr auto operator&(Element &&element) {
+template <ParseExpression Element> constexpr auto operator&(Element &&element) {
   return AndPredicate<Element>{std::forward<Element>(element)};
 }
 } // namespace pegium::parser
