@@ -189,7 +189,8 @@ template <auto Member>
 using ClassType = typename MemberTraits<Member>::ClassType;
 
 template <auto Member> using AttrType = typename MemberTraits<Member>::AttrType;
-template <auto Member> static constexpr bool IsMany = MemberTraits<Member>::IsMany;
+template <auto Member>
+static constexpr bool IsMany = MemberTraits<Member>::IsMany;
 
 // Generic
 template <typename T> struct AssignmentHelper {
@@ -211,14 +212,24 @@ template <typename T> struct AssignmentHelper {
   }
 };
 
-/*template <typename T> struct AssignmentHelper<Reference<T>> {
+template <typename T> struct AssignmentHelper<Reference<T>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, Reference<T> Base::*member, U &&value) const {
-    // node->*member = std::forward<U>(value);
-    static_assert(false, "not implemented");
+    node->*member = Reference<T>{std::forward<U>(value)};
+    node->addReference(member);
   }
-};*/
+};
+template <typename T> struct AssignmentHelper<std::vector<Reference<T>>> {
+  template <typename Node, typename Base, typename U>
+    requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
+  void operator()(Node *node, std::vector<Reference<T>> Base::*member,
+                  U &&value) const {
+    auto index = (node->*member).size();
+    (node->*member).emplace_back(Reference<T>{std::forward<U>(value)});
+    node->addReference(member, index);
+  }
+};
 
 template <typename T> struct AssignmentHelper<std::shared_ptr<T>> {
   template <typename Node, typename Base, typename U>
@@ -253,9 +264,6 @@ template <typename T> struct AssignmentHelper<std::vector<T>> {
 
     static_assert(!std::derived_from<T, AstNode>,
                   "An AstNode must be stored in a std::shared_ptr");
-    /*if constexpr (std::derived_from<T, AstNode>) {
-      value.setContainer(node, member, (node->*member).size());
-    }*/
     if constexpr (std::is_convertible_v<U, T>) {
       (node->*member).emplace_back(std::forward<U>(value));
     } else if constexpr (std::is_constructible_v<T, U>) {

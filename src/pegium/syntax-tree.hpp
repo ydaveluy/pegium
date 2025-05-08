@@ -18,14 +18,6 @@
 namespace pegium {
 
 struct AstNode;
-struct ReferenceInfo {
-  virtual ~ReferenceInfo() = default;
-  // reference: Reference
-  virtual const AstNode *getReference() const = 0;
-  const AstNode *container;
-  std::any property;
-  std::size_t index;
-};
 
 /// A Reference of type T.
 /// @tparam T the AstNode type.
@@ -61,13 +53,7 @@ template <typename T> struct Reference {
   /// Check if the reference is resolved
   explicit operator bool() const { return get(); }
 
-  /// Set the text of the reference (internally used by parser)
-  /// @param refText the reference text
-  /// @return the current object.
-  /*Reference &operator=(std::string refText) noexcept {
-    _refText = std::move(refText);
-    return *this;
-  }*/
+  std::string_view getReferenceText() const noexcept { return _refText; }
 
 private:
   std::string _refText;
@@ -76,6 +62,7 @@ private:
   mutable std::atomic_bool resolved = false;
   mutable T *ref = nullptr;
   mutable std::mutex mutex;*/
+  friend class ReferenceInfo;
 };
 
 /// Helpers to check if an object is a Reference
@@ -85,8 +72,42 @@ template <typename T>
 struct is_reference<std::vector<Reference<T>>> : std::true_type {};
 template <typename T> constexpr bool is_reference_v = is_reference<T>::value;
 
+struct ReferenceInfo {
+  template <typename T, typename Class>
+  ReferenceInfo(AstNode *container, Reference<T> Class::*feature);
+  template <typename T, typename Class>
+  ReferenceInfo(AstNode *container, std::vector<Reference<T>> Class::*feature,
+                std::size_t index);
+  ReferenceInfo(ReferenceInfo &&) = default;
+  ReferenceInfo(const ReferenceInfo &) = default;
+  ReferenceInfo &operator=(ReferenceInfo &&) = default;
+  ReferenceInfo &operator=(const ReferenceInfo &) = default;
+  ReferenceInfo() = default;
+  ~ReferenceInfo() = default;
+  std::string_view getReferenceText() const noexcept {
+    return _referenceText(this);
+  }
+  bool isInstance(const AstNode *node) const noexcept {
+    return _isInstance(node);
+  }
+  const AstNode *getValue() const noexcept { return _getValue(this); }
+  AstNode *getValue() noexcept { return _getValue(this); }
+  void setValue(AstNode *value) { _setValue(this, value); }
+
+  static constexpr std::size_t npos = std::numeric_limits<std::size_t>::max();
+
+private:
+  AstNode *container;
+  std::any property;
+  std::size_t index;
+  std::function<std::string_view(const ReferenceInfo *)> _referenceText;
+  std::function<bool(const AstNode *)> _isInstance;
+  std::function<void(const ReferenceInfo *, AstNode *)> _setValue;
+  std::function<AstNode *(const ReferenceInfo *)> _getValue;
+};
+
 struct CstNode;
-/// Represent a node in the AST. Each node in the AST must derived from AstNode
+/// Represent a node in the AST. Each node in the AST must derives from AstNode
 struct AstNode {
   AstNode() = default;
 
@@ -169,6 +190,25 @@ struct AstNode {
     return of_type<T>(getAllContent());
   }
 
+  /// Returns the references of this node.
+  auto getReferences() { return std::views::all(_references); }
+  /// Returns the references of this node.
+  auto getReferences() const {
+    return std::views::transform(
+        _references,
+        [](const ReferenceInfo &ref) -> const ReferenceInfo & { return ref; });
+  }
+
+  template <typename T, typename Class>
+  void addReference(Reference<T> Class::*feature) {
+    _references.emplace_back(this, feature);
+  }
+  template <typename T, typename Class>
+  void addReference(std::vector<Reference<T>> Class::*feature,
+                    std::size_t index) {
+    _references.emplace_back(this, feature, index);
+  }
+
   /// Returns the parent node, or nullptr if this is the root.
   const AstNode *getContainer() const noexcept;
   /// Returns the parent node, or nullptr if this is the root.
@@ -215,6 +255,7 @@ struct AstNode {
 private:
   void setContainer(AstNode *container, std::any property, std::size_t index);
   std::vector<AstNode *> _content;
+  std::vector<ReferenceInfo> _references;
   /// The container node in the AST; every node except the root node has a
   /// container.
   AstNode *_container = nullptr;
@@ -321,4 +362,48 @@ struct RootCstNode : public CstNode {
   std::string fullText;
 };
 
+template <typename T, typename Class>
+ReferenceInfo::ReferenceInfo(AstNode *container, Reference<T> Class::*feature)
+    : container{container}, property{feature}, index{npos} {
+  assert(dynamic_cast<Class *>(container));
+
+  _referenceText = [feature](const ReferenceInfo *refInfo) -> std::string_view {
+    return (static_cast<const Class *>(refInfo->container)->*feature)
+        .getReferenceText();
+  };
+
+  _isInstance = [](const AstNode *node) -> bool {
+    return dynamic_cast<const T *>(node) != nullptr;
+  };
+  _setValue = [feature](const ReferenceInfo *refInfo, AstNode *value) -> void {
+    (static_cast<Class *>(refInfo->container)->*feature).ref =
+        dynamic_cast<T *>(value);
+  };
+  _getValue = [feature](const ReferenceInfo *refInfo) -> AstNode * {
+    return (static_cast<Class *>(refInfo->container)->*feature).get();
+  };
+}
+template <typename T, typename Class>
+ReferenceInfo::ReferenceInfo(AstNode *container,
+                             std::vector<Reference<T>> Class::*feature,
+                             std::size_t index)
+    : container{container}, property{feature}, index{index} {
+  assert(dynamic_cast<Class *>(container));
+  _referenceText = [feature](const ReferenceInfo *refInfo) -> std::string_view {
+    return (static_cast<const Class *>(refInfo->container)
+                ->*feature)[refInfo->index]
+        .getReferenceText();
+  };
+  _isInstance = [](const AstNode *node) -> bool {
+    return dynamic_cast<const T *>(node) != nullptr;
+  };
+  _setValue = [feature](const ReferenceInfo *refInfo, AstNode *value) -> void {
+    (static_cast<Class *>(refInfo->container)->*feature)[refInfo->index].ref =
+        dynamic_cast<T *>(value);
+  };
+  _getValue = [feature](const ReferenceInfo *refInfo) -> AstNode * {
+    return (static_cast<Class *>(refInfo->container)->*feature)[refInfo->index]
+        .get();
+  };
+}
 } // namespace pegium
