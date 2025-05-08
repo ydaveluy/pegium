@@ -216,7 +216,7 @@ template <typename T> struct AssignmentHelper<Reference<T>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, Reference<T> Base::*member, U &&value) const {
-    node->*member = Reference<T>{std::forward<U>(value)};
+    node->*member = std::move(Reference<T>{std::forward<U>(value)});
     node->addReference(member);
   }
 };

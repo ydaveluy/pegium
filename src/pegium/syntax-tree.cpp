@@ -1,12 +1,12 @@
 
-#include <ostream>
 #include <algorithm>
+#include <ostream>
 #include <pegium/syntax-tree.hpp>
 namespace pegium {
 
 std::ostream &operator<<(std::ostream &os, const CstNode &obj) {
   os << "{\n";
-   if (obj.grammarSource)
+  if (obj.grammarSource)
     os << "\"grammarSource\": \"" << *obj.grammarSource << "\",\n";
 
   if (obj.isLeaf()) {
@@ -61,20 +61,20 @@ void AstNode::cleanup() noexcept {
     auto it = std::find(vec.begin(), vec.end(), this);
     if (it != vec.end()) {
       std::iter_swap(it, vec.end() - 1);
-      vec.pop_back();                    
+      vec.pop_back();
     }
     _container = nullptr;
   }
 }
 
-void AstNode::moveFrom(AstNode&& other) noexcept {
+void AstNode::moveFrom(AstNode &&other) noexcept {
   _container = other._container;
   _containerProperty = std::move(other._containerProperty);
   _containerIndex = other._containerIndex;
   _node = other._node;
 
   if (_container) {
-    auto& siblings = _container->_content;
+    auto &siblings = _container->_content;
     auto it = std::find(siblings.begin(), siblings.end(), &other);
     if (it != siblings.end()) {
       *it = this;
