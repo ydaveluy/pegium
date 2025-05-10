@@ -29,17 +29,6 @@ std::ostream &operator<<(std::ostream &os, const CstNode &obj) {
   return os;
 }
 
-AstNode::AstNode(AstNode &&other) noexcept { moveFrom(std::move(other)); }
-
-// Move assignment
-AstNode &AstNode::operator=(AstNode &&other) noexcept {
-  if (this != &other) {
-    cleanup();
-    moveFrom(std::move(other));
-  }
-  return *this;
-}
-AstNode::~AstNode() noexcept { cleanup(); }
 const AstNode *AstNode::getContainer() const noexcept { return _container; }
 
 AstNode *AstNode::getContainer() noexcept { return _container; }
@@ -53,35 +42,6 @@ void AstNode::setContainer(AstNode *container, std::any property,
   _containerProperty = std::move(property);
   _containerIndex = index;
   _container->_content.push_back(this);
-}
-
-void AstNode::cleanup() noexcept {
-  if (_container) {
-    auto &vec = _container->_content;
-    auto it = std::find(vec.begin(), vec.end(), this);
-    if (it != vec.end()) {
-      std::iter_swap(it, vec.end() - 1);
-      vec.pop_back();
-    }
-    _container = nullptr;
-  }
-}
-
-void AstNode::moveFrom(AstNode &&other) noexcept {
-  _container = other._container;
-  _containerProperty = std::move(other._containerProperty);
-  _containerIndex = other._containerIndex;
-  _node = other._node;
-
-  if (_container) {
-    auto &siblings = _container->_content;
-    auto it = std::find(siblings.begin(), siblings.end(), &other);
-    if (it != siblings.end()) {
-      *it = this;
-    }
-  }
-
-  other._container = nullptr;
 }
 
 } // namespace pegium

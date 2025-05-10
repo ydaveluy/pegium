@@ -57,20 +57,18 @@ struct Repetition final : grammar::Repetition {
       MatchResult result = MatchResult::success(sv.begin());
       const auto end = sv.end();
 
-      while (count < min) {
+      for (; count < min; ++count) {
         result = _element.parse_rule({result.offset, end}, parent, c);
         if (!result) {
           return result;
         }
-        ++count;
       }
-      while (count < max) {
+      for (; count < max; ++count) {
         auto r = _element.parse_rule({result.offset, end}, parent, c);
         if (!r) {
           break;
         }
         result = r;
-        ++count;
       }
       return result;
     }
@@ -110,21 +108,19 @@ struct Repetition final : grammar::Repetition {
       MatchResult result = MatchResult::success(sv.begin());
       std::size_t count = 0;
       const auto end = sv.end();
-      while (count < min) {
+      for (; count < min; ++count) {
         result = _element.parse_terminal({result.offset, end});
         if (!result) {
           return result;
         }
-        ++count;
       }
 
-      while (count < max) {
+      for (; count < max; ++count) {
         auto r = _element.parse_terminal({result.offset, end});
         if (!r) {
           break;
         }
         result = r;
-        ++count;
       }
 
       return result;

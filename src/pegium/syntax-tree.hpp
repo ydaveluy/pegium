@@ -152,18 +152,16 @@ struct CstNode;
 struct AstNode {
   AstNode() = default;
 
-  // Move constructor
-  AstNode(AstNode &&other) noexcept;
+  // delete Copy/Move constructor
+  AstNode(AstNode &&other) = delete;
+  AstNode(const AstNode &other) = delete;
 
-  // Move assignment
-  AstNode &operator=(AstNode &&other) noexcept;
+  // delete Copy/Move assignment
+  AstNode &operator=(AstNode &&other) = delete;
+  AstNode &operator=(const AstNode &other) = delete;
 
   // Destructeur
-  virtual ~AstNode() noexcept;
-
-  /// An attribute of type T.
-  /// @tparam T the attribute type
-  // template <typename T> using attribute = T;
+  virtual ~AstNode() noexcept = default;
 
   /// A reference to an AstNode of type T.
   /// @tparam T the AstNode type
@@ -308,10 +306,6 @@ private:
   /// The Concrete Syntax Tree (CST) node of the text range from which this node
   /// was parsed.
   CstNode *_node;
-
-  void cleanup() noexcept;
-
-  void moveFrom(AstNode &&other) noexcept;
 
   template <typename T, typename Range> static auto of_type(Range &&range) {
     using Ptr = std::ranges::range_value_t<Range>;

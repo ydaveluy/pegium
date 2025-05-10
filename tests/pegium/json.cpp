@@ -29,8 +29,8 @@ struct JsonArray : pegium::AstNode {
 
 struct JsonValue : pegium::AstNode {
 
-  std::variant<std::string, double, std::int32_t, JsonObject, JsonArray, bool,
-               std::nullptr_t>
+  std::variant<std::string, double, std::int32_t, pointer<JsonObject>,
+               pointer<JsonArray>, bool, std::nullptr_t>
       value;
 };
 
@@ -66,9 +66,8 @@ public:
 
   /// STRING | NUMBER | obj | arr | 'true' | 'false' | 'null'
   Rule<Json::JsonValue> JsonValue{
-      "JsonValue",
-      assign<&JsonValue::value>(STRING | JsonArray | Number | JsonObject |
-                                JsonArray | Bool | Null)};
+      "JsonValue", assign<&JsonValue::value>(STRING | Number | JsonObject |
+                                             JsonArray | Bool | Null)};
 
   JsonParser() {
     Null.setValueConverter([](std::string_view) { return nullptr; });
