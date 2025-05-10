@@ -26,10 +26,16 @@ struct IsValidAssignment
               // Check that the type is convertible to AttrType
               std::convertible_to<typename std::remove_cvref_t<Element>::type,
                                   helpers::AttrType<feature>> ||
-              // or AttrType constructible from the givent type
+              // or AttrType constructible from the given type
               std::constructible_from<
                   helpers::AttrType<feature>,
-                  typename std::remove_cvref_t<Element>::type>)> {};
+                  typename std::remove_cvref_t<Element>::type> ||
+              // or AttrType constructible from a shared_ptr of the given type
+              std::constructible_from<
+                  helpers::AttrType<feature>,
+                  std::shared_ptr<typename std::remove_cvref_t<Element>::type>>
+
+              )> {};
 
 template <auto feature, typename... Element>
 struct IsValidAssignment<feature, OrderedChoice<Element...>>

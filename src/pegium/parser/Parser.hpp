@@ -6,7 +6,6 @@
 #include <pegium/parser/Assignment.hpp>
 #include <pegium/parser/CharacterRange.hpp>
 #include <pegium/parser/Context.hpp>
-#include <pegium/parser/CrossReference.hpp>
 #include <pegium/parser/DataTypeRule.hpp>
 #include <pegium/parser/Group.hpp>
 #include <pegium/parser/IParser.hpp>

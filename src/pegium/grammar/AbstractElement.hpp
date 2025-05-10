@@ -18,8 +18,7 @@ enum class ElementKind {
   ParserRule,
   Repetition,
   TerminalRule,
-  UnorderedGroup,
-  CrossReference
+  UnorderedGroup
 };
 
 struct AbstractElement {
