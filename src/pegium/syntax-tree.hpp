@@ -93,29 +93,29 @@ struct ReferenceInfo {
 
   template <typename T, typename Class>
   ReferenceInfo(AstNode *container, Reference<T> Class::*feature)
-      : container{container}, property{feature}, index{npos} {
+      : container{container}, property{feature}, index{npos},
+        _isInstance{makeIsInstance<T>()} {
     assert(dynamic_cast<Class *>(container));
 
-    _isInstance = makeIsInstance<T>();
     auto *typedContainer = static_cast<Class *>(container);
     _installResolver =
-        [typedContainer,
-         feature](std::function<AstNode *(const std::string &)> resolver) {
-          (typedContainer->*feature)._resolver = std::move(resolver);
+        [typedContainer, feature](
+            const std::function<AstNode *(const std::string &)> &resolver) {
+          (typedContainer->*feature)._resolver = resolver;
         };
   }
   template <typename T, typename Class>
   ReferenceInfo(AstNode *container, std::vector<Reference<T>> Class::*feature,
                 std::size_t index)
-      : container{container}, property{feature}, index{index} {
+      : container{container}, property{feature}, index{index},
+        _isInstance{makeIsInstance<T>()} {
     assert(dynamic_cast<Class *>(container));
-    _isInstance = makeIsInstance<T>();
 
     auto *typedContainer = static_cast<Class *>(container);
     _installResolver =
         [typedContainer, feature,
-         index](std::function<AstNode *(const std::string &)> resolver) {
-          (typedContainer->*feature)[index]._resolver = std::move(resolver);
+         index](const std::function<AstNode *(const std::string &)> &resolver) {
+          (typedContainer->*feature)[index]._resolver = resolver;
         };
   }
   ReferenceInfo(ReferenceInfo &&) noexcept = default;
@@ -127,8 +127,9 @@ struct ReferenceInfo {
   bool isInstance(const AstNode *node) const noexcept {
     return _isInstance(node);
   }
-  void installResolver(std::function<AstNode *(const std::string &)> resolver) {
-    _installResolver(std::move(resolver));
+  void installResolver(
+      const std::function<AstNode *(const std::string &)> &resolver) const {
+    _installResolver(resolver);
   }
 
   static constexpr std::size_t npos = std::numeric_limits<std::size_t>::max();
@@ -138,7 +139,7 @@ private:
   std::any property;
   std::size_t index;
   std::function<bool(const AstNode *)> _isInstance;
-  std::function<void(std::function<AstNode *(const std::string &)>)>
+  std::function<void(const std::function<AstNode *(const std::string &)> &)>
       _installResolver;
   template <typename T> static constexpr auto makeIsInstance() noexcept {
     return [](const AstNode *node) {
@@ -192,8 +193,8 @@ struct AstNode {
   auto getContent() { return std::views::all(_content); }
   /// Returns the direct children of this node.
   auto getContent() const {
-    return std::views::transform(
-        _content, [](const AstNode *ptr) -> const AstNode * { return ptr; });
+    return std::views::transform(_content,
+                                 [](const AstNode *ptr) { return ptr; });
   }
 
   /// Returns the direct children of type T.
