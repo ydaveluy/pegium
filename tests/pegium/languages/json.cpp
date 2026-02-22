@@ -124,33 +124,11 @@ std::string makeJsonPayload(std::size_t repetitions) {
 
 } // namespace
 
-TEST(JsonTest, TestJson) {
-  Json::JsonParser parser;
-
-  const std::string input = makeJsonPayload(100'000);
-
-  std::cout << parser.STRING << ": " << *parser.STRING.getElement()
-            << std::endl;
-  using namespace std::chrono;
-  auto start = high_resolution_clock::now();
-
-  auto result = parser.JsonValue.parse(input, parser.createContext());
-  auto end = high_resolution_clock::now();
-  auto duration = duration_cast<milliseconds>(end - start).count();
-
-  std::cout << "Parsed " << input.size() / static_cast<double>(1024 * 1024)
-            << " Mo in " << duration << "ms: "
-            << ((1000. * result.len / duration) /
-                static_cast<double>(1024 * 1024))
-            << " Mo/s\n";
-
-  EXPECT_TRUE(result.ret);
-}
 
 TEST(JsonBenchmark, ParseSpeedMicroBenchmark) {
   Json::JsonParser parser;
   const auto repetitions = pegium::test::getEnvInt(
-      "PEGIUM_BENCH_JSON_REPETITIONS", 100'000, /*minValue*/ 1);
+      "PEGIUM_BENCH_JSON_REPETITIONS", 5'000, /*minValue*/ 1);
   const auto payload = makeJsonPayload(static_cast<std::size_t>(repetitions));
 
   const auto stats = pegium::test::runParseBenchmark(

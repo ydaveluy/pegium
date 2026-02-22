@@ -336,12 +336,7 @@ private:
       if constexpr (IsSharedPtr<Alternative>::value) {
         using AlternativePointee = typename IsSharedPtr<Alternative>::type;
         if constexpr (std::derived_from<AlternativePointee, AstNode>) {
-          // Safe by design: the assignment constraints validate compatible
-          // alternatives at compile-time. Keep this debug-time guard for
-          // malformed/manual CST construction paths.
-          assert((!value ||
-                  std::dynamic_pointer_cast<AlternativePointee>(value)));
-          if (auto casted = std::static_pointer_cast<AlternativePointee>(value);
+          if (auto casted = std::dynamic_pointer_cast<AlternativePointee>(value);
               casted) {
             target = std::move(casted);
             return true;

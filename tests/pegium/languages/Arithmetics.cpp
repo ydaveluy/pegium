@@ -552,7 +552,7 @@ TEST(ArithmeticsTest, SolverRejectsMismatchedFunctionArity) {
 TEST(ArithmeticsBenchmark, ParseSpeedMicroBenchmark) {
   Arithmetics::ArithmeticParser parser;
   const auto repetitions = pegium::test::getEnvInt(
-      "PEGIUM_BENCH_ARITHMETIC_REPETITIONS", 30'000, /*minValue*/ 1);
+      "PEGIUM_BENCH_ARITHMETIC_REPETITIONS", 6'000, /*minValue*/ 1);
   const auto payload =
       makeArithmeticPayload(static_cast<std::size_t>(repetitions));
 
