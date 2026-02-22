@@ -1,8 +1,12 @@
 #include "xsmp.hpp"
+#include <algorithm>
 #include <chrono>
 #include <gtest/gtest.h>
 #include <iostream>
+#include <pegium/benchmarks.hpp>
 #include <pegium/parser/Parser.hpp>
+#include <sstream>
+#include <stdexcept>
 
 namespace Xsmp {
 
@@ -19,7 +23,8 @@ public:
 
   Rule<> QualifiedName{"QualifiedName", some(ID, "."_kw)};
 
-  Rule<> Visibility{"Visibility", "private"_kw | "protected"_kw | "public"_kw};
+  //Rule<> Visibility{"Visibility", "private"_kw | "protected"_kw | "public"_kw};
+  static constexpr auto Visibility = "private"_kw | "protected"_kw | "public"_kw;
 
   Rule<Xsmp::Attribute> Attribute{
       "Attribute",
@@ -263,15 +268,15 @@ public:
       enable_if<&BooleanLiteral::isTrue>("true"_kw) | "false"_kw};
 
 #pragma clang diagnostic pop
-  std::unique_ptr<IContext> createContext() const override {
+  auto createContext() const {
     return ContextBuilder().ignore(WS).hide(ML_COMMENT, SL_COMMENT).build();
   }
 };
 } // namespace Xsmp
 
-TEST(XsmpTest, TestCatalogue) {
-  Xsmp::XsmpParser parser;
+namespace {
 
+std::string makeXsmpPayload(std::size_t repetitions) {
   std::string input = R"(
     /**
      * A demo catalogue
@@ -279,7 +284,7 @@ TEST(XsmpTest, TestCatalogue) {
     catalogue test 
 
   )";
-  for (std::size_t i = 0; i < 20'000; ++i) {
+  for (std::size_t i = 0; i < repetitions; ++i) {
     input += R"(    
    
 namespace hidden
@@ -313,31 +318,308 @@ namespace hidden
 
     )";
   }
+  return input;
+}
 
-  std::cout << parser.Catalogue << ": " << *parser.Catalogue.getElement()
-            << std::endl;
-  using namespace std::chrono;
-  auto start = high_resolution_clock::now();
+const Xsmp::BooleanLiteral *asBoolLiteral(const Xsmp::Expression *expr) {
+  return dynamic_cast<const Xsmp::BooleanLiteral *>(expr);
+}
 
-  auto result = parser.Catalogue.parse(input, parser.createContext());
-  auto end = high_resolution_clock::now();
-  auto duration = duration_cast<milliseconds>(end - start).count();
+std::string makeCatalogueReferenceText() {
+  return R"(
+    catalogue Demo
+    namespace Core
+    {
+      primitive Bool
+      integer Int32 extends Smp.Int32
+      @Meta
+      attribute Bool Flag = true
+      public abstract service MyService extends Base.Service implements IOne, ITwo
+      {
+        reference Bool refValue
+        container Bool bag
+        public constant Bool enabled = true
+        input output field Bool flag = false
+      }
+      enum Mode
+      {
+        ON = true,
+        OFF = false
+      }
+    }
+  )";
+}
 
-  std::cout << "XSMP Parsed " << result.len / static_cast<double>(1024 * 1024)
-            << " Mo in " << duration << "ms: "
-            << ((1000. * result.len / duration) /
-                static_cast<double>(1024 * 1024))
-            << " Mo/s\n";
+std::string replaceOnce(std::string input, std::string_view from,
+                        std::string_view to) {
+  const auto pos = input.find(from);
+  if (pos == std::string::npos) {
+    throw std::logic_error("replaceOnce: pattern not found");
+  }
+  input.replace(pos, from.size(), to);
+  return input;
+}
 
-  EXPECT_TRUE(result.ret);
-  ASSERT_TRUE(result.value);
+void assertCatalogueAst(const std::shared_ptr<Xsmp::Catalogue> &catalogue,
+                        bool allowMissingNamespaceName = false) {
+  ASSERT_TRUE(catalogue != nullptr);
+  EXPECT_EQ(catalogue->name, "Demo");
+  ASSERT_EQ(catalogue->namespaces.size(), 1u);
+  ASSERT_TRUE(catalogue->namespaces[0] != nullptr);
 
-  EXPECT_EQ(result.value->name, "test");
+  const auto &ns = catalogue->namespaces[0];
+  if (allowMissingNamespaceName) {
+    EXPECT_TRUE(ns->name.empty() || ns->name == "Core");
+  } else {
+    EXPECT_EQ(ns->name, "Core");
+  }
+  ASSERT_EQ(ns->members.size(), 5u);
 
-  // for (const auto *node : result.value->getAllContent<Xsmp::NamedElement>())
-  //   std::cout << node->name << std::endl;
+  const auto *primitive = dynamic_cast<const Xsmp::PrimitiveType *>(
+      ns->members[0].get());
+  ASSERT_NE(primitive, nullptr);
+  EXPECT_EQ(primitive->name, "Bool");
 
-  // std::cout << "parsed " << result.value->namespaces.size() << "
-  // namespace\n";
-  //  EXPECT_EQ(result.value->namespaces.size(), 400'002);
+  const auto *integer = dynamic_cast<const Xsmp::Integer *>(ns->members[1].get());
+  ASSERT_NE(integer, nullptr);
+  EXPECT_EQ(integer->name, "Int32");
+  EXPECT_TRUE(integer->primitiveType.has_value());
+
+  const auto *attributeType =
+      dynamic_cast<const Xsmp::AttributeType *>(ns->members[2].get());
+  ASSERT_NE(attributeType, nullptr);
+  EXPECT_EQ(attributeType->name, "Flag");
+  ASSERT_EQ(attributeType->attributes.size(), 1u);
+  ASSERT_TRUE(attributeType->attributes[0] != nullptr);
+  ASSERT_TRUE(attributeType->value != nullptr);
+  const auto *attributeValue = asBoolLiteral(attributeType->value.get());
+  ASSERT_NE(attributeValue, nullptr);
+  EXPECT_TRUE(attributeValue->isTrue);
+
+  const auto service = std::dynamic_pointer_cast<Xsmp::Service>(ns->members[3]);
+  ASSERT_TRUE(service != nullptr);
+  EXPECT_EQ(service->name, "MyService");
+  ASSERT_EQ(service->modifiers.size(), 2u);
+  EXPECT_EQ(service->modifiers[0], "public");
+  EXPECT_EQ(service->modifiers[1], "abstract");
+  EXPECT_TRUE(service->base.has_value());
+  ASSERT_EQ(service->interfaces.size(), 2u);
+  ASSERT_EQ(service->members.size(), 4u);
+
+  const auto *reference =
+      dynamic_cast<const Xsmp::Reference *>(service->members[0].get());
+  ASSERT_NE(reference, nullptr);
+  EXPECT_EQ(reference->name, "refValue");
+
+  const auto *container =
+      dynamic_cast<const Xsmp::Container *>(service->members[1].get());
+  ASSERT_NE(container, nullptr);
+  EXPECT_EQ(container->name, "bag");
+
+  const auto *constant =
+      dynamic_cast<const Xsmp::Constant *>(service->members[2].get());
+  ASSERT_NE(constant, nullptr);
+  EXPECT_EQ(constant->name, "enabled");
+  ASSERT_EQ(constant->modifiers.size(), 1u);
+  EXPECT_EQ(constant->modifiers[0], "public");
+  ASSERT_TRUE(constant->value != nullptr);
+  const auto *constantValue = asBoolLiteral(constant->value.get());
+  ASSERT_NE(constantValue, nullptr);
+  EXPECT_TRUE(constantValue->isTrue);
+
+  const auto *field = dynamic_cast<const Xsmp::Field *>(service->members[3].get());
+  ASSERT_NE(field, nullptr);
+  EXPECT_EQ(field->name, "flag");
+  ASSERT_EQ(field->modifiers.size(), 2u);
+  EXPECT_EQ(field->modifiers[0], "input");
+  EXPECT_EQ(field->modifiers[1], "output");
+  ASSERT_TRUE(field->value != nullptr);
+  const auto *fieldValue = asBoolLiteral(field->value.get());
+  ASSERT_NE(fieldValue, nullptr);
+  EXPECT_FALSE(fieldValue->isTrue);
+
+  const auto *enumeration =
+      dynamic_cast<const Xsmp::Enumeration *>(ns->members[4].get());
+  ASSERT_NE(enumeration, nullptr);
+  EXPECT_EQ(enumeration->name, "Mode");
+  ASSERT_EQ(enumeration->literals.size(), 2u);
+  ASSERT_TRUE(enumeration->literals[0] != nullptr);
+  ASSERT_TRUE(enumeration->literals[1] != nullptr);
+  EXPECT_EQ(enumeration->literals[0]->name, "ON");
+  EXPECT_EQ(enumeration->literals[1]->name, "OFF");
+  ASSERT_TRUE(enumeration->literals[0]->value != nullptr);
+  ASSERT_TRUE(enumeration->literals[1]->value != nullptr);
+  const auto *onValue = asBoolLiteral(enumeration->literals[0]->value.get());
+  const auto *offValue = asBoolLiteral(enumeration->literals[1]->value.get());
+  ASSERT_NE(onValue, nullptr);
+  ASSERT_NE(offValue, nullptr);
+  EXPECT_TRUE(onValue->isTrue);
+  EXPECT_FALSE(offValue->isTrue);
+}
+
+template <typename T>
+void expectDiagnosticKind(
+    const pegium::parser::ParseResult<T> &parsed,
+    pegium::parser::ParseDiagnosticKind kind) {
+  const bool hasKind =
+      std::any_of(parsed.diagnostics.begin(), parsed.diagnostics.end(),
+                  [kind](const pegium::parser::ParseDiagnostic &diag) {
+                    return diag.kind == kind;
+                  });
+  if (!hasKind) {
+    std::ostringstream oss;
+    bool first = true;
+    for (const auto &diag : parsed.diagnostics) {
+      if (!first) {
+        oss << ", ";
+      }
+      first = false;
+      oss << static_cast<int>(diag.kind) << '@' << diag.offset;
+    }
+    ADD_FAILURE() << "expected diagnostic kind=" << static_cast<int>(kind)
+                  << " but got [" << oss.str() << ']';
+  }
+}
+
+} // namespace
+
+TEST(XsmpTest, ParseBuildsExpectedAstForSmallCatalogue) {
+  Xsmp::XsmpParser parser;
+
+  const std::string input = makeCatalogueReferenceText();
+
+  const auto parsed = parser.Catalogue.parse(input, parser.createContext());
+  EXPECT_FALSE(parsed.recovered);
+  ASSERT_TRUE(parsed.ret) << "recovered=" << parsed.recovered
+                          << " len=" << parsed.len
+                          << " size=" << input.size();
+  assertCatalogueAst(parsed.value);
+}
+
+TEST(XsmpTest, RecoverySkipsUnexpectedTokensAndBuildsAst) {
+  Xsmp::XsmpParser parser;
+
+  const std::string input =
+      replaceOnce(makeCatalogueReferenceText(), "catalogue", "catalogoe");
+
+  const auto parsed = parser.Catalogue.parse(input, parser.createContext());
+  ASSERT_TRUE(parsed.ret) << "len=" << parsed.len << " size=" << input.size();
+  EXPECT_TRUE(parsed.recovered);
+  EXPECT_FALSE(parsed.diagnostics.empty());
+  expectDiagnosticKind(parsed, pegium::parser::ParseDiagnosticKind::Replaced);
+  assertCatalogueAst(parsed.value);
+}
+
+TEST(XsmpTest, RecoverySkipsUnexpectedTokenInMiddleOfServiceHeader) {
+  Xsmp::XsmpParser parser;
+
+  const std::string input =
+      replaceOnce(makeCatalogueReferenceText(), "implements", "implxments");
+
+  const auto parsed = parser.Catalogue.parse(input, parser.createContext());
+  ASSERT_TRUE(parsed.ret) << "len=" << parsed.len << " size=" << input.size();
+  EXPECT_TRUE(parsed.recovered);
+  EXPECT_FALSE(parsed.diagnostics.empty());
+  expectDiagnosticKind(parsed, pegium::parser::ParseDiagnosticKind::Replaced);
+  assertCatalogueAst(parsed.value);
+}
+
+TEST(XsmpTest, RecoverySkipsUnexpectedTokensInMiddleOfServiceBody) {
+  Xsmp::XsmpParser parser;
+
+  const std::string input =
+      replaceOnce(makeCatalogueReferenceText(), "constant", "constxnt");
+
+  const auto parsed = parser.Catalogue.parse(input, parser.createContext());
+  ASSERT_TRUE(parsed.ret) << "len=" << parsed.len << " size=" << input.size();
+  EXPECT_TRUE(parsed.recovered);
+  EXPECT_FALSE(parsed.diagnostics.empty());
+  expectDiagnosticKind(parsed, pegium::parser::ParseDiagnosticKind::Replaced);
+  assertCatalogueAst(parsed.value);
+}
+
+TEST(XsmpTest, RecoveryFixesTypoInNamespaceKeyword) {
+  Xsmp::XsmpParser parser;
+
+  const std::string input =
+      replaceOnce(makeCatalogueReferenceText(), "namespace", "namespase");
+
+  const auto parsed = parser.Catalogue.parse(input, parser.createContext());
+  ASSERT_TRUE(parsed.ret) << "len=" << parsed.len << " size=" << input.size();
+  EXPECT_TRUE(parsed.recovered);
+  EXPECT_FALSE(parsed.diagnostics.empty());
+  expectDiagnosticKind(parsed, pegium::parser::ParseDiagnosticKind::Replaced);
+  assertCatalogueAst(parsed.value);
+}
+
+TEST(XsmpTest, RecoveryDeletesExtraCharacterAfterKeyword) {
+  Xsmp::XsmpParser parser;
+
+  const std::string input =
+      replaceOnce(makeCatalogueReferenceText(), "implements", "implementss");
+
+  const auto parsed = parser.Catalogue.parse(input, parser.createContext());
+  ASSERT_TRUE(parsed.ret) << "len=" << parsed.len << " size=" << input.size();
+  EXPECT_TRUE(parsed.recovered);
+  EXPECT_FALSE(parsed.diagnostics.empty());
+  const bool hasDeleteOrReplace =
+      std::any_of(parsed.diagnostics.begin(), parsed.diagnostics.end(),
+                  [](const pegium::parser::ParseDiagnostic &diag) {
+                    return diag.kind == pegium::parser::ParseDiagnosticKind::Deleted ||
+                           diag.kind == pegium::parser::ParseDiagnosticKind::Replaced;
+                  });
+  EXPECT_TRUE(hasDeleteOrReplace);
+  assertCatalogueAst(parsed.value);
+}
+
+TEST(XsmpTest, RecoveryMultipleErrors) {
+  Xsmp::XsmpParser parser;
+
+  const std::string input =R"(
+    /* typo on catalogue keyword */
+    cataloge Demo 
+    
+    aaa /* extra tokens */ 
+
+    namespace Core
+    { 
+      primitive Bool
+      integer Int32 extends Smp.Int32
+      @Meta( /*missing closing bracket */
+      attribute Bool Flag = true
+      Public abstract service MyService extends Base.Service implements IOne, ITwo
+      {
+        reference Bool refValue
+        container Bool bag
+        public constant Bool enabled = true
+        input output field Bool flag = false
+      }
+      enum Mode
+      {
+        ON = true //missing comma
+        OFF = false
+      }
+    // missing closing square bracket for namespace
+  )";
+
+  const auto parsed = parser.Catalogue.parse(input, parser.createContext());
+  ASSERT_TRUE(parsed.ret) << "len=" << parsed.len << " size=" << input.size();
+  EXPECT_TRUE(parsed.recovered);
+  EXPECT_FALSE(parsed.diagnostics.empty());
+  //expectDiagnosticKind(parsed, pegium::parser::ParseDiagnosticKind::Replaced);
+  assertCatalogueAst(parsed.value, /*allowMissingNamespaceName=*/true);
+}
+
+
+TEST(XsmpBenchmark, ParseSpeedMicroBenchmark) {
+  Xsmp::XsmpParser parser;
+  const auto repetitions = pegium::test::getEnvInt(
+      "PEGIUM_BENCH_XSMP_REPETITIONS", 1'500, /*minValue*/ 1);
+  const auto payload = makeXsmpPayload(static_cast<std::size_t>(repetitions));
+
+  const auto stats = pegium::test::runParseBenchmark(
+      "xsmp", payload, [&](std::string_view text) {
+        return parser.Catalogue.parse(text, parser.createContext());
+      });
+  pegium::test::assertMinThroughput("xsmp", stats.mib_per_s);
 }

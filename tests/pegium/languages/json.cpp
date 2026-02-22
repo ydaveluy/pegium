@@ -3,7 +3,8 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <pegium/parser/Parser.hpp>
-#include <pegium/syntax-tree.hpp>
+#include <pegium/benchmarks.hpp>
+#include <pegium/syntax-tree/AstNode.hpp>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -72,16 +73,16 @@ public:
   JsonParser() {
     Null.setValueConverter([](std::string_view) { return nullptr; });
   }
-  std::unique_ptr<IContext> createContext() const override {
+  auto createContext() const {
     return ContextBuilder().ignore(WS).build();
   }
 };
 
 } // namespace Json
 
-TEST(JsonTest, TestJson) {
-  Json::JsonParser parser;
+namespace {
 
+std::string makeJsonPayload(std::size_t repetitions) {
   std::string input = R"(
 { 
   "type": "FeatureCollection",
@@ -94,8 +95,7 @@ TEST(JsonTest, TestJson) {
 
 
   )";
-
-  for (std::size_t i = 0; i < 100'000; ++i) {
+  for (std::size_t i = 0; i < repetitions; ++i) {
     input += R"(    
   "type": "FeatureCollection",
   "features": [
@@ -119,6 +119,15 @@ TEST(JsonTest, TestJson) {
     }
   ]
 })";
+  return input;
+}
+
+} // namespace
+
+TEST(JsonTest, TestJson) {
+  Json::JsonParser parser;
+
+  const std::string input = makeJsonPayload(100'000);
 
   std::cout << parser.STRING << ": " << *parser.STRING.getElement()
             << std::endl;
@@ -136,4 +145,17 @@ TEST(JsonTest, TestJson) {
             << " Mo/s\n";
 
   EXPECT_TRUE(result.ret);
+}
+
+TEST(JsonBenchmark, ParseSpeedMicroBenchmark) {
+  Json::JsonParser parser;
+  const auto repetitions = pegium::test::getEnvInt(
+      "PEGIUM_BENCH_JSON_REPETITIONS", 100'000, /*minValue*/ 1);
+  const auto payload = makeJsonPayload(static_cast<std::size_t>(repetitions));
+
+  const auto stats = pegium::test::runParseBenchmark(
+      "json", payload, [&](std::string_view text) {
+        return parser.JsonValue.parse(text, parser.createContext());
+      });
+  pegium::test::assertMinThroughput("json", stats.mib_per_s);
 }

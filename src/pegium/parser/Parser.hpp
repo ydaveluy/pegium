@@ -16,7 +16,7 @@
 #include <pegium/parser/Repetition.hpp>
 #include <pegium/parser/TerminalRule.hpp>
 #include <pegium/parser/UnorderedGroup.hpp>
-#include <pegium/syntax-tree.hpp>
+#include <pegium/syntax-tree/AstNode.hpp>
 #include <type_traits>
 
 namespace pegium::parser {
@@ -78,44 +78,38 @@ constexpr auto operator<=>(T &&from, U &&to) {
 namespace pegium::parser {
 class Parser : public IParser {
 public:
-  /*GenericParseResult parse(const std::string &input) const override {
-    if (!entryRule)
-      throw std::logic_error("The entry rule is not defined");
-    return entryRule->parseGeneric(input, createContext());
-  }*/
-  std::unique_ptr<IContext> createContext() const override {
+  auto createContext() const {
     return ContextBuilder().build();
   }
 
 private:
-  template <typename T, typename = void> struct RuleHelper {
+  template <typename T>
+  struct RuleHelper {
     static_assert(sizeof(T) == 0, "Unsupported type for Rule");
   };
 
   template <typename T>
-  struct RuleHelper<T, std::enable_if_t<!std::derived_from<T, AstNode>>> {
+    requires (!std::derived_from<T, AstNode>)
+  struct RuleHelper<T> {
     using type = DataTypeRule<T>;
   };
 
   template <typename T>
-  struct RuleHelper<T, std::enable_if_t<std::derived_from<T, AstNode>>> {
+    requires std::derived_from<T, AstNode>
+  struct RuleHelper<T> {
     using type = ParserRule<T>;
   };
 
-  const grammar::Rule *entryRule = nullptr;
+  const grammar::AbstractRule *entryRule = nullptr;
 
 protected:
-  /*void setEntryRule(const grammar::IRule *entryRule) {
-    this->entryRule = entryRule;
-  }*/
-  void setEntryRule(const grammar::Rule &entryRule) {
+  void setEntryRule(const grammar::AbstractRule &entryRule) {
     this->entryRule = &entryRule;
   }
 
   template <typename T = std::string_view> using Terminal = TerminalRule<T>;
   template <typename T = std::string> using Rule = typename RuleHelper<T>::type;
 
-  // using ContextBuilder = ContextBuilder<>;
 };
 
 } // namespace pegium::parser

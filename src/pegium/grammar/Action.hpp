@@ -2,7 +2,7 @@
 
 #include <memory>
 #include <pegium/grammar/AbstractElement.hpp>
-#include <pegium/syntax-tree.hpp>
+#include <pegium/syntax-tree/AstNode.hpp>
 namespace pegium::grammar {
 
 struct Action : AbstractElement {
@@ -10,6 +10,8 @@ struct Action : AbstractElement {
 
   virtual std::shared_ptr<AstNode>
   execute(std::shared_ptr<AstNode> current) const = 0;
+
+  virtual std::string_view getTypeName() const noexcept = 0;
 };
 
 } // namespace pegium::grammar

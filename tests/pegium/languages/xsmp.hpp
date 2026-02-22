@@ -2,7 +2,7 @@
 #include <chrono>
 #include <gtest/gtest.h>
 #include <iostream>
-#include <pegium/syntax-tree.hpp>
+#include <pegium/syntax-tree/AstNode.hpp>
 
 namespace Xsmp {
 struct Type;
