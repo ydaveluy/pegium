@@ -2,110 +2,188 @@
 
 #pragma once
 #include <cassert>
-#include <map>
-#include <pegium/parser/AbstractElement.hpp>
-#include <pegium/parser/IContext.hpp>
+#include <pegium/grammar/Literal.hpp>
+#include <pegium/parser/ParseContext.hpp>
+#include <pegium/parser/ParseExpression.hpp>
 #include <pegium/parser/TerminalRule.hpp>
-#include <pegium/syntax-tree.hpp>
+#include <pegium/syntax-tree/CstBuilder.hpp>
 #include <string_view>
 #include <tuple>
 
 namespace pegium::parser {
 
-/*template <typename Tuple, typename Func>
-void for_each(Tuple &&tuple, Func &&func) {
-  std::apply([&](auto &...elems) { (func(elems), ...); }, tuple);
-}*/
-
 template <typename HiddenTuple, typename IgnoredTuple> struct Context;
-template <typename... Hidden, typename... Ignored>
-/*requires(std::derived_from<std::remove_cvref_t<Hidden>, TerminalRule<>> &&
-         ...) &&
-        (std::derived_from<std::remove_cvref_t<Ignored>, TerminalRule<>> &&
-         ...)*/
-struct Context<std::tuple<Hidden &...>, std::tuple<Ignored &...>> final
-    : IContext {
+
+
+
+template <ParseExpression... Hidden, ParseExpression... Ignored>
+struct Context<std::tuple<Hidden &...>, std::tuple<Ignored &...>> final {
 
   template <typename... H, typename... I>
   Context(std::tuple<H &...> &&hiddens, std::tuple<I &...> &&ignored)
       : _hidden{std::forward<std::tuple<H &...>>(hiddens)},
         _ignored{std::forward<std::tuple<I &...>>(ignored)} {}
 
-  template <std::size_t I = 0>
-  void skip_ignored(std::string_view sv, MatchResult &i) const {
-    if constexpr (I < sizeof...(Ignored)) {
-      i = std::get<I>(_ignored).parse_terminal({i.offset, sv.end()});
-      if (!i)
-        skip_ignored<I + 1>(sv, i);
-    }
-  }
+  [[nodiscard]] const char *skipHiddenNodes(const char *begin, const char *end,
+                                            CstBuilder &builder) const noexcept {
+    const char *cursor = begin;
 
-  template <std::size_t I = 0>
-  void skip_hidden(std::string_view sv, MatchResult &i, CstNode &node) const {
-    if constexpr (I < sizeof...(Hidden)) {
-      const auto &rule = std::get<I>(_hidden);
-      const auto len = rule.parse_terminal({i.offset, sv.end()});
-      if (len) {
-        auto &hiddenNode = node.content.emplace_back();
-        hiddenNode.text = {i.offset, len.offset};
-        hiddenNode.grammarSource = std::addressof(rule);
-        hiddenNode.hidden = true;
-
-        i = len;
-      } else {
-
-        i = len;
-        skip_hidden<I + 1>(sv, i, node);
+    while (true) {
+      while (parse_one(_ignored, end, cursor)) {
       }
+
+      const char *const hidden_start = cursor;
+      const grammar::AbstractElement *hidden_rule = nullptr;
+      if (!parse_one_hidden(_hidden, end, cursor, hidden_rule)) {
+        return cursor;
+      }
+
+      builder.leaf(hidden_start, cursor, hidden_rule, true);
     }
   }
-  MatchResult skipHiddenNodes(std::string_view sv,
-                              CstNode &node) const override {
-    MatchResult i = MatchResult::failure(sv.begin());
 
-    do {
-      skip_ignored(sv, i);
-      // in case there is only one Ignored element all alternatives are already
-      // parsed so exit early if no hidden node
-      if constexpr (sizeof...(Ignored) == 1)
-        i.valid = false;
-
-      skip_hidden(sv, i, node);
-
-    } while (i);
-
-    i.valid = true;
-    return i;
+  [[nodiscard]] MatchResult skipHiddenNodes(std::string_view sv,
+                                            CstBuilder &builder) const noexcept {
+    return MatchResult::success(skipHiddenNodes(sv.begin(), sv.end(), builder));
   }
 
-  void addRecovery(std::string_view expected,
-                   std::string_view position) override {
-    recoveries.emplace_back(RecoveryEntry{std::string(expected), position});
-  }
-  virtual void clearRecovery() override { recoveries.clear(); }
+  [[nodiscard]] bool
+  canForceInsert(const grammar::AbstractElement *element, const char *,
+                 const char *) const noexcept {
+    if (element == nullptr) {
+      return false;
+    }
 
-  void setInputText(std::string_view text) override { _text = text; }
+    if (element->getKind() == grammar::ElementKind::TerminalRule) {
+      return true;
+    }
+    if (element->getKind() != grammar::ElementKind::Literal) {
+      return false;
+    }
+
+    const auto literal =
+        static_cast<const grammar::Literal *>(element)->getValue();
+    if (literal.size() != 1) {
+      return false;
+    }
+
+    const char c = literal[0];
+    return isSyncPunctuation(c);
+  }
+  [[nodiscard]] operator ParseContext() const noexcept {
+    return ParseContext::from(*this);
+  }
 
 private:
-  std::string_view _text;
-  struct RecoveryEntry {
-    std::string expected;
-    std::string_view position;
-  };
-  std::vector<RecoveryEntry> recoveries;
+  template <typename Element>
+  [[nodiscard]] static bool parse_one_element(const Element &element,
+                                              const char *end,
+                                              const char *&cursor) noexcept {
+    if (cursor == end) [[unlikely]] {
+      return false;
+    }
+
+    const char *const start = cursor;
+    const auto r = element.parse_terminal(start, end);
+    if (r.IsValid() && r.offset > start) {
+      cursor = r.offset;
+      return true;
+    }
+    return false;
+  }
+
+  template <typename Tuple, std::size_t... I>
+  [[nodiscard]] static bool parse_one_impl(const Tuple &tuple, const char *end,
+                                           const char *&cursor,
+                                           std::index_sequence<I...>) noexcept {
+    return (parse_one_element(std::get<I>(tuple), end, cursor) || ...);
+  }
+
+  template <typename Tuple>
+  [[nodiscard]] static bool parse_one(const Tuple &tuple, const char *end,
+                                      const char *&cursor) noexcept {
+    constexpr std::size_t size = std::tuple_size_v<Tuple>;
+    if constexpr (size == 0) {
+      (void)tuple;
+      (void)end;
+      (void)cursor;
+      return false;
+    } else if constexpr (size == 1) {
+      return parse_one_element(std::get<0>(tuple), end, cursor);
+    } else if constexpr (size == 2) {
+      return parse_one_element(std::get<0>(tuple), end, cursor) ||
+             parse_one_element(std::get<1>(tuple), end, cursor);
+    } else {
+      return parse_one_impl(tuple, end, cursor,
+                            std::make_index_sequence<size>{});
+    }
+  }
+
+  template <typename Element>
+  [[nodiscard]] static bool
+  parse_one_hidden_element(const Element &element, const char *end,
+                           const char *&cursor,
+                           const grammar::AbstractElement *&matched) noexcept {
+    if (parse_one_element(element, end, cursor)) {
+      matched = std::addressof(element);
+      return true;
+    }
+    return false;
+  }
+
+  template <typename Tuple, std::size_t... I>
+  [[nodiscard]] static bool
+  parse_one_hidden_impl(const Tuple &tuple, const char *end,
+                        const char *&cursor,
+                        const grammar::AbstractElement *&matched,
+                        std::index_sequence<I...>) noexcept {
+    return (parse_one_hidden_element(std::get<I>(tuple), end, cursor,
+                                     matched) ||
+            ...);
+  }
+
+  template <typename Tuple>
+  [[nodiscard]] static bool
+  parse_one_hidden(const Tuple &tuple, const char *end, const char *&cursor,
+                   const grammar::AbstractElement *&matched) noexcept {
+    constexpr std::size_t size = std::tuple_size_v<Tuple>;
+    if constexpr (size == 0) {
+      (void)tuple;
+      (void)end;
+      (void)cursor;
+      (void)matched;
+      return false;
+    } else if constexpr (size == 1) {
+      return parse_one_hidden_element(std::get<0>(tuple), end, cursor,
+                                      matched);
+    } else if constexpr (size == 2) {
+      return parse_one_hidden_element(std::get<0>(tuple), end, cursor,
+                                      matched) ||
+             parse_one_hidden_element(std::get<1>(tuple), end, cursor,
+                                      matched);
+    } else {
+      return parse_one_hidden_impl(tuple, end, cursor, matched,
+                                   std::make_index_sequence<size>{});
+    }
+  }
+
   std::tuple<Hidden &...> _hidden;
   std::tuple<Ignored &...> _ignored;
+
+  [[nodiscard]] static constexpr bool isSyncPunctuation(char c) noexcept {
+    return c == ')' || c == ']' || c == '}' || c == ',' || c == ';';
+  }
 };
 template <typename HiddenTuple = std::tuple<>,
           typename IgnoredTuple = std::tuple<>>
 struct ContextBuilder {
-  ContextBuilder(HiddenTuple &&hiddens = std::tie(),
-                 IgnoredTuple &&ignored = std::tie())
+  explicit ContextBuilder(HiddenTuple &&hiddens = std::tie(),
+                          IgnoredTuple &&ignored = std::tie())
       : _hidden{std::move(hiddens)}, _ignored{std::move(ignored)} {}
 
-  template <typename... Ignored>
-  /*requires (std::derived_from<std::remove_cvref_t<Ignored>, TerminalRule<>> &&
-           ...) && (std::tuple_size<IgnoredTuple>::value == 0)*/
+  template <ParseExpression... Ignored>
+    requires(detail::IsTerminalRule_v<Ignored> && ...) &&
+            (std::tuple_size<IgnoredTuple>::value == 0)
   ContextBuilder<HiddenTuple, std::tuple<Ignored &...>>
   ignore(Ignored &&...ignored) {
     return ContextBuilder<HiddenTuple, std::tuple<Ignored &...>>{
@@ -113,9 +191,9 @@ struct ContextBuilder {
         std::tuple<Ignored &...>(std::forward<Ignored>(ignored)...)};
   }
 
-  template <typename... Hidden>
-  /*requires(std::derived_from<std::remove_cvref_t<Hidden>, TerminalRule<>> &&
-           ...) && (std::tuple_size<HiddenTuple>::value == 0)*/
+  template <ParseExpression... Hidden>
+    requires(detail::IsTerminalRule_v<Hidden> && ...) &&
+            (std::tuple_size<HiddenTuple>::value == 0)
   ContextBuilder<std::tuple<Hidden &...>, IgnoredTuple>
   hide(Hidden &&...hidden) {
     return ContextBuilder<std::tuple<Hidden &...>, IgnoredTuple>{
@@ -124,8 +202,9 @@ struct ContextBuilder {
   }
 
   auto build() {
-    return std::make_unique<Context<HiddenTuple, IgnoredTuple>>(
-        std::move(_hidden), std::move(_ignored));
+    using ContextType = Context<HiddenTuple, IgnoredTuple>;
+    return ParseContext::owning(
+        ContextType{std::move(_hidden), std::move(_ignored)});
   }
 
 private:
@@ -134,7 +213,7 @@ private:
 };
 ContextBuilder() -> ContextBuilder<>;
 
-template <typename... H, typename... I>
+template <ParseExpression... H, ParseExpression... I>
 Context(std::tuple<H &...> &&, std::tuple<I &...> &&)
     -> Context<std::tuple<H &...>, std::tuple<I &...>>;
 

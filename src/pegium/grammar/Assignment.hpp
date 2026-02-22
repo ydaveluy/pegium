@@ -1,13 +1,14 @@
 #pragma once
 #include <pegium/grammar/AbstractElement.hpp>
-#include <pegium/syntax-tree.hpp>
+#include <pegium/syntax-tree/AstNode.hpp>
+#include <pegium/syntax-tree/CstNodeView.hpp>
 #include <string_view>
 
 namespace pegium::grammar {
 
 enum class AssignmentOperator { Assign, Append, EnableIf };
 
-inline constexpr std::ostream &operator<<(std::ostream &os,
+constexpr std::ostream &operator<<(std::ostream &os,
                                           const AssignmentOperator &op) {
   switch (op) {
   case AssignmentOperator::Assign:
@@ -29,7 +30,7 @@ struct Assignment : AbstractElement {
     return AssignmentOperator::Append;
   }
   constexpr ~Assignment() noexcept override = default;
-  virtual void execute(AstNode *current, const CstNode &node) const = 0;
+  virtual void execute(AstNode *current, const CstNodeView &node) const = 0;
   virtual const AbstractElement *getElement() const noexcept = 0;
   virtual std::string_view getFeature() const noexcept = 0;
   void print(std::ostream &os) const final {

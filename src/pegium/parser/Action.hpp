@@ -1,7 +1,11 @@
 #pragma once
 
 #include <pegium/grammar/Action.hpp>
-#include <pegium/parser/AbstractElement.hpp>
+#include <pegium/parser/AssignmentHelpers.hpp>
+#include <pegium/parser/ParseExpression.hpp>
+#include <pegium/parser/ParseState.hpp>
+#include <pegium/parser/RecoverState.hpp>
+#include <pegium/parser/Introspection.hpp>
 #include <type_traits>
 
 namespace pegium::parser {
@@ -10,8 +14,8 @@ template <typename T, auto feature> struct Action final : grammar::Action {
 
   // explicit Action() {}
 
-  constexpr ElementKind getKind() const noexcept final {
-    if constexpr (feature)
+  constexpr ElementKind getKind() const noexcept override {
+    if constexpr (feature != nullptr)
       return ElementKind::Init;
     else
       return ElementKind::New;
@@ -19,27 +23,37 @@ template <typename T, auto feature> struct Action final : grammar::Action {
 
   std::shared_ptr<AstNode>
   execute(std::shared_ptr<AstNode> current) const override {
-    if constexpr (feature)
-      return do_execute(current, feature);
+    if constexpr (feature != nullptr)
+      return do_execute(std::move(current), feature);
     else
       return std::make_shared<T>();
   }
-  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
-                                   IContext &c) const {
-
-    auto &node = parent.content.emplace_back();
-    node.grammarSource = this;
-    node.text = {sv.data(), 0};
-    return MatchResult::success(sv.begin());
+  constexpr bool parse_rule(ParseState &s) const {
+    s.leaf(s.cursor(), this);
+    return true;
+  }
+  bool recover(RecoverState &recoverState) const {
+    recoverState.leaf(recoverState.cursor(), this);
+    return true;
+  }
+  constexpr MatchResult parse_terminal(const char *begin,
+                                       const char *) const noexcept {
+    return MatchResult::success(begin);
   }
   constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-    return MatchResult::success(sv.begin());
+    return parse_terminal(sv.begin(), sv.end());
+  }
+
+
+  std::string_view getTypeName() const noexcept override {
+    static constexpr auto typeName = detail::type_name_v<T>;
+    return typeName;
   }
   void print(std::ostream &os) const override {
-    if constexpr (feature)
-      os << "new " << typeid(T).name() << "(current)"; // TODO add feature name
+    if constexpr (feature != nullptr)
+      os << "new " << getTypeName() << "(current)"; // TODO add feature name
     else
-      os << "new " << typeid(T).name() << "()";
+      os << "new " << getTypeName() << "()";
   }
 
 private:
@@ -47,8 +61,8 @@ private:
   std::shared_ptr<AstNode> do_execute(std::shared_ptr<AstNode> current,
                                       AttrType ClassType::*member) const {
     auto result = std::make_shared<T>();
-
-    auto value = std::dynamic_pointer_cast<helpers::AttrType<feature>>(current);
+    assert(std::dynamic_pointer_cast<helpers::AttrType<feature>>(current));
+    auto value = std::static_pointer_cast<helpers::AttrType<feature>>(current);
     helpers::AssignmentHelper<AttrType>{}(result.get(), member,
                                           std::move(value));
     return result;

@@ -1,64 +1,85 @@
 #pragma once
 
 #include <pegium/grammar/AnyCharacter.hpp>
-#include <pegium/parser/AbstractElement.hpp>
+#include <pegium/parser/ParseExpression.hpp>
+#include <pegium/parser/ParseState.hpp>
+#include <pegium/parser/RecoverState.hpp>
+#include <pegium/parser/TextUtils.hpp>
 
 namespace pegium::parser {
 
-namespace helpers {
-static constexpr auto make_codepoint_len_table() {
-  std::array<std::size_t, 256> table = {};
-  for (unsigned int i = 0; i < 256; ++i) {
-
-    if ((i & 0x80u) == 0) {
-      table[i] = 1;
-    } else if ((i & 0xE0u) == 0xC0u) {
-      table[i] = 2;
-    } else if ((i & 0xF0u) == 0xE0u) {
-      table[i] = 3;
-    } else if ((i & 0xF8u) == 0xF0u) {
-      table[i] = 4;
-    } else {
-      table[i] = std::numeric_limits<std::size_t>::max(); // invalid prefix /
-                                                          // continuation byte
-    }
-  }
-  return table;
-}
-} // namespace helpers
-
 struct AnyCharacter final : grammar::AnyCharacter {
-  using type = std::string;
-  // constexpr ~AnyCharacter() noexcept override = default;
+  using type = std::string_view;
 
-  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
-                                   IContext &c) const {
-    auto i = parse_codepoint(sv);
-    if (!i) {
-      return i;
+  constexpr bool parse_rule(ParseState &s) const {
+    const char *begin = s.cursor();
+    const char *end = s.end;
+    if (begin == end) [[unlikely]] {
+      return false;
     }
-    auto &node = parent.content.emplace_back();
-    node.grammarSource = this;
-    node.text = {sv.data(), i.offset};
 
-    return c.skipHiddenNodes({i.offset, sv.end()}, parent);
+    if (const auto len = utf8_codepoint_length(*begin);
+        static_cast<std::size_t>(end - begin) >= len) [[likely]] {
+      s.leaf(begin + len, this);
+      s.skipHiddenNodes();
+      return true;
+    }
+    return false;
+  }
+  bool recover(RecoverState &recoverState) const {
+    const char *const begin = recoverState.cursor();
+    const char *const end = recoverState.end;
+    if (begin != end) [[likely]] {
+      if (const auto len = utf8_codepoint_length(*begin);
+          static_cast<std::size_t>(end - begin) >= len) [[likely]] {
+        recoverState.leaf(begin + len, this);
+        recoverState.skipHiddenNodes();
+        return true;
+      }
+    }
+
+    if (recoverState.isStrictNoEditMode()) {
+      return false;
+    }
+
+    const auto mark = recoverState.mark();
+    if (recoverState.insertHidden(this)) {
+      recoverState.skipHiddenNodes();
+      return true;
+    }
+
+    recoverState.rewind(mark);
+    while (recoverState.deleteOneCodepoint()) {
+      const char *const scan = recoverState.cursor();
+      if (scan == end) {
+        continue;
+      }
+      if (const auto len = utf8_codepoint_length(*scan);
+          static_cast<std::size_t>(end - scan) >= len) [[likely]] {
+        recoverState.leaf(scan + len, this);
+        recoverState.skipHiddenNodes();
+        return true;
+      }
+    }
+
+    recoverState.rewind(mark);
+    return false;
+  }
+  constexpr MatchResult parse_terminal(const char *begin,
+                                       const char *end) const noexcept {
+    if (begin == end) [[unlikely]] {
+      return MatchResult::failure(begin);
+    }
+
+    if (const auto len = utf8_codepoint_length(*begin);
+        static_cast<std::size_t>(end - begin) >= len) [[likely]] {
+      return MatchResult::success(begin + len);
+    }
+    return MatchResult::failure(begin);
   }
   constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-    return parse_codepoint(sv);
+    return parse_terminal(sv.begin(), sv.end());
   }
 
-private:
-  static constexpr std::array<std::size_t, 256> len_table{
-      helpers::make_codepoint_len_table()};
-
-  [[nodiscard]] static inline constexpr MatchResult
-  parse_codepoint(const std::string_view sv) noexcept {
-    const char *ptr = sv.data();
-    const auto len = len_table[static_cast<unsigned char>(*ptr)];
-    if (sv.size() >= len) {
-      return MatchResult::success(ptr + len);
-    }
-    return MatchResult::failure(ptr);
-  }
 };
 } // namespace pegium::parser

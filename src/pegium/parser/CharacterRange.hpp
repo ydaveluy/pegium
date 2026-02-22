@@ -3,18 +3,20 @@
 #include <algorithm>
 #include <array>
 #include <pegium/grammar/CharacterRange.hpp>
-#include <pegium/parser/AbstractElement.hpp>
 #include <pegium/parser/AnyCharacter.hpp>
 #include <pegium/parser/Group.hpp>
 #include <pegium/parser/NotPredicate.hpp>
+#include <pegium/parser/ParseState.hpp>
+#include <pegium/parser/RecoverState.hpp>
+#include <pegium/parser/TextUtils.hpp>
 #include <ranges>
 
 namespace pegium::parser {
 
 struct CharacterRange final : grammar::CharacterRange {
-  using type = std::string;
+  using type = std::string_view;
   constexpr ~CharacterRange() override = default;
-  constexpr CharacterRange(std::string_view s)
+  constexpr explicit CharacterRange(std::string_view s)
       : lookup{createCharacterRange(s)} {}
 
   constexpr CharacterRange(CharacterRange &&) = default;
@@ -22,40 +24,64 @@ struct CharacterRange final : grammar::CharacterRange {
   constexpr CharacterRange &operator=(CharacterRange &&) = default;
   constexpr CharacterRange &operator=(const CharacterRange &) = default;
 
-  constexpr MatchResult parse_rule(std::string_view sv, CstNode &parent,
-                                   IContext &c) const {
-    auto i = parse_terminal(sv);
-    if (!i) {
-      return i;
+  constexpr bool parse_rule(ParseState &s) const {
+    const char *const begin = s.cursor();
+    if (begin == s.end ||
+        !lookup[static_cast<unsigned char>(*begin)]) {
+      return false;
     }
     // word boundary should be checked with `+ !w`
-    /*if (sv.end() > i.offset && isword(*(i.offset - 1)) && isword(*i.offset)) {
+    /*if (sv.end() > i.offset && isWord(*(i.offset - 1)) && isWord(*i.offset)) {
       return MatchResult::failure(i.offset);
     }*/
-    auto &node = parent.content.emplace_back();
-    node.text = {sv.data(), i.offset};
-    node.grammarSource = this;
+    s.leaf(begin + 1, this);
+    s.skipHiddenNodes();
+    return true;
+  }
+  bool recover(RecoverState &recoverState) const {
+    const char *const begin = recoverState.cursor();
+    if (begin != recoverState.end &&
+        lookup[static_cast<unsigned char>(*begin)]) {
+      recoverState.leaf(begin + 1, this);
+      recoverState.skipHiddenNodes();
+      return true;
+    }
 
-    return c.skipHiddenNodes({i.offset, sv.end()}, parent);
+    if (recoverState.isStrictNoEditMode()) {
+      return false;
+    }
+
+    const auto mark = recoverState.mark();
+    while (recoverState.deleteOneCodepoint()) {
+      const char *const scan = recoverState.cursor();
+      if (scan != recoverState.end &&
+          lookup[static_cast<unsigned char>(*scan)]) {
+        recoverState.leaf(scan + 1, this);
+        recoverState.skipHiddenNodes();
+        return true;
+      }
+    }
+
+    recoverState.rewind(mark);
+    return false;
+  }
+  constexpr MatchResult parse_terminal(const char *begin,
+                                       const char *end) const noexcept {
+
+    return (begin != end && lookup[static_cast<unsigned char>(*begin)])
+               ? MatchResult::success(begin + 1)
+               : MatchResult::failure(begin);
   }
   constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-
-    return (!sv.empty() && lookup[static_cast<unsigned char>(sv[0])])
-               ? MatchResult::success(sv.begin() + 1)
-               : MatchResult::failure(sv.begin());
+    return parse_terminal(sv.begin(), sv.end());
   }
 
   /// Create an insensitive Characters Ranges
   /// @return the insensitive Characters Ranges
-  constexpr CharacterRange &i() & noexcept {
-    make_insensitive();
-    return *this;
-  }
-  /// Create an insensitive Characters Ranges
-  /// @return the insensitive Characters Ranges
-  constexpr CharacterRange &&i() && noexcept {
-    make_insensitive();
-    return std::move(*this);
+  constexpr CharacterRange i() const noexcept {
+    auto insensitive = *this;
+    insensitive.make_insensitive();
+    return insensitive;
   }
 
   void print(std::ostream &os) const override {

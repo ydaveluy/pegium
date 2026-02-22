@@ -1,5 +1,10 @@
 #pragma once
 #include <ostream>
+
+namespace pegium {
+class CstNodeView;
+}
+
 namespace pegium::grammar {
 
 enum class ElementKind {
