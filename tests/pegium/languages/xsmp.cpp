@@ -15,6 +15,11 @@ class XsmpParser : public Parser {
 public:
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wuninitialized"
+
+XsmpParser(){
+    WS=WS.super();
+}
+
   Terminal<> WS{"WS", some(s)};
   Terminal<> SL_COMMENT{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
   Terminal<> ML_COMMENT{"ML_COMMENT", "/*"_kw <=> "*/"_kw};
@@ -269,7 +274,7 @@ public:
 
 #pragma clang diagnostic pop
   auto createContext() const {
-    return ContextBuilder().ignore(WS).hide(ML_COMMENT, SL_COMMENT).build();
+    return SkipperBuilder().ignore(WS).hide(ML_COMMENT, SL_COMMENT).build();
   }
 };
 } // namespace Xsmp

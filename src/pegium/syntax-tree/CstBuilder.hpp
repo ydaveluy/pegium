@@ -17,107 +17,89 @@ class CstBuilder {
 public:
   using Iterator = RootCstNode::Iterator;
   struct Checkpoint {
-    std::uint64_t nodeCount = 0;
-    NodeId current = kNoNode;
-    std::size_t stackTop = 0;
-    const char *cursor = nullptr;
+    std::uint32_t nodeCount;
+    NodeId current;
+    std::uint32_t stackTop;
   };
 
   explicit CstBuilder(
       std::string_view text,
       std::pmr::memory_resource *upstream = std::pmr::get_default_resource())
-      : _root(std::make_shared<RootCstNode>(std::string{text}, upstream)) {}
-
-  [[nodiscard]] Checkpoint mark(const char *cursor) const noexcept {
-    return Checkpoint{
-        .nodeCount = _root->_nodeCount,
-        .current = _current,
-        .stackTop = _stackTop,
-        .cursor = cursor,
-    };
+      : _root(std::make_shared<RootCstNode>(std::string{text}, upstream)) {
+    // pre-allocate a reasonable amount of stack space
+    _stack.resize(128);
+    _stack[0] = kNoNode;
   }
 
-  [[nodiscard]] const char *rewind(const Checkpoint &checkpoint) noexcept {
+  [[nodiscard]] Checkpoint mark() const noexcept {
+    return Checkpoint{.nodeCount =
+                          static_cast<std::uint32_t>(_root->_nodeCount),
+                      .current = _current,
+                      .stackTop = _stackTop};
+  }
+
+  inline void rewind(const Checkpoint &checkpoint) noexcept {
     _root->_nodeCount = checkpoint.nodeCount;
     _current = checkpoint.current;
     _stackTop = checkpoint.stackTop;
-    return checkpoint.cursor;
   }
 
   void reset() noexcept {
     _root->_nodeCount = 0;
     _current = kNoNode;
-    _stackTop = 0;
+    _stackTop = 1;
     _linksFinalized = false;
   }
 
-  void enter(const char *beginPtr) {
+  inline void enter() {
     assert(!_linksFinalized);
-    const NodeId parent = _current;
-    const NodeId id = _root->alloc_node_uninitialized();
-    if (_stackTop == _stack.size()) [[unlikely]] {
-      _stack.push_back(id);
-    } else [[likely]] {
-      _stack[_stackTop] = id;
+    _current = _root->alloc_node_uninitialized();
+
+    if (_stackTop < _stack.size()) [[likely]] {
+      _stack[_stackTop] = _current;
+    } else {
+      _stack.push_back(_current);
     }
     ++_stackTop;
-    _current = id;
-    CstNode &n = _root->node(id);
-    n.begin = _root->offset_of(beginPtr);
-    n.end = n.begin;
-    n.grammarElement = nullptr;
-    n.nextSiblingId = parent;
-    n.isLeaf = true;
-    n.isHidden = false;
-    n.isRecovered = false;
   }
 
-  void exit(const char *endPtr, const grammar::AbstractElement *ge) noexcept {
+  inline void exit(const char *beginPtr, const char *endPtr,
+                   const grammar::AbstractElement *ge) noexcept {
     assert(!_linksFinalized);
-    assert(_stackTop > 0);
+    assert(_stackTop > 1);
     assert(_current != kNoNode);
-
-    const NodeId id = _current;
-    CstNode &n = _root->node(id);
-
-    assert(_root->_nodeCount > static_cast<std::uint64_t>(id) + 1 &&
+    assert(ge);
+    assert(_root->_nodeCount > static_cast<std::uint64_t>(_current) + 1 &&
            "CstNodeBuilder::exit expects at least one child node");
 
-    n.isLeaf = false;
-    n.end = _root->offset_of(endPtr);
-    n.grammarElement = ge;
-    n.isHidden = false;
 
-    --_stackTop;
-    NodeId parent;
-    if (_stackTop > 0) [[likely]] {
-      parent = _stack[_stackTop - 1];
-    } else [[unlikely]] {
-      parent = kNoNode;
-    }
-    _current = n.nextSiblingId = parent;
+    _root->node(_current) = {
+        .begin = _root->offset_of(beginPtr),
+        .end = _root->offset_of(endPtr),
+        .grammarElement = ge,
+        .nextSiblingId = _current= _stack[--_stackTop - 1],
+        .isLeaf = false,
+        .isHidden = false,
+        .isRecovered = false,
+    };
+
   }
 
-  void leaf(const char *beginPtr, const char *endPtr,
-            const grammar::AbstractElement *ge, bool hidden = false,
-            bool recovered = false) {
+  inline void leaf(const char *beginPtr, const char *endPtr,
+                   const grammar::AbstractElement *ge, bool hidden = false,
+                   bool recovered = false) {
     assert(!_linksFinalized);
-    const TextOffset beginOff = _root->offset_of(beginPtr);
-    const TextOffset endOff = _root->offset_of(endPtr);
-
-    const NodeId id = _root->alloc_node_uninitialized();
-    CstNode &n = _root->node(id);
-
-    n.begin = beginOff;
-    n.end = endOff;
-    n.grammarElement = ge;
-    n.nextSiblingId = _current;
-    n.isLeaf = true;
-    n.isHidden = hidden;
-    n.isRecovered = recovered;
-    if (recovered && _current != kNoNode) {
-      mark_recovered_ancestors(_current);
-    }
+    assert(ge);
+    const auto id = _root->alloc_node_uninitialized();
+    _root->node(id) = {
+        .begin = _root->offset_of(beginPtr),
+        .end = _root->offset_of(endPtr),
+        .grammarElement = ge,
+        .nextSiblingId = _current,
+        .isLeaf = true,
+        .isHidden = hidden,
+        .isRecovered = recovered,
+    };
   }
 
   [[nodiscard]] std::uint64_t node_count() const noexcept {
@@ -127,6 +109,7 @@ public:
                                 const grammar::AbstractElement *ge) noexcept {
     assert(!_linksFinalized);
     assert(id < _root->_nodeCount);
+    assert(ge);
     _root->node(id).grammarElement = ge;
   }
 
@@ -145,14 +128,6 @@ public:
   }
 
 private:
-  void mark_recovered_ancestors(NodeId parent) noexcept {
-    while (parent != kNoNode) {
-      CstNode &node = _root->node(parent);
-      node.isRecovered = true;
-      parent = node.nextSiblingId;
-    }
-  }
-
   void finalize_links() {
     if (_linksFinalized) [[unlikely]] {
       return;
@@ -195,7 +170,7 @@ private:
 
   std::shared_ptr<RootCstNode> _root;
   std::vector<NodeId> _stack;
-  std::size_t _stackTop = 0;
+  std::uint32_t _stackTop = 1;
   NodeId _current = kNoNode;
   bool _linksFinalized = false;
 };

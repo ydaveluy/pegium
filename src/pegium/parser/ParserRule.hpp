@@ -1,4 +1,7 @@
 #pragma once
+#include <algorithm>
+#include <cassert>
+#include <iostream>
 #include <pegium/grammar/Action.hpp>
 #include <pegium/grammar/Assignment.hpp>
 #include <pegium/parser/AbstractRule.hpp>
@@ -8,13 +11,9 @@
 #include <pegium/parser/IParser.hpp>
 #include <pegium/parser/Introspection.hpp>
 #include <pegium/parser/ParseContext.hpp>
-#include <pegium/parser/ParseState.hpp>
 #include <pegium/parser/RecoveryTrace.hpp>
-#include <pegium/parser/RecoverState.hpp>
+#include <pegium/parser/Skipper.hpp>
 #include <pegium/parser/StepTrace.hpp>
-#include <cassert>
-#include <iostream>
-#include <algorithm>
 #include <stdexcept>
 #include <string_view>
 
@@ -22,9 +21,9 @@ namespace pegium::parser {
 
 template <typename T>
   requires std::derived_from<T, AstNode>
-struct ParserRule final : AbstractRuleBase<grammar::ParserRule> {
+struct ParserRule final : AbstractRule<grammar::ParserRule> {
   using type = T;
-  using BaseRule = AbstractRuleBase<grammar::ParserRule>;
+  using BaseRule = AbstractRule<grammar::ParserRule>;
   using BaseRule::BaseRule;
   std::string_view getTypeName() const noexcept override {
     static constexpr auto typeName = detail::type_name_v<T>;
@@ -39,25 +38,29 @@ struct ParserRule final : AbstractRuleBase<grammar::ParserRule> {
     std::shared_ptr<T> current;
     struct AssignmentEntry {
       const grammar::Assignment *assignment;
-      CstNodeView node;
+      NodeId node;
     };
-    std::vector<AssignmentEntry> assignments{};
+    std::vector<AssignmentEntry> assignments;
 
-    for (const auto &it : node) {
-      if (it.isHidden()) {
+    const auto &root = node.root();
+
+    for (const auto view : node) {
+      const auto &n = view.node();
+      if (n.isHidden) {
         continue;
       }
-      assert(it.getGrammarElement());
-      switch (it.getGrammarElement()->getKind()) {
+      assert(n.grammarElement);
+      switch (n.grammarElement->getKind()) {
       case ElementKind::Assignment: {
         assignments.emplace_back(
-            static_cast<const grammar::Assignment *>(it.getGrammarElement()), it);
+            static_cast<const grammar::Assignment *>(n.grammarElement),
+            view.id());
         break;
       }
       case ElementKind::New: {
         current = std::static_pointer_cast<T>(
-            static_cast<const grammar::Action *>(it.getGrammarElement())
-                ->execute(std::static_pointer_cast<AstNode>(current)));
+            static_cast<const grammar::Action *>(n.grammarElement)
+                ->execute(current));
         break;
       }
       case ElementKind::Init: {
@@ -65,18 +68,19 @@ struct ParserRule final : AbstractRuleBase<grammar::ParserRule> {
           current = std::make_shared<T>();
         }
         for (const auto &entry : assignments) {
-          entry.assignment->execute(current.get(), entry.node);
+          entry.assignment->execute(current.get(),
+                                    CstNodeView(&root, entry.node));
         }
         assignments.clear();
         current = std::static_pointer_cast<T>(
-            static_cast<const grammar::Action *>(it.getGrammarElement())
-                ->execute(std::static_pointer_cast<AstNode>(current)));
+            static_cast<const grammar::Action *>(n.grammarElement)
+                ->execute(current));
         break;
       }
       case ElementKind::ParserRule: {
         current = std::static_pointer_cast<T>(
-            static_cast<const grammar::ParserRule *>(it.getGrammarElement())
-                ->getValue(it));
+            static_cast<const grammar::ParserRule *>(n.grammarElement)
+                ->getValue(view));
         break;
       }
       default:
@@ -88,171 +92,127 @@ struct ParserRule final : AbstractRuleBase<grammar::ParserRule> {
       current = std::make_shared<T>();
     }
     for (const auto &entry : assignments) {
-      entry.assignment->execute(current.get(), entry.node);
+      entry.assignment->execute(current.get(), CstNodeView(&root, entry.node));
     }
     return current;
   }
-  GenericParseResult parseGeneric(std::string_view text,
-                                  const ParseContext &context,
+  GenericParseResult parseGeneric(std::string_view text, const Skipper &context,
                                   const ParseOptions &options = {}) const {
     auto result = parse(text, context, options);
     return {.root_node = result.root_node};
   }
   ParseResult<std::shared_ptr<T>>
-  parse(std::string_view text, const ParseContext &context,
+  parse(std::string_view text, const Skipper &skipper,
         const ParseOptions &options = {}) const {
     ParseResult<std::shared_ptr<T>> result;
     CstBuilder builder(text);
     const auto input = builder.getText();
     detail::stepTraceReset();
 
-#if defined(PEGIUM_BENCH_RECOVERY_ONLY)
-    constexpr bool bypassInitialStrictParse = true;
-#else
-    constexpr bool bypassInitialStrictParse = false;
-#endif
+    std::uint32_t maxCursorOffset = 0;
 
-    std::size_t maxCursorOffset = 0;
-    if constexpr (!bypassInitialStrictParse) {
-      detail::stepTraceInc(detail::StepCounter::ParsePhaseRuns);
-      ParseState state{builder, context};
-      state.skipHiddenNodes();
-      const bool match = parse_rule(state);
-      result.len = static_cast<size_t>(state.cursor() - state.begin);
-      maxCursorOffset = state.maxCursorOffset();
-      result.ret = match && result.len == input.size();
-    } else {
-      result.len = 0;
-      result.ret = false;
-      maxCursorOffset = 0;
-    }
+    std::uint32_t recoveryAttempt = 0;
+    auto runRecoveryAttempt = [&](bool strictNoEdit, bool resetBuilder,
+                                  std::uint32_t editFloorOffset,
+                                  std::uint32_t editCeilingOffset) {
+      ++recoveryAttempt;
+      detail::stepTraceInc(detail::StepCounter::RecoveryPhaseRuns);
+      if (resetBuilder)
+        builder.reset();
 
-    if (!result.ret) {
-      std::size_t recoveryAttempt = 0;
-      auto runRecoveryAttempt = [&](bool strictNoEdit, bool resetBuilder,
-                                    std::size_t editFloorOffset,
-                                    std::size_t editCeilingOffset)
-          -> std::size_t {
-        ++recoveryAttempt;
-        detail::stepTraceInc(detail::StepCounter::RecoveryPhaseRuns);
-        if (resetBuilder) {
-          builder.reset();
-        }
-        RecoverState recoverState{builder, context};
-        recoverState.setEditFloorOffset(editFloorOffset);
-        recoverState.setEditCeilingOffset(editCeilingOffset);
-        recoverState.setTrackEditState(!strictNoEdit);
-        recoverState.setMaxConsecutiveCodepointDeletes(
-            options.maxConsecutiveCodepointDeletes);
-        if (strictNoEdit) {
-          recoverState.allowInsert = false;
-          recoverState.allowDelete = false;
-        }
-        recoverState.skipHiddenNodes();
-        const bool recoveredMatch = recover(recoverState);
-
-        result.len =
-            static_cast<size_t>(recoverState.cursor() - recoverState.begin);
-        result.recovered = recoverState.hadEdits;
-        result.diagnostics = recoverState.diagnostics;
-        result.ret = recoveredMatch && result.len == input.size();
-        PEGIUM_RECOVERY_TRACE("[rule parse recover] ", getName(),
-                              " attempt=", recoveryAttempt,
-                              " floor=", editFloorOffset,
-                              " ceil=", editCeilingOffset,
-                              " strict=", strictNoEdit, " recoveredMatch=",
-                              recoveredMatch, " len=", result.len, "/",
-                              input.size(), " hadEdits=",
-                              recoverState.hadEdits, " max=",
-                              recoverState.maxCursorOffset(),
-                              " diag=", result.diagnostics.size());
-        return recoverState.maxCursorOffset();
-      };
-
-      if constexpr (bypassInitialStrictParse) {
-        // First attempt in strict mode without resetting the fresh builder.
-        const std::size_t strictMax =
-            runRecoveryAttempt(/*strictNoEdit=*/true, /*resetBuilder=*/false,
-                               /*editFloorOffset=*/0,
-                               /*editCeilingOffset=*/input.size());
-        if (!result.ret) {
-          if (strictMax > maxCursorOffset) {
-            maxCursorOffset = strictMax;
-          }
-        }
+      ParseContext context{builder, skipper};
+      context.setEditFloorOffset(editFloorOffset);
+      context.setEditCeilingOffset(editCeilingOffset);
+      context.setTrackEditState(!strictNoEdit);
+      context.setMaxConsecutiveCodepointDeletes(
+          options.maxConsecutiveCodepointDeletes);
+      if (strictNoEdit) {
+        context.allowInsert = false;
+        context.allowDelete = false;
       }
+      context.skipHiddenNodes();
 
-      if (!result.ret) {
-        const std::size_t localRecoveryWindow = options.localRecoveryWindowBytes;
-        if (localRecoveryWindow != 0) {
-          const std::size_t recoveryFloorAnchor = maxCursorOffset;
-          const std::size_t localEditCeilingOffset = std::min(
-              input.size(), recoveryFloorAnchor + localRecoveryWindow);
+      const bool recoveredMatch = rule(context);
+      result.len = static_cast<size_t>(context.cursor() - context.begin);
+      result.recovered = context.hadEdits;
+      result.diagnostics = context.diagnostics;
+      result.ret = recoveredMatch && result.len == input.size();
+      PEGIUM_RECOVERY_TRACE(
+          "[rule parse rule] ", getName(), " attempt=", recoveryAttempt,
+          " floor=", editFloorOffset, " ceil=", editCeilingOffset,
+          " strict=", strictNoEdit, " recoveredMatch=", recoveredMatch,
+          " len=", result.len, "/", input.size(),
+          " hadEdits=", context.hadEdits, " max=", context.maxCursorOffset(),
+          " diag=", result.diagnostics.size());
+      return context.maxCursorOffset();
+    };
+
+    const std::uint32_t strictMax =
+        runRecoveryAttempt(/*strictNoEdit=*/true,
+                           /*resetBuilder=*/false,
+                           /*editFloorOffset=*/0,
+                           /*editCeilingOffset=*/input.size());
+    maxCursorOffset = std::max(maxCursorOffset, strictMax);
+
+    if (!result.ret && options.recoveryEnabled) {
+      const std::uint32_t localRecoveryWindow =
+          options.localRecoveryWindowBytes;
+      if (localRecoveryWindow != 0) {
+        const std::uint32_t recoveryFloorAnchor = maxCursorOffset;
+        const std::uint32_t localEditCeilingOffset =
+            std::min(static_cast<std::uint32_t>(input.size()),
+                     recoveryFloorAnchor + localRecoveryWindow);
+        runRecoveryAttempt(/*strictNoEdit=*/false, /*resetBuilder=*/true,
+                           /*editFloorOffset=*/recoveryFloorAnchor,
+                           localEditCeilingOffset);
+        if (!result.ret) {
           runRecoveryAttempt(/*strictNoEdit=*/false, /*resetBuilder=*/true,
                              /*editFloorOffset=*/recoveryFloorAnchor,
-                             localEditCeilingOffset);
-          if (!result.ret) {
-            runRecoveryAttempt(/*strictNoEdit=*/false, /*resetBuilder=*/true,
-                               /*editFloorOffset=*/recoveryFloorAnchor,
-                               /*editCeilingOffset=*/input.size());
-          }
-        } else {
-          while (!result.ret) {
-            const std::size_t newMax =
-                runRecoveryAttempt(/*strictNoEdit=*/false, /*resetBuilder=*/true,
-                                   /*editFloorOffset=*/maxCursorOffset,
-                                   /*editCeilingOffset=*/input.size());
-            if (newMax <= maxCursorOffset) {
-              break;
-            }
-            maxCursorOffset = newMax;
-          }
+                             /*editCeilingOffset=*/input.size());
+        }
+      } else {
+        while (!result.ret) {
+          const std::uint32_t newMax = runRecoveryAttempt(
+              /*strictNoEdit=*/false, /*resetBuilder=*/true,
+              /*editFloorOffset=*/maxCursorOffset,
+              /*editCeilingOffset=*/input.size());
+          if (newMax <= maxCursorOffset)
+            break;
+          maxCursorOffset = newMax;
         }
       }
     }
-    result.root_node = builder.finalize();
 
+    result.root_node = builder.finalize();
     if (result.ret) {
       auto node = detail::findFirstRootMatchingNode(*result.root_node, this);
-      if (!node.has_value()) {
+      if (!node.has_value())
         node = detail::findFirstMatchingNode(*result.root_node, this);
-      }
-      if (!node.has_value()) {
+      if (!node.has_value())
         throw std::logic_error("ParserRule::parse matched node not found");
-      }
       result.value = getTypedValue(*node);
     }
 
     detail::stepTraceDumpSummary(getName(), result.ret, result.recovered,
                                  result.len, input.size());
-
     return result;
   }
-  bool parse_rule(ParseState &s) const {
-    const auto mark = s.enter();
-    if (!parse_assigned_rule(s)) {
-      s.rewind(mark);
+
+  bool rule(ParseContext &ctx) const {
+    PEGIUM_RECOVERY_TRACE(
+        "[rule rule] enter ", getName(), " offset=", ctx.cursorOffset(),
+        " allowI=", ctx.allowInsert, " allowD=", ctx.allowDelete);
+    const auto mark = ctx.enter();
+    if (!rule_fast(ctx)) {
+      PEGIUM_RECOVERY_TRACE("[rule rule] fail ", getName(),
+                            " offset=", ctx.cursorOffset());
+      ctx.rewind(mark);
       return false;
     }
-    s.exit(this);
-    return true;
-  }
-  bool recover(RecoverState &recoverState) const {
-    PEGIUM_RECOVERY_TRACE("[rule recover] enter ", getName(), " offset=",
-                          recoverState.cursorOffset(), " allowI=",
-                          recoverState.allowInsert, " allowD=",
-                          recoverState.allowDelete);
-    const auto mark = recoverState.enter();
-    if (!parse_assigned_recover(recoverState)) {
-      PEGIUM_RECOVERY_TRACE("[rule recover] fail ", getName(), " offset=",
-                            recoverState.cursorOffset());
-      recoverState.rewind(mark);
-      return false;
-    }
-    PEGIUM_RECOVERY_TRACE("[rule recover] ok ", getName(), " offset=",
-                          recoverState.cursorOffset(), " hadEdits=",
-                          recoverState.hadEdits);
-    recoverState.exit(this);
+    PEGIUM_RECOVERY_TRACE("[rule rule] ok ", getName(),
+                          " offset=", ctx.cursorOffset(),
+                          " hadEdits=", ctx.hadEdits);
+    ctx.exit(mark, this);
     return true;
   }
   using BaseRule::operator=;

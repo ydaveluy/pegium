@@ -27,10 +27,10 @@ TEST(CstSearchTest, FindFirstMatchingNodeSkipsHiddenAndSearchesDepthFirst) {
   const char *begin = builder.input_begin();
 
   builder.leaf(begin, begin + 1, &target, true);
-  builder.enter(begin + 1);
+  builder.enter();
   builder.leaf(begin + 1, begin + 2, &other, false);
   builder.leaf(begin + 2, begin + 3, &target, false);
-  builder.exit(begin + 3, &group);
+  builder.exit(begin + 1, begin + 3, &group);
   builder.leaf(begin + 3, begin + 4, &target, false);
 
   auto root = builder.finalize();
@@ -52,10 +52,10 @@ TEST(CstSearchTest, FirstVisibleChildReturnsFirstVisibleOrNullopt) {
 
   pegium::CstBuilder builder{"xy"};
   const char *begin = builder.input_begin();
-  builder.enter(begin);
+  builder.enter();
   builder.leaf(begin, begin + 1, &target, true);
   builder.leaf(begin + 1, begin + 2, &target, false);
-  builder.exit(begin + 2, &group);
+  builder.exit(begin, begin + 2, &group);
   auto root = builder.finalize();
 
   auto it = root->begin();
@@ -76,9 +76,9 @@ TEST(CstSearchTest, FirstVisibleChildReturnsFirstVisibleOrNullopt) {
 
   pegium::CstBuilder hiddenOnlyBuilder{"z"};
   const char *b = hiddenOnlyBuilder.input_begin();
-  hiddenOnlyBuilder.enter(b);
+  hiddenOnlyBuilder.enter();
   hiddenOnlyBuilder.leaf(b, b + 1, &target, true);
-  hiddenOnlyBuilder.exit(b + 1, &group);
+  hiddenOnlyBuilder.exit(b, b + 1, &group);
   auto hiddenOnlyRoot = hiddenOnlyBuilder.finalize();
   auto hiddenParent = *hiddenOnlyRoot->begin();
 

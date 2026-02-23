@@ -3,7 +3,7 @@
 #pragma once
 #include <cassert>
 #include <pegium/grammar/Literal.hpp>
-#include <pegium/parser/ParseContext.hpp>
+#include <pegium/parser/Skipper.hpp>
 #include <pegium/parser/ParseExpression.hpp>
 #include <pegium/parser/TerminalRule.hpp>
 #include <pegium/syntax-tree/CstBuilder.hpp>
@@ -70,8 +70,8 @@ struct Context<std::tuple<Hidden &...>, std::tuple<Ignored &...>> final {
     const char c = literal[0];
     return isSyncPunctuation(c);
   }
-  [[nodiscard]] operator ParseContext() const noexcept {
-    return ParseContext::from(*this);
+  [[nodiscard]] operator Skipper() const noexcept {
+    return Skipper::from(*this);
   }
 
 private:
@@ -84,7 +84,7 @@ private:
     }
 
     const char *const start = cursor;
-    const auto r = element.parse_terminal(start, end);
+    const auto r = element.terminal(start, end);
     if (r.IsValid() && r.offset > start) {
       cursor = r.offset;
       return true;
@@ -176,17 +176,17 @@ private:
 };
 template <typename HiddenTuple = std::tuple<>,
           typename IgnoredTuple = std::tuple<>>
-struct ContextBuilder {
-  explicit ContextBuilder(HiddenTuple &&hiddens = std::tie(),
+struct SkipperBuilder {
+  explicit SkipperBuilder(HiddenTuple &&hiddens = std::tie(),
                           IgnoredTuple &&ignored = std::tie())
       : _hidden{std::move(hiddens)}, _ignored{std::move(ignored)} {}
 
   template <ParseExpression... Ignored>
     requires(detail::IsTerminalRule_v<Ignored> && ...) &&
             (std::tuple_size<IgnoredTuple>::value == 0)
-  ContextBuilder<HiddenTuple, std::tuple<Ignored &...>>
+  SkipperBuilder<HiddenTuple, std::tuple<Ignored &...>>
   ignore(Ignored &&...ignored) {
-    return ContextBuilder<HiddenTuple, std::tuple<Ignored &...>>{
+    return SkipperBuilder<HiddenTuple, std::tuple<Ignored &...>>{
         std::move(_hidden),
         std::tuple<Ignored &...>(std::forward<Ignored>(ignored)...)};
   }
@@ -194,16 +194,16 @@ struct ContextBuilder {
   template <ParseExpression... Hidden>
     requires(detail::IsTerminalRule_v<Hidden> && ...) &&
             (std::tuple_size<HiddenTuple>::value == 0)
-  ContextBuilder<std::tuple<Hidden &...>, IgnoredTuple>
+  SkipperBuilder<std::tuple<Hidden &...>, IgnoredTuple>
   hide(Hidden &&...hidden) {
-    return ContextBuilder<std::tuple<Hidden &...>, IgnoredTuple>{
+    return SkipperBuilder<std::tuple<Hidden &...>, IgnoredTuple>{
         std::tuple<Hidden &...>(std::forward<Hidden>(hidden)...),
         std::move(_ignored)};
   }
 
   auto build() {
     using ContextType = Context<HiddenTuple, IgnoredTuple>;
-    return ParseContext::owning(
+    return Skipper::owning(
         ContextType{std::move(_hidden), std::move(_ignored)});
   }
 
@@ -211,7 +211,7 @@ private:
   HiddenTuple _hidden;
   IgnoredTuple _ignored;
 };
-ContextBuilder() -> ContextBuilder<>;
+SkipperBuilder() -> SkipperBuilder<>;
 
 template <ParseExpression... H, ParseExpression... I>
 Context(std::tuple<H &...> &&, std::tuple<I &...> &&)

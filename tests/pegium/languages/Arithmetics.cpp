@@ -98,12 +98,11 @@ public:
                        Multiplication))};
 
 
-  Rule<> MultiplicationOrDivision{"MultiplicationOrDivision", "*"_kw | "/"_kw };
   Rule<Arithmetics::Expression> Multiplication{
       "Multiplication",
       Exponentiation +
           many(action<&Arithmetics::BinaryExpression::left>() +
-                   assign<&Arithmetics::BinaryExpression::op>(MultiplicationOrDivision) +
+                   assign<&Arithmetics::BinaryExpression::op>("*"_kw | "/"_kw ) +
                    assign<&Arithmetics::BinaryExpression::right>(
                        Exponentiation))};
 
@@ -135,13 +134,9 @@ public:
                      ")"_kw)};
 #pragma clang diagnostic pop
 
-  ArithmeticParser() {
-    NUMBER.setValueConverter(
-        [](std::string_view sv) { return std::stod(std::string{sv}); });
-  }
 
   auto createContext() const {
-    return ContextBuilder().ignore(WS).hide(ML_COMMENT, SL_COMMENT).build();
+    return SkipperBuilder().ignore(WS).hide(ML_COMMENT, SL_COMMENT).build();
   }
 };
 

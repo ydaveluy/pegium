@@ -59,11 +59,11 @@ TEST(SyntaxTreeTest, CstNodeJsonEscapesGrammarSource) {
 TEST(SyntaxTreeTest, RootJsonIncludesNestedContentAndHiddenChildren) {
   pegium::CstBuilder builder{"ab"};
   const char *begin = builder.input_begin();
-
-  builder.enter(begin);
-  builder.leaf(begin, begin + 1, nullptr, false);
-  builder.leaf(begin + 1, begin + 2, nullptr, true);
-  builder.exit(begin + 2, nullptr);
+DummyGrammarElement ge;
+  builder.enter();
+  builder.leaf(begin, begin + 1, &ge, false);
+  builder.leaf(begin + 1, begin + 2, &ge, true);
+  builder.exit(begin, begin + 2, &ge);
 
   auto root = builder.finalize();
   const std::string json = pegium::toJson(*root);
@@ -100,9 +100,9 @@ TEST(SyntaxTreeTest, RootJsonEscapesFullTextCharacters) {
 TEST(SyntaxTreeTest, RootJsonSeparatesMultipleTopLevelNodesWithComma) {
   pegium::CstBuilder builder{"ab"};
   const char *begin = builder.input_begin();
-
-  builder.leaf(begin, begin + 1, nullptr, false);
-  builder.leaf(begin + 1, begin + 2, nullptr, false);
+DummyGrammarElement ge;
+  builder.leaf(begin, begin + 1, &ge, false);
+  builder.leaf(begin + 1, begin + 2, &ge, false);
 
   auto root = builder.finalize();
   const std::string json = pegium::toJson(*root);

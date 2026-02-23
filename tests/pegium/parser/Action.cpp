@@ -42,17 +42,17 @@ TEST(ActionTest, ParseMethodsDoNotConsumeInput) {
   auto makeChild = action<ChildNode>();
   std::string_view input = "abc";
 
-  auto terminal = makeChild.parse_terminal(input);
+  auto terminal = makeChild.terminal(input);
   EXPECT_TRUE(terminal.IsValid());
   EXPECT_EQ(terminal.offset, input.begin());
 
   pegium::CstBuilder builder(input);
   const auto parseInput = builder.getText();
-  auto context = ContextBuilder().build();
-  ParseState state{builder, context};
-  auto rule = makeChild.parse_rule(state);
+  auto skipper = SkipperBuilder().build();
+  ParseContext ctx{builder, skipper};
+  auto rule = makeChild.rule(ctx);
   EXPECT_TRUE(rule);
-  EXPECT_EQ(state.cursor(), parseInput.begin());
+  EXPECT_EQ(ctx.cursor(), parseInput.begin());
 
   auto root = builder.finalize();
   std::size_t count = 0;

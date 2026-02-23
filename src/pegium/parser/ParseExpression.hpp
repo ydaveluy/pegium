@@ -20,17 +20,15 @@ struct MatchResult {
   }
 };
 
-struct ParseState;
-struct RecoverState;
+struct ParseContext;
 
 template <typename T>
 concept ParseExpression =
     std::derived_from<std::remove_cvref_t<T>, grammar::AbstractElement> &&
     requires(const std::remove_cvref_t<T> &t, const char *begin,
-             const char *end, ParseState &state, RecoverState &recover) {
-      { t.parse_terminal(begin, end) } noexcept -> std::same_as<MatchResult>;
-      { t.parse_rule(state) } -> std::same_as<bool>;
-      { t.recover(recover) } -> std::same_as<bool>;
+             const char *end, ParseContext &ctx) {
+      { t.terminal(begin, end) } noexcept -> std::same_as<MatchResult>;
+      { t.rule(ctx) } -> std::same_as<bool>;
     };
 
 template <ParseExpression T>

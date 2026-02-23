@@ -3,9 +3,8 @@
 #include <array>
 #include <pegium/grammar/Literal.hpp>
 #include <pegium/parser/ParseExpression.hpp>
-#include <pegium/parser/ParseState.hpp>
 #include <pegium/parser/RecoveryTrace.hpp>
-#include <pegium/parser/RecoverState.hpp>
+#include <pegium/parser/ParseContext.hpp>
 #include <pegium/parser/TextUtils.hpp>
 #include <ranges>
 
@@ -13,6 +12,7 @@ namespace pegium::parser {
 
 template <auto literal, bool case_sensitive = true>
 struct Literal final : grammar::Literal {
+  static constexpr bool nullable = literal.empty();
   using type = std::string_view;
   using grammar::Literal::getValue;
   std::string_view getValue() const noexcept override {
@@ -25,42 +25,13 @@ struct Literal final : grammar::Literal {
     return getValue();
   }
   bool isCaseSensitive() const noexcept override { return case_sensitive; }
-  constexpr bool parse_rule(ParseState &s) const {
-    const char *begin = s.cursor();
-    const char *end = s.end;
-    if (literal.size() > static_cast<std::size_t>(end - begin)) [[unlikely]] {
-      return false;
-    }
 
-    for (std::size_t i = 0; i < literal.size(); ++i) {
-      if constexpr (case_sensitive) {
-        if (begin[i] != literal[i]) {
-          return false;
-        }
-      } else {
-        if (tolower(begin[i]) != literal[i]) {
-          return false;
-        }
-      }
-    }
-    const char *offset = begin + literal.size();
-
-    // TODO expose a parser-level word-boundary helper in parse context.
-    if constexpr (isWord(literal.back())) {
-      if (offset != end && isWord(*offset))
-        return false;
-    }
-
-    s.leaf(offset, this);
-    s.skipHiddenNodes();
-    return true;
-  }
-  bool recover(RecoverState &recoverState) const {
-    const char *const end = recoverState.end;
+  bool rule(ParseContext &ctx) const {
+    const char *const end = ctx.end;
     const char *boundaryOffset = nullptr;
 
     // Fast path: mirror parse_rule, and bail out immediately on exact match.
-    const char *const begin = recoverState.cursor();
+    const char *const begin = ctx.cursor();
     if (literal.size() <= static_cast<std::size_t>(end - begin)) {
       for (std::size_t i = 0; i < literal.size(); ++i) {
         if constexpr (case_sensitive) {
@@ -82,75 +53,75 @@ struct Literal final : grammar::Literal {
         }
       }
 
-      PEGIUM_RECOVERY_TRACE("[literal recover] direct match '", getValue(),
-                            "' at ", recoverState.cursorOffset());
-      recoverState.leaf(offset, this);
-      recoverState.skipHiddenNodes();
+      PEGIUM_RECOVERY_TRACE("[literal rule] direct match '", getValue(),
+                            "' at ", ctx.cursorOffset());
+      ctx.leaf(offset, this);
+      ctx.skipHiddenNodes();
       return true;
     }
 
 slow_path:
-    if (recoverState.isStrictNoEditMode()) {
+    if (ctx.isStrictNoEditMode()) {
       return false;
     }
 
-    const auto mark = recoverState.mark();
+    const auto mark = ctx.mark();
     if (boundaryOffset != nullptr) {
-      PEGIUM_RECOVERY_TRACE("[literal recover] boundary violation '", getValue(),
-                            "' at ", recoverState.cursorOffset());
-      const auto boundaryMark = recoverState.mark();
+      PEGIUM_RECOVERY_TRACE("[literal rule] boundary violation '", getValue(),
+                            "' at ", ctx.cursorOffset());
+      const auto boundaryMark = ctx.mark();
       const char *const boundaryEnd =
-          advanceOneCodepointLossy(boundaryOffset, recoverState.end);
-      recoverState.leaf(boundaryOffset, this);
-      if (recoverState.deleteOneCodepoint()) {
-        PEGIUM_RECOVERY_TRACE("[literal recover] boundary delete success '",
+          advanceOneCodepointLossy(boundaryOffset, ctx.end);
+      ctx.leaf(boundaryOffset, this);
+      if (ctx.deleteOneCodepoint()) {
+        PEGIUM_RECOVERY_TRACE("[literal rule] boundary delete success '",
                               getValue(), "'");
         return true;
       }
-      recoverState.rewind(boundaryMark);
-      if (boundaryEnd > recoverState.cursor() &&
-          recoverState.replaceLeaf(boundaryEnd, this)) {
-        PEGIUM_RECOVERY_TRACE("[literal recover] boundary replace success '",
+      ctx.rewind(boundaryMark);
+      if (boundaryEnd > ctx.cursor() &&
+          ctx.replaceLeaf(boundaryEnd, this)) {
+        PEGIUM_RECOVERY_TRACE("[literal rule] boundary replace success '",
                               getValue(), "'");
-        recoverState.skipHiddenNodes();
+        ctx.skipHiddenNodes();
         return true;
       }
-      recoverState.rewind(mark);
+      ctx.rewind(mark);
     }
     if constexpr (recover_insertable) {
-      if (recoverState.insertHidden(this)) {
-        PEGIUM_RECOVERY_TRACE("[literal recover] inserted '", getValue(),
-                              "' at ", recoverState.cursorOffset());
-        recoverState.skipHiddenNodes();
+      if (ctx.insertHidden(this)) {
+        PEGIUM_RECOVERY_TRACE("[literal rule] inserted '", getValue(),
+                              "' at ", ctx.cursorOffset());
+        ctx.skipHiddenNodes();
         return true;
       }
-      recoverState.rewind(mark);
+      ctx.rewind(mark);
     }
-    if (recoverState.insertHiddenForced(this)) {
-      PEGIUM_RECOVERY_TRACE("[literal recover] forced inserted '", getValue(),
-                            "' at ", recoverState.cursorOffset());
-      recoverState.skipHiddenNodes();
+    if (ctx.insertHiddenForced(this)) {
+      PEGIUM_RECOVERY_TRACE("[literal rule] forced inserted '", getValue(),
+                            "' at ", ctx.cursorOffset());
+      ctx.skipHiddenNodes();
       return true;
     }
-    recoverState.rewind(mark);
+    ctx.rewind(mark);
 
     if constexpr (recover_typo_replaceable) {
       const char *const typoEnd =
-          typo_replace_end(recoverState.cursor(), recoverState.end);
+          typo_replace_end(ctx.cursor(), ctx.end);
       if (typoEnd != nullptr) {
-        if (typoEnd != recoverState.end && isWord(*typoEnd)) {
+        if (typoEnd != ctx.end && isWord(*typoEnd)) {
           // keep searching through delete paths
-        } else if (recoverState.replaceLeaf(typoEnd, this)) {
-          PEGIUM_RECOVERY_TRACE("[literal recover] typo replace success '",
+        } else if (ctx.replaceLeaf(typoEnd, this)) {
+          PEGIUM_RECOVERY_TRACE("[literal rule] typo replace success '",
                                 getValue(), "'");
-          recoverState.skipHiddenNodes();
+          ctx.skipHiddenNodes();
           return true;
         }
       }
     }
 
-    while (recoverState.deleteOneCodepoint()) {
-      const char *const scanBegin = recoverState.cursor();
+    while (ctx.deleteOneCodepoint()) {
+      const char *const scanBegin = ctx.cursor();
       if (literal.size() > static_cast<std::size_t>(end - scanBegin)) {
         continue;
       }
@@ -175,23 +146,23 @@ slow_path:
           }
         }
 
-        PEGIUM_RECOVERY_TRACE("[literal recover] delete-scan match '", getValue(),
+        PEGIUM_RECOVERY_TRACE("[literal rule] delete-scan match '", getValue(),
                               "' at ",
-                              recoverState.cursorOffset());
-        recoverState.leaf(scanEnd, this);
-        recoverState.skipHiddenNodes();
+                              ctx.cursorOffset());
+        ctx.leaf(scanEnd, this);
+        ctx.skipHiddenNodes();
         return true;
       }
     next_delete_scan:
       continue;
     }
 
-    PEGIUM_RECOVERY_TRACE("[literal recover] fail '", getValue(), "' at ",
-                          recoverState.cursorOffset());
-    recoverState.rewind(mark);
+    PEGIUM_RECOVERY_TRACE("[literal rule] fail '", getValue(), "' at ",
+                          ctx.cursorOffset());
+    ctx.rewind(mark);
     return false;
   }
-  constexpr MatchResult parse_terminal(const char *begin,
+  constexpr MatchResult terminal(const char *begin,
                                        const char *end) const noexcept {
 
     if (literal.size() > static_cast<std::size_t>(end - begin)) [[unlikely]] {
@@ -212,14 +183,13 @@ slow_path:
     return MatchResult::success(begin + literal.size());
   }
 
-  constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-    return parse_terminal(sv.begin(), sv.end());
+  constexpr MatchResult terminal(std::string_view sv) const noexcept {
+    return terminal(sv.begin(), sv.end());
   }
 
   /// Create an insensitive Literal
   /// @return the insensitive Literal
   constexpr auto i() const noexcept {
-
     return Literal<toLower(), isCaseSensitive(literal)>{};
   }
   void print(std::ostream &os) const override {

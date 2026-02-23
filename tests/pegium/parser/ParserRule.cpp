@@ -38,14 +38,14 @@ TEST(ParserRuleTest, ParseRequiresFullConsumption) {
   ParserRule<DummyAstNode> rule{"Rule", ":"_kw + action<DummyAstNode>()};
 
   {
-    auto result = rule.parse(":", ContextBuilder().build());
+    auto result = rule.parse(":", SkipperBuilder().build());
     ASSERT_TRUE(result.ret);
     EXPECT_EQ(result.len, 1u);
     EXPECT_TRUE(result.value != nullptr);
   }
 
   {
-    auto result = rule.parse(":abc", ContextBuilder().build());
+    auto result = rule.parse(":abc", SkipperBuilder().build());
     EXPECT_FALSE(result.ret);
     EXPECT_EQ(result.len, 1u);
   }
@@ -55,7 +55,7 @@ TEST(ParserRuleTest, NestedParserRuleAssignmentSetsContainer) {
   ParserRule<LeafNode> leafRule{"Leaf", assign<&LeafNode::name>("leaf"_kw)};
   ParserRule<RootNode> rootRule{"Root", assign<&RootNode::leaf>(leafRule)};
 
-  auto result = rootRule.parse("leaf", ContextBuilder().build());
+  auto result = rootRule.parse("leaf", SkipperBuilder().build());
   ASSERT_TRUE(result.ret);
   ASSERT_TRUE(result.value != nullptr);
   ASSERT_TRUE(result.value->leaf != nullptr);
@@ -66,7 +66,7 @@ TEST(ParserRuleTest, NestedParserRuleAssignmentSetsContainer) {
 TEST(ParserRuleTest, ParseGenericAndGetValueExposeTypedAstValue) {
   ParserRule<LeafNode> rule{"Leaf", assign<&LeafNode::name>("leaf"_kw)};
 
-  auto parsed = rule.parse("leaf", ContextBuilder().build());
+  auto parsed = rule.parse("leaf", SkipperBuilder().build());
   ASSERT_TRUE(parsed.ret);
   ASSERT_TRUE(parsed.root_node != nullptr);
 
@@ -80,7 +80,7 @@ TEST(ParserRuleTest, ParseGenericAndGetValueExposeTypedAstValue) {
   EXPECT_EQ(typed->name, "leaf");
   EXPECT_FALSE(rule.getTypeName().empty());
 
-  auto generic = rule.parseGeneric("leaf", ContextBuilder().build());
+  auto generic = rule.parseGeneric("leaf", SkipperBuilder().build());
   ASSERT_TRUE(generic.root_node != nullptr);
 }
 
@@ -88,7 +88,7 @@ TEST(ParserRuleTest, DirectParserRuleCompositionUsesParserRuleChildValue) {
   ParserRule<LeafNode> inner{"Inner", assign<&LeafNode::name>("leaf"_kw)};
   ParserRule<LeafNode> outer{"Outer", inner};
 
-  auto result = outer.parse("leaf", ContextBuilder().build());
+  auto result = outer.parse("leaf", SkipperBuilder().build());
   ASSERT_TRUE(result.ret);
   ASSERT_TRUE(result.value != nullptr);
   EXPECT_EQ(result.value->name, "leaf");
@@ -97,7 +97,7 @@ TEST(ParserRuleTest, DirectParserRuleCompositionUsesParserRuleChildValue) {
 TEST(ParserRuleTest, RuleWithoutActionsBuildsDefaultAstNode) {
   ParserRule<DummyAstNode> rule{"Rule", ":"_kw};
 
-  auto result = rule.parse(":", ContextBuilder().build());
+  auto result = rule.parse(":", SkipperBuilder().build());
   ASSERT_TRUE(result.ret);
   EXPECT_EQ(result.len, 1u);
   ASSERT_TRUE(result.value != nullptr);
@@ -105,16 +105,16 @@ TEST(ParserRuleTest, RuleWithoutActionsBuildsDefaultAstNode) {
 
 TEST(ParserRuleTest, ParseRuleAddsNodeOnSuccessAndRewindsOnFailure) {
   ParserRule<LeafNode> rule{"Leaf", assign<&LeafNode::name>("leaf"_kw)};
-  auto context = ContextBuilder().build();
+  auto skipper = SkipperBuilder().build();
 
   {
     pegium::CstBuilder builder("leaf");
     const auto input = builder.getText();
-    ParseState state{builder, context};
+    ParseContext ctx{builder, skipper};
 
-    auto ok = rule.parse_rule(state);
+    auto ok = rule.rule(ctx);
     EXPECT_TRUE(ok);
-    EXPECT_EQ(state.cursor() - input.begin(), 4);
+    EXPECT_EQ(ctx.cursor() - input.begin(), 4);
 
     auto root = builder.finalize();
     auto node = root->begin();
@@ -125,11 +125,11 @@ TEST(ParserRuleTest, ParseRuleAddsNodeOnSuccessAndRewindsOnFailure) {
   {
     pegium::CstBuilder builder("xyz");
     const auto input = builder.getText();
-    ParseState state{builder, context};
+    ParseContext ctx{builder, skipper};
 
-    auto ko = rule.parse_rule(state);
+    auto ko = rule.rule(ctx);
     EXPECT_FALSE(ko);
-    EXPECT_EQ(state.cursor(), input.begin());
+    EXPECT_EQ(ctx.cursor(), input.begin());
 
     auto root = builder.finalize();
     EXPECT_EQ(root->begin(), root->end());
@@ -142,7 +142,7 @@ TEST(ParserRuleTest, NewActionCreatesCurrentNodeAndAppliesQueuedAssignments) {
       assign<&ChainNode::token>("x"_kw) + action<ChainNode>() +
           action<ChainNode, &ChainNode::previous>()};
 
-  auto result = rule.parse("x", ContextBuilder().build());
+  auto result = rule.parse("x", SkipperBuilder().build());
   ASSERT_TRUE(result.ret);
   ASSERT_TRUE(result.value != nullptr);
 
@@ -158,7 +158,7 @@ TEST(ParserRuleTest, InitActionBuildsImplicitCurrentWhenMissing) {
       assign<&ChainNode::token>("x"_kw) +
           action<ChainNode, &ChainNode::previous>()};
 
-  auto result = rule.parse("x", ContextBuilder().build());
+  auto result = rule.parse("x", SkipperBuilder().build());
   ASSERT_TRUE(result.ret);
   ASSERT_TRUE(result.value != nullptr);
   ASSERT_TRUE(result.value->previous != nullptr);

@@ -26,6 +26,7 @@ if(PEGIUM_PROFILE_BUILD)
     add_compile_options($<$<CXX_COMPILER_ID:GNU,Clang>:-fvisibility=default>)
     add_compile_options($<$<CXX_COMPILER_ID:GNU,Clang>:-fno-omit-frame-pointer>)
     add_compile_options($<$<CXX_COMPILER_ID:GNU,Clang>:-fno-optimize-sibling-calls>)
+    add_compile_options($<$<CXX_COMPILER_ID:GNU,Clang>:-fno-inline>)
 else()
     # Optimization flags for better performance
     add_compile_options($<$<CONFIG:Release>:-O3>)
@@ -38,14 +39,9 @@ endif()
 
 option(PEGIUM_ENABLE_CODECOVERAGE   "Enable code coverage testing support"            OFF)
 option(PEGIUM_ENABLE_RECOVERY_TRACE "Enable verbose recovery traces"                   OFF)
-option(PEGIUM_BENCH_RECOVERY_ONLY   "Bypass initial parse_rule and start directly in recovery mode" ON)
 
 if(PEGIUM_ENABLE_RECOVERY_TRACE)
     add_compile_definitions(PEGIUM_ENABLE_RECOVERY_TRACE)
-endif()
-
-if(PEGIUM_BENCH_RECOVERY_ONLY)
-    add_compile_definitions(PEGIUM_BENCH_RECOVERY_ONLY)
 endif()
 
 

@@ -6,14 +6,15 @@
 #include <pegium/parser/AnyCharacter.hpp>
 #include <pegium/parser/Group.hpp>
 #include <pegium/parser/NotPredicate.hpp>
-#include <pegium/parser/ParseState.hpp>
-#include <pegium/parser/RecoverState.hpp>
+#include <pegium/parser/ParseContext.hpp>
 #include <pegium/parser/TextUtils.hpp>
 #include <ranges>
 
 namespace pegium::parser {
 
 struct CharacterRange final : grammar::CharacterRange {
+  static constexpr bool nullable = false;
+
   using type = std::string_view;
   constexpr ~CharacterRange() override = default;
   constexpr explicit CharacterRange(std::string_view s)
@@ -24,56 +25,42 @@ struct CharacterRange final : grammar::CharacterRange {
   constexpr CharacterRange &operator=(CharacterRange &&) = default;
   constexpr CharacterRange &operator=(const CharacterRange &) = default;
 
-  constexpr bool parse_rule(ParseState &s) const {
-    const char *const begin = s.cursor();
-    if (begin == s.end ||
-        !lookup[static_cast<unsigned char>(*begin)]) {
-      return false;
-    }
-    // word boundary should be checked with `+ !w`
-    /*if (sv.end() > i.offset && isWord(*(i.offset - 1)) && isWord(*i.offset)) {
-      return MatchResult::failure(i.offset);
-    }*/
-    s.leaf(begin + 1, this);
-    s.skipHiddenNodes();
-    return true;
-  }
-  bool recover(RecoverState &recoverState) const {
-    const char *const begin = recoverState.cursor();
-    if (begin != recoverState.end &&
+  bool rule(ParseContext &ctx) const {
+    const char *const begin = ctx.cursor();
+    if (begin != ctx.end &&
         lookup[static_cast<unsigned char>(*begin)]) {
-      recoverState.leaf(begin + 1, this);
-      recoverState.skipHiddenNodes();
+      ctx.leaf(begin + 1, this);
+      ctx.skipHiddenNodes();
       return true;
     }
 
-    if (recoverState.isStrictNoEditMode()) {
+    if (ctx.isStrictNoEditMode()) {
       return false;
     }
 
-    const auto mark = recoverState.mark();
-    while (recoverState.deleteOneCodepoint()) {
-      const char *const scan = recoverState.cursor();
-      if (scan != recoverState.end &&
+    const auto mark = ctx.mark();
+    while (ctx.deleteOneCodepoint()) {
+      const char *const scan = ctx.cursor();
+      if (scan != ctx.end &&
           lookup[static_cast<unsigned char>(*scan)]) {
-        recoverState.leaf(scan + 1, this);
-        recoverState.skipHiddenNodes();
+        ctx.leaf(scan + 1, this);
+        ctx.skipHiddenNodes();
         return true;
       }
     }
 
-    recoverState.rewind(mark);
+    ctx.rewind(mark);
     return false;
   }
-  constexpr MatchResult parse_terminal(const char *begin,
+  constexpr MatchResult terminal(const char *begin,
                                        const char *end) const noexcept {
 
     return (begin != end && lookup[static_cast<unsigned char>(*begin)])
                ? MatchResult::success(begin + 1)
                : MatchResult::failure(begin);
   }
-  constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-    return parse_terminal(sv.begin(), sv.end());
+  constexpr MatchResult terminal(std::string_view sv) const noexcept {
+    return terminal(sv.begin(), sv.end());
   }
 
   /// Create an insensitive Characters Ranges

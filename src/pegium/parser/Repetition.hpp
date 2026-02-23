@@ -3,16 +3,20 @@
 #include <limits>
 #include <pegium/grammar/Repetition.hpp>
 #include <pegium/parser/ParseExpression.hpp>
+#include <pegium/parser/ParseContext.hpp>
 #include <pegium/parser/RecoveryTrace.hpp>
-#include <pegium/parser/ParseState.hpp>
-#include <pegium/parser/RecoverState.hpp>
 #include <pegium/parser/StepTrace.hpp>
 
 namespace pegium::parser {
 
 template <std::size_t min, std::size_t max, ParseExpression Element>
 struct Repetition final : grammar::Repetition {
-
+  static constexpr bool nullable =
+      (min == 0) || std::remove_cvref_t<Element>::nullable;
+  static_assert(!std::remove_cvref_t<Element>::nullable,
+                "A Repetition cannot be initialized with a nullable element.");
+  static_assert(!(min == 0 && max == 0),
+                "A Repetition cannot have both min and max set to 0.");
   constexpr explicit Repetition(Element &&element)
       : _element{std::forward<Element>(element)} {}
 
@@ -27,86 +31,28 @@ struct Repetition final : grammar::Repetition {
   std::size_t getMin() const noexcept override { return min; }
   std::size_t getMax() const noexcept override { return max; }
 
-  constexpr bool parse_rule(ParseState &s) const {
-    // optional
-    if constexpr (is_optional) {
-      (void)_element.parse_rule(s);
-      return true;
-    }
-    // zero or more
-    else if constexpr (is_star) {
-      while (true) {
-        const char *const before = s.cursor();
-        if (!_element.parse_rule(s) || s.cursor() == before) {
-          break;
-        }
-      }
-      return true;
-    }
-    // one or more
-    else if constexpr (is_plus) {
-
-      if (!_element.parse_rule(s)) {
-        return false;
-      }
-      while (true) {
-        const char *const before = s.cursor();
-        if (!_element.parse_rule(s) || s.cursor() == before) {
-          break;
-        }
-      }
-      return true;
-    }
-    // only min/max times
-    else if constexpr (is_fixed) {
-      for (std::size_t i = 0; i < min; ++i) {
-        if (!_element.parse_rule(s)) {
-          return false;
-        }
-      }
-      return true;
-    }
-    // other cases
-    else {
-      std::size_t count = 0;
-
-      for (; count < min; ++count) {
-        if (!_element.parse_rule(s)) {
-          return false;
-        }
-      }
-      for (; count < max; ++count) {
-        const char *const before = s.cursor();
-        if (!_element.parse_rule(s) || s.cursor() == before) {
-          break;
-        }
-      }
-      return true;
-    }
-  }
-
-  bool recover(RecoverState &recoverState) const {
+  bool rule(ParseContext &ctx) const {
     detail::stepTraceInc(detail::StepCounter::RepetitionRecoverCalls);
-    if (recoverState.isStrictNoEditMode()) {
-      return recover_strict_impl(recoverState);
+    if (ctx.isStrictNoEditMode()) {
+      return rule_strict_impl(ctx);
     }
 
-    return recover_editable_impl(recoverState);
+    return rule_editable_impl(ctx);
   }
 
-  constexpr MatchResult parse_terminal(const char *begin,
+  constexpr MatchResult terminal(const char *begin,
                                        const char *end) const noexcept {
     // optional
     if constexpr (is_optional) {
-      auto result = _element.parse_terminal(begin, end);
+      auto result = _element.terminal(begin, end);
       return result.IsValid() ? result : MatchResult::success(begin);
     }
     // zero or more
     else if constexpr (is_star) {
       auto result = MatchResult::success(begin);
       while (true) {
-        auto r = _element.parse_terminal(result.offset, end);
-        if (!r.IsValid() || r.offset == result.offset) {
+        auto r = _element.terminal(result.offset, end);
+        if (!r.IsValid()) {
           break;
         }
         result = r;
@@ -116,13 +62,13 @@ struct Repetition final : grammar::Repetition {
     // one or more
     else if constexpr (is_plus) {
 
-      auto result = _element.parse_terminal(begin, end);
+      auto result = _element.terminal(begin, end);
       if (!result.IsValid())
         return result;
 
       while (true) {
-        auto r = _element.parse_terminal(result.offset, end);
-        if (!r.IsValid() || r.offset == result.offset) {
+        auto r = _element.terminal(result.offset, end);
+        if (!r.IsValid()) {
           break;
         }
         result = r;
@@ -133,7 +79,7 @@ struct Repetition final : grammar::Repetition {
     else if constexpr (is_fixed) {
       auto result = MatchResult::success(begin);
       for (std::size_t i = 0; i < min; ++i) {
-        result = _element.parse_terminal(result.offset, end);
+        result = _element.terminal(result.offset, end);
         if (!result.IsValid()) {
           return result;
         }
@@ -146,14 +92,14 @@ struct Repetition final : grammar::Repetition {
       MatchResult result = MatchResult::success(begin);
       std::size_t count = 0;
       for (; count < min; ++count) {
-        result = _element.parse_terminal(result.offset, end);
+        result = _element.terminal(result.offset, end);
         if (!result.IsValid()) {
           return result;
         }
       }
 
       for (; count < max; ++count) {
-        auto r = _element.parse_terminal(result.offset, end);
+        auto r = _element.terminal(result.offset, end);
         if (!r.IsValid()) {
           break;
         }
@@ -163,8 +109,8 @@ struct Repetition final : grammar::Repetition {
       return result;
     }
   }
-  constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-    return parse_terminal(sv.begin(), sv.end());
+  constexpr MatchResult terminal(std::string_view sv) const noexcept {
+    return terminal(sv.begin(), sv.end());
   }
   void print(std::ostream &os) const override {
     os << _element;
@@ -193,32 +139,26 @@ private:
       (min == 1 && max == std::numeric_limits<std::size_t>::max());
   static constexpr bool is_fixed = (min == max && min > 0);
 
-  bool recover_strict_impl(RecoverState &recoverState) const {
+  bool rule_strict_impl(ParseContext &ctx) const {
     if constexpr (is_optional) {
-      (void)_element.recover(recoverState);
+      (void)_element.rule(ctx);
       return true;
     } else if constexpr (is_star) {
-      while (true) {
-        const char *const before = recoverState.cursor();
-        if (!_element.recover(recoverState) || recoverState.cursor() == before) {
-          break;
-        }
+      while (_element.rule(ctx)) {
+        // loop until the element cannot be recovered anymore
       }
       return true;
     } else if constexpr (is_plus) {
-      if (!_element.recover(recoverState)) {
+      if (!_element.rule(ctx)) {
         return false;
       }
-      while (true) {
-        const char *const before = recoverState.cursor();
-        if (!_element.recover(recoverState) || recoverState.cursor() == before) {
-          break;
-        }
+      while (_element.rule(ctx)) {
+        // loop until the element cannot be recovered anymore
       }
       return true;
     } else if constexpr (is_fixed) {
       for (std::size_t i = 0; i < min; ++i) {
-        if (!_element.recover(recoverState)) {
+        if (!_element.rule(ctx)) {
           return false;
         }
       }
@@ -226,13 +166,12 @@ private:
     } else {
       std::size_t count = 0;
       for (; count < min; ++count) {
-        if (!_element.recover(recoverState)) {
+        if (!_element.rule(ctx)) {
           return false;
         }
       }
       for (; count < max; ++count) {
-        const char *const before = recoverState.cursor();
-        if (!_element.recover(recoverState) || recoverState.cursor() == before) {
+        if (!_element.rule(ctx)) {
           break;
         }
       }
@@ -240,68 +179,68 @@ private:
     }
   }
 
-  bool recover_editable_impl(RecoverState &recoverState) const {
+  bool rule_editable_impl(ParseContext &ctx) const {
     if constexpr (is_optional) {
-      (void)_element.recover(recoverState);
+      (void)_element.rule(ctx);
       return true;
     } else if constexpr (is_star) {
-      PEGIUM_RECOVERY_TRACE("[repeat * recover] enter offset=",
-                            recoverState.cursorOffset());
+      PEGIUM_RECOVERY_TRACE("[repeat * rule] enter offset=",
+                            ctx.cursorOffset());
       while (true) {
-        const char *const before = recoverState.cursor();
-        const auto mark = recoverState.mark();
-        const bool allowInsert = recoverState.allowInsert;
-        recoverState.allowInsert = false;
-        const bool elementRecovered = _element.recover(recoverState);
-        recoverState.allowInsert = allowInsert;
-        if (elementRecovered && recoverState.cursor() != before) {
-          PEGIUM_RECOVERY_TRACE("[repeat * recover] element matched offset=",
-                                recoverState.cursorOffset());
+        const char *const before = ctx.cursor();
+        const auto mark = ctx.mark();
+        const bool allowInsert = ctx.allowInsert;
+        ctx.allowInsert = false;
+        const bool elementRecovered = _element.rule(ctx);
+        ctx.allowInsert = allowInsert;
+        if (elementRecovered && ctx.cursor() != before) {
+          PEGIUM_RECOVERY_TRACE("[repeat * rule] element matched offset=",
+                                ctx.cursorOffset());
           continue;
         }
-        recoverState.rewind(mark);
-        PEGIUM_RECOVERY_TRACE("[repeat * recover] stop offset=",
-                              recoverState.cursorOffset());
+        ctx.rewind(mark);
+        PEGIUM_RECOVERY_TRACE("[repeat * rule] stop offset=",
+                              ctx.cursorOffset());
         break;
       }
       return true;
     } else if constexpr (is_plus) {
-      const auto firstMark = recoverState.mark();
-      const char *const firstBefore = recoverState.cursor();
-      const bool allowInsert = recoverState.allowInsert;
-      recoverState.allowInsert = false;
-      if (!_element.recover(recoverState) ||
-          recoverState.cursor() == firstBefore) {
-        recoverState.allowInsert = allowInsert;
-        recoverState.rewind(firstMark);
-        PEGIUM_RECOVERY_TRACE("[repeat + recover] first element failed offset=",
-                              recoverState.cursorOffset());
+      const auto firstMark = ctx.mark();
+      const char *const firstBefore = ctx.cursor();
+      const bool allowInsert = ctx.allowInsert;
+      ctx.allowInsert = false;
+      if (!_element.rule(ctx) ||
+          ctx.cursor() == firstBefore) {
+        ctx.allowInsert = allowInsert;
+        ctx.rewind(firstMark);
+        PEGIUM_RECOVERY_TRACE("[repeat + rule] first element failed offset=",
+                              ctx.cursorOffset());
         return false;
       }
-      recoverState.allowInsert = allowInsert;
-      PEGIUM_RECOVERY_TRACE("[repeat + recover] first element ok offset=",
-                            recoverState.cursorOffset());
+      ctx.allowInsert = allowInsert;
+      PEGIUM_RECOVERY_TRACE("[repeat + rule] first element ok offset=",
+                            ctx.cursorOffset());
       while (true) {
-        const char *const before = recoverState.cursor();
-        const auto mark = recoverState.mark();
-        const bool allowInsert = recoverState.allowInsert;
-        recoverState.allowInsert = false;
-        const bool elementRecovered = _element.recover(recoverState);
-        recoverState.allowInsert = allowInsert;
-        if (elementRecovered && recoverState.cursor() != before) {
-          PEGIUM_RECOVERY_TRACE("[repeat + recover] element matched offset=",
-                                recoverState.cursorOffset());
+        const char *const before = ctx.cursor();
+        const auto mark = ctx.mark();
+        const bool allowInsert = ctx.allowInsert;
+        ctx.allowInsert = false;
+        const bool elementRecovered = _element.rule(ctx);
+        ctx.allowInsert = allowInsert;
+        if (elementRecovered && ctx.cursor() != before) {
+          PEGIUM_RECOVERY_TRACE("[repeat + rule] element matched offset=",
+                                ctx.cursorOffset());
           continue;
         }
-        recoverState.rewind(mark);
-        PEGIUM_RECOVERY_TRACE("[repeat + recover] stop offset=",
-                              recoverState.cursorOffset());
+        ctx.rewind(mark);
+        PEGIUM_RECOVERY_TRACE("[repeat + rule] stop offset=",
+                              ctx.cursorOffset());
         break;
       }
       return true;
     } else if constexpr (is_fixed) {
       for (std::size_t i = 0; i < min; ++i) {
-        if (!_element.recover(recoverState)) {
+        if (!_element.rule(ctx)) {
           return false;
         }
       }
@@ -309,13 +248,14 @@ private:
     } else {
       std::size_t count = 0;
       for (; count < min; ++count) {
-        if (!_element.recover(recoverState)) {
+        if (!_element.rule(ctx)) {
           return false;
         }
       }
       for (; count < max; ++count) {
-        const char *const before = recoverState.cursor();
-        if (!_element.recover(recoverState) || recoverState.cursor() == before) {
+        const char *const before = ctx.cursor();
+        if (!_element.rule(ctx) ||
+            ctx.cursor() == before) {
           break;
         }
       }
