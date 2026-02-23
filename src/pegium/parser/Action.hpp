@@ -3,16 +3,14 @@
 #include <pegium/grammar/Action.hpp>
 #include <pegium/parser/AssignmentHelpers.hpp>
 #include <pegium/parser/ParseExpression.hpp>
-#include <pegium/parser/ParseState.hpp>
-#include <pegium/parser/RecoverState.hpp>
+#include <pegium/parser/ParseContext.hpp>
 #include <pegium/parser/Introspection.hpp>
 #include <type_traits>
 
 namespace pegium::parser {
 
 template <typename T, auto feature> struct Action final : grammar::Action {
-
-  // explicit Action() {}
+  static constexpr bool nullable = true; 
 
   constexpr ElementKind getKind() const noexcept override {
     if constexpr (feature != nullptr)
@@ -28,20 +26,16 @@ template <typename T, auto feature> struct Action final : grammar::Action {
     else
       return std::make_shared<T>();
   }
-  constexpr bool parse_rule(ParseState &s) const {
-    s.leaf(s.cursor(), this);
+  bool rule(ParseContext &ctx) const {
+    ctx.leaf(ctx.cursor(), this);
     return true;
   }
-  bool recover(RecoverState &recoverState) const {
-    recoverState.leaf(recoverState.cursor(), this);
-    return true;
-  }
-  constexpr MatchResult parse_terminal(const char *begin,
+  constexpr MatchResult terminal(const char *begin,
                                        const char *) const noexcept {
     return MatchResult::success(begin);
   }
-  constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-    return parse_terminal(sv.begin(), sv.end());
+  constexpr MatchResult terminal(std::string_view sv) const noexcept {
+    return terminal(sv.begin(), sv.end());
   }
 
 

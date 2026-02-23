@@ -20,15 +20,14 @@ struct DummyGrammarElement final : pegium::grammar::AbstractElement {
 TEST(SyntaxTreeTest, BuilderRewindRestoresCheckpoint) {
   pegium::CstBuilder builder{"xyz"};
   const char *begin = builder.input_begin();
-  const auto checkpoint = builder.mark(begin);
-
-  builder.enter(begin);
-  builder.leaf(begin, begin + 1, nullptr, false);
-  builder.exit(begin + 1, nullptr);
+  const auto checkpoint = builder.mark();
+  DummyGrammarElement ge;
+  builder.enter();
+  builder.leaf(begin, begin + 1, &ge, false);
+  builder.exit(begin, begin + 1, &ge);
   ASSERT_GT(builder.node_count(), 0u);
 
-  const char *rewound = builder.rewind(checkpoint);
-  EXPECT_EQ(rewound, begin);
+  builder.rewind(checkpoint);
   EXPECT_EQ(builder.node_count(), 0u);
 
   auto root = builder.finalize();
@@ -43,8 +42,8 @@ TEST(SyntaxTreeTest, BuilderRewindRestoresCheckpoint) {
 TEST(SyntaxTreeTest, BuilderResetClearsStateAndAllowsReuse) {
   pegium::CstBuilder builder{"xy"};
   const char *begin = builder.input_begin();
-
-  builder.leaf(begin, begin + 1, nullptr, false);
+  DummyGrammarElement ge;
+  builder.leaf(begin, begin + 1, &ge, false);
   auto firstRoot = builder.finalize();
 
   std::vector<pegium::CstNodeView> firstNodes;
@@ -57,7 +56,7 @@ TEST(SyntaxTreeTest, BuilderResetClearsStateAndAllowsReuse) {
   builder.reset();
   EXPECT_EQ(builder.node_count(), 0u);
 
-  builder.leaf(begin + 1, begin + 2, nullptr, false);
+  builder.leaf(begin + 1, begin + 2, &ge, false);
   auto secondRoot = builder.finalize();
 
   std::vector<pegium::CstNodeView> secondNodes;
@@ -72,8 +71,8 @@ TEST(SyntaxTreeTest, BuilderOverrideGrammarElementUpdatesNode) {
   static const DummyGrammarElement grammarElement{};
   pegium::CstBuilder builder{"a"};
   const char *begin = builder.input_begin();
-
-  builder.leaf(begin, begin + 1, nullptr, false);
+  DummyGrammarElement ge;
+  builder.leaf(begin, begin + 1, &ge, false);
   builder.override_grammar_element(0u, &grammarElement);
   auto root = builder.finalize();
 
@@ -88,7 +87,8 @@ TEST(SyntaxTreeTest, BuilderOverrideGrammarElementUpdatesNode) {
 TEST(SyntaxTreeTest, BuilderFinalizeIsIdempotentAndLeafHasNoChildren) {
   pegium::CstBuilder builder{"a"};
   const char *begin = builder.input_begin();
-  builder.leaf(begin, begin + 1, nullptr, false);
+  DummyGrammarElement ge;
+  builder.leaf(begin, begin + 1, &ge, false);
 
   auto root1 = builder.finalize();
   auto root2 = builder.finalize();
@@ -110,7 +110,8 @@ TEST(SyntaxTreeTest, EmptyRootHasNoTopLevelNodes) {
 TEST(SyntaxTreeTest, NodeViewExposesOffsetsAndText) {
   pegium::CstBuilder builder{"abc"};
   const char *begin = builder.input_begin();
-  builder.leaf(begin + 1, begin + 3, nullptr, false);
+  DummyGrammarElement ge;
+  builder.leaf(begin + 1, begin + 3, &ge, false);
 
   auto root = builder.finalize();
   auto it = root->begin();

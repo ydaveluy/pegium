@@ -22,9 +22,10 @@ struct ParseDiagnostic {
 };
 
 struct ParseOptions {
-  std::size_t maxConsecutiveCodepointDeletes = 8;
+  std::uint32_t maxConsecutiveCodepointDeletes = 8;
   // 0 disables local-window limitation (legacy global recovery behavior).
-  std::size_t localRecoveryWindowBytes = 128;
+  std::uint32_t localRecoveryWindowBytes = 128;
+  bool recoveryEnabled = true;
 };
 
 template <typename T> struct ParseResult {

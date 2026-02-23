@@ -9,12 +9,10 @@
 #include <pegium/grammar/CharacterRange.hpp>
 #include <pegium/grammar/Literal.hpp>
 #include <pegium/grammar/Rule.hpp>
-// #include <pegium/parser/IRule.hpp>
 #include <pegium/parser/AssignmentHelpers.hpp>
 #include <pegium/parser/Introspection.hpp>
 #include <pegium/parser/ParseExpression.hpp>
-#include <pegium/parser/ParseState.hpp>
-#include <pegium/parser/RecoverState.hpp>
+#include <pegium/parser/ParseContext.hpp>
 #include <pegium/parser/OrderedChoice.hpp>
 #include <pegium/parser/RuleValue.hpp>
 #include <stdexcept>
@@ -79,6 +77,9 @@ struct IsValidAssignment<feature, const OrderedChoice<Element...> &&>
 
 template <auto feature, ParseExpression Element>
 struct Assignment final : grammar::Assignment {
+static constexpr bool nullable = false;
+static_assert(!std::remove_cvref_t<Element>::nullable,
+              "An Assignment cannot be initialized with a nullable element.");
 
   constexpr Assignment(Element &&element, AssignmentOperator ope)
       : _element{std::forward<Element>(element)}, _operator{ope} {}
@@ -98,37 +99,19 @@ struct Assignment final : grammar::Assignment {
     return _operator;
   }
 
-  constexpr bool parse_rule(ParseState &s) const {
-    if constexpr (IsOrderedChoice<Element>::value) {
-      const auto mark = s.enter();
-      if (!_element.parse_rule(s)) {
-        s.rewind(mark);
-        return false;
-      }
-      s.exit(this);
-      return true;
-    } else {
-      const auto before = s.node_count();
-      const bool result = _element.parse_rule(s);
-      if (result && s.node_count() > before) {
-        s.override_grammar_element(static_cast<NodeId>(before), this);
-      }
-      return result;
+  bool rule(ParseContext &ctx) const {
+    if (ctx.isStrictNoEditMode()) {
+      return rule_strict_impl(ctx);
     }
+    return rule_editable_impl(ctx);
   }
-  bool recover(RecoverState &recoverState) const {
-    if (recoverState.isStrictNoEditMode()) {
-      return recover_strict_impl(recoverState);
-    }
-    return recover_editable_impl(recoverState);
-  }
-  constexpr MatchResult parse_terminal(const char *begin,
+  constexpr MatchResult terminal(const char *begin,
                                        const char *) const noexcept {
     assert(false && "An Assignment cannot be in a terminal.");
     return MatchResult::failure(begin);
   }
-  constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-    return parse_terminal(sv.begin(), sv.end());
+  constexpr MatchResult terminal(std::string_view sv) const noexcept {
+    return terminal(sv.begin(), sv.end());
   }
 
   void execute(AstNode *current, const CstNodeView &node) const override {
@@ -139,39 +122,39 @@ private:
   ParseExpressionHolder<Element> _element;
   AssignmentOperator _operator;
 
-  bool recover_strict_impl(RecoverState &recoverState) const {
+  bool rule_strict_impl(ParseContext &ctx) const {
     if constexpr (IsOrderedChoice<Element>::value) {
-      const auto mark = recoverState.enter();
-      if (!_element.recover(recoverState)) {
-        recoverState.rewind(mark);
+      const auto mark = ctx.enter();
+      if (!_element.rule(ctx)) {
+        ctx.rewind(mark);
         return false;
       }
-      recoverState.exit(this);
+      ctx.exit(mark, this);
       return true;
     } else {
-      const auto before = recoverState.node_count();
-      const bool result = _element.recover(recoverState);
-      if (result && recoverState.node_count() > before) {
-        recoverState.override_grammar_element(static_cast<NodeId>(before), this);
+      const auto before = ctx.node_count();
+      const bool result = _element.rule(ctx);
+      if (result && ctx.node_count() > before) {
+        ctx.override_grammar_element(static_cast<NodeId>(before), this);
       }
       return result;
     }
   }
 
-  bool recover_editable_impl(RecoverState &recoverState) const {
+  bool rule_editable_impl(ParseContext &ctx) const {
     if constexpr (IsOrderedChoice<Element>::value) {
-      const auto mark = recoverState.enter();
-      if (!_element.recover(recoverState)) {
-        recoverState.rewind(mark);
+      const auto mark = ctx.enter();
+      if (!_element.rule(ctx)) {
+        ctx.rewind(mark);
         return false;
       }
-      recoverState.exit(this);
+      ctx.exit(mark, this);
       return true;
     } else {
-      const auto before = recoverState.node_count();
-      const bool result = _element.recover(recoverState);
-      if (result && recoverState.node_count() > before) {
-        recoverState.override_grammar_element(static_cast<NodeId>(before), this);
+      const auto before = ctx.node_count();
+      const bool result = _element.rule(ctx);
+      if (result && ctx.node_count() > before) {
+        ctx.override_grammar_element(static_cast<NodeId>(before), this);
       }
       return result;
     }
@@ -462,49 +445,49 @@ private:
 
   std::optional<SelectedValue>
   extract_selected_value(const CstNodeView &node) const {
-    for (const auto &child : node) {
-      if (child.isHidden()) {
+    for (const auto view : node) {
+      const auto &child = view.node();
+      if (child.isHidden) {
         continue;
       }
 
-      const auto *grammarElement = child.getGrammarElement();
-      if (!grammarElement) {
-        return std::nullopt;
-      }
+      const auto *grammarElement = child.grammarElement;
+      assert(grammarElement && "Node must have a grammar element");
+
 
       switch (grammarElement->getKind()) {
       case ElementKind::TerminalRule:
         return SelectedValue{
             static_cast<const grammar::TerminalRule *>(grammarElement)
-                ->getValue(child),
+                ->getValue(view),
             ElementKind::TerminalRule};
       case ElementKind::DataTypeRule:
         return SelectedValue{
             static_cast<const grammar::DataTypeRule *>(grammarElement)
-                ->getValue(child),
+                ->getValue(view),
             ElementKind::DataTypeRule};
       case ElementKind::ParserRule:
         return SelectedValue{
             static_cast<const grammar::ParserRule *>(grammarElement)
-                ->getValue(child),
+                ->getValue(view),
             ElementKind::ParserRule};
       case ElementKind::Literal:
         return SelectedValue{
             grammar::RuleValue{
                 static_cast<const grammar::Literal *>(grammarElement)
-                    ->getValue(child)},
+                    ->getValue(view)},
             ElementKind::Literal};
       case ElementKind::CharacterRange:
         return SelectedValue{
             grammar::RuleValue{
                 static_cast<const grammar::CharacterRange *>(grammarElement)
-                    ->getValue(child)},
+                    ->getValue(view)},
             ElementKind::CharacterRange};
       case ElementKind::AnyCharacter:
         return SelectedValue{
             grammar::RuleValue{
                 static_cast<const grammar::AnyCharacter *>(grammarElement)
-                    ->getValue(child)},
+                    ->getValue(view)},
             ElementKind::AnyCharacter};
       default:
         return std::nullopt;

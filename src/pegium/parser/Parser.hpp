@@ -79,7 +79,7 @@ namespace pegium::parser {
 class Parser : public IParser {
 public:
   auto createContext() const {
-    return ContextBuilder().build();
+    return SkipperBuilder().build();
   }
 
 private:

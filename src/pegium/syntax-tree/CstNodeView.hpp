@@ -56,7 +56,9 @@ public:
   const grammar::AbstractElement *getGrammarElement() const noexcept {
     return _root->node(_id).grammarElement;
   }
-
+  inline const CstNode &node() const noexcept { return _root->node(_id); }
+  inline const RootCstNode &root() const noexcept { return *_root; }
+  inline NodeId id() const noexcept { return _id; }
   ChildIterator begin() const noexcept {
     if (_root->node(_id).isLeaf) {
       return ChildIterator(_root, kNoNode);

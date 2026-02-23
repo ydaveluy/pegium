@@ -102,7 +102,7 @@ inline void stepTraceDumpSummary(std::string_view label, bool ret, bool recovere
             << " delete=" << stepTraceGet(StepCounter::RecoverStateDelete)
             << " replace=" << stepTraceGet(StepCounter::RecoverStateReplace)
             << '\n';
-  std::cerr << "  choice recover: calls="
+  std::cerr << "  choice rule: calls="
             << stepTraceGet(StepCounter::ChoiceRecoverCalls)
             << " fast_try=" << stepTraceGet(StepCounter::ChoiceFastAttempts)
             << " fast_ok=" << stepTraceGet(StepCounter::ChoiceFastSuccess)
@@ -110,7 +110,7 @@ inline void stepTraceDumpSummary(std::string_view label, bool ret, bool recovere
             << " strict=" << stepTraceGet(StepCounter::ChoiceStrictPasses)
             << " editable="
             << stepTraceGet(StepCounter::ChoiceEditablePasses) << '\n';
-  std::cerr << "  group recover: calls="
+  std::cerr << "  group rule: calls="
             << stepTraceGet(StepCounter::GroupRecoverCalls)
             << " fast_try=" << stepTraceGet(StepCounter::GroupFastAttempts)
             << " fast_ok=" << stepTraceGet(StepCounter::GroupFastSuccess)
@@ -118,7 +118,7 @@ inline void stepTraceDumpSummary(std::string_view label, bool ret, bool recovere
             << " strict=" << stepTraceGet(StepCounter::GroupStrictPasses)
             << " editable="
             << stepTraceGet(StepCounter::GroupEditablePasses) << '\n';
-  std::cerr << "  unordered recover: calls="
+  std::cerr << "  unordered rule: calls="
             << stepTraceGet(StepCounter::UnorderedRecoverCalls)
             << " fast_try=" << stepTraceGet(StepCounter::UnorderedFastAttempts)
             << " fast_ok=" << stepTraceGet(StepCounter::UnorderedFastSuccess)
@@ -127,7 +127,7 @@ inline void stepTraceDumpSummary(std::string_view label, bool ret, bool recovere
             << " strict=" << stepTraceGet(StepCounter::UnorderedStrictPasses)
             << " editable="
             << stepTraceGet(StepCounter::UnorderedEditablePasses) << '\n';
-  std::cerr << "  repetition recover: calls="
+  std::cerr << "  repetition rule: calls="
             << stepTraceGet(StepCounter::RepetitionRecoverCalls)
             << " fast_try=" << stepTraceGet(StepCounter::RepetitionFastAttempts)
             << " fast_ok=" << stepTraceGet(StepCounter::RepetitionFastSuccess)

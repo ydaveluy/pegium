@@ -3,9 +3,8 @@
 #include <pegium/grammar/OrderedChoice.hpp>
 #include <pegium/parser/CstSearch.hpp>
 #include <pegium/parser/ParseExpression.hpp>
+#include <pegium/parser/ParseContext.hpp>
 #include <pegium/parser/RecoveryTrace.hpp>
-#include <pegium/parser/ParseState.hpp>
-#include <pegium/parser/RecoverState.hpp>
 #include <pegium/parser/StepTrace.hpp>
 #include <stdexcept>
 #include <type_traits>
@@ -17,7 +16,8 @@ template <ParseExpression... Elements>
 struct OrderedChoice final : grammar::OrderedChoice {
   static_assert(sizeof...(Elements) > 1,
                 "An OrderedChoice shall contains at least 2 elements.");
-  
+  static constexpr bool nullable = (... || std::remove_cvref_t<Elements>::nullable);
+
   constexpr explicit OrderedChoice(std::tuple<Elements...> &&elements)
       : _elements{std::move(elements)} {}
   constexpr OrderedChoice(OrderedChoice &&) noexcept = default;
@@ -25,59 +25,55 @@ struct OrderedChoice final : grammar::OrderedChoice {
   constexpr OrderedChoice &operator=(OrderedChoice &&) noexcept = default;
   constexpr OrderedChoice &operator=(const OrderedChoice &) = default;
 
-  constexpr bool parse_rule(ParseState &s) const {
-    return parse_rule_impl(s);
-  }
-
-  bool recover(RecoverState &recoverState) const {
+  bool rule(ParseContext &ctx) const {
     detail::stepTraceInc(detail::StepCounter::ChoiceRecoverCalls);
-    if (recoverState.isStrictNoEditMode()) {
+    if (ctx.isStrictNoEditMode()) {
       detail::stepTraceInc(detail::StepCounter::ChoiceStrictPasses);
-      return recover_strict(recoverState);
+      return rule_strict(ctx);
     }
 
-    const auto entry = recoverState.mark();
-    PEGIUM_RECOVERY_TRACE("[choice recover] enter offset=",
-                          recoverState.cursorOffset(), " allowI=",
-                          recoverState.allowInsert, " allowD=",
-                          recoverState.allowDelete);
+    const auto entry = ctx.mark();
+    PEGIUM_RECOVERY_TRACE(
+        "[choice rule] enter offset=", ctx.cursorOffset(),
+        " allowI=", ctx.allowInsert,
+        " allowD=", ctx.allowDelete);
 
-    const bool allowInsert = recoverState.allowInsert;
-    const bool allowDelete = recoverState.allowDelete;
-    recoverState.allowInsert = false;
-    recoverState.allowDelete = false;
+    const bool allowInsert = ctx.allowInsert;
+    const bool allowDelete = ctx.allowDelete;
+    ctx.allowInsert = false;
+    ctx.allowDelete = false;
     detail::stepTraceInc(detail::StepCounter::ChoiceStrictPasses);
-    if (recover_strict(recoverState)) {
-      recoverState.allowInsert = allowInsert;
-      recoverState.allowDelete = allowDelete;
-      PEGIUM_RECOVERY_TRACE("[choice recover] strict success offset=",
-                            recoverState.cursorOffset());
+    if (rule_strict(ctx)) {
+      ctx.allowInsert = allowInsert;
+      ctx.allowDelete = allowDelete;
+      PEGIUM_RECOVERY_TRACE("[choice rule] strict success offset=",
+                            ctx.cursorOffset());
       return true;
     }
-    recoverState.rewind(entry);
-    recoverState.allowInsert = allowInsert;
-    recoverState.allowDelete = allowDelete;
+    ctx.rewind(entry);
+    ctx.allowInsert = allowInsert;
+    ctx.allowDelete = allowDelete;
 
-    if (recover_editable(recoverState)) {
+    if (rule_editable(ctx)) {
       detail::stepTraceInc(detail::StepCounter::ChoiceEditablePasses);
-      PEGIUM_RECOVERY_TRACE("[choice recover] editable success offset=",
-                            recoverState.cursorOffset());
+      PEGIUM_RECOVERY_TRACE("[choice rule] editable success offset=",
+                            ctx.cursorOffset());
       return true;
     }
     detail::stepTraceInc(detail::StepCounter::ChoiceEditablePasses);
 
-    PEGIUM_RECOVERY_TRACE("[choice recover] fail offset=",
-                          recoverState.cursorOffset());
-    recoverState.rewind(entry);
+    PEGIUM_RECOVERY_TRACE("[choice rule] fail offset=",
+                          ctx.cursorOffset());
+    ctx.rewind(entry);
     return false;
   }
 
-  constexpr MatchResult parse_terminal(const char *begin,
+  constexpr MatchResult terminal(const char *begin,
                                        const char *end) const noexcept {
     return parse_terminal_impl(begin, end);
   }
-  constexpr MatchResult parse_terminal(std::string_view sv) const noexcept {
-    return parse_terminal(sv.begin(), sv.end());
+  constexpr MatchResult terminal(std::string_view sv) const noexcept {
+    return terminal(sv.begin(), sv.end());
   }
 
   void print(std::ostream &os) const override {
@@ -101,45 +97,31 @@ private:
     if constexpr (I == sizeof...(Elements)) {
       return MatchResult::failure(begin);
     } else {
-      auto r = std::get<I>(_elements).parse_terminal(begin, end);
+      auto r = std::get<I>(_elements).terminal(begin, end);
       return r.IsValid() ? r : parse_terminal_impl<I + 1>(begin, end);
     }
   }
 
   template <std::size_t I = 0>
-  constexpr bool parse_rule_impl(ParseState &s) const {
+  bool rule_impl(ParseContext &ctx) const {
     if constexpr (I == sizeof...(Elements)) {
       return false;
     } else {
-      const auto mark = s.mark();
-      if (std::get<I>(_elements).parse_rule(s)) {
+      const auto mark = ctx.mark();
+      if (std::get<I>(_elements).rule(ctx)) {
         return true;
       }
-      s.rewind(mark);
-      return parse_rule_impl<I + 1>(s);
+      ctx.rewind(mark);
+      return rule_impl<I + 1>(ctx);
     }
   }
 
-  template <std::size_t I = 0>
-  bool recover_rule_impl(RecoverState &recoverState) const {
-    if constexpr (I == sizeof...(Elements)) {
-      return false;
-    } else {
-      const auto mark = recoverState.mark();
-      if (std::get<I>(_elements).recover(recoverState)) {
-        return true;
-      }
-      recoverState.rewind(mark);
-      return recover_rule_impl<I + 1>(recoverState);
-    }
+  bool rule_strict(ParseContext &ctx) const {
+    return rule_impl(ctx);
   }
 
-  bool recover_strict(RecoverState &recoverState) const {
-    return recover_rule_impl(recoverState);
-  }
-
-  bool recover_editable(RecoverState &recoverState) const {
-    return recover_rule_impl(recoverState);
+  bool rule_editable(ParseContext &ctx) const {
+    return rule_impl(ctx);
   }
 
   template <ParseExpression... Rhs>
@@ -152,12 +134,14 @@ private:
   template <ParseExpression Rhs>
   friend constexpr auto operator|(OrderedChoice &&lhs, Rhs &&rhs) {
     return OrderedChoice<Elements..., ParseExpressionHolder<Rhs>>{
-        std::tuple_cat(std::move(lhs._elements), std::forward_as_tuple(std::forward<Rhs>(rhs)))};
+        std::tuple_cat(std::move(lhs._elements),
+                       std::forward_as_tuple(std::forward<Rhs>(rhs)))};
   }
   template <ParseExpression Lhs>
   friend constexpr auto operator|(Lhs &&lhs, OrderedChoice &&rhs) {
     return OrderedChoice<ParseExpressionHolder<Lhs>, Elements...>{
-        std::tuple_cat(std::forward_as_tuple(std::forward<Lhs>(lhs)), std::move(rhs._elements))};
+        std::tuple_cat(std::forward_as_tuple(std::forward<Lhs>(lhs)),
+                       std::move(rhs._elements))};
   }
 };
 
@@ -177,7 +161,6 @@ struct IsOrderedChoiceRaw<OrderedChoice<E...>> : std::true_type {};
 } // namespace detail
 
 template <typename T>
-struct IsOrderedChoice
-    : detail::IsOrderedChoiceRaw<std::remove_cvref_t<T>> {};
+struct IsOrderedChoice : detail::IsOrderedChoiceRaw<std::remove_cvref_t<T>> {};
 
 } // namespace pegium::parser

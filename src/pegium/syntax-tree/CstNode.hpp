@@ -16,6 +16,7 @@ struct CstNode {
   TextOffset begin;
   TextOffset end;
 
+  // a pointer to the grammar element responsible for this node, cannot be null
   const grammar::AbstractElement *grammarElement;
 
   // During parsing: temp parent id.
@@ -27,7 +28,7 @@ struct CstNode {
   bool isHidden;
   bool isRecovered;
 };
-static_assert(sizeof(CstNode) <= 32,
+static_assert(sizeof(CstNode) <= 24,
               "CstNode should be small enough to be efficiently stored in a "
               "vector");
 static_assert(std::is_trivially_constructible_v<CstNode>);

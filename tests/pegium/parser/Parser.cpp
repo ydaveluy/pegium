@@ -20,14 +20,14 @@ TEST(ParserTest, EndOfFileExpressionWorks) {
 
   {
     std::string_view okInput = "a";
-    auto ok = expr.parse_terminal(okInput);
+    auto ok = expr.terminal(okInput);
     EXPECT_TRUE(ok.IsValid());
     EXPECT_EQ(ok.offset - okInput.begin(), 1);
   }
 
   {
     std::string_view koInput = "ab";
-    auto ko = expr.parse_terminal(koInput);
+    auto ko = expr.terminal(koInput);
     EXPECT_FALSE(ko.IsValid());
   }
 }
@@ -37,14 +37,14 @@ TEST(ParserTest, NegatedCharacterRangeLiteralWorks) {
 
   {
     std::string_view okInput = "x";
-    auto ok = notNewLine.parse_terminal(okInput);
+    auto ok = notNewLine.terminal(okInput);
     EXPECT_TRUE(ok.IsValid());
     EXPECT_EQ(ok.offset - okInput.begin(), 1);
   }
 
   {
     std::string_view koInput = "\n";
-    auto ko = notNewLine.parse_terminal(koInput);
+    auto ko = notNewLine.terminal(koInput);
     EXPECT_FALSE(ko.IsValid());
   }
 }
@@ -54,14 +54,14 @@ TEST(ParserTest, UntilOperatorConsumesUntilClosingToken) {
 
   {
     std::string_view okInput = "/*hello*/";
-    auto ok = comment.parse_terminal(okInput);
+    auto ok = comment.terminal(okInput);
     EXPECT_TRUE(ok.IsValid());
     EXPECT_EQ(ok.offset - okInput.begin(), 9);
   }
 
   {
     std::string_view koInput = "/*hello";
-    auto ko = comment.parse_terminal(koInput);
+    auto ko = comment.terminal(koInput);
     EXPECT_FALSE(ko.IsValid());
   }
 }
