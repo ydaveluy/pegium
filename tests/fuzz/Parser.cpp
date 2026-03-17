@@ -19,6 +19,7 @@
 namespace {
 
 using namespace pegium::parser;
+namespace grammar = pegium::grammar;
 
 constexpr std::size_t kMaxSmokeInputBytes = 128u * 1024u;
 constexpr std::string_view kFuzzLanguageId = "fuzz";
