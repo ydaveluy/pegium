@@ -19,7 +19,7 @@ endif()
 FetchContent_Declare(
     lsp_framework
     GIT_REPOSITORY https://github.com/leon-bckl/lsp-framework.git
-    GIT_TAG        ab8e884c01567debb319834ce90910f64616a12b
+    GIT_TAG        1.3.1
 )
 FetchContent_MakeAvailable(lsp_framework)
 
@@ -237,8 +237,6 @@ if(BUILD_TESTING)
             pegium_example_requirements
             pegium_example_statemachine
         )
-    endif()
-    if(PEGIUM_BUILD_EXAMPLES)
         target_link_libraries(PegiumBench PUBLIC
             pegium
             pegium_example_arithmetics
@@ -246,8 +244,6 @@ if(BUILD_TESTING)
             pegium_example_requirements
             pegium_example_statemachine
         )
-    endif()
-    if(PEGIUM_BUILD_EXAMPLES)
         target_link_libraries(PegiumExamplesTest PUBLIC
             pegium
             pegium_example_arithmetics

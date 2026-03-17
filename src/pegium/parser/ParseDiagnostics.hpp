@@ -21,10 +21,10 @@ inline CstNodeView first_recovered_node(const RootCstNode &cst) {
 }
 
 inline void ensure_parse_diagnostic(std::vector<ParseDiagnostic> &diagnostics,
-                                    const RootCstNode *cst,
-                                    TextOffset parsedLength,
-                                    TextOffset failureVisibleCursorOffset,
-                                    bool fullMatch) {
+                                   const RootCstNode *cst,
+                                   TextOffset parsedLength,
+                                   TextOffset failureVisibleCursorOffset,
+                                   bool fullMatch) {
   const auto hasSyntaxDiagnostic = [&]() {
     for (const auto &diagnostic : diagnostics) {
       if (diagnostic.isSyntax()) {
@@ -43,7 +43,8 @@ inline void ensure_parse_diagnostic(std::vector<ParseDiagnostic> &diagnostics,
                            .offset = incompleteOffset,
                            .beginOffset = incompleteOffset,
                            .endOffset = incompleteOffset,
-                           .element = nullptr});
+                           .element = nullptr,
+                           .message = {}});
     return;
   }
   if (cst == nullptr) {
@@ -54,8 +55,10 @@ inline void ensure_parse_diagnostic(std::vector<ParseDiagnostic> &diagnostics,
                            .offset = recovered.getBegin(),
                            .beginOffset = recovered.getBegin(),
                            .endOffset = recovered.getEnd(),
-                           .element = nullptr});
+                           .element = nullptr,
+                           .message = {}});
   }
+
 }
 
 } // namespace pegium::parser::detail

@@ -46,6 +46,11 @@ makeScopeQueryContext(const ReferenceInfo &context) noexcept {
       .container = context.container,
       .property = context.property,
       .index = context.index,
+      .referenceText = {},
+      .referenceType = std::type_index(typeid(void)),
+      .rule = nullptr,
+      .assignment = nullptr,
+      .multi = false,
   };
   if (context.reference != nullptr) {
     query.referenceText = context.reference->getRefText();

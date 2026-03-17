@@ -436,7 +436,8 @@ bool is_link_end_char(char c) noexcept {
 bool has_symbol_or_reference(std::string_view token,
                              const workspace::IndexManager &index,
                              const workspace::Documents *documents) {
-  for ([[maybe_unused]] const auto &description : index.findElementsByName(token)) {
+  for (const auto &description : index.findElementsByName(token)) {
+    (void)description;
     return true;
   }
 

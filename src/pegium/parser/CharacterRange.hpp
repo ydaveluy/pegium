@@ -50,24 +50,39 @@ struct CharacterRange final : grammar::CharacterRange,
 
   void print(std::ostream &os) const override {
     os << '[';
-    int rangeStart = -1;
-    for (int codepoint = 0; codepoint < 256; ++codepoint) {
+    std::size_t rangeStart = 0;
+    bool hasRangeStart = false;
+    for (std::size_t codepoint = 0; codepoint < 256; ++codepoint) {
       if (lookup[codepoint]) {
-        if (rangeStart == -1)
+        if (!hasRangeStart) {
           rangeStart = codepoint;
+          hasRangeStart = true;
+        }
       } else {
-        if (rangeStart != -1) {
-          if (codepoint - rangeStart == 1)
+        if (hasRangeStart) {
+          if (codepoint - rangeStart == 1u)
             os << escape_char(static_cast<char>(rangeStart));
-          else if (codepoint - rangeStart == 2)
+          else if (codepoint - rangeStart == 2u)
             os << escape_char(static_cast<char>(rangeStart))
                << escape_char(static_cast<char>(rangeStart + 1));
           else
-            os << escape_char(static_cast<char>(rangeStart)) << '-'
+            os << escape_char(static_cast<char>(rangeStart))
+               << '-'
                << escape_char(static_cast<char>(codepoint - 1));
-          rangeStart = -1;
+          hasRangeStart = false;
         }
       }
+    }
+    if (hasRangeStart) {
+      if (255u - rangeStart == 0u)
+        os << escape_char(static_cast<char>(rangeStart));
+      else if (255u - rangeStart == 1u)
+        os << escape_char(static_cast<char>(rangeStart))
+           << escape_char(static_cast<char>(rangeStart + 1));
+      else
+        os << escape_char(static_cast<char>(rangeStart))
+           << '-'
+           << escape_char(static_cast<char>(255));
     }
     os << ']';
   }
