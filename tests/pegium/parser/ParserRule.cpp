@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
-#include <pegium/parser/Parser.hpp>
+#include <pegium/ParseJsonTestSupport.hpp>
+#include <pegium/TestCstBuilderHarness.hpp>
+#include <pegium/TestRuleParser.hpp>
+#include <pegium/parser/PegiumParser.hpp>
 
 #include <memory>
 #include <type_traits>
@@ -23,31 +26,47 @@ struct ChainNode : pegium::AstNode {
   pointer<ChainNode> previous;
 };
 
+template <typename RuleType>
+auto parse_rule(const RuleType &rule, std::string_view text,
+                const Skipper &skipper = SkipperBuilder().build(),
+                const ParseOptions &options = {}) {
+  auto document = std::make_unique<pegium::workspace::Document>();
+  document->setText(std::string{text});
+  pegium::test::parse_rule(rule, *document, skipper, options);
+  return document;
+}
+
 } // namespace
 
-static_assert(std::is_same_v<decltype(
-                                 std::declval<pegium::Reference<DummyAstNode> &>()
-                                     .operator->()),
-                             DummyAstNode *>);
 static_assert(
-    std::is_same_v<decltype(std::declval<const pegium::Reference<DummyAstNode> &>()
+    std::is_same_v<decltype(std::declval<pegium::Reference<DummyAstNode> &>()
                                 .operator->()),
-                   const DummyAstNode *>);
+                   DummyAstNode *>);
+static_assert(std::is_same_v<
+              decltype(std::declval<const pegium::Reference<DummyAstNode> &>()
+                           .operator->()),
+              const DummyAstNode *>);
 
 TEST(ParserRuleTest, ParseRequiresFullConsumption) {
-  ParserRule<DummyAstNode> rule{"Rule", ":"_kw + action<DummyAstNode>()};
+  ParserRule<DummyAstNode> rule{"Rule", ":"_kw + create<DummyAstNode>()};
 
   {
-    auto result = rule.parse(":", SkipperBuilder().build());
-    ASSERT_TRUE(result.ret);
-    EXPECT_EQ(result.len, 1u);
-    EXPECT_TRUE(result.value != nullptr);
+    auto document = pegium::test::ExpectAst(rule, ":",
+                                            R"json({
+  "$type": "DummyAstNode"
+})json");
+    auto &result = document->parseResult;
+    EXPECT_TRUE(result.fullMatch);
   }
 
   {
-    auto result = rule.parse(":abc", SkipperBuilder().build());
-    EXPECT_FALSE(result.ret);
-    EXPECT_EQ(result.len, 1u);
+    auto document = parse_rule(rule, ":abc");
+    auto &result = document->parseResult;
+    EXPECT_FALSE(result.fullMatch);
+    EXPECT_TRUE(result.value);
+    ASSERT_EQ(result.parseDiagnostics.size(), 1u);
+    EXPECT_EQ(result.parseDiagnostics.front().kind,
+              ParseDiagnosticKind::Incomplete);
   }
 }
 
@@ -55,113 +74,155 @@ TEST(ParserRuleTest, NestedParserRuleAssignmentSetsContainer) {
   ParserRule<LeafNode> leafRule{"Leaf", assign<&LeafNode::name>("leaf"_kw)};
   ParserRule<RootNode> rootRule{"Root", assign<&RootNode::leaf>(leafRule)};
 
-  auto result = rootRule.parse("leaf", SkipperBuilder().build());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
-  ASSERT_TRUE(result.value->leaf != nullptr);
-  EXPECT_EQ(result.value->leaf->name, "leaf");
-  EXPECT_EQ(result.value->leaf->getContainer(), result.value.get());
+  auto document = pegium::test::ExpectAst(rootRule, "leaf",
+                                          R"json({
+  "$type": "RootNode",
+  "leaf": {
+    "$type": "LeafNode",
+    "name": "leaf"
+  }
+})json");
+  auto *typed = pegium::ast_ptr_cast<RootNode>(document->parseResult.value);
+  ASSERT_TRUE(typed != nullptr);
+  ASSERT_TRUE(typed->leaf != nullptr);
+  EXPECT_EQ(typed->leaf->getContainer(), typed);
 }
 
-TEST(ParserRuleTest, ParseGenericAndGetValueExposeTypedAstValue) {
+TEST(ParserRuleTest, ParseAndGetValueExposeTypedAstValue) {
   ParserRule<LeafNode> rule{"Leaf", assign<&LeafNode::name>("leaf"_kw)};
 
-  auto parsed = rule.parse("leaf", SkipperBuilder().build());
-  ASSERT_TRUE(parsed.ret);
-  ASSERT_TRUE(parsed.root_node != nullptr);
+  auto document = pegium::test::ExpectAst(rule, "leaf",
+                                          R"json({
+  "$type": "LeafNode",
+  "name": "leaf"
+})json");
+  auto &parsed = document->parseResult;
+  ASSERT_TRUE(parsed.cst != nullptr);
 
-  auto node =
-      detail::findFirstMatchingNode(*parsed.root_node, std::addressof(rule));
+  auto node = detail::findFirstMatchingNode(*parsed.cst, std::addressof(rule));
   ASSERT_TRUE(node.has_value());
 
   auto value = rule.getValue(*node);
-  auto typed = std::dynamic_pointer_cast<LeafNode>(value);
+  auto *typed = pegium::ast_ptr_cast<LeafNode>(value);
   ASSERT_TRUE(typed != nullptr);
   EXPECT_EQ(typed->name, "leaf");
   EXPECT_FALSE(rule.getTypeName().empty());
-
-  auto generic = rule.parseGeneric("leaf", SkipperBuilder().build());
-  ASSERT_TRUE(generic.root_node != nullptr);
 }
 
 TEST(ParserRuleTest, DirectParserRuleCompositionUsesParserRuleChildValue) {
   ParserRule<LeafNode> inner{"Inner", assign<&LeafNode::name>("leaf"_kw)};
   ParserRule<LeafNode> outer{"Outer", inner};
 
-  auto result = outer.parse("leaf", SkipperBuilder().build());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
-  EXPECT_EQ(result.value->name, "leaf");
+  pegium::test::ExpectAst(outer, "leaf",
+                          R"json({
+  "$type": "LeafNode",
+  "name": "leaf"
+})json");
 }
 
 TEST(ParserRuleTest, RuleWithoutActionsBuildsDefaultAstNode) {
   ParserRule<DummyAstNode> rule{"Rule", ":"_kw};
 
-  auto result = rule.parse(":", SkipperBuilder().build());
-  ASSERT_TRUE(result.ret);
-  EXPECT_EQ(result.len, 1u);
-  ASSERT_TRUE(result.value != nullptr);
+  pegium::test::ExpectAst(rule, ":", "{}", {.includeType = false});
 }
 
-TEST(ParserRuleTest, ParseRuleAddsNodeOnSuccessAndRewindsOnFailure) {
+TEST(ParserRuleTest, ParseRuleAddsNodeOnSuccessAndKeepsLocalFailureState) {
   ParserRule<LeafNode> rule{"Leaf", assign<&LeafNode::name>("leaf"_kw)};
   auto skipper = SkipperBuilder().build();
 
   {
-    pegium::CstBuilder builder("leaf");
+    auto builderHarness = pegium::test::makeCstBuilderHarness("leaf");
+    auto &builder = builderHarness.builder;
     const auto input = builder.getText();
     ParseContext ctx{builder, skipper};
 
-    auto ok = rule.rule(ctx);
+    auto ok = parse(rule, ctx);
     EXPECT_TRUE(ok);
     EXPECT_EQ(ctx.cursor() - input.begin(), 4);
 
-    auto root = builder.finalize();
+    auto root = builder.getRootCstNode();
     auto node = root->begin();
     ASSERT_NE(node, root->end());
     EXPECT_EQ((*node).getGrammarElement(), std::addressof(rule));
   }
 
   {
-    pegium::CstBuilder builder("xyz");
+    auto builderHarness = pegium::test::makeCstBuilderHarness("xyz");
+    auto &builder = builderHarness.builder;
     const auto input = builder.getText();
     ParseContext ctx{builder, skipper};
 
-    auto ko = rule.rule(ctx);
+    auto ko = parse(rule, ctx);
     EXPECT_FALSE(ko);
     EXPECT_EQ(ctx.cursor(), input.begin());
 
-    auto root = builder.finalize();
-    EXPECT_EQ(root->begin(), root->end());
+    auto root = builder.getRootCstNode();
+    EXPECT_NE(root->begin(), root->end());
   }
+}
+
+TEST(ParserRuleTest, TopLevelParseFailureLeavesEmptyCst) {
+  ParserRule<DummyAstNode> rule{"Rule", "service"_kw};
+
+  auto document = parse_rule(rule, "");
+  ASSERT_NE(document->parseResult.cst, nullptr);
+  EXPECT_EQ(document->parseResult.cst->begin(), document->parseResult.cst->end());
+  EXPECT_FALSE(document->parseSucceeded());
+}
+
+TEST(ParserRuleTest, ConstructorOptionSetsLocalSkipper) {
+  TerminalRule<> ws{"WS", some(s)};
+  DataTypeRule<std::string> token{"Token", "a"_kw + "b"_kw};
+  ParseOptions strictNoRecovery;
+  strictNoRecovery.recoveryEnabled = false;
+
+  ParserRule<LeafNode> withoutLocalSkipper{"Leaf",
+                                           assign<&LeafNode::name>(token)};
+  auto document = parse_rule(withoutLocalSkipper, "a   b",
+                             SkipperBuilder().build(), strictNoRecovery);
+  auto &baseline = document->parseResult;
+  EXPECT_FALSE(baseline.value);
+
+  ParserRule<LeafNode> withLocalSkipper{
+      "Leaf", assign<&LeafNode::name>(token),
+      opt::with_skipper(SkipperBuilder().ignore(ws).build())};
+
+  pegium::test::ExpectAst(withLocalSkipper, "a   b",
+                          R"json({
+  "$type": "LeafNode",
+  "name": "ab"
+})json",
+                          strictNoRecovery);
 }
 
 TEST(ParserRuleTest, NewActionCreatesCurrentNodeAndAppliesQueuedAssignments) {
   ParserRule<ChainNode> rule{
-      "Chain",
-      assign<&ChainNode::token>("x"_kw) + action<ChainNode>() +
-          action<ChainNode, &ChainNode::previous>()};
+      "Chain", assign<&ChainNode::token>("x"_kw) + create<ChainNode>() +
+                   nest<ChainNode, &ChainNode::previous>()};
 
-  auto result = rule.parse("x", SkipperBuilder().build());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
+  auto document = parse_rule(rule, "x");
+  auto &result = document->parseResult;
+  ASSERT_TRUE(result.value);
+  auto *typed = pegium::ast_ptr_cast<ChainNode>(result.value);
+  ASSERT_TRUE(typed != nullptr);
 
-  EXPECT_TRUE(result.value->token.empty());
-  ASSERT_TRUE(result.value->previous != nullptr);
-  EXPECT_EQ(result.value->previous->token, "x");
-  EXPECT_EQ(result.value->previous->getContainer(), result.value.get());
+  EXPECT_TRUE(typed->token.empty());
+  ASSERT_TRUE(typed->previous != nullptr);
+  EXPECT_EQ(typed->previous->token, "x");
+  EXPECT_EQ(typed->previous->getContainer(), typed);
 }
 
 TEST(ParserRuleTest, InitActionBuildsImplicitCurrentWhenMissing) {
-  ParserRule<ChainNode> rule{
-      "Chain",
-      assign<&ChainNode::token>("x"_kw) +
-          action<ChainNode, &ChainNode::previous>()};
+  ParserRule<ChainNode> rule{"Chain",
+                             assign<&ChainNode::token>("x"_kw) +
+                                 nest<ChainNode, &ChainNode::previous>()};
 
-  auto result = rule.parse("x", SkipperBuilder().build());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
-  ASSERT_TRUE(result.value->previous != nullptr);
-  EXPECT_EQ(result.value->previous->token, "x");
-  EXPECT_EQ(result.value->previous->getContainer(), result.value.get());
+  auto document = parse_rule(rule, "x");
+  auto &result = document->parseResult;
+  ASSERT_TRUE(result.value);
+  auto *typed = pegium::ast_ptr_cast<ChainNode>(result.value);
+  ASSERT_TRUE(typed != nullptr);
+  ASSERT_TRUE(typed->previous != nullptr);
+  EXPECT_EQ(typed->previous->token, "x");
+  EXPECT_EQ(typed->previous->getContainer(), typed);
 }

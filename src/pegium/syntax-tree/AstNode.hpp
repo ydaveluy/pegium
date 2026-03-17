@@ -1,6 +1,5 @@
 #pragma once
 
-#include <any>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
@@ -13,38 +12,59 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
+#include <pegium/parser/Introspection.hpp>
+#include <pegium/syntax-tree/CstNodeView.hpp>
 #include <pegium/syntax-tree/Reference.hpp>
 
 namespace pegium {
 
-/// Represent a node in the AST. Each node in the AST must derives from AstNode
+/// Base type for every AST node produced by pegium parsers.
+///
+/// `AstNode` stores the structural links of the tree:
+/// - direct children
+/// - parent/container metadata
+/// - the originating CST node when available
+///
+/// Nodes are intentionally non-copyable and non-movable because container and
+/// CST links point into a concrete tree instance.
 struct AstNode {
   AstNode() = default;
 
-  // delete Copy/Move constructor
+  /// AST nodes are tree-owned and cannot be moved.
   AstNode(AstNode &&other) = delete;
+  /// AST nodes are tree-owned and cannot be copied.
   AstNode(const AstNode &other) = delete;
 
-  // delete Copy/Move assignment
+  /// AST nodes are tree-owned and cannot be move-assigned.
   AstNode &operator=(AstNode &&other) = delete;
+  /// AST nodes are tree-owned and cannot be copy-assigned.
   AstNode &operator=(const AstNode &other) = delete;
 
-  // Destructeur
+  /// Virtual destructor for polymorphic AST hierarchies.
   virtual ~AstNode() noexcept = default;
 
   /// A reference to an AstNode of type T.
-  /// @tparam T the AstNode type
+  ///
+  /// References participate in linking and can resolve across documents.
   template <typename T> using reference = Reference<T>;
+  /// A multi-valued reference to AST nodes of type `T`.
+  template <typename T> using multi_reference = MultiReference<T>;
 
   /// A pointer on an object of type T.
-  /// @tparam T type of the contained object
-  template <typename T> using pointer = std::shared_ptr<T>;
+  ///
+  /// This is the default ownership model for containment relations in generated
+  /// AST types.
+  template <typename T> using pointer = std::unique_ptr<T>;
 
+  /// Optional value convenience alias used in AST structs.
   template <typename T> using optional = std::optional<T>;
+  /// Variant value convenience alias used in AST structs.
+  template <typename... T> using variant = std::variant<T...>;
 
-  // Import standard types for convenience
+  /// Convenience aliases re-exported for generated AST declarations.
   using int8_t = std::int8_t;
   using int16_t = std::int16_t;
   using int32_t = std::int32_t;
@@ -62,9 +82,40 @@ struct AstNode {
   /// Returns the direct children of this node.
   auto getContent() noexcept { return std::views::all(_content); }
   /// Returns the direct children of this node.
+  ///
+  /// The returned range preserves the stored child order.
   auto getContent() const noexcept {
     return std::views::transform(_content,
                                  [](const AstNode *ptr) { return ptr; });
+  }
+
+  /// Returns the direct child at `index`, or `nullptr` when out of bounds.
+  [[nodiscard]] const AstNode *getContentAt(std::size_t index) const noexcept {
+    return index < _content.size() ? _content[index] : nullptr;
+  }
+
+  /// Returns the direct child at `index`, or `nullptr` when out of bounds.
+  [[nodiscard]] AstNode *getContentAt(std::size_t index) noexcept {
+    return index < _content.size() ? _content[index] : nullptr;
+  }
+
+  /// Returns the name of the container property that owns this node.
+  ///
+  /// The value is empty when the property name was not provided during
+  /// container setup.
+  [[nodiscard]] std::string_view getContainerPropertyName() const noexcept {
+    return _containerPropertyName;
+  }
+
+  /// Returns the index within the owning container property when it is a vector.
+  ///
+  /// Single-valued containment properties return `std::nullopt`.
+  [[nodiscard]] std::optional<std::size_t>
+  getContainerPropertyIndex() const noexcept {
+    if (_containerIndex == std::numeric_limits<std::size_t>::max()) {
+      return std::nullopt;
+    }
+    return _containerIndex;
   }
 
   /// Returns the direct children of type T.
@@ -84,6 +135,9 @@ struct AstNode {
   auto getAllContent() noexcept { return Range<AstNode *>(this); }
 
   /// Returns all descendants of this node.
+  ///
+  /// The current node itself is not included. Traversal order is depth-first
+  /// and preserves child order.
   auto getAllContent() const noexcept { return Range<const AstNode *>(this); }
 
   /// Returns all descendants of type T.
@@ -100,31 +154,35 @@ struct AstNode {
     return of_type<T>(getAllContent());
   }
 
-  /// Returns the references of this node.
-  auto getReferences() noexcept { return std::views::all(_references); }
-  /// Returns the references of this node.
-  auto getReferences() const noexcept {
-    return std::views::transform(
-        _references,
-        [](const ReferenceInfo &ref) -> const ReferenceInfo & { return ref; });
+  /// Returns `true` when this AST node is associated with a CST node.
+  [[nodiscard]] bool hasCstNode() const noexcept { return _cstNode.valid(); }
+
+  /// Returns the CST node from which this AST node was parsed.
+  ///
+  /// Callers should check `hasCstNode()` before assuming the result is valid.
+  [[nodiscard]] const CstNodeView &getCstNode() const noexcept {
+    return _cstNode;
   }
 
-  template <typename T, typename Class>
-  void addReference(Reference<T> Class::*feature) {
-    _references.emplace_back(this, feature);
-  }
-  template <typename T, typename Class>
-  void addReference(std::vector<Reference<T>> Class::*feature,
-                    std::size_t index) {
-    _references.emplace_back(this, feature, index);
+  /// Returns the CST node from which this AST node was parsed.
+  ///
+  /// Callers should check `hasCstNode()` before assuming the result is valid.
+  [[nodiscard]] CstNodeView &getCstNode() noexcept { return _cstNode; }
+
+  /// Associates this AST node with its originating CST node.
+  [[gnu::always_inline]] void setCstNode(const CstNodeView &node) noexcept {
+    assert(node.valid());
+    assert(!_cstNode.valid());
+    _cstNode = node;
   }
 
   /// Returns the parent node, or nullptr if this is the root.
-  const AstNode *getContainer() const noexcept;
+  const AstNode *getContainer() const noexcept { return _container; }
   /// Returns the parent node, or nullptr if this is the root.
-  AstNode *getContainer() noexcept;
+  AstNode *getContainer() noexcept { return _container; }
 
-  /// Returns the nearest ancestor of type T, or nullptr if none is found.
+  /// Returns the nearest ancestor of type `T`, or `nullptr` if none is found.
+  ///
   /// If the current node itself matches, it is returned.
   template <typename T>
     requires std::derived_from<T, AstNode>
@@ -139,7 +197,8 @@ struct AstNode {
     return nullptr;
   }
 
-  /// Returns the nearest ancestor of type T, or nullptr if none is found.
+  /// Returns the nearest ancestor of type `T`, or `nullptr` if none is found.
+  ///
   /// If the current node itself matches, it is returned.
   template <typename T>
     requires std::derived_from<T, AstNode>
@@ -154,29 +213,52 @@ struct AstNode {
     return nullptr;
   }
 
-  template <typename Node, typename Base, typename T>
-    requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
-  void
-  setContainer(Node *container, T Base::*property,
-               std::size_t index = std::numeric_limits<std::size_t>::max()) {
-    this->setContainer(container, std::any(property), index);
+  /// Sets the container relationship for this node using a compile-time AST feature.
+  template <typename Node, auto Feature>
+    requires std::derived_from<Node, AstNode> &&
+             requires(Node &node) { node.*Feature; }
+  void setContainer(
+      Node &container,
+      std::size_t index = std::numeric_limits<std::size_t>::max()) {
+    this->setContainer(container, parser::detail::member_name_v<Feature>, index);
+  }
+
+  /// Attaches this node to a container using a compile-time AST feature.
+  template <typename Node, auto Feature>
+    requires std::derived_from<Node, AstNode> &&
+             requires(Node &node) { node.*Feature; }
+  void attachToContainer(
+      Node &container,
+      std::size_t index = std::numeric_limits<std::size_t>::max()) noexcept {
+    this->attachToContainer(container, parser::detail::member_name_v<Feature>,
+                            index);
+  }
+
+  /// Attaches this node to a container without handling reparenting.
+  void attachToContainer(
+      AstNode &container, std::string_view propertyName,
+      std::size_t index = std::numeric_limits<std::size_t>::max()) noexcept {
+    assert(_container == nullptr);
+    _container = &container;
+    _containerPropertyName = propertyName;
+    _containerIndex = index;
+    _container->_content.push_back(this);
   }
 
 private:
-  void setContainer(AstNode *container, std::any property, std::size_t index);
+  void setContainer(AstNode &container, std::string_view propertyName,
+                    std::size_t index);
   std::vector<AstNode *> _content;
-  std::vector<ReferenceInfo> _references;
   /// The container node in the AST; every node except the root node has a
   /// container.
   AstNode *_container = nullptr;
-  /// The property of the `_container` node that contains this node. This is
-  /// either a direct reference or a vector.
-  std::any _containerProperty;
-  /// In case `_containerProperty` is a vector, the vector index is stored here.
+  std::string_view _containerPropertyName;
+  /// In case the container property is a vector, the element index is stored
+  /// here.
   std::size_t _containerIndex = std::numeric_limits<std::size_t>::max();
   /// The Concrete Syntax Tree (CST) node of the text range from which this node
   /// was parsed.
-  // CstNode *_node = nullptr;
+  CstNodeView _cstNode;
 
   template <typename T, typename Range>
   static auto of_type(Range &&range) noexcept {
@@ -240,5 +322,17 @@ private:
     NodePtr root_;
   };
 };
+
+/// Casts a contained unique pointer to a concrete AST type without transferring ownership.
+template <typename T, typename U>
+T *ast_ptr_cast(std::unique_ptr<U> &ptr) noexcept {
+  return dynamic_cast<T *>(ptr.get());
+}
+
+/// Casts a contained unique pointer to a concrete AST type without transferring ownership.
+template <typename T, typename U>
+const T *ast_ptr_cast(const std::unique_ptr<U> &ptr) noexcept {
+  return dynamic_cast<const T *>(ptr.get());
+}
 
 } // namespace pegium

@@ -1,195 +1,351 @@
 #pragma once
 #include <algorithm>
+#include <array>
+#include <concepts>
 #include <pegium/grammar/UnorderedGroup.hpp>
+#include <pegium/parser/CompletionSupport.hpp>
+#include <pegium/parser/ExpectContext.hpp>
+#include <pegium/parser/ExpectFrontier.hpp>
+#include <pegium/parser/ParseAttempt.hpp>
+#include <pegium/parser/ParseMode.hpp>
 #include <pegium/parser/ParseExpression.hpp>
 #include <pegium/parser/ParseContext.hpp>
+#include <pegium/parser/SkipperBuilder.hpp>
 #include <pegium/parser/StepTrace.hpp>
+#include <string>
+#include <tuple>
 
 namespace pegium::parser {
 
-template <ParseExpression... Elements>
-struct UnorderedGroup final : grammar::UnorderedGroup {
+template <Expression... Elements> struct UnorderedGroupWithSkipper;
+
+template <Expression... Elements>
+struct UnorderedGroup : grammar::UnorderedGroup {
   static constexpr bool nullable = false;
+  static constexpr bool isFailureSafe = true;
   static_assert(sizeof...(Elements) > 1,
                 "An UnorderedGroup shall contains at least 2 elements.");
   static_assert(
       (!std::remove_cvref_t<Elements>::nullable && ...),
       "An UnorderedGroup cannot be initialized with nullable elements.");
 
-  constexpr explicit UnorderedGroup(std::tuple<Elements...> &&elems)
-      : _elements{std::move(elems)} {}
+  constexpr explicit UnorderedGroup(std::tuple<Elements...> &&tupleElements)
+      : elements{std::move(tupleElements)} {}
 
   constexpr UnorderedGroup(UnorderedGroup &&) noexcept = default;
   constexpr UnorderedGroup(const UnorderedGroup &) = default;
   constexpr UnorderedGroup &operator=(UnorderedGroup &&) noexcept = default;
   constexpr UnorderedGroup &operator=(const UnorderedGroup &) = default;
 
-  bool rule(ParseContext &ctx) const {
-    detail::stepTraceInc(detail::StepCounter::UnorderedRecoverCalls);
-    if (ctx.isStrictNoEditMode()) {
+private:
+  friend struct detail::ParseAccess;
+
+  template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
+    if constexpr (StrictParseModeContext<Context>) {
       detail::stepTraceInc(detail::StepCounter::UnorderedStrictPasses);
-      return rule_strict(ctx);
-    }
+      return parse_group(ctx);
+    } else if constexpr (RecoveryParseModeContext<Context>) {
+      detail::stepTraceInc(detail::StepCounter::UnorderedRecoverCalls);
 
-    const auto entry = ctx.mark();
+      const auto entryCheckpoint = ctx.mark();
 
-    const bool allowInsert = ctx.allowInsert;
-    const bool allowDelete = ctx.allowDelete;
-    ctx.allowInsert = false;
-    ctx.allowDelete = false;
-    detail::stepTraceInc(detail::StepCounter::UnorderedStrictPasses);
-    if (rule_strict(ctx)) {
-      ctx.allowInsert = allowInsert;
-      ctx.allowDelete = allowDelete;
-      return true;
-    }
-    ctx.rewind(entry);
-    ctx.allowInsert = allowInsert;
-    ctx.allowDelete = allowDelete;
+      if (!ctx.isInRecoveryPhase()) {
+        const bool strictMatched =
+            parse_group(static_cast<TrackedParseContext &>(ctx));
+        detail::stepTraceInc(detail::StepCounter::UnorderedStrictPasses);
+        if (strictMatched) {
+          return true;
+        }
+        ctx.rewind(entryCheckpoint);
+      }
 
-    if (rule_editable(ctx)) {
+      if (parse_group(ctx)) {
+        detail::stepTraceInc(detail::StepCounter::UnorderedEditablePasses);
+        return true;
+      }
       detail::stepTraceInc(detail::StepCounter::UnorderedEditablePasses);
+      ctx.rewind(entryCheckpoint);
+      return false;
+    } else {
+      return parse_group(ctx);
+    }
+  }
+
+  template <ParseModeContext Context>
+  bool parse_group(Context &ctx) const {
+    const auto groupCheckpoint = ctx.mark();
+    ProcessedFlags matchedFlags{};
+    std::size_t matchedCount = 0;
+
+    while (matchedCount < sizeof...(Elements)) {
+      auto betweenCheckpoint = ctx.mark();
+      if (matchedCount > 0) {
+        betweenCheckpoint = ctx.mark();
+        ctx.skip();
+      }
+
+      if (!try_match_one(ctx, matchedFlags)) {
+        if (matchedCount > 0) {
+          ctx.rewind(betweenCheckpoint);
+        }
+        break;
+      }
+      if constexpr (ExpectParseModeContext<Context>) {
+        if (ctx.frontierBlocked()) {
+          return true;
+        }
+      }
+      ++matchedCount;
+    }
+    if (matchedCount == sizeof...(Elements)) {
       return true;
     }
-    detail::stepTraceInc(detail::StepCounter::UnorderedEditablePasses);
-    ctx.rewind(entry);
+    ctx.rewind(groupCheckpoint);
     return false;
   }
 
-  constexpr MatchResult terminal(const char *begin,
-                                       const char *end) const noexcept {
-    MatchResult r = MatchResult::success(begin);
-    ProcessedFlags processed{};
+public:
+
+  constexpr const char *terminal(const char *begin) const noexcept
+    requires(... && TerminalCapableExpression<Elements>)
+  {
+    const char *cursor = begin;
+    ProcessedFlags matchedFlags{};
 
     while (true) {
-      bool anyProcessed = false;
-      std::size_t index = 0;
+      bool matchedAnyElement = false;
+      std::size_t elementIndex = 0;
       std::apply(
           [&](const auto &...element) {
-            ((anyProcessed |=
-              parse_terminal_element(element, end, r, processed, index++)),
+            ((matchedAnyElement |=
+              terminal_impl(element, cursor, matchedFlags, elementIndex++)),
              ...);
           },
-          _elements);
+          elements);
 
-      if (!anyProcessed)
+      if (!matchedAnyElement)
         break;
     }
 
-    return std::ranges::all_of(processed, [](bool p) { return p; })
-               ? MatchResult::success(r.offset)
-               : MatchResult::failure(r.offset);
+    return std::ranges::all_of(matchedFlags, [](bool isMatched) {
+             return isMatched;
+           })
+               ? cursor
+               : nullptr;
   }
-  constexpr MatchResult terminal(std::string_view sv) const noexcept {
-    return terminal(sv.begin(), sv.end());
+  constexpr const char *terminal(const std::string &text) const noexcept
+    requires(... && TerminalCapableExpression<Elements>)
+  {
+    return terminal(text.c_str());
   }
 
-  void print(std::ostream &os) const override {
-    os << '(';
-    bool first = true;
-    std::apply(
-        [&](auto const &...elems) {
-          ((os << (first ? "" : " & "), os << elems, first = false), ...);
-        },
-        _elements);
-
-    os << ')';
+  template <std::convertible_to<Skipper> LocalSkipper>
+    requires std::copy_constructible<std::tuple<Elements...>>
+  auto skip(LocalSkipper &&localSkipper) const & {
+    return with_skipper(std::forward<LocalSkipper>(localSkipper));
   }
+
+  template <std::convertible_to<Skipper> LocalSkipper>
+  auto skip(LocalSkipper &&localSkipper) && {
+    return std::move(*this).with_skipper(std::forward<LocalSkipper>(localSkipper));
+  }
+
+  template <typename... SkipperParts>
+    requires((... && (detail::IsHiddenRules_v<SkipperParts> ||
+                     detail::IsIgnoredRules_v<SkipperParts>))) &&
+            std::copy_constructible<std::tuple<Elements...>>
+  auto skip(SkipperParts &&...parts) const & {
+    return with_skipper(parser::skip(std::forward<SkipperParts>(parts)...));
+  }
+
+  template <typename... SkipperParts>
+    requires((... && (detail::IsHiddenRules_v<SkipperParts> ||
+                     detail::IsIgnoredRules_v<SkipperParts>)))
+  auto skip(SkipperParts &&...parts) && {
+    return std::move(*this).with_skipper(
+        parser::skip(std::forward<SkipperParts>(parts)...));
+  }
+
+  template <std::convertible_to<Skipper> LocalSkipper>
+    requires std::copy_constructible<std::tuple<Elements...>>
+  auto with_skipper(LocalSkipper &&localSkipper) const & {
+    return UnorderedGroupWithSkipper<Elements...>{
+        *this, static_cast<Skipper>(std::forward<LocalSkipper>(localSkipper))};
+  }
+
+  template <std::convertible_to<Skipper> LocalSkipper>
+  auto with_skipper(LocalSkipper &&localSkipper) && {
+    return UnorderedGroupWithSkipper<Elements...>{
+        std::move(*this),
+        static_cast<Skipper>(std::forward<LocalSkipper>(localSkipper))};
+  }
+
+  const AbstractElement *get(std::size_t elementIndex) const noexcept override {
+    if (elementIndex >= sizeof...(Elements))
+      return nullptr;
+    return get_impl(elementIndex,
+                    std::make_index_sequence<sizeof...(Elements)>());
+  }
+
+  std::size_t size() const noexcept override { return sizeof...(Elements); }
+  constexpr bool isNullable() const noexcept override {
+    return nullable;
+  }
+
 
 private:
   using ProcessedFlags = std::array<bool, sizeof...(Elements)>;
+  template <std::size_t... Is>
+  const AbstractElement *get_impl(std::size_t elementIndex,
+                                  std::index_sequence<Is...>) const noexcept {
+    using AccessorFn = const AbstractElement *(*)(const UnorderedGroup *) noexcept;
 
-  template <typename T>
-  static bool parse_rule_element(const T &element, ProcessedFlags &processed,
-                                    ParseContext &ctx,
-                                    std::size_t index) {
-    if (processed[index])
-      return false;
+    static constexpr std::array<AccessorFn, sizeof...(Elements)> accessors = {
+        +[](const UnorderedGroup *self) noexcept -> const AbstractElement * {
+          return std::addressof(std::get<Is>(self->elements));
+        }...};
 
-    auto chekpoint = ctx.mark();
-    if (element.rule(ctx)) {
-      processed[index] = true;
-      return true;
-    }
-    ctx.rewind(chekpoint);
-    return false;
+    return accessors[elementIndex](this);
   }
 
-  bool rule_impl(ParseContext &ctx) const {
-    ProcessedFlags processed{};
-
-    while (true) {
-      bool anyProcessed = false;
-      std::size_t index = 0;
-      std::apply(
-          [&](const auto &...element) {
-            ((anyProcessed |=
-              parse_rule_element(element, processed, ctx, index++)),
-             ...);
-          },
-          _elements);
-
-      if (!anyProcessed)
-        break;
-    }
-    return std::ranges::all_of(processed, [](bool p) { return p; });
-  }
-
-  bool rule_strict(ParseContext &ctx) const {
-    const auto mark = ctx.mark();
-    if (!rule_impl(ctx)) {
-      ctx.rewind(mark);
+  template <ParseModeContext Context, typename T>
+  static bool try_match_rule_element(const T &element,
+                                     ProcessedFlags &matchedFlags,
+                                     Context &ctx,
+                                     std::size_t elementIndex) {
+    if (matchedFlags[elementIndex]) {
       return false;
     }
-    return true;
-  }
-
-  bool rule_editable(ParseContext &ctx) const {
-    return rule_impl(ctx);
-  }
-
-  template <typename T>
-  static constexpr bool parse_terminal_element(const T &element,
-                                               const char *end, MatchResult &r,
-                                               ProcessedFlags &processed,
-                                               std::size_t index) noexcept {
-    if (processed[index])
-      return false;
-
-    if (auto result = element.terminal(r.offset, end); result.IsValid()) {
-      r = result;
-      processed[index] = true;
-      return true;
+    if constexpr (StrictParseModeContext<Context>) {
+      if (attempt_parse_strict(ctx, element)) {
+        matchedFlags[elementIndex] = true;
+        return true;
+      }
+    } else if constexpr (RecoveryParseModeContext<Context>) {
+      if (attempt_parse_editable(ctx, element)) {
+        matchedFlags[elementIndex] = true;
+        return true;
+      }
+    } else {
+      if (parse(element, ctx)) {
+        matchedFlags[elementIndex] = !ctx.frontierBlocked();
+        return true;
+      }
     }
     return false;
   }
 
-  std::tuple<Elements...> _elements;
-
-  template <ParseExpression... Rhs>
-  friend constexpr auto operator&(UnorderedGroup &&lhs,
-                                  UnorderedGroup<Rhs...> &&rhs) {
-    return UnorderedGroup<Elements..., ParseExpressionHolder<Rhs>...>{
-        std::tuple_cat(std::move(lhs._elements), std::move(rhs._elements))};
+  template <ParseModeContext Context, std::size_t I = 0>
+  bool try_match_one(Context &ctx, ProcessedFlags &matchedFlags) const {
+    if constexpr (I == sizeof...(Elements)) {
+      return false;
+    } else {
+      if constexpr (ExpectParseModeContext<Context>) {
+        if (matchedFlags[I]) {
+          return try_match_one<Context, I + 1>(ctx, matchedFlags);
+        }
+        const auto checkpoint = ctx.mark();
+        ExpectBranchResult result{};
+        collect_expect_branch(ctx, checkpoint, std::get<I>(elements), result);
+        if (result.matched) {
+          matchedFlags[I] = !result.blocked;
+          return true;
+        }
+      } else if (try_match_rule_element(std::get<I>(elements), matchedFlags, ctx,
+                                        I)) {
+        return true;
+      }
+      return try_match_one<Context, I + 1>(ctx, matchedFlags);
+    }
   }
 
-  template <ParseExpression Rhs>
-  friend constexpr auto operator&(UnorderedGroup &&lhs, Rhs &&rhs) {
-    return UnorderedGroup<Elements..., ParseExpressionHolder<Rhs>>{
-        std::tuple_cat(std::move(lhs._elements),
-                       std::forward_as_tuple(std::forward<Rhs>(rhs)))};
+  template <typename T>
+  static constexpr bool terminal_impl(const T &element,
+                                      const char *&cursor,
+                                      ProcessedFlags &matchedFlags,
+                                      std::size_t elementIndex) noexcept {
+    if (matchedFlags[elementIndex])
+      return false;
+
+    if (const char *matchEnd = element.terminal(cursor);
+        matchEnd != nullptr) {
+      cursor = matchEnd;
+      matchedFlags[elementIndex] = true;
+      return true;
+    }
+    return false;
   }
-  template <ParseExpression Lhs>
-  friend constexpr auto operator&(Lhs &&lhs, UnorderedGroup &&rhs) {
-    return UnorderedGroup<ParseExpressionHolder<Lhs>, Elements...>{
-        std::tuple_cat(std::forward_as_tuple(std::forward<Lhs>(lhs)),
-                       std::move(rhs._elements))};
-  }
+
+public:
+  std::tuple<Elements...> elements;
 };
-template <ParseExpression Lhs, ParseExpression Rhs>
+
+template <Expression... Elements>
+struct UnorderedGroupWithSkipper final : UnorderedGroup<Elements...>,
+                                         CompletionSkipperProvider {
+  using Base = UnorderedGroup<Elements...>;
+  static constexpr bool nullable = Base::nullable;
+  static constexpr bool isFailureSafe = Base::isFailureSafe;
+
+  explicit UnorderedGroupWithSkipper(const Base &base, Skipper localSkipper)
+      : Base(base), _localSkipper(std::move(localSkipper)) {}
+  explicit UnorderedGroupWithSkipper(Base &&base, Skipper localSkipper)
+      : Base(std::move(base)), _localSkipper(std::move(localSkipper)) {}
+
+  UnorderedGroupWithSkipper(UnorderedGroupWithSkipper &&) noexcept = default;
+  UnorderedGroupWithSkipper(const UnorderedGroupWithSkipper &) = default;
+  UnorderedGroupWithSkipper &
+  operator=(UnorderedGroupWithSkipper &&) noexcept = default;
+  UnorderedGroupWithSkipper &
+  operator=(const UnorderedGroupWithSkipper &) = default;
+  [[nodiscard]] const Skipper *
+  getCompletionSkipper() const noexcept override {
+    return std::addressof(_localSkipper);
+  }
+
+private:
+  friend struct detail::ParseAccess;
+
+  template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
+    auto localSkipperGuard = ctx.with_skipper(_localSkipper);
+    (void)localSkipperGuard;
+    return parse(static_cast<const Base &>(*this), ctx);
+  }
+
+  Skipper _localSkipper;
+};
+
+namespace detail {
+
+template <typename T> struct IsUnorderedGroupFlattenRaw : std::false_type {};
+
+template <typename... E>
+struct IsUnorderedGroupFlattenRaw<UnorderedGroup<E...>> : std::true_type {};
+
+template <typename G>
+  requires IsUnorderedGroupFlattenRaw<std::remove_cvref_t<G>>::value
+constexpr decltype(auto) as_unordered_group_tuple(G &&group) {
+  return std::forward<G>(group).elements;
+}
+
+template <Expression Expr>
+  requires(!IsUnorderedGroupFlattenRaw<std::remove_cvref_t<Expr>>::value)
+constexpr auto as_unordered_group_tuple(Expr &&expr) {
+  return std::tuple<ExpressionHolder<Expr>>{std::forward<Expr>(expr)};
+}
+
+template <typename... Ts>
+constexpr auto make_unordered_group(std::tuple<Ts...> &&elements) {
+  return UnorderedGroup<Ts...>{std::move(elements)};
+}
+
+} // namespace detail
+
+template <Expression Lhs, Expression Rhs>
 constexpr auto operator&(Lhs &&lhs, Rhs &&rhs) {
-  return UnorderedGroup<ParseExpressionHolder<Lhs>, ParseExpressionHolder<Rhs>>{
-      std::forward_as_tuple(std::forward<Lhs>(lhs), std::forward<Rhs>(rhs))};
+  return detail::make_unordered_group(std::tuple_cat(
+      detail::as_unordered_group_tuple(std::forward<Lhs>(lhs)),
+      detail::as_unordered_group_tuple(std::forward<Rhs>(rhs))));
 }
 
 } // namespace pegium::parser

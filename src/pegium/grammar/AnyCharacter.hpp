@@ -10,11 +10,9 @@ struct AnyCharacter : AbstractElement {
     return ElementKind::AnyCharacter;
   }
   constexpr ~AnyCharacter() noexcept override = default;
-  virtual std::string_view getValue(const CstNodeView &node) const noexcept {
-    return node.getText();
-  }
+  virtual std::string_view getValue(const CstNodeView &node) const noexcept;
 
-  void print(std::ostream &os) const final { os << '.'; }
+  void print(std::ostream &os) const final;
 };
 
 } // namespace pegium::grammar

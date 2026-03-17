@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cctype>
@@ -17,45 +16,60 @@ namespace pegium::parser {
 /// @tparam N the number of char including '\0'
 template <std::size_t N> struct char_array_builder {
   std::array<char, N - 1> value;
-  explicit(false) consteval char_array_builder(char const (&pp)[N]) {
-    for (std::size_t i = 0; i < value.size(); ++i) {
-      value[i] = pp[i];
+  explicit(false) consteval char_array_builder(char const (&sourceChars)[N]) {
+    for (std::size_t charIndex = 0; charIndex < value.size(); ++charIndex) {
+      value[charIndex] = sourceChars[charIndex];
     }
   }
 };
 
+template <std::size_t Pos, std::size_t Count, std::size_t N>
+consteval auto array_substr(const std::array<char, N> &in) {
+  static_assert(Pos <= N, "Pos out of range");
+  static_assert(Pos + Count <= N, "Pos+Count out of range");
+
+  std::array<char, Count> out{};
+  for (std::size_t offset = 0; offset < Count; ++offset) {
+    out[offset] = in[Pos + offset];
+  }
+  return out;
+}
+
+template <std::size_t Pos, std::size_t N>
+consteval auto array_substr(const std::array<char, N> &in) {
+  static_assert(Pos <= N, "Pos out of range");
+  return array_substr<Pos, N - Pos>(in);
+}
+
 constexpr std::array<bool, 256> createCharacterRange(std::string_view s) {
   std::array<bool, 256> value{};
-  std::size_t i = 0;
+  std::size_t rangeCursor = 0;
 
-  const std::size_t len = s.size();
-  bool negate = false;
-  if (len > 0 && s[0] == '^') {
-    negate = true;
-    ++i;
-  }
+  const std::size_t rangeTextLength = s.size();
 
-  assert(!negate && "CharacterRange does not support '^'.");
-  // check that each char is not a codepoint
+  //  check that each char is not a codepoint
   for (auto chr : s) {
     assert((static_cast<std::byte>(chr) & std::byte{0x80}) == std::byte{0});
   }
-  while (i < len) {
-    auto first = s[i];
-    if (i + 2 < len && s[i + 1] == '-') {
-      auto last = s[i + 2];
-      for (auto c = static_cast<unsigned char>(first);
-           c <= static_cast<unsigned char>(last); ++c) {
-        value[c] = true;
+
+  // character range negation is handled in  operator""_cr
+  assert(!(rangeTextLength > 0 && s[0] == '^') &&
+         "Character range negation is not supported in character range "
+         "definition.");
+
+  while (rangeCursor < rangeTextLength) {
+    auto rangeStart = s[rangeCursor];
+    if (rangeCursor + 2 < rangeTextLength && s[rangeCursor + 1] == '-') {
+      auto rangeEnd = s[rangeCursor + 2];
+      for (auto codepoint = static_cast<unsigned char>(rangeStart);
+           codepoint <= static_cast<unsigned char>(rangeEnd); ++codepoint) {
+        value[codepoint] = true;
       }
-      i += 3;
+      rangeCursor += 3;
     } else {
-      value[static_cast<unsigned char>(first)] = true;
-      ++i;
+      value[static_cast<unsigned char>(rangeStart)] = true;
+      ++rangeCursor;
     }
-  }
-  if (negate) {
-    std::transform(value.begin(), value.end(), value.begin(), std::logical_not{});
   }
   return value;
 }
@@ -76,13 +90,14 @@ constexpr bool isWord(char c) {
 
 consteval auto make_utf8_codepoint_length_table() {
   std::array<std::size_t, 256> table = {};
-  for (unsigned int i = 0; i < 256; ++i) {
-    table[i] = ((i & 0x80u) == 0u)       ? 1
-               : ((i & 0xE0u) == 0xC0u) ? 2
-               : ((i & 0xF0u) == 0xE0u) ? 3
-               : ((i & 0xF8u) == 0xF0u)
-                   ? 4
-                   : std::numeric_limits<std::size_t>::max();
+  for (unsigned int byteValue = 0; byteValue < 256; ++byteValue) {
+    table[byteValue] = (byteValue == 0u)                ? 0
+                       : ((byteValue & 0x80u) == 0u)    ? 1
+                       : ((byteValue & 0xE0u) == 0xC0u) ? 2
+                       : ((byteValue & 0xF0u) == 0xE0u) ? 3
+                       : ((byteValue & 0xF8u) == 0xF0u)
+                           ? 4
+                           : std::numeric_limits<std::size_t>::max();
   }
   return table;
 }
@@ -94,29 +109,49 @@ constexpr std::size_t utf8_codepoint_length(char leadByte) noexcept {
   return utf8_codepoint_length_table[static_cast<unsigned char>(leadByte)];
 }
 
-constexpr bool is_utf8_codepoint_complete(const char *begin,
-                                          const char *end) noexcept {
-  if (begin == end) [[unlikely]] {
-    return false;
+constexpr const char *
+consume_utf8_codepoint_if_complete(const char *cursor) noexcept {
+  const auto leadByte = static_cast<unsigned char>(*cursor);
+  if (leadByte == 0) [[unlikely]] {
+    return nullptr;
   }
-  const auto len = utf8_codepoint_length(*begin);
-  if (len == std::numeric_limits<std::size_t>::max()) {
-    return false;
-  }
-  return static_cast<std::size_t>(end - begin) >= len;
-}
-
-constexpr const char *advanceOneCodepointLossy(const char *cursor,
-                                               const char *end) noexcept {
-  if (cursor == end) [[unlikely]] {
-    return end;
-  }
-  const auto len = utf8_codepoint_length(*cursor);
-  if (len == std::numeric_limits<std::size_t>::max() ||
-      static_cast<std::size_t>(end - cursor) < len) {
+  if (leadByte < 0x80) [[likely]] {
     return cursor + 1;
   }
-  return cursor + len;
+
+  switch (utf8_codepoint_length_table[leadByte]) {
+  case 2:
+    return cursor[1] == 0 ? nullptr : cursor + 2;
+  case 3:
+    return cursor[1] == 0 || cursor[2] == 0 ? nullptr : cursor + 3;
+  case 4:
+    return cursor[1] == 0 || cursor[2] == 0 || cursor[3] == 0 ? nullptr
+                                                              : cursor + 4;
+  default:
+    return nullptr;
+  }
+}
+
+constexpr const char *advanceOneCodepointLossy(const char *cursor) noexcept {
+  const auto leadByte = static_cast<unsigned char>(*cursor);
+  if (leadByte == 0) [[unlikely]] {
+    return cursor;
+  }
+  if (leadByte < 0x80) [[likely]] {
+    return cursor + 1;
+  }
+
+  switch (utf8_codepoint_length_table[leadByte]) {
+  case 2:
+    return cursor[1] == 0 ? cursor + 1 : cursor + 2;
+  case 3:
+    return cursor[1] == 0 || cursor[2] == 0 ? cursor + 1 : cursor + 3;
+  case 4:
+    return cursor[1] == 0 || cursor[2] == 0 || cursor[3] == 0 ? cursor + 1
+                                                              : cursor + 4;
+  default:
+    return cursor + 1;
+  }
 }
 
 consteval auto make_tolower() {
@@ -166,8 +201,7 @@ constexpr std::string escape_char(char c) {
       return std::string{c};
     }
     char buf[5];
-    std::snprintf(buf, sizeof(buf), "\\x%02X",
-                  static_cast<unsigned char>(c));
+    std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<unsigned char>(c));
     return buf;
   }
 }

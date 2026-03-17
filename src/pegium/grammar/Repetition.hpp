@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <pegium/grammar/AbstractElement.hpp>
 
@@ -14,6 +15,7 @@ struct Repetition : AbstractElement {
   virtual std::size_t getMax() const noexcept = 0;
 
   virtual const AbstractElement *getElement() const noexcept = 0;
+  void print(std::ostream &os) const override;
 };
 
 } // namespace pegium::grammar

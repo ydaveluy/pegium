@@ -10,7 +10,7 @@ struct AndPredicate : AbstractElement {
   }
   constexpr ~AndPredicate() noexcept override = default;
   virtual const AbstractElement *getElement() const noexcept = 0;
-  void print(std::ostream &os) const final { os << '&' << *getElement(); }
+  void print(std::ostream &os) const final;
 };
 
 } // namespace pegium::grammar

@@ -1,0 +1,248 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "CMake Configure",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S",
+                "${workspaceFolder}",
+                "-B",
+                "${workspaceFolder}/build"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Arithmetics LSP Server",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build",
+                "--target",
+                "pegium-example-arithmetics-lsp",
+                "-j"
+            ],
+            "dependsOn": [
+                "CMake Configure"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Compile Arithmetics VSCode Extension",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "if [ ! -d node_modules ]; then npm install; fi"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/arithmetics"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Arithmetics VSCode Extension",
+            "type": "shell",
+            "command": "npm",
+            "args": [
+                "run",
+                "compile"
+            ],
+            "dependsOn": [
+                "Compile Arithmetics VSCode Extension"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/arithmetics"
+            },
+            "problemMatcher": "$tsc"
+        },
+        {
+            "label": "Prepare Arithmetics Extension",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Build Arithmetics LSP Server",
+                "Build Arithmetics VSCode Extension"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Domainmodel LSP Server",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build",
+                "--target",
+                "pegium-example-domainmodel-lsp",
+                "-j"
+            ],
+            "dependsOn": [
+                "CMake Configure"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Compile Domainmodel VSCode Extension",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "if [ ! -d node_modules ]; then npm install; fi"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/domainmodel"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Domainmodel VSCode Extension",
+            "type": "shell",
+            "command": "npm",
+            "args": [
+                "run",
+                "compile"
+            ],
+            "dependsOn": [
+                "Compile Domainmodel VSCode Extension"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/domainmodel"
+            },
+            "problemMatcher": "$tsc"
+        },
+        {
+            "label": "Prepare Domainmodel Extension",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Build Domainmodel LSP Server",
+                "Build Domainmodel VSCode Extension"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Requirements LSP Server",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build",
+                "--target",
+                "pegium-example-requirements-lsp",
+                "-j"
+            ],
+            "dependsOn": [
+                "CMake Configure"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Compile Requirements VSCode Extension",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "if [ ! -d node_modules ]; then npm install; fi"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/requirements"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Requirements VSCode Extension",
+            "type": "shell",
+            "command": "npm",
+            "args": [
+                "run",
+                "compile"
+            ],
+            "dependsOn": [
+                "Compile Requirements VSCode Extension"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/requirements"
+            },
+            "problemMatcher": "$tsc"
+        },
+        {
+            "label": "Prepare Requirements Extension",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Build Requirements LSP Server",
+                "Build Requirements VSCode Extension"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Statemachine LSP Server",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build",
+                "--target",
+                "pegium-example-statemachine-lsp",
+                "-j"
+            ],
+            "dependsOn": [
+                "CMake Configure"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Compile Statemachine VSCode Extension",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "if [ ! -d node_modules ]; then npm install; fi"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/statemachine"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Statemachine VSCode Extension",
+            "type": "shell",
+            "command": "npm",
+            "args": [
+                "run",
+                "compile"
+            ],
+            "dependsOn": [
+                "Compile Statemachine VSCode Extension"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/statemachine"
+            },
+            "problemMatcher": "$tsc"
+        },
+        {
+            "label": "Prepare Statemachine Extension",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Build Statemachine LSP Server",
+                "Build Statemachine VSCode Extension"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}

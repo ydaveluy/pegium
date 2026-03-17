@@ -3,9 +3,7 @@
 #include <cassert>
 #include <cstdint>
 #include <limits>
-#include <memory>
 #include <memory_resource>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -13,166 +11,221 @@
 
 namespace pegium {
 
+/// Incremental builder for one `RootCstNode`.
+///
+/// The parser uses `CstBuilder` as a streaming recorder:
+/// - `enter()` opens a non-leaf node
+/// - `leaf()` appends a leaf node at the current depth
+/// - `exit()` finalizes the currently open node and links it to its parent
+///
+/// The builder supports speculative parsing through `mark()` / `rewind()`
+/// without a separate finalize pass.
 class CstBuilder {
 public:
   using Iterator = RootCstNode::Iterator;
-  struct Checkpoint {
-    std::uint32_t nodeCount;
-    NodeId current;
-    std::uint32_t stackTop;
+  using StackIndex = std::uint32_t;
+
+  static_assert(std::numeric_limits<StackIndex>::max() >= kMaxNodeCount,
+                "StackIndex must represent full CST depth without truncation");
+
+  /// Sibling linkage state for one nesting depth during streaming build.
+  struct Frame {
+    NodeId parent; // node whose children are being built at this
+                   // depth (kNoNode for root-level)
+    NodeId last;   // last child already linked at this depth (or kNoNode)
   };
 
-  explicit CstBuilder(
-      std::string_view text,
-      std::pmr::memory_resource *upstream = std::pmr::get_default_resource())
-      : _root(std::make_shared<RootCstNode>(std::string{text}, upstream)) {
-    // pre-allocate a reasonable amount of stack space
-    _stack.resize(128);
-    _stack[0] = kNoNode;
+  /// Snapshot of the builder state suitable for speculative rewind.
+  struct Checkpoint {
+    NodeCount nodeCount;
+    NodeId current;
+    StackIndex depth;
+    NodeId lastAtLevel;   // snapshot of frames[depth].last
+    NodeId parentAtLevel; // snapshot of frames[depth].parent
+  };
+
+  explicit CstBuilder(RootCstNode &root) : _root(root) {
+    _frames.resize(kInitialStackCapacity);
+    _frames[0].parent = kNoNode;
+    _frames[0].last = kNoNode;
   }
 
-  [[nodiscard]] Checkpoint mark() const noexcept {
-    return Checkpoint{.nodeCount =
-                          static_cast<std::uint32_t>(_root->_nodeCount),
-                      .current = _current,
-                      .stackTop = _stackTop};
-  }
-
-  inline void rewind(const Checkpoint &checkpoint) noexcept {
-    _root->_nodeCount = checkpoint.nodeCount;
-    _current = checkpoint.current;
-    _stackTop = checkpoint.stackTop;
-  }
-
+  /// Clears the current CST content and resets the builder to its initial state.
   void reset() noexcept {
-    _root->_nodeCount = 0;
+    _root._nodeCount = 0;
     _current = kNoNode;
-    _stackTop = 1;
-    _linksFinalized = false;
+    _depth = 0;
+    _frames[0].parent = kNoNode;
+    _frames[0].last = kNoNode;
   }
 
-  inline void enter() {
-    assert(!_linksFinalized);
-    _current = _root->alloc_node_uninitialized();
+  /// Returns a checkpoint that can later be passed to `rewind(...)`.
+  [[nodiscard]] Checkpoint mark() const noexcept {
+    assert(_depth < _frames.size());
+    return {
+        .nodeCount = _root._nodeCount,
+        .current = _current,
+        .depth = _depth,
+        .lastAtLevel = _frames[_depth].last,
+        .parentAtLevel = _frames[_depth].parent,
+    };
+  }
 
-    if (_stackTop < _stack.size()) [[likely]] {
-      _stack[_stackTop] = _current;
-    } else {
-      _stack.push_back(_current);
+  /// Restores the CST builder state to the given checkpoint.
+  ///
+  /// If no node was created since `mark()`, this function is a no-op.
+  inline void rewind(const Checkpoint &cp) noexcept {
+    if (_root._nodeCount == cp.nodeCount)
+      return;
+    _root._nodeCount = cp.nodeCount;
+    _current = cp.current;
+    _depth = cp.depth;
+
+    // Cut the sibling link that may have been created after mark()
+    if (cp.lastAtLevel != kNoNode) {
+      // lastAtLevel existed at mark() time, so it must still be valid after
+      // rewind
+      assert(static_cast<NodeCount>(cp.lastAtLevel) < cp.nodeCount);
+      _root.node(cp.lastAtLevel).nextSiblingId = kNoNode;
     }
-    ++_stackTop;
+
+    assert(_depth < _frames.size());
+    _frames[_depth].parent = cp.parentAtLevel;
+    _frames[_depth].last = cp.lastAtLevel;
   }
 
-  inline void exit(const char *beginPtr, const char *endPtr,
+  // --------------------------------------------------------------------------
+  // Streaming build: nextSiblingId is produced without a finalize pass.
+  //
+  // Policy:
+  // - leaf(): node is complete -> link immediately at current depth
+  // - enter(): alloc open node, descend, but DO NOT link yet
+  // - exit(): finalize node, then link it at parent depth
+  // --------------------------------------------------------------------------
+
+  /// Opens a new non-leaf node at the current cursor position.
+  ///
+  /// The node remains incomplete until the matching `exit(...)`.
+  inline void enter() noexcept {
+    const NodeId id = _root.alloc_node_uninitialized();
+    _current = id;
+
+    // Descend: set up next depth for children of this node
+    ++_depth;
+    if (_depth < _frames.size()) [[likely]] {
+      _frames[_depth] = {id, kNoNode};
+    } else {
+      _frames.emplace_back(id, kNoNode);
+    }
+  }
+
+  /// Finalizes the node opened by the last unmatched `enter()`.
+  ///
+  /// `beginOffset` and `endOffset` describe the full covered source span of the
+  /// node.
+  inline void exit(TextOffset beginOffset, TextOffset endOffset,
                    const grammar::AbstractElement *ge) noexcept {
-    assert(!_linksFinalized);
-    assert(_stackTop > 1);
-    assert(_current != kNoNode);
     assert(ge);
-    assert(_root->_nodeCount > static_cast<std::uint64_t>(_current) + 1 &&
-           "CstNodeBuilder::exit expects at least one child node");
+    assert(_current != kNoNode);
+    assert(_depth > 0); // must have a parent depth to link into
 
+    const bool hasChildren = _frames[_depth].last != kNoNode;
 
-    _root->node(_current) = {
-        .begin = _root->offset_of(beginPtr),
-        .end = _root->offset_of(endPtr),
+    // Finalize node created by enter()
+    _root.node(_current) = {
+        .begin = beginOffset,
+        .end = endOffset,
         .grammarElement = ge,
-        .nextSiblingId = _current= _stack[--_stackTop - 1],
-        .isLeaf = false,
+        .nextSiblingId = kNoNode,
+        .isLeaf = !hasChildren,
         .isHidden = false,
         .isRecovered = false,
     };
 
+    // Pop to parent depth
+    --_depth;
+
+    // Link current among siblings at parent depth
+    NodeId &last = _frames[_depth].last;
+    if (last != kNoNode) [[likely]] {
+      _root.node(last).nextSiblingId = _current;
+    }
+    last = _current;
+
+    // Restore current to parent node at this depth
+    _current = _frames[_depth].parent;
   }
 
-  inline void leaf(const char *beginPtr, const char *endPtr,
+  inline void leaf(TextOffset beginOffset, TextOffset endOffset,
                    const grammar::AbstractElement *ge, bool hidden = false,
-                   bool recovered = false) {
-    assert(!_linksFinalized);
+                   bool recovered = false) noexcept {
     assert(ge);
-    const auto id = _root->alloc_node_uninitialized();
-    _root->node(id) = {
-        .begin = _root->offset_of(beginPtr),
-        .end = _root->offset_of(endPtr),
+    assert(_depth < _frames.size());
+
+    const NodeId id = _root.alloc_node_uninitialized();
+    _root.node(id) = {
+        .begin = beginOffset,
+        .end = endOffset,
         .grammarElement = ge,
-        .nextSiblingId = _current,
+        .nextSiblingId = kNoNode,
         .isLeaf = true,
         .isHidden = hidden,
         .isRecovered = recovered,
     };
+
+    // Link leaf among siblings at current depth
+    NodeId &last = _frames[_depth].last;
+    if (last != kNoNode) [[likely]] {
+      _root.node(last).nextSiblingId = id;
+    }
+    last = id;
   }
 
-  [[nodiscard]] std::uint64_t node_count() const noexcept {
-    return _root->_nodeCount;
+  // --------------------------------------------------------------------------
+
+  /// Returns the number of currently committed CST nodes.
+  [[nodiscard]] NodeCount node_count() const noexcept {
+    return _root._nodeCount;
   }
+
+  /// Rebinds an already built node to another grammar element.
+  ///
+  /// This is mainly used by parser helpers that refine the semantic element
+  /// attached to a previously emitted CST node.
   void override_grammar_element(NodeId id,
                                 const grammar::AbstractElement *ge) noexcept {
-    assert(!_linksFinalized);
-    assert(id < _root->_nodeCount);
+    assert(id < _root._nodeCount);
     assert(ge);
-    _root->node(id).grammarElement = ge;
+    _root.node(id).grammarElement = ge;
   }
 
+  /// Returns a pointer to the beginning of the input text.
   [[nodiscard]] const char *input_begin() const noexcept {
-    return _root->_text.data();
+    const auto text = _root.getText();
+    return text.data();
   }
+  /// Returns a pointer one past the end of the input text.
   [[nodiscard]] const char *input_end() const noexcept {
-    return _root->_text.data() + _root->_text.size();
+    const auto text = _root.getText();
+    return text.data() + text.size();
   }
+  /// Returns the full source text currently attached to the builder root.
   [[nodiscard]] std::string_view getText() const noexcept {
-    return _root->getText();
+    return _root.getText();
   }
-  [[nodiscard]] std::shared_ptr<RootCstNode> finalize() {
-    finalize_links();
-    return _root;
+
+  /// Returns the owning CST root.
+  [[nodiscard]]  RootCstNode *getRootCstNode() noexcept {
+    return &_root;
   }
 
 private:
-  void finalize_links() {
-    if (_linksFinalized) [[unlikely]] {
-      return;
-    }
-    assert(_root->_nodeCount <=
-               static_cast<std::uint64_t>(std::numeric_limits<NodeId>::max()) &&
-           "Too many CST nodes for NodeId type");
+  static constexpr std::size_t kInitialStackCapacity = 128;
 
-    const auto n = static_cast<NodeId>(_root->_nodeCount);
-    if (n == 0) [[unlikely]] {
-      _linksFinalized = true;
-      return;
-    }
-
-    std::vector<NodeId> lastChild(n, kNoNode);
-    NodeId rootLast = kNoNode;
-
-    for (NodeId child = 0; child < n; ++child) {
-      CstNode &cn = _root->node(child);
-      NodeId parent = cn.nextSiblingId;
-      cn.nextSiblingId = kNoNode;
-
-      if (parent == kNoNode) {
-        if (rootLast != kNoNode) {
-          _root->node(rootLast).nextSiblingId = child;
-        }
-        rootLast = child;
-        continue;
-      }
-
-      NodeId &last = lastChild[parent];
-      if (last != kNoNode) {
-        _root->node(last).nextSiblingId = child;
-      }
-      last = child;
-    }
-
-    _linksFinalized = true;
-  }
-
-  std::shared_ptr<RootCstNode> _root;
-  std::vector<NodeId> _stack;
-  std::uint32_t _stackTop = 1;
+  RootCstNode &_root;
+  std::vector<Frame> _frames;
+  StackIndex _depth = 0;
   NodeId _current = kNoNode;
-  bool _linksFinalized = false;
 };
 
 } // namespace pegium

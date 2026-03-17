@@ -1,71 +1,93 @@
 #pragma once
 
 #include <pegium/grammar/AnyCharacter.hpp>
-#include <pegium/parser/ParseExpression.hpp>
+#include <pegium/parser/ExpectContext.hpp>
+#include <pegium/parser/ParseMode.hpp>
 #include <pegium/parser/ParseContext.hpp>
+#include <pegium/parser/ParseExpression.hpp>
+#include <pegium/parser/TerminalRecoverySupport.hpp>
 #include <pegium/parser/TextUtils.hpp>
+#include <string>
 
 namespace pegium::parser {
 
 struct AnyCharacter final : grammar::AnyCharacter {
   static constexpr bool nullable = false;
+  static constexpr bool isFailureSafe = true;
 
   using type = std::string_view;
+  std::string_view getRawValue(const CstNodeView &node) const noexcept {
+    return getValue(node);
+  }
 
-  bool rule(ParseContext &ctx) const {
-    const char *const begin = ctx.cursor();
-    const char *const end = ctx.end;
-    if (begin != end) [[likely]] {
-      if (const auto len = utf8_codepoint_length(*begin);
-          static_cast<std::size_t>(end - begin) >= len) [[likely]] {
-        ctx.leaf(begin + len, this);
-        ctx.skipHiddenNodes();
+  constexpr const char *terminal(const char *begin) const noexcept {
+    return consume_utf8_codepoint_if_complete(begin);
+  }
+  constexpr const char *terminal(const std::string &text) const noexcept {
+    return terminal(text.c_str());
+  }
+
+  constexpr bool isNullable() const noexcept override {
+    return nullable;
+  }
+
+private:
+  friend struct detail::ParseAccess;
+  friend struct detail::ProbeAccess;
+
+  bool probe_impl(ParseContext &ctx) const noexcept {
+    return terminal(ctx.cursor()) != nullptr;
+  }
+
+  template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
+    const char *const matchedEnd = terminal(ctx.cursor());
+    if constexpr (StrictParseModeContext<Context>) {
+      if (matchedEnd != nullptr) [[likely]] {
+        ctx.leaf(matchedEnd, this);
         return true;
       }
-    }
-
-    if (ctx.isStrictNoEditMode()) {
       return false;
-    }
-
-    const auto mark = ctx.mark();
-    if (ctx.insertHidden(this)) {
-      ctx.skipHiddenNodes();
-      return true;
-    }
-    // TODO move mark at this place because insertHidden does not change the state when returning false, so we can avoid the mark and rewind in this case
-    ctx.rewind(mark);
-    while (ctx.deleteOneCodepoint()) {
-      const char *const scan = ctx.cursor();
-      if (scan == end) {
-        continue;
-      }
-      if (const auto len = utf8_codepoint_length(*scan);
-          static_cast<std::size_t>(end - scan) >= len) [[likely]] {
-        ctx.leaf(scan + len, this);
-        ctx.skipHiddenNodes();
+    } else if constexpr (RecoveryParseModeContext<Context>) {
+      if (matchedEnd != nullptr) [[likely]] {
+        ctx.leaf(matchedEnd, this);
         return true;
       }
+      if (!ctx.canEdit()) {
+        return false;
+      }
+      return detail::apply_delete_scan_terminal_candidate(
+          ctx,
+          [&](const char *scanCursor) noexcept -> const char * {
+            return terminal(scanCursor);
+          },
+          [&](const char *scanEnd) { ctx.leaf(scanEnd, this); });
+    } else {
+      if (ctx.reachedAnchor()) {
+        return false;
+      }
+      if (matchedEnd != nullptr && ctx.canTraverseUntil(matchedEnd)) {
+        ctx.leaf(matchedEnd, this);
+        return true;
+      }
+      if (!ctx.canEdit()) {
+        return false;
+      }
+      return detail::apply_delete_scan_terminal_candidate(
+          ctx,
+          [&](const char *scanCursor) noexcept -> const char * {
+            const auto *scanEnd = terminal(scanCursor);
+            return detail::can_apply_recovery_match(ctx, scanEnd)
+                       ? scanEnd
+                       : nullptr;
+          },
+          [&](const char *scanEnd) { ctx.leaf(scanEnd, this); });
     }
-
-    ctx.rewind(mark);
-    return false;
   }
-  constexpr MatchResult terminal(const char *begin,
-                                       const char *end) const noexcept {
-    if (begin == end) [[unlikely]] {
-      return MatchResult::failure(begin);
-    }
-
-    if (const auto len = utf8_codepoint_length(*begin);
-        static_cast<std::size_t>(end - begin) >= len) [[likely]] {
-      return MatchResult::success(begin + len);
-    }
-    return MatchResult::failure(begin);
-  }
-  constexpr MatchResult terminal(std::string_view sv) const noexcept {
-    return terminal(sv.begin(), sv.end());
-  }
-
 };
+
+namespace detail {
+
+template <> struct IsTerminalAtom<AnyCharacter> : std::true_type {};
+
+} // namespace detail
 } // namespace pegium::parser

@@ -2,9 +2,14 @@
 
 #include <pegium/grammar/AbstractRule.hpp>
 #include <pegium/grammar/RuleValue.hpp>
+#include <string>
 
 namespace pegium {
 class CstNodeView;
+}
+
+namespace pegium::parser {
+struct ValueBuildContext;
 }
 
 namespace pegium::grammar {
@@ -13,7 +18,18 @@ struct TerminalRule : AbstractRule {
   constexpr ElementKind getKind() const noexcept override {
     return ElementKind::TerminalRule;
   }
-  virtual RuleValue getValue(const CstNodeView &node) const = 0;
-};
+  virtual RuleValue
+  getValue(const CstNodeView &node,
+           const parser::ValueBuildContext *context = nullptr) const = 0;
+  virtual void
+  appendTextValue(std::string &out, const CstNodeView &node,
+                  const parser::ValueBuildContext *context = nullptr) const = 0;
+  virtual const AbstractElement *getElement() const noexcept = 0;
 
+  void print(std::ostream &os) const override;
+};
+template <typename T>
+concept IsTerminalRule =
+    std::derived_from<std::remove_cvref_t<T>, TerminalRule>;
+    
 } // namespace pegium::grammar

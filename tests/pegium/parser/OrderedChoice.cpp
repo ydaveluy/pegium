@@ -1,39 +1,40 @@
 #include <gtest/gtest.h>
-#include <pegium/parser/Parser.hpp>
-#include <sstream>
-
+#include <pegium/TestCstBuilderHarness.hpp>
+#include <pegium/parser/ParseAttempt.hpp>
+#include <pegium/parser/PegiumParser.hpp>
 using namespace pegium::parser;
 
 TEST(OrderedChoiceTest, ChoosesFirstMatchingAlternative) {
   auto choice = "ab"_kw | "a"_kw;
-  std::string_view input = "abx";
+  std::string input = "abx";
 
   auto result = choice.terminal(input);
-  EXPECT_TRUE(result.IsValid());
-  EXPECT_EQ(result.offset - input.begin(), 2);
+  EXPECT_NE(result, nullptr);
+  EXPECT_EQ(result - input.c_str(), 2);
 }
 
 TEST(OrderedChoiceTest, FallsBackToNextAlternative) {
   auto choice = "ab"_kw | "a"_kw;
-  std::string_view input = "ax";
+  std::string input = "ax";
 
   auto result = choice.terminal(input);
-  EXPECT_TRUE(result.IsValid());
-  EXPECT_EQ(result.offset - input.begin(), 1);
+  EXPECT_NE(result, nullptr);
+  EXPECT_EQ(result - input.c_str(), 1);
 }
 
 TEST(OrderedChoiceTest, ParseRuleAddsNodesFromSelectedAlternative) {
   auto choice = "ab"_kw | "a"_kw;
-  pegium::CstBuilder builder("a");
+  auto builderHarness = pegium::test::makeCstBuilderHarness("a");
+  auto &builder = builderHarness.builder;
   const auto input = builder.getText();
   auto skipper = SkipperBuilder().build();
 
   ParseContext ctx{builder, skipper};
-  auto result = choice.rule(ctx);
+  auto result = parse(choice, ctx);
   EXPECT_TRUE(result);
   EXPECT_EQ(ctx.cursor() - input.begin(), 1);
 
-  auto root = builder.finalize();
+  auto root = builder.getRootCstNode();
   auto it = root->begin();
   ASSERT_NE(it, root->end());
   ++it;
@@ -42,25 +43,25 @@ TEST(OrderedChoiceTest, ParseRuleAddsNodesFromSelectedAlternative) {
 
 TEST(OrderedChoiceTest, ParseTerminalFailsWhenNoAlternativeMatches) {
   auto choice = "ab"_kw | "cd"_kw;
-  std::string_view input = "xy";
+  std::string input = "xy";
 
   auto result = choice.terminal(input);
-  EXPECT_FALSE(result.IsValid());
-  EXPECT_EQ(result.offset, input.begin());
+  EXPECT_EQ(result, nullptr);
 }
 
 TEST(OrderedChoiceTest, ParseRuleRewindsBeforeTryingNextAlternative) {
   auto choice = (":"_kw + ";"_kw) | ":"_kw;
-  pegium::CstBuilder builder(":x");
+  auto builderHarness = pegium::test::makeCstBuilderHarness(":x");
+  auto &builder = builderHarness.builder;
   const auto input = builder.getText();
   auto skipper = SkipperBuilder().build();
 
   ParseContext ctx{builder, skipper};
-  auto result = choice.rule(ctx);
+  auto result = parse(choice, ctx);
   EXPECT_TRUE(result);
   EXPECT_EQ(ctx.cursor() - input.begin(), 1);
 
-  auto root = builder.finalize();
+  auto root = builder.getRootCstNode();
   auto it = root->begin();
   ASSERT_NE(it, root->end());
   EXPECT_EQ((*it).getText(), ":");
@@ -68,80 +69,108 @@ TEST(OrderedChoiceTest, ParseRuleRewindsBeforeTryingNextAlternative) {
   EXPECT_EQ(it, root->end());
 }
 
-TEST(OrderedChoiceTest, OperatorPipeCompositionsRemainFlattenedAndPrintable) {
-  auto leftAssoc = ("a"_kw | "b"_kw) | "c"_kw;
-  auto rightAssoc = "a"_kw | ("b"_kw | "c"_kw);
-  auto extended = (("a"_kw | "b"_kw) | "c"_kw) | "d"_kw;
+TEST(OrderedChoiceTest, WithLocalSkipperCanMatchAlternativeContainingGroup) {
+  TerminalRule<> ws{"WS", some(s)};
+  auto defaultSkipper = skip();
+  auto choice = (("a"_kw + "b"_kw) | "c"_kw).skip(ignored(ws));
 
-  {
-    std::string_view input = "c!";
-    auto result = leftAssoc.terminal(input);
-    EXPECT_TRUE(result.IsValid());
-    EXPECT_EQ(result.offset - input.begin(), 1);
-  }
-  {
-    std::string_view input = "b!";
-    auto result = rightAssoc.terminal(input);
-    EXPECT_TRUE(result.IsValid());
-    EXPECT_EQ(result.offset - input.begin(), 1);
-  }
-  {
-    std::string_view input = "d!";
-    auto result = extended.terminal(input);
-    EXPECT_TRUE(result.IsValid());
-    EXPECT_EQ(result.offset - input.begin(), 1);
-  }
-
-  std::ostringstream leftText;
-  leftText << leftAssoc;
-  EXPECT_EQ(leftText.str(), "('a' | 'b' | 'c')");
-
-  std::ostringstream mergedText;
-  mergedText << extended;
-  EXPECT_EQ(mergedText.str(), "('a' | 'b' | 'c' | 'd')");
+  auto builderHarness = pegium::test::makeCstBuilderHarness("a   b");
+  auto &builder = builderHarness.builder;
+  ParseContext ctx{builder, defaultSkipper};
+  EXPECT_TRUE(parse(choice, ctx));
+  EXPECT_EQ(ctx.cursorOffset(), 5U);
 }
 
-TEST(OrderedChoiceTest, ParseTerminalPointerOverloadWorks) {
-  auto choice = "ab"_kw | "a"_kw;
-  std::string_view input = "abx";
+TEST(OrderedChoiceTest, WithLocalSkipperRestoresOuterSkipperAfterMatch) {
+  TerminalRule<> ws{"WS", some(s)};
+  auto defaultSkipper = skip();
+  auto choice = (("a"_kw + "b"_kw) | "c"_kw).skip(ignored(ws));
+  auto trailing = "c"_kw;
 
-  auto result = choice.terminal(input.begin(), input.end());
-  EXPECT_TRUE(result.IsValid());
-  EXPECT_EQ(result.offset - input.begin(), 2);
-}
+  auto builderHarness = pegium::test::makeCstBuilderHarness("a   b   c");
+  auto &builder = builderHarness.builder;
+  ParseContext ctx{builder, defaultSkipper};
+  ASSERT_TRUE(parse(choice, ctx));
+  EXPECT_EQ(ctx.cursorOffset(), 5U);
 
-TEST(OrderedChoiceTest, ExplicitOperatorPipeOverloadsPreserveAlternatives) {
-  auto rightChoice = "b"_kw | "c"_kw;
-  auto prefixed = "a"_kw | std::move(rightChoice);
-  std::string_view prefixedInput = "c!";
-  auto prefixedResult = prefixed.terminal(prefixedInput);
-  EXPECT_TRUE(prefixedResult.IsValid());
-  EXPECT_EQ(prefixedResult.offset - prefixedInput.begin(), 1);
-
-  auto leftChoice = "a"_kw | "b"_kw;
-  auto suffixed = std::move(leftChoice) | "c"_kw;
-  std::string_view suffixedInput = "c!";
-  auto suffixedResult = suffixed.terminal(suffixedInput);
-  EXPECT_TRUE(suffixedResult.IsValid());
-  EXPECT_EQ(suffixedResult.offset - suffixedInput.begin(), 1);
+  const auto beforeSkip = ctx.cursorOffset();
+  ctx.skip();
+  EXPECT_EQ(ctx.cursorOffset(), beforeSkip);
+  EXPECT_FALSE(parse(trailing, ctx));
 }
 
 TEST(OrderedChoiceTest, ParseRuleFailureRewindsCursorAndLeavesNoNodes) {
   auto choice = ("a"_kw + "b"_kw) | ("c"_kw + "d"_kw);
-  pegium::CstBuilder builder("ax");
+  auto builderHarness = pegium::test::makeCstBuilderHarness("ax");
+  auto &builder = builderHarness.builder;
   const auto input = builder.getText();
   auto skipper = SkipperBuilder().build();
 
   ParseContext ctx{builder, skipper};
-  auto result = choice.rule(ctx);
+  auto result = parse(choice, ctx);
   EXPECT_FALSE(result);
   EXPECT_EQ(ctx.cursor(), input.begin());
 
-  auto root = builder.finalize();
+  auto root = builder.getRootCstNode();
   EXPECT_EQ(root->begin(), root->end());
 }
 
-TEST(OrderedChoiceTest, ExposesGrammarKind) {
-  auto choice = "a"_kw | "b"_kw;
-  EXPECT_EQ(choice.getKind(), pegium::grammar::ElementKind::OrderedChoice);
+TEST(OrderedChoiceTest, StrictSafeProbeDoesNotChangeCursorTreeOrMaxCursor) {
+  auto choice = "ab"_kw | "a"_kw;
+  auto skipper = SkipperBuilder().build();
+
+  {
+    auto builderHarness = pegium::test::makeCstBuilderHarness("ab:");
+    auto &builder = builderHarness.builder;
+    ParseContext ctx{builder, skipper};
+    const auto *cursor = ctx.cursor();
+    const auto *maxCursor = ctx.maxCursor();
+
+    EXPECT_TRUE(probe(choice, ctx));
+    EXPECT_EQ(ctx.cursor(), cursor);
+    EXPECT_EQ(ctx.maxCursor(), maxCursor);
+    EXPECT_EQ(builder.getRootCstNode()->begin(), builder.getRootCstNode()->end());
+  }
+
+  {
+    auto builderHarness = pegium::test::makeCstBuilderHarness("xy");
+    auto &builder = builderHarness.builder;
+    ParseContext ctx{builder, skipper};
+    const auto *cursor = ctx.cursor();
+    const auto *maxCursor = ctx.maxCursor();
+
+    EXPECT_FALSE(probe(choice, ctx));
+    EXPECT_EQ(ctx.cursor(), cursor);
+    EXPECT_EQ(ctx.maxCursor(), maxCursor);
+    EXPECT_EQ(builder.getRootCstNode()->begin(), builder.getRootCstNode()->end());
+  }
+}
+
+TEST(OrderedChoiceTest, FastProbeMatchesStrictParseOutcome) {
+  auto choice = "ab"_kw | "a"_kw;
+  auto skipper = SkipperBuilder().build();
+
+  {
+    auto fastHarness = pegium::test::makeCstBuilderHarness("ab:");
+    auto &fastBuilder = fastHarness.builder;
+    ParseContext fastCtx{fastBuilder, skipper};
+
+    auto parseHarness = pegium::test::makeCstBuilderHarness("ab:");
+    auto &parseBuilder = parseHarness.builder;
+    ParseContext parseCtx{parseBuilder, skipper};
+
+    EXPECT_EQ(attempt_fast_probe(fastCtx, choice), parse(choice, parseCtx));
+  }
+
+  {
+    auto fastHarness = pegium::test::makeCstBuilderHarness("xy");
+    auto &fastBuilder = fastHarness.builder;
+    ParseContext fastCtx{fastBuilder, skipper};
+
+    auto parseHarness = pegium::test::makeCstBuilderHarness("xy");
+    auto &parseBuilder = parseHarness.builder;
+    ParseContext parseCtx{parseBuilder, skipper};
+
+    EXPECT_EQ(attempt_fast_probe(fastCtx, choice), parse(choice, parseCtx));
+  }
 }
