@@ -214,7 +214,7 @@ struct ExpectContext {
     return false;
   }
 
-  [[nodiscard]] constexpr std::size_t activeRecoveryDepth() const noexcept {
+  [[nodiscard]] std::size_t activeRecoveryDepth() const noexcept {
     return _activeRecoveries.size();
   }
 

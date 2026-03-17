@@ -392,7 +392,7 @@ struct RecoveryContext : TrackedParseContext {
                      .maxCursorOffset
                : 0;
   }
-  [[nodiscard]] constexpr std::size_t activeRecoveryDepth() const noexcept {
+  [[nodiscard]] std::size_t activeRecoveryDepth() const noexcept {
     return _activeRecoveries.size();
   }
   [[nodiscard]] constexpr bool hasHadEdits() const noexcept {
@@ -489,7 +489,10 @@ struct RecoveryContext : TrackedParseContext {
     for (const auto &edit : edits) {
       diagnostics.push_back({.kind = edit.kind,
                              .offset = edit.offset,
-                             .element = edit.element});
+                             .beginOffset = edit.offset,
+                             .endOffset = edit.offset,
+                             .element = edit.element,
+                             .message = {}});
     }
     return diagnostics;
   }
@@ -568,6 +571,7 @@ struct RecoveryContext : TrackedParseContext {
       return false;
     }
     const auto beforeOffset = cursorOffset();
+    (void)beforeOffset;
     const char *const deletedEnd = detail::next_codepoint_cursor(cursor());
     const char *const next = deletedEnd;
     if (next <= cursor()) [[unlikely]] {
@@ -618,6 +622,7 @@ struct RecoveryContext : TrackedParseContext {
       return false;
     }
     const auto beforeOffset = cursorOffset();
+    (void)beforeOffset;
     recoveryEdits.push_back({.kind = ParseDiagnosticKind::Replaced,
                              .offset = cursorOffset(),
                              .element = element});

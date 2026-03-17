@@ -48,7 +48,8 @@ constexpr std::array<bool, 256> createCharacterRange(std::string_view s) {
   const std::size_t rangeTextLength = s.size();
 
   //  check that each char is not a codepoint
-  for (auto chr : s) {
+  for (const auto chr : s) {
+    (void) chr;
     assert((static_cast<std::byte>(chr) & std::byte{0x80}) == std::byte{0});
   }
 
@@ -156,9 +157,9 @@ constexpr const char *advanceOneCodepointLossy(const char *cursor) noexcept {
 
 consteval auto make_tolower() {
   std::array<unsigned char, 256> lookup{};
-  for (int c = 0; c < 256; ++c) {
-    if (c >= 'A' && c <= 'Z') {
-      lookup[c] = static_cast<unsigned char>(c) + ('a' - 'A');
+  for (std::size_t c = 0; c < lookup.size(); ++c) {
+    if (c >= static_cast<std::size_t>('A') && c <= static_cast<std::size_t>('Z')) {
+      lookup[c] = static_cast<unsigned char>(static_cast<int>(c) + ('a' - 'A'));
     } else {
       lookup[c] = static_cast<unsigned char>(c);
     }

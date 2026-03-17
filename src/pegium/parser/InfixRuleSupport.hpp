@@ -233,7 +233,6 @@ private:
                     const ValueBuildContext &context) {
     std::unique_ptr<RightPointeeType> rhs;
     CstNodeView operatorNode;
-    bool consumedTail = false;
     for (const auto child : node) {
       if (child.node().isHidden) {
         continue;
@@ -248,13 +247,11 @@ private:
             detail::extract_raw_value(model->primary, child, context));
         continue;
       }
-      assert(!consumedTail);
       assert(child.getGrammarElement() == model->_owner);
       rhs = cast_operand<RightPointeeType>(
           buildTypedFromCst(model, child,
                             cast_operand<LeftPointeeType>(std::move(rhs)),
                             context));
-      consumedTail = true;
     }
 
     assert(lhsNode != nullptr);

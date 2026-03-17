@@ -146,7 +146,8 @@ FailureAnalysisResult analyze_failure(const grammar::ParserRule &entryRule,
 
 FailureSnapshot snapshot_from_committed_cst(const RootCstNode &cst,
                                             TextOffset maxCursorOffset) noexcept {
-  FailureSnapshot snapshot{.maxCursorOffset = maxCursorOffset};
+  FailureSnapshot snapshot{.maxCursorOffset = maxCursorOffset,
+                           .failureLeafHistory = {}};
   for (NodeId id = 0;; ++id) {
     const auto node = cst.get(id);
     if (!node.valid()) {

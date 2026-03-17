@@ -26,7 +26,7 @@ struct ExpectBranchResult {
 [[gnu::always_inline]] inline CapturedFrontier
 capture_frontier_since(ExpectContext &ctx,
                        const ExpectContext::Checkpoint &checkpoint) {
-  CapturedFrontier frontier{.blocked = ctx.frontierBlocked()};
+  CapturedFrontier frontier{.blocked = ctx.frontierBlocked(), .items = {}};
   if (checkpoint.frontierSize >= ctx.frontier.size()) {
     return frontier;
   }
