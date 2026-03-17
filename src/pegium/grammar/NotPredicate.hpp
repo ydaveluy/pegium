@@ -12,7 +12,7 @@ struct NotPredicate : AbstractElement {
   virtual const AbstractElement *getElement() const noexcept = 0;
   constexpr ~NotPredicate() noexcept override = default;
 
-  void print(std::ostream &os) const final { os << '!' << *getElement(); }
+  void print(std::ostream &os) const final;
 };
 
 } // namespace pegium::grammar

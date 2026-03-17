@@ -1,0 +1,73 @@
+{
+  "name": "pegium-arithmetics-dsl",
+  "displayName": "Pegium Arithmetics DSL",
+  "version": "0.1.0",
+  "description": "Arithmetics example language powered by Pegium",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.86.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:arithmetics"
+  ],
+  "main": "./vscode/out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "arithmetics",
+        "aliases": [
+          "Arithmetics",
+          "arithmetics"
+        ],
+        "extensions": [
+          ".calc"
+        ],
+        "configuration": "./vscode/language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "arithmetics",
+        "scopeName": "source.arithmetics",
+        "path": "./vscode/syntaxes/arithmetics.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Pegium Arithmetics",
+      "properties": {
+        "pegium.arithmetics.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the pegium-example-arithmetics-lsp executable. If empty, common build locations are probed."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./vscode/tsconfig.json",
+    "test": "npm run compile && node ./vscode/out/test/runTest.js",
+    "watch": "tsc -p ./vscode/tsconfig.json -w",
+    "vscode:prepublish": "npm run compile"
+  },
+  "files": [
+    "package.json",
+    "README.md",
+    "example",
+    "vscode/out",
+    "vscode/src",
+    "vscode/language-configuration.json",
+    "vscode/syntaxes"
+  ],
+  "dependencies": {
+    "vscode-languageclient": "~9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "^2.4.1",
+    "@types/node": "^20.17.17",
+    "@types/vscode": "^1.86.0",
+    "typescript": "^5.7.2"
+  }
+}

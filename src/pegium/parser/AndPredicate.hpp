@@ -1,17 +1,29 @@
 #pragma once
 #include <memory>
+#include <pegium/parser/ExpectContext.hpp>
+#include <pegium/parser/ExpectFrontier.hpp>
 #include <pegium/grammar/AndPredicate.hpp>
-#include <pegium/parser/ParseExpression.hpp>
+#include <pegium/parser/ParseAttempt.hpp>
+#include <pegium/parser/ParseMode.hpp>
 #include <pegium/parser/ParseContext.hpp>
+#include <pegium/parser/ParseExpression.hpp>
+#include <string>
+#include <string_view>
 
 namespace pegium::parser {
 
-template <ParseExpression Element>
+template <Expression Element>
 struct AndPredicate final : grammar::AndPredicate {
   static constexpr bool nullable = true;
+  static constexpr bool isFailureSafe = true;
 
   explicit constexpr AndPredicate(Element &&element)
-      : _element{std::forward<Element>(element)} {}
+    requires(!std::is_lvalue_reference_v<Element>)
+      : _element(std::move(element)) {}
+  explicit constexpr AndPredicate(Element element)
+    requires(std::is_lvalue_reference_v<Element>)
+      : _element(element) {}
+
   constexpr AndPredicate(AndPredicate &&) noexcept = default;
   constexpr AndPredicate(const AndPredicate &) = default;
   constexpr AndPredicate &operator=(AndPredicate &&) noexcept = default;
@@ -21,45 +33,66 @@ struct AndPredicate final : grammar::AndPredicate {
     return std::addressof(_element);
   }
 
-  bool rule(ParseContext &ctx) const {
-    if (ctx.isStrictNoEditMode()) {
-      return rule_strict_probe(ctx);
-    }
+  constexpr const char *terminal(const char *begin) const noexcept
+    requires TerminalCapableExpression<Element>
+  {
+    return _element.terminal(begin) != nullptr ? begin : nullptr;
+  }
+  constexpr const char *terminal(const std::string &text) const noexcept
+    requires TerminalCapableExpression<Element>
+  {
+    return terminal(text.c_str());
+  }
 
-    const bool allowInsert = ctx.allowInsert;
-    const bool allowDelete = ctx.allowDelete;
-    ctx.allowInsert = false;
-    ctx.allowDelete = false;
-    const bool result = rule_strict_probe(ctx);
-    ctx.allowInsert = allowInsert;
-    ctx.allowDelete = allowDelete;
-    return result;
-  }
-  constexpr MatchResult terminal(const char *begin,
-                                       const char *end) const noexcept {
-    return _element.terminal(begin, end).IsValid()
-               ? MatchResult::success(begin)
-               : MatchResult::failure(begin);
-  }
-  constexpr MatchResult terminal(std::string_view sv) const noexcept {
-    return terminal(sv.begin(), sv.end());
+  constexpr bool isNullable() const noexcept override {
+    return nullable;
   }
 
 private:
-  ParseExpressionHolder<Element> _element;
+  friend struct detail::ParseAccess;
+  friend struct detail::ProbeAccess;
 
-  bool rule_strict_probe(ParseContext &ctx) const {
-    const bool trackEditState = ctx.trackEditState;
-    ctx.setTrackEditState(false);
-    const auto mark = ctx.mark();
-    const bool result = _element.rule(ctx);
-    ctx.rewind(mark);
-    ctx.setTrackEditState(trackEditState);
-    return result;
+  ExpressionHolder<Element> _element;
+
+  bool probe_impl(ParseContext &ctx) const {
+    return parser::probe(_element, ctx);
+  }
+
+  template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
+    if constexpr (!ExpectParseModeContext<Context>) {
+      if constexpr (RecoveryParseModeContext<Context>) {
+        TrackedParseContext &strictCtx = ctx;
+        return parser::probe(_element, strictCtx);
+      } else {
+        ParseContext &strictCtx = ctx;
+        return parser::probe(_element, strictCtx);
+      }
+    } else {
+      if (ctx.cursor() == ctx.end) {
+        const auto checkpoint = ctx.mark();
+        if (!parse(_element, ctx)) {
+          ctx.rewind(checkpoint);
+          return false;
+        }
+        auto branchFrontier = capture_frontier_since(ctx, checkpoint);
+        ctx.rewind(checkpoint);
+        if (branchFrontier.blocked && !branchFrontier.items.empty()) {
+          merge_captured_frontier(ctx, branchFrontier, false);
+        }
+        return true;
+      }
+
+      const std::string_view remaining{
+          ctx.cursor(), static_cast<std::size_t>(ctx.end - ctx.cursor())};
+      auto probeCtx = ExpectContext{remaining, ctx.skipper(),
+                                    static_cast<TextOffset>(remaining.size())};
+      probeCtx.setInRecoveryPhase(false);
+      return with_no_edits(probeCtx, [&]() { return parse(_element, probeCtx); });
+    }
   }
 };
 
-template <ParseExpression Element> constexpr auto operator&(Element &&element) {
+template <Expression Element> constexpr auto operator&(Element &&element) {
   return AndPredicate<Element>{std::forward<Element>(element)};
 }
 } // namespace pegium::parser

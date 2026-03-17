@@ -1,26 +1,25 @@
 #include <pegium/syntax-tree/AstNode.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <limits>
 
 namespace pegium {
 
-const AstNode *AstNode::getContainer() const noexcept { return _container; }
-
-AstNode *AstNode::getContainer() noexcept { return _container; }
-
-void AstNode::setContainer(AstNode *container, std::any property,
+void AstNode::setContainer(AstNode &container, std::string_view propertyName,
                            std::size_t index) {
+  if (_container == nullptr) {
+    attachToContainer(container, propertyName, index);
+    return;
+  }
   if (_container) {
     auto &content = _container->_content;
-    auto it = std::ranges::find(content, this);
-    if (it != content.end()) {
+    if (auto it = std::ranges::find(content, this); it != content.end()) {
       content.erase(it);
     }
   }
-  _container = container;
-  _containerProperty = std::move(property);
-  _containerIndex = index;
-  _container->_content.push_back(this);
+  _container = nullptr;
+  attachToContainer(container, propertyName, index);
 }
 
 } // namespace pegium

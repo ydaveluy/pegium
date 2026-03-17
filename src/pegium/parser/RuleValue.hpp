@@ -19,6 +19,7 @@ concept SupportedRuleValueType =
     std::same_as<std::remove_cvref_t<T>, char> ||
     std::same_as<std::remove_cvref_t<T>, bool> ||
     std::same_as<std::remove_cvref_t<T>, std::nullptr_t> ||
+    std::is_enum_v<std::remove_cvref_t<T>> ||
     (std::integral<std::remove_cvref_t<T>> &&
      !std::same_as<std::remove_cvref_t<T>, char> &&
      !std::same_as<std::remove_cvref_t<T>, bool>) ||
@@ -39,6 +40,9 @@ inline RuleValue toRuleValue(T value) {
     return RuleValue{value};
   } else if constexpr (std::same_as<RawT, std::nullptr_t>) {
     return RuleValue{nullptr};
+  } else if constexpr (std::is_enum_v<RawT>) {
+    using UnderlyingType = std::underlying_type_t<RawT>;
+    return toRuleValue(static_cast<UnderlyingType>(value));
   } else if constexpr (std::floating_point<RawT>) {
     if constexpr (std::same_as<RawT, float>) {
       return RuleValue{value};

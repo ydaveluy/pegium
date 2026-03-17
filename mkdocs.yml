@@ -1,0 +1,92 @@
+site_name: Pegium
+site_description: C++20 toolkit for building parsers, AST/CST pipelines, validation, references, formatting, and language servers.
+site_url: https://ydaveluy.github.io/pegium/
+repo_url: https://github.com/ydaveluy/pegium
+repo_name: ydaveluy/pegium
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  language: en
+  custom_dir: overrides
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+    - content.action.edit
+    - content.action.view
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: light blue
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      base_path:
+        - .
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Introduction:
+      - introduction/index.md
+      - Why Pegium: introduction/why-pegium.md
+      - Pegium for Langium Users: introduction/langium-users.md
+  - Getting Started:
+      - getting-started/index.md
+      - Build the Repository: getting-started/build.md
+      - Run the Examples: getting-started/examples.md
+      - Your First Language: getting-started/first-language.md
+  - Build a Language:
+      - build-a-language/index.md
+      - Grammar Essentials: build-a-language/grammar.md
+      - AST and CST: build-a-language/ast-and-cst.md
+      - References and Scoping: build-a-language/references-and-scoping.md
+      - Validation: build-a-language/validation.md
+      - Formatting: build-a-language/formatting.md
+      - LSP Services: build-a-language/lsp-services.md
+      - Workspace Lifecycle: build-a-language/workspace.md
+  - Reference:
+      - reference/index.md
+      - Grammar Reference: reference/grammar-reference.md
+      - Services and Modules: reference/services-and-modules.md
+      - Formatter DSL: reference/formatter-dsl.md
+      - Default LSP Services: reference/lsp-services.md
+      - Completion Provider: reference/completion-provider.md
+      - Workspace Concepts: reference/workspace.md
+  - Recipes:
+      - recipes/index.md
+      - Custom Validator: recipes/custom-validator.md
+      - Custom Formatter: recipes/custom-formatter.md
+      - Custom Scope Provider: recipes/custom-scope-provider.md
+      - Custom LSP Features: recipes/custom-lsp-features.md
+  - Examples:
+      - examples/index.md
+      - Arithmetics: examples/arithmetics.md
+      - Domainmodel: examples/domainmodel.md
+      - Requirements: examples/requirements.md
+      - Statemachine: examples/statemachine.md

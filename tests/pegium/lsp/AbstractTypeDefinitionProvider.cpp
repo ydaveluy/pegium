@@ -1,0 +1,61 @@
+#include <gtest/gtest.h>
+
+#include <pegium/lsp/AbstractTypeDefinitionProvider.hpp>
+
+#include "AbstractNavigationProviderTestUtils.hpp"
+
+namespace pegium::lsp {
+namespace {
+
+using namespace test_navigation;
+
+class TestTypeDefinitionProvider final : public AbstractTypeDefinitionProvider {
+public:
+  using AbstractTypeDefinitionProvider::AbstractTypeDefinitionProvider;
+
+  mutable std::string seenName;
+
+protected:
+  std::optional<std::vector<::lsp::LocationLink>>
+  collectGoToTypeLocationLinks(
+      const AstNode &element,
+      const utils::CancellationToken &cancelToken) const override {
+    utils::throw_if_cancelled(cancelToken);
+    const auto *entry = dynamic_cast<const NavigationEntry *>(&element);
+    if (entry == nullptr) {
+      return std::nullopt;
+    }
+    seenName = entry->name;
+    return std::vector<::lsp::LocationLink>{link_to_element(element)};
+  }
+};
+
+TEST(AbstractTypeDefinitionProviderTest, DelegatesResolvedDeclarationNode) {
+  auto shared = test::make_shared_services();
+  ASSERT_TRUE(shared->serviceRegistry->registerServices(
+      test::make_services<NavigationParser>(*shared, "nav", {".nav"})));
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("type-definition.nav"), "nav",
+      "entry Alpha\n"
+      "use Alpha");
+  ASSERT_NE(document, nullptr);
+
+  const auto *services = lookup_services(*shared, "nav");
+  ASSERT_NE(services, nullptr);
+
+  TestTypeDefinitionProvider provider(*services);
+
+  ::lsp::TypeDefinitionParams params{};
+  params.position = document->offsetToPosition(use_name_offset(*document) + 1);
+
+  const auto links =
+      provider.getTypeDefinition(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(links.has_value());
+  ASSERT_EQ(links->size(), 1u);
+  EXPECT_EQ(provider.seenName, "Alpha");
+  EXPECT_EQ((*links)[0].targetUri.toString(), document->uri);
+}
+
+} // namespace
+} // namespace pegium::lsp

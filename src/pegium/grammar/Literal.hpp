@@ -13,10 +13,9 @@ struct Literal : AbstractElement {
 
   constexpr ~Literal() noexcept override = default;
   virtual std::string_view getValue() const noexcept = 0;
-  virtual std::string_view getValue(const CstNodeView &node) const noexcept {
-    return node.getText();
-  }
+  virtual std::string_view getValue(const CstNodeView &node) const noexcept;
   virtual bool isCaseSensitive() const noexcept = 0;
+  void print(std::ostream &os) const override;
 };
 
 } // namespace pegium::grammar

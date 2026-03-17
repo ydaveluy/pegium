@@ -9,8 +9,8 @@ namespace pegium::grammar {
 
 enum class ElementKind {
 
-  New,        // create a new instance
-  Init,       // create a new instance and init a feature with current value
+  Create,     // create a new instance
+  Nest,       // create a new instance and init a feature with current value
   Assignment, // assign a feature of the current element
   AndPredicate,
   AnyCharacter,
@@ -23,20 +23,22 @@ enum class ElementKind {
   ParserRule,
   Repetition,
   TerminalRule,
-  UnorderedGroup
+  UnorderedGroup,
+  InfixRule,
+  InfixOperator
 };
 
 struct AbstractElement {
   using ElementKind = pegium::grammar::ElementKind;
   constexpr virtual ElementKind getKind() const noexcept = 0;
+  constexpr virtual bool isNullable() const noexcept = 0;
   constexpr virtual ~AbstractElement() noexcept = default;
   constexpr virtual void print(std::ostream &os) const = 0;
 
   friend std::ostream &operator<<(std::ostream &os,
-                                  const AbstractElement &obj) {
-    obj.print(os);
-    return os;
-  }
+                                  const AbstractElement &obj);
 };
+
+std::ostream &operator<<(std::ostream &os, const AbstractElement &obj);
 
 } // namespace pegium::grammar

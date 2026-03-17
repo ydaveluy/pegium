@@ -1,6 +1,9 @@
+#include <cstdint>
 #include <gtest/gtest.h>
-#include <pegium/parser/Parser.hpp>
-#include <sstream>
+#include <pegium/ParseJsonTestSupport.hpp>
+#include <pegium/TestRuleParser.hpp>
+#include <pegium/parser/PegiumParser.hpp>
+#include <string>
 #include <variant>
 
 using namespace pegium::parser;
@@ -27,7 +30,7 @@ struct StrictChildNode : pegium::AstNode {
 };
 
 struct StrictChoiceNode : pegium::AstNode {
-  std::variant<bool, std::shared_ptr<StrictChildNode>> value;
+  std::variant<bool, pointer<StrictChildNode>> value;
 };
 
 struct DerivedLeafNode : pegium::AstNode {
@@ -39,6 +42,11 @@ struct AssignmentFeatureNode : pegium::AstNode {
   reference<DerivedLeafNode> refOne;
   pointer<DerivedLeafNode> child;
   vector<pointer<DerivedLeafNode>> children;
+};
+
+struct ReferenceInfoNode : pegium::AstNode {
+  reference<DerivedLeafNode> refOne;
+  vector<reference<DerivedLeafNode>> refs;
 };
 
 struct PointerChoiceNode : pegium::AstNode {
@@ -53,12 +61,15 @@ struct VariantSourceNode : pegium::AstNode {
   std::variant<bool, std::string> value;
 };
 
-struct CharAnyNode : pegium::AstNode {
-  std::string value;
+enum class AssignMode : std::uint8_t {
+  Alpha = 1,
+  Beta = 2,
 };
 
-struct LiteralChoiceNode : pegium::AstNode {
-  std::string value;
+struct EnumChoiceNode : pegium::AstNode {
+  AssignMode mode = AssignMode::Alpha;
+  optional<AssignMode> maybeMode;
+  std::variant<AssignMode, std::string> variantMode;
 };
 
 struct PlainLeafValue {
@@ -74,69 +85,59 @@ struct NullAssignNode : pegium::AstNode {
   std::nullptr_t marker = nullptr;
 };
 
-struct NonConsumingTrueElement final : pegium::grammar::AbstractElement {
-  using type = bool;
-  static constexpr bool nullable = true;
-
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Literal;
-  }
-  void print(std::ostream &os) const override { os << "<true>"; }
-
-  bool rule(ParseContext &ctx) const {
-    (void)ctx;
-    return true;
-  }
-  constexpr MatchResult terminal(const char *begin,
-                                 const char *) const noexcept {
-    return MatchResult::success(begin);
-  }
-  constexpr MatchResult terminal(std::string_view sv) const noexcept {
-    return terminal(sv.begin(), sv.end());
-  }
-  constexpr bool getValue(const pegium::CstNodeView &) const noexcept {
-    return true;
-  }
-};
-
 struct LeafValueElement final : pegium::grammar::AbstractElement {
   using type = PlainLeafValue;
   static constexpr bool nullable = false;
+  static constexpr bool isFailureSafe = true;
 
   constexpr ElementKind getKind() const noexcept override {
     return ElementKind::Literal;
   }
-  void print(std::ostream &os) const override { os << "<leaf-value>"; }
-
-  bool rule(ParseContext &ctx) const {
-    auto result = terminal(ctx.cursor(), ctx.end);
-    if (!result.IsValid()) {
-      return false;
-    }
-    ctx.leaf(result.offset, this);
-    ctx.skipHiddenNodes();
-    return true;
+  constexpr bool isNullable() const noexcept override {
+    return nullable;
   }
-  constexpr MatchResult terminal(const char *begin,
-                                 const char *end) const noexcept {
+  void print(std::ostream &os) const override { os << "<leaf-value>"; }
+  constexpr const char *terminal(const char *begin) const noexcept {
     constexpr std::string_view token = "leaf";
-    if (static_cast<std::size_t>(end - begin) < token.size()) {
-      return MatchResult::failure(begin);
+    for (std::size_t i = 0; i < token.size(); ++i) {
+      if (begin[i] == '\0') {
+        return nullptr;
+      }
     }
     for (std::size_t i = 0; i < token.size(); ++i) {
       if (begin[i] != token[i]) {
-        return MatchResult::failure(begin + i);
+        return nullptr;
       }
     }
-    return MatchResult::success(begin + token.size());
+    return begin + token.size();
   }
-  constexpr MatchResult terminal(std::string_view sv) const noexcept {
-    return terminal(sv.begin(), sv.end());
+  constexpr const char *terminal(const std::string &text) const noexcept {
+    return terminal(text.c_str());
   }
   type getValue(const pegium::CstNodeView &node) const {
     type value;
     value.name = std::string{node.getText()};
     return value;
+  }
+  type getRawValue(const pegium::CstNodeView &node) const {
+    return getValue(node);
+  }
+
+private:
+  friend struct pegium::parser::detail::ParseAccess;
+
+  template <typename Context> bool parse_impl(Context &ctx) const {
+    if constexpr (std::same_as<std::remove_cvref_t<Context>, ExpectContext>) {
+      return true;
+    } else {
+      auto result = terminal(ctx.cursor());
+      if (result == nullptr) {
+        return false;
+      }
+      ctx.leaf(result, this);
+      ctx.skip();
+      return true;
+    }
   }
 };
 
@@ -144,68 +145,90 @@ struct NullValueElement final : pegium::grammar::AbstractElement {
   using type = std::nullptr_t;
 
   static constexpr bool nullable = false;
+  static constexpr bool isFailureSafe = true;
   constexpr ElementKind getKind() const noexcept override {
     return ElementKind::Literal;
   }
-  void print(std::ostream &os) const override { os << "<null>"; }
-
-  bool rule(ParseContext &ctx) const {
-    auto result = terminal(ctx.cursor(), ctx.end);
-    if (!result.IsValid()) {
-      return false;
-    }
-    ctx.leaf(result.offset, this);
-    ctx.skipHiddenNodes();
-    return true;
+  constexpr bool isNullable() const noexcept override {
+    return nullable;
   }
-  constexpr MatchResult terminal(const char *begin,
-                                 const char *end) const noexcept {
+  void print(std::ostream &os) const override { os << "<null>"; }
+  constexpr const char *terminal(const char *begin) const noexcept {
     constexpr std::string_view token = "nil";
-    if (static_cast<std::size_t>(end - begin) < token.size()) {
-      return MatchResult::failure(begin);
+    for (std::size_t i = 0; i < token.size(); ++i) {
+      if (begin[i] == '\0') {
+        return nullptr;
+      }
     }
     for (std::size_t i = 0; i < token.size(); ++i) {
       if (begin[i] != token[i]) {
-        return MatchResult::failure(begin + i);
+        return nullptr;
       }
     }
-    return MatchResult::success(begin + token.size());
+    return begin + token.size();
   }
-  constexpr MatchResult terminal(std::string_view sv) const noexcept {
-    return terminal(sv.begin(), sv.end());
+  constexpr const char *terminal(const std::string &text) const noexcept {
+    return terminal(text.c_str());
   }
   constexpr type getValue(const pegium::CstNodeView &) const noexcept {
     return nullptr;
   }
+  constexpr type getRawValue(const pegium::CstNodeView &) const noexcept {
+    return nullptr;
+  }
+
+private:
+  friend struct pegium::parser::detail::ParseAccess;
+
+  template <typename Context> bool parse_impl(Context &ctx) const {
+    if constexpr (std::same_as<std::remove_cvref_t<Context>, ExpectContext>) {
+      return true;
+    } else {
+      auto result = terminal(ctx.cursor());
+      if (result == nullptr) {
+        return false;
+      }
+      ctx.leaf(result, this);
+      ctx.skip();
+      return true;
+    }
+  }
 };
 
-struct AssignmentParser final : Parser {
+struct AssignmentParser final : PegiumParser {
   Rule<ChildNode> Child{"Child", assign<&ChildNode::name>("child"_kw)};
   Rule<AssignmentNode> Root{
       "Root", assign<&AssignmentNode::id>("id"_kw) + ":"_kw +
                   many(append<&AssignmentNode::tags>("tag"_kw), ","_kw) +
                   enable_if<&AssignmentNode::enabled>("!"_kw) +
                   assign<&AssignmentNode::child>(Child)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
 
-struct ChoiceParser final : Parser {
+struct ChoiceParser final : PegiumParser {
   Rule<ChoiceNode> Root{"Root", assign<&ChoiceNode::op>("+"_kw | "-"_kw)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
 
-struct StringViewChoiceParser final : Parser {
-  Terminal<std::string_view> Word{"Word", "word"_kw};
-  Rule<ChoiceNode> Root{"Root", assign<&ChoiceNode::op>(Word | "-"_kw)};
-};
-
-struct StrictOrderedChoiceParser final : Parser {
+struct StrictOrderedChoiceParser final : PegiumParser {
   Rule<StrictChildNode> Child{"Child",
                               assign<&StrictChildNode::name>("child"_kw)};
   Terminal<bool> Bool{"Bool", "true"_kw | "false"_kw};
   Rule<StrictChoiceNode> Root{"Root",
                               assign<&StrictChoiceNode::value>(Child | Bool)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
 
-struct AssignmentFeatureParser final : Parser {
+struct AssignmentFeatureParser final : PegiumParser {
   Rule<DerivedLeafNode> Child{"Child",
                               assign<&DerivedLeafNode::name>("child"_kw)};
   Rule<AssignmentFeatureNode> Root{
@@ -214,401 +237,470 @@ struct AssignmentFeatureParser final : Parser {
           assign<&AssignmentFeatureNode::refOne>("ref"_kw) + ":"_kw +
           assign<&AssignmentFeatureNode::child>(Child) + ":"_kw +
           many(append<&AssignmentFeatureNode::children>(Child), ","_kw)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
 
-struct PointerChoiceParser final : Parser {
+struct ReferenceInfoParser final : PegiumParser {
+  Rule<ReferenceInfoNode> Root{
+      "Root",
+      assign<&ReferenceInfoNode::refOne>("opt"_kw) + ":"_kw +
+          many(append<&ReferenceInfoNode::refs>("ref"_kw), ","_kw)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
+};
+
+struct PointerChoiceParser final : PegiumParser {
   Rule<DerivedLeafNode> Child{"Child",
                               assign<&DerivedLeafNode::name>("child"_kw)};
   Rule<PointerChoiceNode> Root{
       "Root", assign<&PointerChoiceNode::child>(Child | Child)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
 
-struct BoolEnableParser final : Parser {
+struct BoolEnableParser final : PegiumParser {
   Terminal<bool> Bool{"Bool", "true"_kw | "false"_kw};
   Rule<BoolEnableNode> Root{"Root", enable_if<&BoolEnableNode::enabled>(Bool)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
 
-struct VariantSourceParser final : Parser {
+struct VariantSourceParser final : PegiumParser {
   Terminal<bool> Bool{"Bool", "true"_kw | "false"_kw};
   DataTypeRule<std::string> Word{"Word", "ab"_kw};
   Rule<VariantSourceNode> Root{"Root",
                                assign<&VariantSourceNode::value>(Bool | Word)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
 
-struct CharAnyParser final : Parser {
-  Rule<CharAnyNode> Root{"Root", assign<&CharAnyNode::value>(d | dot)};
+struct EnumChoiceParser final : PegiumParser {
+  Terminal<AssignMode> ModeA{"ModeA", "A"_kw};
+  Terminal<AssignMode> ModeB{"ModeB", "B"_kw};
+  Rule<EnumChoiceNode> Root{
+      "Root", assign<&EnumChoiceNode::mode>(ModeA | ModeB) + ":"_kw +
+                  assign<&EnumChoiceNode::maybeMode>(ModeA | ModeB) + ":"_kw +
+                  assign<&EnumChoiceNode::variantMode>(ModeA | ModeB)};
+
+  EnumChoiceParser() {
+    ModeA.setValueConverter([](std::string_view) noexcept {
+      return opt::conversion_value<AssignMode>(AssignMode::Alpha);
+    });
+    ModeB.setValueConverter([](std::string_view) noexcept {
+      return opt::conversion_value<AssignMode>(AssignMode::Beta);
+    });
+  }
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
 
-struct LiteralChoiceParser final : Parser {
-  Rule<LiteralChoiceNode> Root{
-      "Root", assign<&LiteralChoiceNode::value>("z"_kw | "y"_kw)};
-};
-
-struct BoolAssignParser final : Parser {
+struct BoolAssignParser final : PegiumParser {
   Rule<BoolEnableNode> Root{"Root", assign<&BoolEnableNode::enabled>("!"_kw)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
 
-struct DirectValueParser final : Parser {
+struct DirectValueParser final : PegiumParser {
   Rule<DirectValueNode> Root{
       "Root", assign<&DirectValueNode::one>(LeafValueElement{}) + ":"_kw +
                   append<&DirectValueNode::many>(LeafValueElement{})};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
 
-struct NullValueParser final : Parser {
+struct NullValueParser final : PegiumParser {
   Rule<NullAssignNode> Root{
       "Root", assign<&NullAssignNode::marker>(NullValueElement{})};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
 };
+
+template <typename T> const T *ast_as(const ParseResult &result) {
+  return pegium::ast_ptr_cast<T>(result.value);
+}
+
+template <typename RuleType>
+auto parse_rule(const RuleType &rule, std::string_view text,
+                const Skipper &skipper = SkipperBuilder().build(),
+                const ParseOptions &options = {}) {
+  auto document = std::make_unique<pegium::workspace::Document>();
+  document->setText(std::string{text});
+  pegium::test::parse_rule(rule, *document, skipper, options);
+  return document;
+}
 
 } // namespace
 
 TEST(AssignmentTest, AssignAppendAndEnableIfPopulateAstNode) {
   AssignmentParser parser;
 
-  auto result = parser.Root.parse("id:tag,tag!child", parser.createContext());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
-
-  EXPECT_EQ(result.value->id, "id");
-  ASSERT_EQ(result.value->tags.size(), 2u);
-  EXPECT_EQ(result.value->tags[0], "tag");
-  EXPECT_EQ(result.value->tags[1], "tag");
-  EXPECT_TRUE(result.value->enabled);
-
-  ASSERT_TRUE(result.value->child != nullptr);
-  EXPECT_EQ(result.value->child->name, "child");
-  EXPECT_EQ(result.value->child->getContainer(), result.value.get());
+  auto document = pegium::test::ExpectAst(
+      parser.Root, "id:tag,tag!child",
+      R"json({
+  "$type": "AssignmentNode",
+  "child": {
+    "$type": "ChildNode",
+    "name": "child"
+  },
+  "enabled": true,
+  "id": "id",
+  "tags": [
+    "tag",
+    "tag"
+  ]
+})json");
+  auto resultValue = ast_as<AssignmentNode>(document->parseResult);
+  ASSERT_TRUE(resultValue != nullptr);
+  ASSERT_TRUE(resultValue->child != nullptr);
+  EXPECT_EQ(resultValue->child->getContainer(), resultValue);
 }
 
 TEST(AssignmentTest, OrderedChoiceAssignsMatchedLiteralText) {
   ChoiceParser parser;
 
-  auto plus = parser.Root.parse("+", parser.createContext());
-  ASSERT_TRUE(plus.ret);
-  ASSERT_TRUE(plus.value != nullptr);
-  EXPECT_EQ(plus.value->op, "+");
+  pegium::test::ExpectAst(
+      parser.Root, "+",
+      R"json({
+  "$type": "ChoiceNode",
+  "op": "+"
+})json");
 
-  auto minus = parser.Root.parse("-", parser.createContext());
-  ASSERT_TRUE(minus.ret);
-  ASSERT_TRUE(minus.value != nullptr);
-  EXPECT_EQ(minus.value->op, "-");
-}
-
-TEST(AssignmentTest, OrderedChoiceAssignsStringViewToString) {
-  StringViewChoiceParser parser;
-
-  auto word = parser.Root.parse("word", parser.createContext());
-  ASSERT_TRUE(word.ret);
-  ASSERT_TRUE(word.value != nullptr);
-  EXPECT_EQ(word.value->op, "word");
-
-  auto minus = parser.Root.parse("-", parser.createContext());
-  ASSERT_TRUE(minus.ret);
-  ASSERT_TRUE(minus.value != nullptr);
-  EXPECT_EQ(minus.value->op, "-");
-}
-
-TEST(AssignmentTest, OrderedChoiceStrictModeDoesNotConvertAstPointerToBool) {
-  StrictOrderedChoiceParser parser;
-
-  auto child = parser.Root.parse("child", parser.createContext());
-  ASSERT_TRUE(child.ret);
-  ASSERT_TRUE(child.value != nullptr);
-  EXPECT_TRUE(std::holds_alternative<std::shared_ptr<StrictChildNode>>(
-      child.value->value));
-  EXPECT_FALSE(std::holds_alternative<bool>(child.value->value));
-
-  auto yes = parser.Root.parse("true", parser.createContext());
-  ASSERT_TRUE(yes.ret);
-  ASSERT_TRUE(yes.value != nullptr);
-  EXPECT_TRUE(std::holds_alternative<bool>(yes.value->value));
-  EXPECT_TRUE(std::get<bool>(yes.value->value));
+  pegium::test::ExpectAst(
+      parser.Root, "-",
+      R"json({
+  "$type": "ChoiceNode",
+  "op": "-"
+})json");
 }
 
 TEST(AssignmentTest, OptionalReferenceAndPointerAssignmentsAreHandled) {
   AssignmentFeatureParser parser;
 
-  auto result =
-      parser.Root.parse("opt:ref:child:child,child", parser.createContext());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
+  auto document = pegium::test::ExpectAst(
+      parser.Root, "opt:ref:child:child,child",
+      R"json({
+  "$type": "AssignmentFeatureNode",
+  "child": {
+    "$type": "DerivedLeafNode",
+    "name": "child"
+  },
+  "children": [
+    {
+      "$type": "DerivedLeafNode",
+      "name": "child"
+    },
+    {
+      "$type": "DerivedLeafNode",
+      "name": "child"
+    }
+  ],
+  "optName": "opt",
+  "refOne": {
+    "$refText": "ref"
+  }
+})json",
+      {.includeReferenceErrors = false});
+  auto resultValue = ast_as<AssignmentFeatureNode>(document->parseResult);
+  ASSERT_TRUE(resultValue != nullptr);
 
-  ASSERT_TRUE(result.value->optName.has_value());
-  EXPECT_EQ(*result.value->optName, "opt");
+  const auto refOneNode = resultValue->refOne.getRefNode();
+  ASSERT_TRUE(refOneNode.has_value());
+  EXPECT_EQ(refOneNode->getText(), "ref");
+  EXPECT_EQ(refOneNode->getBegin(), 4u);
+  EXPECT_EQ(refOneNode->getEnd(), 7u);
 
-  ASSERT_TRUE(result.value->child != nullptr);
-  EXPECT_EQ(result.value->child->name, "child");
-  EXPECT_EQ(result.value->child->getContainer(), result.value.get());
+  ASSERT_TRUE(resultValue->child != nullptr);
+  EXPECT_EQ(resultValue->child->getContainer(), resultValue);
 
-  ASSERT_EQ(result.value->children.size(), 2u);
-  ASSERT_TRUE(result.value->children[0] != nullptr);
-  ASSERT_TRUE(result.value->children[1] != nullptr);
-  EXPECT_EQ(result.value->children[0]->getContainer(), result.value.get());
-  EXPECT_EQ(result.value->children[1]->getContainer(), result.value.get());
+  ASSERT_EQ(resultValue->children.size(), 2u);
+  ASSERT_TRUE(resultValue->children[0] != nullptr);
+  ASSERT_TRUE(resultValue->children[1] != nullptr);
+  EXPECT_EQ(resultValue->children[0]->getContainer(), resultValue);
+  EXPECT_EQ(resultValue->children[1]->getContainer(), resultValue);
+}
+
+TEST(AssignmentTest, ReferenceAssignmentsCaptureSourceCstNode) {
+  AssignmentFeatureParser parser;
+
+  auto document = pegium::test::ExpectAst(
+      parser.Root, "opt:ref:child:child",
+      R"json({
+  "$type": "AssignmentFeatureNode",
+  "child": {
+    "$type": "DerivedLeafNode",
+    "name": "child"
+  },
+  "children": [
+    {
+      "$type": "DerivedLeafNode",
+      "name": "child"
+    }
+  ],
+  "optName": "opt",
+  "refOne": {
+    "$refText": "ref"
+  }
+})json",
+      {.includeReferenceErrors = false});
+  auto resultValue = ast_as<AssignmentFeatureNode>(document->parseResult);
+  ASSERT_TRUE(resultValue != nullptr);
+
+  const auto refNode = resultValue->refOne.getRefNode();
+  ASSERT_TRUE(refNode.has_value());
+  EXPECT_EQ(refNode->getText(), "ref");
+  EXPECT_EQ(refNode->getBegin(), 4u);
+  EXPECT_EQ(refNode->getEnd(), 7u);
+}
+
+TEST(AssignmentTest, ReferenceAssignmentsPropagatePropertyAndIndexMetadata) {
+  ReferenceInfoParser parser;
+
+  auto document = pegium::test::ExpectAst(
+      parser.Root, "opt:ref,ref",
+      R"json({
+  "$type": "ReferenceInfoNode",
+  "refOne": {
+    "$refText": "opt"
+  },
+  "refs": [
+    {
+      "$refText": "ref"
+    },
+    {
+      "$refText": "ref"
+    }
+  ]
+})json",
+      {.includeReferenceErrors = false});
+  auto resultValue = ast_as<ReferenceInfoNode>(document->parseResult);
+  ASSERT_TRUE(resultValue != nullptr);
+
+  ASSERT_EQ(document->references.size(), 3u);
+
+  const auto *optionalRef = document->references[0].getConst();
+  ASSERT_NE(optionalRef, nullptr);
+  EXPECT_EQ(optionalRef->getProperty(), "refOne");
+  EXPECT_FALSE(optionalRef->getPropertyIndex().has_value());
+
+  const auto *firstRef = document->references[1].getConst();
+  ASSERT_NE(firstRef, nullptr);
+  EXPECT_EQ(firstRef->getProperty(), "refs");
+  ASSERT_TRUE(firstRef->getPropertyIndex().has_value());
+  EXPECT_EQ(*firstRef->getPropertyIndex(), 0u);
+
+  const auto *secondRef = document->references[2].getConst();
+  ASSERT_NE(secondRef, nullptr);
+  EXPECT_EQ(secondRef->getProperty(), "refs");
+  ASSERT_TRUE(secondRef->getPropertyIndex().has_value());
+  EXPECT_EQ(*secondRef->getPropertyIndex(), 1u);
 }
 
 TEST(AssignmentTest, OrderedChoiceParserRuleValueUsesAstPointerPath) {
   PointerChoiceParser parser;
 
-  auto result = parser.Root.parse("child", parser.createContext());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
-  ASSERT_TRUE(result.value->child != nullptr);
-  EXPECT_EQ(result.value->child->name, "child");
-  EXPECT_EQ(result.value->child->getContainer(), result.value.get());
+  auto document = pegium::test::ExpectAst(
+      parser.Root, "child",
+      R"json({
+  "$type": "PointerChoiceNode",
+  "child": {
+    "$type": "DerivedLeafNode",
+    "name": "child"
+  }
+})json");
+  auto resultValue = ast_as<PointerChoiceNode>(document->parseResult);
+  ASSERT_TRUE(resultValue != nullptr);
+  ASSERT_TRUE(resultValue->child != nullptr);
+  EXPECT_EQ(resultValue->child->getContainer(), resultValue);
 }
 
 TEST(AssignmentTest, EnableIfWithBoolElementAssignsParsedBooleanValue) {
   BoolEnableParser parser;
 
-  auto yes = parser.Root.parse("true", parser.createContext());
-  ASSERT_TRUE(yes.ret);
-  ASSERT_TRUE(yes.value != nullptr);
-  EXPECT_TRUE(yes.value->enabled);
+  pegium::test::ExpectAst(
+      parser.Root, "true",
+      R"json({
+  "$type": "BoolEnableNode",
+  "enabled": true
+})json");
+  pegium::test::ExpectAst(
+      parser.Root, "false",
+      R"json({
+  "$type": "BoolEnableNode",
+  "enabled": false
+})json");
+}
 
-  auto no = parser.Root.parse("false", parser.createContext());
-  ASSERT_TRUE(no.ret);
-  ASSERT_TRUE(no.value != nullptr);
-  EXPECT_FALSE(no.value->enabled);
+TEST(AssignmentTest, OrderedChoiceSupportsVariantBoolAndAstNodeValues) {
+  StrictOrderedChoiceParser parser;
+
+  {
+    auto document = pegium::test::ExpectAst(
+        parser.Root, "true",
+        R"json({
+  "$type": "StrictChoiceNode",
+  "value": true
+})json");
+    auto resultValue = ast_as<StrictChoiceNode>(document->parseResult);
+    ASSERT_TRUE(resultValue != nullptr);
+    ASSERT_TRUE(std::holds_alternative<bool>(resultValue->value));
+    EXPECT_TRUE(std::get<bool>(resultValue->value));
+  }
+
+  {
+    auto document = pegium::test::ExpectAst(
+        parser.Root, "child",
+        R"json({
+  "$type": "StrictChoiceNode",
+  "value": {
+    "$type": "StrictChildNode",
+    "name": "child"
+  }
+})json");
+    auto resultValue = ast_as<StrictChoiceNode>(document->parseResult);
+    ASSERT_TRUE(resultValue != nullptr);
+    ASSERT_TRUE(std::holds_alternative<std::unique_ptr<StrictChildNode>>(
+        resultValue->value));
+    const auto &child =
+        std::get<std::unique_ptr<StrictChildNode>>(resultValue->value);
+    ASSERT_TRUE(child != nullptr);
+    EXPECT_EQ(child->getContainer(), resultValue);
+    EXPECT_EQ(child->getContainerPropertyName(), "value");
+  }
 }
 
 TEST(AssignmentTest, OrderedChoiceSupportsTerminalAndDataTypeKinds) {
   VariantSourceParser parser;
 
   {
-    auto result = parser.Root.parse("true", parser.createContext());
-    ASSERT_TRUE(result.ret);
-    ASSERT_TRUE(result.value != nullptr);
-    EXPECT_TRUE(std::holds_alternative<bool>(result.value->value));
-    EXPECT_TRUE(std::get<bool>(result.value->value));
+    auto document = pegium::test::ExpectAst(
+        parser.Root, "true",
+        R"json({
+  "$type": "VariantSourceNode",
+  "value": true
+})json");
+    auto &result = document->parseResult;
+    ASSERT_TRUE(result.value);
+    auto resultValue = ast_as<VariantSourceNode>(result);
+    ASSERT_TRUE(resultValue != nullptr);
+    EXPECT_TRUE(std::holds_alternative<bool>(resultValue->value));
+    EXPECT_TRUE(std::get<bool>(resultValue->value));
   }
 
   {
-    auto result = parser.Root.parse("ab", parser.createContext());
-    ASSERT_TRUE(result.ret);
-    ASSERT_TRUE(result.value != nullptr);
-    EXPECT_TRUE(std::holds_alternative<std::string>(result.value->value));
-    EXPECT_EQ(std::get<std::string>(result.value->value), "ab");
+    auto document = pegium::test::ExpectAst(
+        parser.Root, "ab",
+        R"json({
+  "$type": "VariantSourceNode",
+  "value": "ab"
+})json");
+    auto &result = document->parseResult;
+    ASSERT_TRUE(result.value);
+    auto resultValue = ast_as<VariantSourceNode>(result);
+    ASSERT_TRUE(resultValue != nullptr);
+    EXPECT_TRUE(std::holds_alternative<std::string>(resultValue->value));
+    EXPECT_EQ(std::get<std::string>(resultValue->value), "ab");
   }
 }
 
-TEST(AssignmentTest, OrderedChoiceSupportsLiteralKindWithStringFallback) {
-  LiteralChoiceParser parser;
-
-  auto result = parser.Root.parse("z", parser.createContext());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
-  EXPECT_EQ(result.value->value, "z");
-}
-
-TEST(AssignmentTest, OrderedChoiceSupportsCharacterRangeAndAnyCharacterKinds) {
-  CharAnyParser parser;
+TEST(AssignmentTest, OrderedChoiceConvertsUnderlyingRuleValueBackToEnum) {
+  EnumChoiceParser parser;
 
   {
-    auto result = parser.Root.parse("7", parser.createContext());
-    ASSERT_TRUE(result.ret);
-    ASSERT_TRUE(result.value != nullptr);
-    EXPECT_EQ(result.value->value, "7");
+    auto document = pegium::test::ExpectAst(
+        parser.Root, "A:B:A",
+        R"json({
+  "$type": "EnumChoiceNode",
+  "maybeMode": 2,
+  "mode": 1,
+  "variantMode": 1
+})json");
+    auto &result = document->parseResult;
+    ASSERT_TRUE(result.value);
+    auto resultValue = ast_as<EnumChoiceNode>(result);
+    ASSERT_TRUE(resultValue != nullptr);
+    EXPECT_EQ(resultValue->mode, AssignMode::Alpha);
+    ASSERT_TRUE(resultValue->maybeMode.has_value());
+    EXPECT_EQ(*resultValue->maybeMode, AssignMode::Beta);
+    ASSERT_TRUE(std::holds_alternative<AssignMode>(resultValue->variantMode));
+    EXPECT_EQ(std::get<AssignMode>(resultValue->variantMode),
+              AssignMode::Alpha);
   }
 
   {
-    auto result = parser.Root.parse(":", parser.createContext());
-    ASSERT_TRUE(result.ret);
-    ASSERT_TRUE(result.value != nullptr);
-    EXPECT_EQ(result.value->value, ":");
-  }
-}
-
-TEST(AssignmentTest, ParseRuleForNonOrderedOverridesGrammarElement) {
-  auto expression = assign<&AssignmentNode::id>("id"_kw);
-  auto skipper = SkipperBuilder().build();
-
-  {
-    pegium::CstBuilder builder("id");
-    const auto input = builder.getText();
-    ParseContext ctx{builder, skipper};
-
-    auto ok = expression.rule(ctx);
-    EXPECT_TRUE(ok);
-    EXPECT_EQ(ctx.cursor() - input.begin(), 2);
-
-    auto root = builder.finalize();
-    auto node = root->begin();
-    ASSERT_NE(node, root->end());
-    EXPECT_EQ((*node).getGrammarElement(), std::addressof(expression));
-  }
-
-  {
-    pegium::CstBuilder builder("xx");
-    ParseContext ctx{builder, skipper};
-    auto ko = expression.rule(ctx);
-    EXPECT_FALSE(ko);
-
-    auto root = builder.finalize();
-    EXPECT_EQ(root->begin(), root->end());
+    auto document = pegium::test::ExpectAst(
+        parser.Root, "B:A:B",
+        R"json({
+  "$type": "EnumChoiceNode",
+  "maybeMode": 1,
+  "mode": 2,
+  "variantMode": 2
+})json");
+    auto &result = document->parseResult;
+    ASSERT_TRUE(result.value);
+    auto resultValue = ast_as<EnumChoiceNode>(result);
+    ASSERT_TRUE(resultValue != nullptr);
+    EXPECT_EQ(resultValue->mode, AssignMode::Beta);
+    ASSERT_TRUE(resultValue->maybeMode.has_value());
+    EXPECT_EQ(*resultValue->maybeMode, AssignMode::Alpha);
+    ASSERT_TRUE(std::holds_alternative<AssignMode>(resultValue->variantMode));
+    EXPECT_EQ(std::get<AssignMode>(resultValue->variantMode), AssignMode::Beta);
   }
 }
-
-/*TEST(AssignmentTest, ParseRuleForOrderedChoiceRewindsOnFailure) {
-  auto expression = assign<&ChoiceNode::op>("+"_kw | "-"_kw);
-  auto skipper = SkipperBuilder().build();
-
-  {
-    pegium::CstBuilder builder("+");
-    const auto input = builder.getText();
-    RecoverState ctx{builder, skipper};
-
-    auto ok = expression.rule(ctx);
-    EXPECT_TRUE(ok);
-    EXPECT_EQ(ctx.cursor() - input.begin(), 1);
-
-    auto root = builder.finalize();
-    auto node = root->begin();
-    ASSERT_NE(node, root->end());
-    EXPECT_EQ((*node).getGrammarElement(), std::addressof(expression));
-  }
-
-  {
-    pegium::CstBuilder builder("*");
-    const auto input = builder.getText();
-    RecoverState ctx{builder, skipper};
-    auto ko = expression.rule(ctx);
-    EXPECT_FALSE(ko);
-    EXPECT_EQ(ctx.cursor(), input.begin());
-
-    auto root = builder.finalize();
-    EXPECT_EQ(root->begin(), root->end());
-  }
-}*/
 
 TEST(AssignmentTest, AssignOnBoolWithNonBoolElementSetsTrue) {
   BoolAssignParser parser;
 
-  auto result = parser.Root.parse("!", parser.createContext());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
-  EXPECT_TRUE(result.value->enabled);
-}
-
-TEST(AssignmentTest, AssignmentMetadataAndOperatorsAreExposed) {
-  auto assignExpr = assign<&AssignmentNode::id>("id"_kw);
-  auto appendExpr = append<&AssignmentNode::tags>("tag"_kw);
-  auto enableExpr = enable_if<&AssignmentNode::enabled>("!"_kw);
-
-  EXPECT_EQ(assignExpr.getKind(), pegium::grammar::ElementKind::Assignment);
-  EXPECT_EQ(assignExpr.getOperator(),
-            pegium::grammar::AssignmentOperator::Assign);
-  EXPECT_EQ(appendExpr.getOperator(),
-            pegium::grammar::AssignmentOperator::Append);
-  EXPECT_EQ(enableExpr.getOperator(),
-            pegium::grammar::AssignmentOperator::EnableIf);
-
-  std::ostringstream opText;
-  opText << pegium::grammar::AssignmentOperator::Assign
-         << pegium::grammar::AssignmentOperator::Append
-         << pegium::grammar::AssignmentOperator::EnableIf;
-  EXPECT_EQ(opText.str(), "=+=?=");
-
-  std::ostringstream assignmentText;
-  assignmentText << assignExpr;
-  EXPECT_NE(assignmentText.str().find("id="), std::string::npos);
+  pegium::test::ExpectAst(
+      parser.Root, "!",
+      R"json({
+  "$type": "BoolEnableNode",
+  "enabled": true
+})json");
 }
 
 TEST(AssignmentTest, DirectObjectValuesAssignAndAppendSharedPointers) {
   DirectValueParser parser;
 
-  auto result = parser.Root.parse("leaf:leaf", parser.createContext());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
+  auto document = parse_rule(parser.Root, "leaf:leaf");
+  auto &result = document->parseResult;
+  ASSERT_TRUE(result.value);
+  auto resultValue = ast_as<DirectValueNode>(result);
+  ASSERT_TRUE(resultValue != nullptr);
 
-  ASSERT_TRUE(result.value->one != nullptr);
-  EXPECT_EQ(result.value->one->name, "leaf");
+  ASSERT_TRUE(resultValue->one != nullptr);
+  EXPECT_EQ(resultValue->one->name, "leaf");
 
-  ASSERT_EQ(result.value->many.size(), 1u);
-  ASSERT_TRUE(result.value->many[0] != nullptr);
-  EXPECT_EQ(result.value->many[0]->name, "leaf");
+  ASSERT_EQ(resultValue->many.size(), 1u);
+  ASSERT_TRUE(resultValue->many[0] != nullptr);
+  EXPECT_EQ(resultValue->many[0]->name, "leaf");
 }
 
 TEST(AssignmentTest, NullptrValueAssignmentIsAccepted) {
   NullValueParser parser;
 
-  auto result = parser.Root.parse("nil", parser.createContext());
-  ASSERT_TRUE(result.ret);
-  ASSERT_TRUE(result.value != nullptr);
-  EXPECT_EQ(result.value->marker, nullptr);
-}
-
-/*TEST(AssignmentTest, OrderedChoiceExecuteThrowsWhenSelectedChildIsInvalid) {
-  auto expression = assign<&LiteralChoiceNode::value>("z"_kw | "y"_kw);
-  LeafValueElement ge;
-  pegium::CstBuilder builder("z");
-  const char *begin = builder.input_begin();
-  builder.enter();
-  builder.leaf(begin, begin + 1, nullptr, false);
-  builder.exit(begin, begin + 1, std::addressof(expression));
-  auto root = builder.finalize();
-
-  auto node = root->begin();
-  ASSERT_NE(node, root->end());
-
-  LiteralChoiceNode current;
-  EXPECT_THROW(expression.execute(&current, *node), std::runtime_error);
-}*/
-
-TEST(AssignmentTest,
-     OrderedChoiceExecuteThrowsWhenSelectedValueIsNotAssignable) {
-  auto expression = assign<&ChoiceNode::op>("+"_kw | "-"_kw);
-  ParserRule<StrictChildNode> childRule{
-      "Child", assign<&StrictChildNode::name>("child"_kw)};
-
-  pegium::CstBuilder builder("child");
-  const char *begin = builder.input_begin();
-  builder.enter();
-  builder.leaf(begin, begin + 5, std::addressof(childRule), false);
-  builder.exit(begin, begin + 5, std::addressof(expression));
-  auto root = builder.finalize();
-
-  auto node = root->begin();
-  ASSERT_NE(node, root->end());
-
-  ChoiceNode current;
-  EXPECT_THROW(expression.execute(&current, *node), std::runtime_error);
-}
-
-TEST(AssignmentTest, OrderedChoiceExecuteThrowsWhenOnlyHiddenChildrenExist) {
-  auto expression = assign<&LiteralChoiceNode::value>("z"_kw | "y"_kw);
-  const auto hiddenToken = " "_kw;
-
-  pegium::CstBuilder builder(" ");
-  const char *begin = builder.input_begin();
-  builder.enter();
-  builder.leaf(begin, begin + 1, std::addressof(hiddenToken), true);
-  builder.exit(begin, begin + 1, std::addressof(expression));
-  auto root = builder.finalize();
-
-  auto node = root->begin();
-  ASSERT_NE(node, root->end());
-
-  LiteralChoiceNode current;
-  EXPECT_THROW(expression.execute(&current, *node), std::runtime_error);
-}
-
-TEST(AssignmentTest, OrderedChoiceExecuteSkipsHiddenChildren) {
-  auto expression = assign<&LiteralChoiceNode::value>("z"_kw | "y"_kw);
-  const auto hiddenToken = " "_kw;
-  const auto visibleToken = "z"_kw;
-
-  pegium::CstBuilder builder("z");
-  const char *begin = builder.input_begin();
-  builder.enter();
-  builder.leaf(begin, begin, std::addressof(hiddenToken), true);
-  builder.leaf(begin, begin + 1, std::addressof(visibleToken), false);
-  builder.exit(begin, begin + 1, std::addressof(expression));
-  auto root = builder.finalize();
-
-  auto node = root->begin();
-  ASSERT_NE(node, root->end());
-
-  LiteralChoiceNode current;
-  expression.execute(&current, *node);
-  EXPECT_EQ(current.value, "z");
+  pegium::test::ExpectAst(
+      parser.Root, "nil",
+      R"json({
+  "$type": "NullAssignNode",
+  "marker": null
+})json");
 }

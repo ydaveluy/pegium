@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            cxx: g++
+            build_type: Debug
+          - compiler: gcc
+            cxx: g++
+            build_type: Release
+          - compiler: clang
+            cxx: clang++
+            build_type: Debug
+          - compiler: clang
+            cxx: clang++
+            build_type: Release
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure
+        env:
+          CC: ${{ matrix.compiler }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DPEGIUM_BUILD_EXAMPLES=ON
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} -j 2
+      - name: Run core tests
+        run: ./build/PegiumCoreUnitTest
+      - name: Run LSP tests
+        run: ./build/PegiumLspUnitTest
+      - name: Run integration tests
+        run: ./build/PegiumIntegrationTest
+      - name: Run legacy tests
+        run: ./build/PegiumLegacyLanguagesTest
+      - name: Run example tests
+        run: ./build/PegiumExamplesTest
+
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPEGIUM_BUILD_EXAMPLES=OFF \
+            -DPEGIUM_BUILD_FUZZ_TARGETS=ON
+      - name: Build
+        run: cmake --build build --config Release -j 2 --target PegiumParserFuzzTarget
+      - name: Run fuzz smoke test
+        run: ctest --test-dir build -R PegiumParserFuzzSmoke --output-on-failure
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    env:
+      UBSAN_OPTIONS: print_stacktrace=1
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: asan
+            cxx: clang++
+            flags: -DPEGIUM_ENABLE_ASAN=ON
+          - name: ubsan
+            cxx: clang++
+            flags: -DPEGIUM_ENABLE_UBSAN=ON
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure
+        env:
+          CC: clang
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPEGIUM_BUILD_EXAMPLES=OFF \
+            -DPEGIUM_BUILD_FUZZ_TARGETS=ON \
+            ${{ matrix.flags }}
+      - name: Build
+        run: cmake --build build --config Debug -j 2 --target PegiumCoreUnitTest PegiumParserFuzzTarget
+      - name: Run parser-focused tests
+        run: |
+          ./build/PegiumCoreUnitTest --gtest_filter='AssignmentTest.*:DataTypeRuleTest.*:DocumentTest.*:InfixRuleTest.*:ParserRuleTest.*:ParserTest.*:Recovery*:*TerminalRuleTest.*:DefaultDocumentBuilderTest.Parse*:DefaultDocumentFactoryTest.*'
+      - name: Run fuzz smoke corpus
+        run: ./build/PegiumParserFuzzTarget --corpus tests/fuzz/corpus

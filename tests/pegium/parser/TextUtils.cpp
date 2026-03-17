@@ -21,6 +21,8 @@ TEST(TextUtilsTest, CharacterHelpersReturnExpectedValues) {
   EXPECT_TRUE(isWord('_'));
   EXPECT_FALSE(isWord('-'));
 
+  EXPECT_EQ(utf8_codepoint_length('\0'), 0U);
+
   EXPECT_EQ(tolower('A'), 'a');
   EXPECT_EQ(tolower('z'), 'z');
 
