@@ -4,33 +4,34 @@
 namespace pegium {
 
 void AbstractReference::ensureResolved() const {
+  using enum ReferenceState;
   auto state = _state.load(std::memory_order_acquire);
-  if (state == ReferenceState::Resolved || state == ReferenceState::Error) {
+  if (state == Resolved || state == Error) {
     return;
   }
 
   std::scoped_lock lock(_mutex);
   state = _state.load(std::memory_order_relaxed);
-  if (state == ReferenceState::Resolved || state == ReferenceState::Error) {
+  if (state == Resolved || state == Error) {
     return;
   }
-  if (state == ReferenceState::Resolving) {
+  if (state == Resolving) {
     _targets.clear();
     _errorMessage = "Cyclic reference resolution detected.";
-    _state.store(ReferenceState::Error, std::memory_order_release);
+    _state.store(Error, std::memory_order_release);
     return;
   }
 
   if (_linker == nullptr) {
     _targets.clear();
     _errorMessage = "No linker is available for this reference.";
-    _state.store(ReferenceState::Error, std::memory_order_release);
+    _state.store(Error, std::memory_order_release);
     return;
   }
 
   _targets.clear();
   _errorMessage.clear();
-  _state.store(ReferenceState::Resolving, std::memory_order_release);
+  _state.store(Resolving, std::memory_order_release);
 
   if (_isMulti) {
     setResolution(references::resolveAllReferences(*_linker, *this));

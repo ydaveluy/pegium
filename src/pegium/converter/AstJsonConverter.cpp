@@ -10,6 +10,7 @@
 #include <pegium/grammar/FeatureValue.hpp>
 #include <pegium/parser/Introspection.hpp>
 #include <pegium/syntax-tree/Reference.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 
 namespace pegium::converter {
 namespace {
@@ -214,7 +215,7 @@ services::JsonValue AstJsonConverter::convert(const AstNode &node,
     collect_feature_assignments(child, childRootIds, visitedNodeIds, assignments);
   }
 
-  std::unordered_set<std::string> seenFeatures;
+  utils::TransparentStringSet seenFeatures;
   const auto *root = root_node(node);
   for (const auto *assignment : assignments) {
     const auto feature = std::string(assignment->getFeature());

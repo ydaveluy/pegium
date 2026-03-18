@@ -12,6 +12,7 @@
 #include <utility>
 
 #include <pegium/services/SharedServices.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 
 namespace pegium::lsp {
 
@@ -53,7 +54,7 @@ std::vector<::lsp::Location> DefaultReferencesProvider::findReferences(
   }
 
   std::vector<::lsp::Location> locations;
-  std::unordered_set<std::string> seen;
+  utils::TransparentStringSet seen;
 
   for (const auto &reference :
        referencesService->findReferencesAt(document, offset,

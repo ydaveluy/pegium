@@ -21,7 +21,8 @@ struct Range {
                Position(value.start);
                Position(value.end);
              })
-  constexpr Range(const T &value) noexcept : start(value.start), end(value.end) {}
+  constexpr Range(const T &value) noexcept
+      : start(value.start), end(value.end) {}
 
   template <typename T>
     requires requires(T value, Position position) {

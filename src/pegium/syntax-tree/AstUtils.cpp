@@ -41,8 +41,8 @@ const AstNode *find_ast_node_at_offset(const AstNode &node, TextOffset offset) {
     return nullptr;
   }
 
-  const auto cstNode = node.getCstNode();
-  if (offset < cstNode.getBegin() || offset > cstNode.getEnd()) {
+  if (const auto cstNode = node.getCstNode();
+      offset < cstNode.getBegin() || offset > cstNode.getEnd()) {
     return nullptr;
   }
 

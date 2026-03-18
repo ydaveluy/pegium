@@ -35,7 +35,7 @@ private:
   friend struct detail::ParseAccess;
   friend struct detail::ProbeAccess;
 
-  bool probe_impl(ParseContext &ctx) const noexcept {
+  bool probe_impl(const ParseContext &ctx) const noexcept {
     return terminal(ctx.cursor()) != nullptr;
   }
 

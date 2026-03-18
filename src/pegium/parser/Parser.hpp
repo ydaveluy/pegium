@@ -76,7 +76,20 @@ struct ParseDiagnostic {
 
 private:
   friend std::ostream &operator<<(std::ostream &os,
-                                  const ParseDiagnostic &diagnostic);
+                                  const ParseDiagnostic &diagnostic) {
+    os << "ParseDiagnostic{kind=" << diagnostic.kind
+       << ", offset=" << diagnostic.offset
+       << ", begin=" << diagnostic.beginOffset
+       << ", end=" << diagnostic.endOffset;
+    if (diagnostic.element != nullptr) {
+      os << ", element=" << *diagnostic.element;
+    }
+    if (!diagnostic.message.empty()) {
+      os << ", message=\"" << diagnostic.message << "\"";
+    }
+    os << "}";
+    return os;
+  }
 };
 
 /// Heuristics and limits controlling recovery and expectation search.

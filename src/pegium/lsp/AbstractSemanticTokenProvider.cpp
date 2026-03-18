@@ -38,28 +38,28 @@ constexpr std::array<std::string_view, 10> kSemanticTokenModifiers = {
     "definition",   "deprecated",  "documentation",
     "modification", "readonly",    "static"};
 
-std::unordered_map<std::string, std::uint32_t> make_type_map() {
-  std::unordered_map<std::string, std::uint32_t> map;
+services::SemanticTokenProvider::StringIndexMap make_type_map() {
+  services::SemanticTokenProvider::StringIndexMap map;
   for (std::uint32_t index = 0; index < kSemanticTokenTypes.size(); ++index) {
     map.try_emplace(std::string(kSemanticTokenTypes[index]), index);
   }
   return map;
 }
 
-std::unordered_map<std::string, std::uint32_t> make_modifier_map() {
-  std::unordered_map<std::string, std::uint32_t> map;
+services::SemanticTokenProvider::StringIndexMap make_modifier_map() {
+  services::SemanticTokenProvider::StringIndexMap map;
   for (std::uint32_t index = 0; index < kSemanticTokenModifiers.size(); ++index) {
     map.try_emplace(std::string(kSemanticTokenModifiers[index]), 1u << index);
   }
   return map;
 }
 
-const std::unordered_map<std::string, std::uint32_t> &semantic_token_types() {
+const services::SemanticTokenProvider::StringIndexMap &semantic_token_types() {
   static const auto map = make_type_map();
   return map;
 }
 
-const std::unordered_map<std::string, std::uint32_t> &
+const services::SemanticTokenProvider::StringIndexMap &
 semantic_token_modifiers() {
   static const auto map = make_modifier_map();
   return map;
@@ -94,7 +94,8 @@ to_string_vector(std::initializer_list<std::string_view> values) {
 
 void append_semantic_token(
     const workspace::Document &document,
-    const std::optional<::lsp::Range> &filterRange, SemanticTokenInfo token,
+    const std::optional<::lsp::Range> &filterRange,
+    const SemanticTokenInfo &token,
     std::vector<EncodedSemanticToken> &tokens) {
   if (filterRange.has_value() &&
       !ranges_overlap(document, token.range, *filterRange)) {
@@ -145,12 +146,12 @@ AbstractSemanticTokenProvider::AbstractSemanticTokenProvider(
   }
 }
 
-std::unordered_map<std::string, std::uint32_t>
+AbstractSemanticTokenProvider::StringIndexMap
 AbstractSemanticTokenProvider::tokenTypes() const {
   return semantic_token_types();
 }
 
-std::unordered_map<std::string, std::uint32_t>
+AbstractSemanticTokenProvider::StringIndexMap
 AbstractSemanticTokenProvider::tokenModifiers() const {
   return semantic_token_modifiers();
 }
@@ -159,10 +160,10 @@ AbstractSemanticTokenProvider::tokenModifiers() const {
 AbstractSemanticTokenProvider::semanticTokensOptions() const {
   ::lsp::SemanticTokensOptions options{};
   for (const auto type : kSemanticTokenTypes) {
-    options.legend.tokenTypes.push_back(std::string(type));
+    options.legend.tokenTypes.emplace_back(type);
   }
   for (const auto modifier : kSemanticTokenModifiers) {
-    options.legend.tokenModifiers.push_back(std::string(modifier));
+    options.legend.tokenModifiers.emplace_back(modifier);
   }
   options.range = true;
   ::lsp::SemanticTokensOptionsFull full{};

@@ -6,6 +6,7 @@
 
 #include <pegium/lsp/ExecuteCommandHandler.hpp>
 #include <pegium/services/DefaultSharedLspService.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 
 namespace pegium::lsp {
 
@@ -30,8 +31,7 @@ private:
 
   mutable std::once_flag _initializationFlag;
   mutable std::vector<std::string> _commandNames;
-  mutable std::unordered_map<std::string, ExecuteCommandFunction>
-      _registeredCommands;
+  mutable utils::TransparentStringMap<ExecuteCommandFunction> _registeredCommands;
 };
 
 } // namespace pegium::lsp

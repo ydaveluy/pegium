@@ -16,6 +16,7 @@
 #include <pegium/services/SharedServices.hpp>
 #include <pegium/syntax-tree/AstUtils.hpp>
 #include <pegium/utils/Stream.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 
 namespace pegium::lsp {
 
@@ -25,12 +26,6 @@ namespace {
 
 std::string description_detail(const workspace::AstNodeDescription &description) {
   return detail::display_type_name(description.type);
-}
-
-bool contains_letter(std::string_view text) noexcept {
-  return std::ranges::any_of(text, [](char c) {
-    return std::isalpha(static_cast<unsigned char>(c)) != 0;
-  });
 }
 
 const AbstractReference *
@@ -180,9 +175,9 @@ DefaultCompletionProvider::getCompletion(
     const utils::CancellationToken &cancelToken) const {
   utils::throw_if_cancelled(cancelToken);
 
-  const auto *fuzzyMatcher =
-      languageServices.sharedServices.lsp.fuzzyMatcher.get();
-  if (fuzzyMatcher == nullptr) {
+  if (const auto *fuzzyMatcher =
+          languageServices.sharedServices.lsp.fuzzyMatcher.get();
+      fuzzyMatcher == nullptr) {
     return std::nullopt;
   }
 
@@ -195,11 +190,11 @@ DefaultCompletionProvider::getCompletion(
   const auto *reference = find_reference_at_offset(document, offset);
 
   std::vector<::lsp::CompletionItem> items;
-  std::unordered_map<std::string, std::size_t> itemsByKey;
+  utils::TransparentStringMap<std::size_t> itemsByKey;
 
   const auto accept =
       [this, &items, &itemsByKey](const CompletionContext &context,
-                                  CompletionValue value) {
+                                  const CompletionValue &value) {
     ::lsp::CompletionItem item{};
     if (!fillCompletionItem(context, value, item)) {
       return;
@@ -209,7 +204,7 @@ DefaultCompletionProvider::getCompletion(
                             ? std::string_view(*item.detail)
                             : std::string_view{};
     const auto [it, inserted] =
-        itemsByKey.emplace(completion_key(item.label, detail), items.size());
+        itemsByKey.try_emplace(completion_key(item.label, detail), items.size());
     if (!inserted) {
       return;
     }

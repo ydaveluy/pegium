@@ -126,8 +126,9 @@ void collect_keyword_nodes(const CstNodeView &node, std::string_view keyword,
 
     const auto *grammarElement = candidate->getGrammarElement();
     if (grammarElement->getKind() == grammar::ElementKind::Literal) {
-      const auto *literal = static_cast<const grammar::Literal *>(grammarElement);
-      if (literal_matches_keyword(*literal, keyword)) {
+      if (const auto *literal =
+              static_cast<const grammar::Literal *>(grammarElement);
+          literal_matches_keyword(*literal, keyword)) {
         matches.push_back(*candidate);
       }
       continue;
@@ -135,8 +136,8 @@ void collect_keyword_nodes(const CstNodeView &node, std::string_view keyword,
 
     const auto *operatorElement =
         static_cast<const grammar::InfixOperator *>(grammarElement);
-    const auto *operatorRule = operatorElement->getOperator();
-    if (operatorRule != nullptr &&
+    if (const auto *operatorRule = operatorElement->getOperator();
+        operatorRule != nullptr &&
         operatorRule->getKind() == grammar::ElementKind::Literal &&
         literal_matches_keyword(
             *static_cast<const grammar::Literal *>(operatorRule), keyword)) {

@@ -8,7 +8,7 @@
 namespace pegium::lsp {
 
 void LanguageServerRuntimeState::reset() noexcept {
-  std::unordered_map<std::string, std::shared_ptr<utils::CancellationTokenSource>>
+  utils::TransparentStringMap<std::shared_ptr<utils::CancellationTokenSource>>
       pending;
   {
     std::scoped_lock lock(_requestCancellationMutex);
@@ -19,7 +19,7 @@ void LanguageServerRuntimeState::reset() noexcept {
     pending = std::move(_requestCancellation);
     _requestCancellation.clear();
   }
-  for (auto &source : std::views::values(pending)) {
+  for (const auto &source : std::views::values(pending)) {
     if (source != nullptr) {
       source->request_stop();
     }
@@ -77,7 +77,7 @@ void LanguageServerRuntimeState::clearRequestCancellation(
     return;
   }
   std::scoped_lock lock(_requestCancellationMutex);
-  const auto it = _requestCancellation.find(std::string(requestKey));
+  const auto it = _requestCancellation.find(requestKey);
   if (it == _requestCancellation.end()) {
     return;
   }
@@ -94,7 +94,7 @@ void LanguageServerRuntimeState::cancelRequestByKey(std::string_view requestKey)
   std::shared_ptr<utils::CancellationTokenSource> source;
   {
     std::scoped_lock lock(_requestCancellationMutex);
-    const auto it = _requestCancellation.find(std::string(requestKey));
+    const auto it = _requestCancellation.find(requestKey);
     if (it != _requestCancellation.end()) {
       source = it->second;
     }

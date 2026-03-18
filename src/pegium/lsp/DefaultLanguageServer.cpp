@@ -95,7 +95,8 @@ void for_each_language_service(const services::SharedServices &sharedServices,
 }
 
 template <typename OptArray>
-void insert_strings(std::set<std::string> &target, const OptArray &values) {
+void insert_strings(std::set<std::string, std::less<>> &target,
+                    const OptArray &values) {
   if (!values.has_value()) {
     return;
   }
@@ -104,11 +105,12 @@ void insert_strings(std::set<std::string> &target, const OptArray &values) {
   }
 }
 
-::lsp::Array<::lsp::String> to_lsp_array(const std::set<std::string> &values) {
+::lsp::Array<::lsp::String>
+to_lsp_array(const std::set<std::string, std::less<>> &values) {
   ::lsp::Array<::lsp::String> array;
   array.reserve(values.size());
   for (const auto &value : values) {
-    array.push_back(value);
+    array.emplace_back(value);
   }
   return array;
 }
@@ -116,8 +118,8 @@ void insert_strings(std::set<std::string> &target, const OptArray &values) {
 std::optional<::lsp::CompletionOptions>
 merge_completion_options(const services::SharedServices &sharedServices) {
   bool hasProvider = false;
-  std::set<std::string> triggerCharacters;
-  std::set<std::string> allCommitCharacters;
+  std::set<std::string, std::less<>> triggerCharacters;
+  std::set<std::string, std::less<>> allCommitCharacters;
   bool resolveProvider = false;
   std::optional<::lsp::CompletionOptionsCompletionItem> completionItem;
 
@@ -166,8 +168,8 @@ merge_completion_options(const services::SharedServices &sharedServices) {
 
 std::optional<::lsp::SignatureHelpOptions>
 merge_signature_help_options(const services::SharedServices &sharedServices) {
-  std::set<std::string> triggerCharacters;
-  std::set<std::string> retriggerCharacters;
+  std::set<std::string, std::less<>> triggerCharacters;
+  std::set<std::string, std::less<>> retriggerCharacters;
 
   for_each_language_service(sharedServices,
                             [&triggerCharacters,

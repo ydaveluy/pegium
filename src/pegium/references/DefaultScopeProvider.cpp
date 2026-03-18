@@ -19,10 +19,6 @@ std::type_index invalid_type() noexcept {
   return std::type_index(typeid(void));
 }
 
-utils::stream<const workspace::AstNodeDescription *> makeEmptyDescriptionPointerStream() {
-  return utils::make_stream<const workspace::AstNodeDescription *>(
-      std::views::empty<const workspace::AstNodeDescription *>);
-}
 } // namespace
 
 class DefaultScopeProvider::ReferenceTypeFilter final : public BucketTypeFilter {
@@ -87,8 +83,8 @@ const workspace::AstNodeDescription *DefaultScopeProvider::getScopeEntry(
   const auto *container = context.container;
   const auto *document = container ? tryGetDocument(*container) : nullptr;
   if (document != nullptr && container != nullptr) {
-    const auto localScopes = getLocalScopeLevels(*document);
-    if (localScopes != nullptr && !localScopes->empty()) {
+    if (const auto localScopes = getLocalScopeLevels(*document);
+        localScopes != nullptr && !localScopes->empty()) {
       for (auto *current = container; current != nullptr;
            current = current->getContainer()) {
         const auto it = localScopes->find(current);
@@ -108,11 +104,12 @@ const workspace::AstNodeDescription *DefaultScopeProvider::getScopeEntry(
   if (indexManager == nullptr) {
     return nullptr;
   }
-  const auto globalEntries = indexManager->allBucketedScopeEntries();
-  if (globalEntries == nullptr) {
+  if (const auto globalEntries = indexManager->allBucketedScopeEntries();
+      globalEntries == nullptr) {
     return nullptr;
+  } else {
+    return findScopeEntry(*globalEntries, context, context.referenceText);
   }
-  return findScopeEntry(*globalEntries, context, context.referenceText);
 }
 
 utils::stream<const workspace::AstNodeDescription *>
@@ -121,8 +118,8 @@ DefaultScopeProvider::getScopeEntries(const ScopeQueryContext &context) const {
   const auto *container = context.container;
   const auto *document = container ? tryGetDocument(*container) : nullptr;
   if (document != nullptr && container != nullptr) {
-    const auto localScopes = getLocalScopeLevels(*document);
-    if (localScopes != nullptr && !localScopes->empty()) {
+    if (const auto localScopes = getLocalScopeLevels(*document);
+        localScopes != nullptr && !localScopes->empty()) {
       for (auto *current = container; current != nullptr;
            current = current->getContainer()) {
         const auto it = localScopes->find(current);
@@ -136,8 +133,8 @@ DefaultScopeProvider::getScopeEntries(const ScopeQueryContext &context) const {
 
   const auto *indexManager = coreServices.shared.workspace.indexManager.get();
   if (indexManager != nullptr) {
-    const auto globalEntries = indexManager->allBucketedScopeEntries();
-    if (globalEntries != nullptr) {
+    if (const auto globalEntries = indexManager->allBucketedScopeEntries();
+        globalEntries != nullptr) {
       appendScopeEntries(matches, *globalEntries, context, context.referenceText);
     }
   }
@@ -263,11 +260,11 @@ const workspace::AstNodeDescription *DefaultScopeProvider::findScopeEntry(
     const workspace::BucketedScopeEntries &entries,
     const ScopeQueryContext &context, std::string_view name) const noexcept {
   for (const auto &bucket : entries.buckets) {
-    const auto range = bucket.entriesByName.equal_range(name);
-    if (range.first == range.second || !acceptsBucket(context, bucket)) {
+    const auto [first, last] = bucket.entriesByName.equal_range(name);
+    if (first == last || !acceptsBucket(context, bucket)) {
       continue;
     }
-    return range.first->second;
+    return first->second;
   }
   return nullptr;
 }
@@ -288,11 +285,11 @@ void DefaultScopeProvider::appendScopeEntries(
       }
       continue;
     }
-    const auto range = bucket.entriesByName.equal_range(name);
-    if (range.first == range.second) {
+    const auto [first, last] = bucket.entriesByName.equal_range(name);
+    if (first == last) {
       continue;
     }
-    for (auto rangeIt = range.first; rangeIt != range.second; ++rangeIt) {
+    for (auto rangeIt = first; rangeIt != last; ++rangeIt) {
       if (rangeIt->second != nullptr) {
         matches.push_back(rangeIt->second);
       }

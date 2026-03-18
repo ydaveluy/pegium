@@ -136,8 +136,8 @@ protected:
         return parse_elements<Context, I + 1>(ctx);
       } else if constexpr (RecoveryParseModeContext<Context>) {
         if (!ctx.isInRecoveryPhase()) {
-          TrackedParseContext &strictCtx = ctx;
-          if (!parse(std::get<I>(elements), strictCtx)) {
+          if (TrackedParseContext &strictCtx = ctx;
+              !parse(std::get<I>(elements), strictCtx)) {
             return false;
           }
           return parse_elements<Context, I + 1>(ctx);

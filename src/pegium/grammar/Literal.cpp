@@ -1,7 +1,7 @@
 #include <pegium/grammar/Literal.hpp>
 
 #include <cctype>
-#include <cstdio>
+#include <format>
 #include <ostream>
 #include <string_view>
 
@@ -52,10 +52,7 @@ void printEscapedChar(std::ostream &os, char c) {
     return;
   }
 
-  char buffer[5];
-  std::snprintf(buffer, sizeof(buffer), "\\x%02X",
-                static_cast<unsigned char>(c));
-  os << buffer;
+  os << std::format("\\x{:02X}", static_cast<unsigned char>(c));
 }
 
 } // namespace

@@ -107,7 +107,7 @@ make_workspace_initialized_params(::lsp::MessageHandler *messageHandler) {
   }
 
   params.registerDidChangeConfiguration =
-      [messageHandler](std::vector<std::string> sections) {
+      [messageHandler](const std::vector<std::string> &sections) {
         if (sections.empty()) {
           return make_ready_future();
         }
@@ -128,7 +128,7 @@ make_workspace_initialized_params(::lsp::MessageHandler *messageHandler) {
       };
 
   params.fetchConfiguration =
-      [messageHandler](std::vector<std::string> sections) {
+      [messageHandler](const std::vector<std::string> &sections) {
         if (sections.empty()) {
           return make_ready_future(std::vector<services::JsonValue>{});
         }

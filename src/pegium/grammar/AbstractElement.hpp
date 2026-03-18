@@ -36,9 +36,10 @@ struct AbstractElement {
   constexpr virtual void print(std::ostream &os) const = 0;
 
   friend std::ostream &operator<<(std::ostream &os,
-                                  const AbstractElement &obj);
+                                  const AbstractElement &obj) {
+    obj.print(os);
+    return os;
+  }
 };
-
-std::ostream &operator<<(std::ostream &os, const AbstractElement &obj);
 
 } // namespace pegium::grammar

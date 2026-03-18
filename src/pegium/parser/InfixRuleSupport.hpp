@@ -140,11 +140,13 @@ template <typename Element> struct InfixOperatorValueSupport {
                                       const CstNodeView &node) {
     ValueBuildContext context;
     grammar::RuleValue value{std::int8_t{0}};
-    const bool visited =
-        visit_raw_value(element, node, context, [&value](auto &&rawValue) {
-          value = to_rule_value(std::forward<decltype(rawValue)>(rawValue));
-        });
-    if (!visited) {
+    if (const bool visited =
+            visit_raw_value(element, node, context,
+                            [&value]<typename RawValue>(RawValue &&rawValue) {
+                              value = to_rule_value(
+                                  std::forward<RawValue>(rawValue));
+                            });
+        !visited) {
       return grammar::RuleValue{std::int8_t{0}};
     }
     return value;
@@ -227,8 +229,9 @@ private:
     if constexpr (I == sizeof...(Operators)) {
       return false;
     } else {
-      const auto &operatorExpression = std::get<I>(model->ops);
-      if (operatorNode.getGrammarElement() == std::addressof(operatorExpression)) {
+      if (const auto &operatorExpression = std::get<I>(model->ops);
+          operatorNode.getGrammarElement() ==
+          std::addressof(operatorExpression)) {
         return assign_operator_from_expression(node, operatorExpression,
                                                operatorNode, context);
       }

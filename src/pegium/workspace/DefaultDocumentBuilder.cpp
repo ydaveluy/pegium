@@ -523,7 +523,7 @@ bool DefaultDocumentBuilder::buildInternal(
   } else if (!contentIndexes.empty()) {
     taskScheduler->parallelFor(
         cancelToken, contentIndexes,
-        [&entries, &exportedSymbols](execution::TaskScheduler::Scope &scope,
+        [&entries, &exportedSymbols](const execution::TaskScheduler::Scope &scope,
                                      std::size_t index) {
           exportedSymbols[index] =
               entries[index].services->references.scopeComputation
@@ -622,7 +622,7 @@ bool DefaultDocumentBuilder::buildInternal(
       taskScheduler->parallelFor(
           cancelToken, referenceIndexes,
           [&linkEntries, &referenceDescriptions](
-              execution::TaskScheduler::Scope &scope, std::size_t index) {
+              const execution::TaskScheduler::Scope &scope, std::size_t index) {
             if (linkEntries[index].services->workspace
                     .referenceDescriptionProvider == nullptr) {
               return;

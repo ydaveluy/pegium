@@ -39,7 +39,7 @@ private:
   [[nodiscard]] AstNode *loadAstNode(
       const workspace::AstNodeDescription &description) const;
   [[nodiscard]] workspace::LinkingError
-  createLinkingError(ReferenceInfo reference, std::string message,
+  createLinkingError(const ReferenceInfo &reference, std::string message,
                      std::optional<workspace::AstNodeDescription>
                          targetDescription = std::nullopt) const;
 };

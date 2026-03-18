@@ -21,10 +21,10 @@ std::string normalize_extension(std::string_view extension) {
 }
 
 const CoreServices *lookup_by_language_id_locked(
-    const std::unordered_map<std::string, std::unique_ptr<CoreServices>>
+    const utils::TransparentStringMap<std::unique_ptr<CoreServices>>
         &servicesByLanguageId,
     std::string_view languageId) {
-  const auto it = servicesByLanguageId.find(std::string(languageId));
+  const auto it = servicesByLanguageId.find(languageId);
   return it == servicesByLanguageId.end() ? nullptr : it->second.get();
 }
 
@@ -140,9 +140,9 @@ DefaultServiceRegistry::getServicesByFileName(std::string_view fileName) const {
     return services;
   }
 
-  const auto extension =
-      std::filesystem::path(std::string(fileName)).extension().string();
-  if (!extension.empty()) {
+  if (const auto extension =
+          std::filesystem::path(std::string(fileName)).extension().string();
+      !extension.empty()) {
     if (const auto *services = lookupByExtension(extension)) {
       return services;
     }
@@ -153,13 +153,14 @@ DefaultServiceRegistry::getServicesByFileName(std::string_view fileName) const {
 
 bool DefaultServiceRegistry::remove(std::string_view languageId) {
   std::scoped_lock lock(_mutex);
-  if (_servicesByLanguageId.erase(std::string(languageId)) == 0) {
+  if (auto it = _servicesByLanguageId.find(languageId); it != _servicesByLanguageId.end()) {
+    _servicesByLanguageId.erase(it);
+  } else {
     return false;
   }
-  _registrationOrder.erase(
-      std::remove(_registrationOrder.begin(), _registrationOrder.end(),
-                  std::string(languageId)),
-      _registrationOrder.end());
+  const auto removal =
+      std::ranges::remove(_registrationOrder, std::string(languageId));
+  _registrationOrder.erase(removal.begin(), removal.end());
   rebuildUriMapsLocked();
   return true;
 }
@@ -178,7 +179,7 @@ DefaultServiceRegistry::lookupByExtension(std::string_view extension) const {
 
 const CoreServices *
 DefaultServiceRegistry::lookupByFileName(std::string_view fileName) const {
-  const auto languageIt = _languageIdByFileName.find(std::string(fileName));
+  const auto languageIt = _languageIdByFileName.find(fileName);
   if (languageIt == _languageIdByFileName.end()) {
     return nullptr;
   }

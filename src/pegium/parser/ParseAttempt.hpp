@@ -55,8 +55,7 @@ inline bool attempt_parse_recovery_strict_view(RecoveryContext &ctx,
     return parse(expression, strictCtx);
   } else {
     const auto checkpoint = ctx.mark();
-    TrackedParseContext &strictCtx = ctx;
-    if (parse(expression, strictCtx)) {
+    if (TrackedParseContext &strictCtx = ctx; parse(expression, strictCtx)) {
       return true;
     }
     ctx.rewind(checkpoint);

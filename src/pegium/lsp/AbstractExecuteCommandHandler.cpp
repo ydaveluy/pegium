@@ -15,7 +15,7 @@ AbstractExecuteCommandHandler::executeCommand(
     const utils::CancellationToken &cancelToken) const {
   utils::throw_if_cancelled(cancelToken);
   ensureInitialized();
-  const auto it = _registeredCommands.find(std::string(name));
+  const auto it = _registeredCommands.find(name);
   if (it == _registeredCommands.end()) {
     return std::nullopt;
   }
@@ -30,7 +30,7 @@ void AbstractExecuteCommandHandler::ensureInitialized() const {
 }
 
 ExecuteCommandAcceptor AbstractExecuteCommandHandler::createCommandAcceptor() {
-  return [this](std::string name, ExecuteCommandFunction execute) {
+  return [this](const std::string &name, ExecuteCommandFunction execute) {
     auto [it, inserted] =
         _registeredCommands.insert_or_assign(name, std::move(execute));
     if (inserted) {

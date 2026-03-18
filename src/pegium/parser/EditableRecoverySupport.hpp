@@ -45,10 +45,10 @@ evaluate_editable_recovery_candidate(RecoveryContext &ctx,
   const std::uint64_t deleteEfficiency =
       static_cast<std::uint64_t>(deleteGain) *
       static_cast<std::uint64_t>(editable.editCost);
-  const std::uint64_t editableEfficiency =
-      static_cast<std::uint64_t>(editableGain) *
-      static_cast<std::uint64_t>(deleteRetry.editCost);
-  if (deleteEfficiency > editableEfficiency) {
+  if (const std::uint64_t editableEfficiency =
+          static_cast<std::uint64_t>(editableGain) *
+          static_cast<std::uint64_t>(deleteRetry.editCost);
+      deleteEfficiency > editableEfficiency) {
     return true;
   }
   return is_better_editable_recovery_candidate(deleteRetry, editable);

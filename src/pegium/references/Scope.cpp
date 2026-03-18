@@ -25,23 +25,6 @@ inline std::string normalizeName(std::string_view name) {
   return lowered;
 }
 
-class SensitiveNameMatcher {
-public:
-  explicit SensitiveNameMatcher(std::string_view needle) noexcept
-      : _needle(needle) {}
-
-  [[nodiscard]] bool matches(std::string_view candidate) const noexcept {
-    return candidate == _needle;
-  }
-  [[nodiscard]] bool
-  operator()(const AstNodeDescription &entry) const noexcept {
-    return matches(entry.name);
-  }
-
-private:
-  std::string_view _needle;
-};
-
 class InsensitiveNameMatcher {
 public:
   explicit InsensitiveNameMatcher(std::string_view needle) {
@@ -61,10 +44,6 @@ public:
       }
     }
     return true;
-  }
-  [[nodiscard]] bool
-  operator()(const AstNodeDescription &entry) const noexcept {
-    return matches(entry.name);
   }
 
 private:
@@ -98,22 +77,11 @@ makeMultiMapDescriptionPointers(const MultiMapType &map, std::string_view key) {
   return utils::make_stream<const AstNodeDescription *>(std::move(entries));
 }
 
-void appendCaseInsensitiveMatches(std::vector<const AstNodeDescription *> &matches,
-                                  const workspace::ScopeEntryBucket &bucket,
-                                  std::string_view name) {
-  const InsensitiveNameMatcher matcher(name);
-  for (const auto *entry : bucket.entries) {
-    if (entry != nullptr && matcher.matches(entry->name)) {
-      matches.push_back(entry);
-    }
-  }
-}
-
 void appendSensitiveMatches(std::vector<const AstNodeDescription *> &matches,
                             const workspace::ScopeEntryBucket &bucket,
                             std::string_view name) {
-  const auto range = bucket.entriesByName.equal_range(name);
-  for (auto it = range.first; it != range.second; ++it) {
+  const auto [first, last] = bucket.entriesByName.equal_range(name);
+  for (auto it = first; it != last; ++it) {
     if (it->second != nullptr) {
       matches.push_back(it->second);
     }

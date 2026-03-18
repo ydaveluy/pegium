@@ -79,7 +79,7 @@ DefaultCodeActionProvider::getCodeActions(
     for (const auto &edit : *edits) {
       if (auto action = makeDefaultCodeAction(document, diagnostic, edit);
           action.has_value()) {
-        actions.push_back(std::move(*action));
+        actions.emplace_back(std::move(*action));
       }
     }
   }

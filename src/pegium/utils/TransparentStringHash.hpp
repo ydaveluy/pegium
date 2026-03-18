@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace pegium::utils {
 
@@ -21,5 +24,12 @@ struct TransparentStringHash {
     return (*this)(std::string_view(value));
   }
 };
+
+template <typename T>
+using TransparentStringMap =
+    std::unordered_map<std::string, T, TransparentStringHash, std::equal_to<>>;
+
+using TransparentStringSet =
+    std::unordered_set<std::string, TransparentStringHash, std::equal_to<>>;
 
 } // namespace pegium::utils

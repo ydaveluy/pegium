@@ -464,8 +464,7 @@ template <typename T> struct Reference : AbstractReference {
     if (node == nullptr) {
       return nullptr;
     }
-    auto *casted = dynamic_cast<T *>(node);
-    if (casted != nullptr) {
+    if (auto *casted = dynamic_cast<T *>(node); casted != nullptr) {
       return casted;
     }
     std::scoped_lock lock(_mutex);

@@ -24,11 +24,11 @@ public:
   using Storage = std::variant<RuleValue, const AstNode *, ReferenceValue, Array>;
 
   FeatureValue() noexcept;
-  FeatureValue(RuleValue value) noexcept;
-  FeatureValue(const AstNode *value) noexcept;
-  FeatureValue(const AbstractReference *value) noexcept;
-  FeatureValue(ReferenceValue value) noexcept;
-  FeatureValue(Array value) noexcept;
+  explicit FeatureValue(RuleValue value) noexcept;
+  explicit FeatureValue(const AstNode *value) noexcept;
+  explicit FeatureValue(const AbstractReference *value) noexcept;
+  explicit FeatureValue(ReferenceValue value) noexcept;
+  explicit FeatureValue(Array value) noexcept;
 
   [[nodiscard]] bool isRuleValue() const noexcept;
   [[nodiscard]] bool isAstNode() const noexcept;

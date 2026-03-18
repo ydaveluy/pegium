@@ -123,10 +123,10 @@ private:
       (void)cursorStart;
       return std::nullopt;
     } else {
-      auto candidate = detail::find_best_literal_fuzzy_candidate(
-          getValue(), fuzzyInputView(cursorStart, fuzzyInputLimit(ctx)),
-          case_sensitive);
-      if (candidate.has_value() && shouldConsiderFuzzyCandidate(*candidate)) {
+      if (auto candidate = detail::find_best_literal_fuzzy_candidate(
+              getValue(), fuzzyInputView(cursorStart, fuzzyInputLimit(ctx)),
+              case_sensitive);
+          candidate.has_value() && shouldConsiderFuzzyCandidate(*candidate)) {
         return candidate;
       }
       return std::nullopt;
@@ -221,8 +221,8 @@ private:
       if (!fuzzyCandidate.has_value()) {
         return false;
       }
-      const char *const fuzzyEnd = cursorStart + fuzzyCandidate->consumed;
-      if (detail::can_apply_recovery_match(ctx, fuzzyEnd) &&
+      if (const char *const fuzzyEnd = cursorStart + fuzzyCandidate->consumed;
+          detail::can_apply_recovery_match(ctx, fuzzyEnd) &&
           !hasWordBoundaryViolation(fuzzyEnd) &&
           detail::apply_replace_leaf_recovery_edit(
               ctx, fuzzyEnd, this,
@@ -274,7 +274,7 @@ private:
     return false;
   }
 
-  bool probe_impl(ParseContext &ctx) const noexcept {
+  bool probe_impl(const ParseContext &ctx) const noexcept {
     const char *const matchEnd = terminal(ctx.cursor());
     if (matchEnd == nullptr) {
       return false;
@@ -318,10 +318,10 @@ private:
         return false;
       }
       const auto fuzzyCandidate = findFuzzyCandidate(ctx, cursorStart);
-      const auto bestChoice = selectLocalRecoveryChoice(
-          ctx, cursorStart, matchedEnd, fuzzyCandidate,
-          hasWordBoundaryViolation);
-      if (applyLocalRecoveryChoice(ctx, bestChoice, fuzzyCandidate, cursorStart,
+      if (const auto bestChoice = selectLocalRecoveryChoice(
+              ctx, cursorStart, matchedEnd, fuzzyCandidate,
+              hasWordBoundaryViolation);
+          applyLocalRecoveryChoice(ctx, bestChoice, fuzzyCandidate, cursorStart,
                                    matchedEnd, hasWordBoundaryViolation)) {
         return true;
       }
@@ -340,9 +340,9 @@ private:
         ctx.leaf(matchedEnd, this);
         return true;
       }
-      const auto anchorDistance =
-          static_cast<std::size_t>(ctx.anchor - cursorStart);
-      if (cursorStart < ctx.anchor && anchorDistance <= literal.size()) {
+      if (const auto anchorDistance =
+              static_cast<std::size_t>(ctx.anchor - cursorStart);
+          cursorStart < ctx.anchor && anchorDistance <= literal.size()) {
         bool prefixMatches = true;
         for (std::size_t index = 0; index < anchorDistance; ++index) {
           const auto lhs = static_cast<unsigned char>(cursorStart[index]);

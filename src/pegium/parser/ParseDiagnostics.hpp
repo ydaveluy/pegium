@@ -25,15 +25,15 @@ inline void ensure_parse_diagnostic(std::vector<ParseDiagnostic> &diagnostics,
                                    TextOffset parsedLength,
                                    TextOffset failureVisibleCursorOffset,
                                    bool fullMatch) {
-  const auto hasSyntaxDiagnostic = [&diagnostics]() {
-    for (const auto &diagnostic : diagnostics) {
-      if (diagnostic.isSyntax()) {
-        return true;
-      }
-    }
-    return false;
-  }();
-  if (hasSyntaxDiagnostic) {
+  if (const auto hasSyntaxDiagnostic = [&diagnostics]() {
+        for (const auto &diagnostic : diagnostics) {
+          if (diagnostic.isSyntax()) {
+            return true;
+          }
+        }
+        return false;
+      }();
+      hasSyntaxDiagnostic) {
     return;
   }
   if (!fullMatch) {

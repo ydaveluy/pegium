@@ -52,7 +52,7 @@ select_update_document_id(std::span<const workspace::DocumentId> changedDocument
 bool merge_validation_options_for_document(
     const services::SharedServices &sharedServices,
     workspace::DocumentId documentId, workspace::BuildOptions &options) {
-  auto *documents = sharedServices.workspace.documents.get();
+  const auto *documents = sharedServices.workspace.documents.get();
   if (documents == nullptr || documentId == workspace::InvalidDocumentId) {
     return false;
   }
@@ -109,8 +109,8 @@ public:
         if (options.supersedeDocument) {
           ++latestGeneration;
 
-          auto inFlight = _inFlightByDocumentId.find(task.documentId);
-          if (inFlight != _inFlightByDocumentId.end() &&
+          if (auto inFlight = _inFlightByDocumentId.find(task.documentId);
+              inFlight != _inFlightByDocumentId.end() &&
               inFlight->second != nullptr) {
             inFlight->second->request_stop();
           }
@@ -259,7 +259,7 @@ bool DefaultDocumentUpdateHandler::supportsDidChangeWatchedFiles() const noexcep
 namespace {
 
 bool is_redundant_text_snapshot(
-    workspace::Documents *documents,
+    const workspace::Documents *documents,
     const std::shared_ptr<const workspace::TextDocument> &textDocument) {
   if (documents == nullptr || textDocument == nullptr || textDocument->uri.empty()) {
     return false;

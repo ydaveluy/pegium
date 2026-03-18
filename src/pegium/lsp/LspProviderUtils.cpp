@@ -346,7 +346,7 @@ std::string document_highlight_key(const DocumentHighlightData &highlight) {
 
 void collect_folding_ranges(const CstNodeView &node, std::string_view text,
                             std::vector<FoldingRangeData> &ranges,
-                            std::unordered_set<std::string> &seen) {
+                            utils::TransparentStringSet &seen) {
   if (node.isHidden()) {
     return;
   }
@@ -434,8 +434,8 @@ bool is_link_end_char(char c) noexcept {
 bool has_symbol_or_reference(std::string_view token,
                              const workspace::IndexManager &index,
                              const workspace::Documents *documents) {
-  auto symbols = index.findElementsByName(token);
-  if (symbols.begin() != symbols.end()) {
+  if (auto symbols = index.findElementsByName(token);
+      symbols.begin() != symbols.end()) {
     return true;
   }
 

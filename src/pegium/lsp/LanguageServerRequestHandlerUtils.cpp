@@ -66,7 +66,7 @@ get_document(const services::SharedServices &sharedServices,
   return range;
 }
 
-void ensure_initialized(LanguageServerHandlerContext &server) {
+void ensure_initialized(const LanguageServerHandlerContext &server) {
   if (!server.initialized()) {
     throw ::lsp::RequestError(
         static_cast<int>(::lsp::ErrorCodes::ServerNotInitialized),
@@ -215,11 +215,11 @@ void wait_until_phase(services::SharedServices &sharedServices,
 
 std::string request_key_from_message_id(const ::lsp::MessageId &id) {
   return std::visit(
-      [](const auto &value) -> std::string {
-        using Value = std::decay_t<decltype(value)>;
-        if constexpr (std::is_same_v<Value, std::nullptr_t>) {
+      []<typename Value>(const Value &value) -> std::string {
+        using DecayedValue = std::decay_t<Value>;
+        if constexpr (std::is_same_v<DecayedValue, std::nullptr_t>) {
           return {};
-        } else if constexpr (std::is_integral_v<Value>) {
+        } else if constexpr (std::is_integral_v<DecayedValue>) {
           return std::format("i:{}", value);
         } else {
           return std::format("s:{}", std::string(value));

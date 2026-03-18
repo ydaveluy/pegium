@@ -41,18 +41,19 @@ private:
   friend struct detail::ParseAccess;
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
+    using enum detail::StepCounter;
     if constexpr (StrictParseModeContext<Context>) {
-      detail::stepTraceInc(detail::StepCounter::UnorderedStrictPasses);
+      detail::stepTraceInc(UnorderedStrictPasses);
       return parse_group(ctx);
     } else if constexpr (RecoveryParseModeContext<Context>) {
-      detail::stepTraceInc(detail::StepCounter::UnorderedRecoverCalls);
+      detail::stepTraceInc(UnorderedRecoverCalls);
 
       const auto entryCheckpoint = ctx.mark();
 
       if (!ctx.isInRecoveryPhase()) {
         const bool strictMatched =
             parse_group(static_cast<TrackedParseContext &>(ctx));
-        detail::stepTraceInc(detail::StepCounter::UnorderedStrictPasses);
+        detail::stepTraceInc(UnorderedStrictPasses);
         if (strictMatched) {
           return true;
         }
@@ -60,10 +61,10 @@ private:
       }
 
       if (parse_group(ctx)) {
-        detail::stepTraceInc(detail::StepCounter::UnorderedEditablePasses);
+        detail::stepTraceInc(UnorderedEditablePasses);
         return true;
       }
-      detail::stepTraceInc(detail::StepCounter::UnorderedEditablePasses);
+      detail::stepTraceInc(UnorderedEditablePasses);
       ctx.rewind(entryCheckpoint);
       return false;
     } else {
