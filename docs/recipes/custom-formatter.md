@@ -1,7 +1,10 @@
-# Custom Formatter
+# Formatting
 
 The formatter API is built for method-pointer registration and CST-backed
 selections.
+
+Use this page when you already know that formatting is the subsystem you want
+to customize and you need the concrete formatter wiring pattern.
 
 ## Pattern
 
@@ -36,3 +39,8 @@ formatBlock(openBrace, closeBrace, formatter.interior(openBrace, closeBrace));
 - use the generic block and list helpers to keep rules consistent
 - format comments through `onHidden(...)` when the comment text itself matters
 - wire the formatter into `services->lsp.formatter`, otherwise nothing runs
+
+## Related pages
+
+- [Learn: Add Formatting and LSP Services](../learn/workflow/generate_everything.md)
+- [Formatter DSL](../reference/formatter-dsl.md)

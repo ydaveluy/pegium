@@ -11,7 +11,7 @@ template: home.html
     languages in modern C++, from grammar definitions to LSP features.
   </p>
   <div class="pegium-actions">
-    <a class="md-button md-button--primary" href="getting-started/">Get started</a>
+    <a class="md-button md-button--primary" href="learn/">Learn Pegium</a>
     <a class="md-button" href="examples/">Browse examples</a>
   </div>
   <div class="pegium-pills">
@@ -59,24 +59,25 @@ template: home.html
     Understand where Pegium fits, what problems it solves, and how it relates
     to Langium.
 
--   [Getting Started](getting-started/index.md)
+    New here? Start with [Choose Your Path](introduction/choose-your-path.md).
 
-    Build the repository, run the examples, and follow a first language path.
+-   [Learn](learn/index.md)
 
--   [Build a Language](build-a-language/index.md)
-
-    Learn the main extension points: grammar, AST/CST, references, validation,
-    formatting, LSP services, and workspace lifecycle.
-
--   [Reference](reference/index.md)
-
-    Use the API-oriented pages as the canonical reference for grammar,
-    formatter DSL, services, and workspace concepts.
+    Follow the recommended Pegium workflow from repository build to grammar,
+    AST, references, validation, and editor features.
 
 -   [Recipes](recipes/index.md)
 
     Jump directly to focused customization tasks such as validators,
     formatters, scoping, completion, hover, and rename.
+
+-   [Reference](reference/index.md)
+
+    Use the API-oriented pages as the canonical reference for grammar,
+    semantic model, services, and document lifecycle concepts.
+
+    If you want help choosing the right page, open
+    [Start Here](reference/start-here.md).
 
 -   [Examples](examples/index.md)
 

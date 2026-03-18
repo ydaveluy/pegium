@@ -3,6 +3,9 @@
 This page documents the user-facing formatting DSL built around
 `pegium::lsp::AbstractFormatter`.
 
+Use this page when you need the canonical formatter API surface rather than the
+shorter task-oriented recipe.
+
 ## Creating a formatter
 
 The minimal pattern is:
@@ -136,3 +139,9 @@ Useful operations:
 
 These helpers are designed to cover common patterns such as brace blocks,
 comma-separated lists, and comment normalization.
+
+## Related pages
+
+- [Formatting](../recipes/custom-formatter.md)
+- [Default LSP Services](lsp-services.md)
+- [Semantic Model](semantic-model.md)

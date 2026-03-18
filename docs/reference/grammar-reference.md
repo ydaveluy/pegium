@@ -2,24 +2,30 @@
 
 This page is the canonical grammar reference for Pegium.
 
+Use this page when you need the exact parser DSL surface. If you want the
+recommended learning order first, go back to
+[Write the Grammar](../learn/workflow/write_grammar.md).
+
 All snippets assume:
 
 ```cpp
-#include <pegium/parser/Parser.hpp>
+#include <pegium/parser/PegiumParser.hpp>
 using namespace pegium::parser;
 ```
 
 Snippets that use `Terminal<T>`, `Rule<T>`, or `Infix<...>` assume they are
-written inside a subclass of `pegium::parser::Parser`.
+written inside a subclass of `pegium::parser::PegiumParser`.
 
 ## Parser class
 
-A Pegium grammar starts with a parser class deriving from `pegium::parser::Parser`.
+A Pegium grammar starts with a parser class deriving from
+`pegium::parser::PegiumParser`.
 
 ```cpp
-class MyParser : public Parser {
+class MyParser : public PegiumParser {
 public:
-  using Parser::parse;
+  using PegiumParser::PegiumParser;
+  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -37,7 +43,7 @@ protected:
 
 ## Parser aliases
 
-Inside a `Parser` subclass, prefer these aliases:
+Inside a `PegiumParser` subclass, prefer these aliases:
 
 - `Terminal<T>`: terminal rule
 - `Rule<T>`: data type rule or parser rule, depending on `T`
@@ -54,7 +60,7 @@ Every parser must override `getEntryRule()`.
 
 The entry rule:
 
-- is the rule used by `Parser::parse(...)`
+- is the rule used by `PegiumParser::parse(...)`
 - must be AST-producing
 - is therefore typically a `Rule<RootAstNode>`
 
@@ -577,3 +583,9 @@ Several APIs intentionally reject nullable expressions:
 - `Rule<T>`
 - `assign`, `append`, `enable_if`
 - `many`, `some`, `repeat`
+
+## Related pages
+
+- [Write the Grammar](../learn/workflow/write_grammar.md)
+- [Parser Contracts](parser-contracts.md)
+- [Glossary](glossary.md)

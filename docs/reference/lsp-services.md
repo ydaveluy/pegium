@@ -1,6 +1,10 @@
 # Default LSP Services
 
-Pegium ships default implementations for a broad set of LSP features.
+Pegium exposes provider slots for a broad set of LSP features. A smaller
+subset is installed automatically by `makeDefaultServices(...)`.
+
+Use this page when you want to know which editor features come for free and
+which ones still need explicit installation.
 
 ## `Services::lsp`
 
@@ -31,6 +35,11 @@ The `services.lsp` group contains providers such as:
 Each slot is independent. You can replace one provider without rewriting the
 entire language server setup.
 
+Today, the default LSP module installs providers for completion, hover,
+document symbols, document highlights, folding ranges, definition, references,
+rename, and code actions. Other slots remain available but start as `nullptr`
+until your language installs them.
+
 ## Default customization style
 
 Use the defaults whenever your language follows common patterns, then override
@@ -46,9 +55,10 @@ services->lsp.renameProvider = std::make_unique<lsp::MyRenameProvider>(*services
 ## Good defaults to keep
 
 - document symbol collection
+- document highlights
 - folding ranges
-- fuzzy matching
-- selection ranges
+- definition and references
+- rename when the reference model is already correct
 
 ## Typical language-specific overrides
 
@@ -66,3 +76,10 @@ reference filtering, rule hooks, keyword hooks, and snippet generation.
 
 Keep the defaults until a real product need appears. Replacing providers too
 early usually increases maintenance cost without adding much value.
+
+## Related pages
+
+- [Configuration Services](configuration-services.md)
+- [Completion Provider](completion-provider.md)
+- [Custom LSP Features](../recipes/custom-lsp-features.md)
+- [Formatting](../recipes/custom-formatter.md)

@@ -3,6 +3,9 @@
 Pegium groups language behavior into service objects instead of forcing each
 feature to be wired manually.
 
+Use this page after [Configuration Services](configuration-services.md) when you
+want the slightly more structural view of how service objects are organized.
+
 ## Core entry points
 
 - `pegium::services::SharedServices`
@@ -12,7 +15,8 @@ feature to be wired manually.
 
 `makeDefaultServices(...)` is the usual starting point. It creates a language
 service object, installs the default core services, and installs the default
-LSP services.
+LSP services. Your language-specific parser is then assigned through
+`services->parser`.
 
 ## Service layout
 
@@ -35,8 +39,9 @@ Typical example:
 
 ```cpp
 auto services = pegium::services::makeDefaultServices(
-    sharedServices, "my-language", std::move(parser));
+    sharedServices, "my-language");
 
+services->parser = std::make_unique<const my::parser::MyParser>(*services);
 services->lsp.formatter = std::make_unique<lsp::MyFormatter>(*services);
 ```
 
@@ -46,3 +51,9 @@ services->lsp.formatter = std::make_unique<lsp::MyFormatter>(*services);
 - register a validation registry or validator
 - provide a custom scope provider
 - swap a completion or hover provider
+
+## Related pages
+
+- [Configuration Services](configuration-services.md)
+- [Default LSP Services](lsp-services.md)
+- [Workspace Concepts](workspace.md)

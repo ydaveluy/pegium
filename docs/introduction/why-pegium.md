@@ -7,6 +7,12 @@ It aims to give C++ projects the same kind of “language workbench” feeling t
 Langium gives to TypeScript projects, while staying honest about the fact that
 the implementation model is different.
 
+## Read this page if
+
+- you are evaluating Pegium for a project
+- you want the design goals, not just the feature list
+- you need to explain what Pegium is trying to optimize for
+
 ## Design goals
 
 - Use modern C++20 idioms instead of external DSL files.
@@ -53,3 +59,10 @@ infrastructure.
 Pegium is not a website generator, IDE, or code generator. It gives you a
 language implementation toolkit and example applications, then lets you decide
 how far you want to push the surrounding tooling.
+
+## Continue with
+
+- [Features](features.md) for the concrete capability list
+- [Choose Your Path](choose-your-path.md) for the best next documentation
+  section
+- [Learn Pegium](../learn/index.md) if you already want to start building

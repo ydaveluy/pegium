@@ -3,6 +3,9 @@
 The fastest path is to copy one of the examples and reduce it to the features
 you need.
 
+This page is a legacy shortcut. The current guided path lives in
+[Learn Pegium](../learn/index.md).
+
 Starting from an existing example is usually better than writing a fresh
 language skeleton, because the examples already wire:
 
@@ -42,7 +45,7 @@ every feature at once.
 
 ## Next steps
 
-- [Grammar essentials](../build-a-language/grammar.md)
-- [AST and CST](../build-a-language/ast-and-cst.md)
-- [Formatting](../build-a-language/formatting.md)
+- [Write the Grammar](../learn/workflow/write_grammar.md)
+- [Shape the AST and CST](../learn/workflow/generate_ast.md)
+- [Add Formatting and LSP Services](../learn/workflow/generate_everything.md)
 - [Custom validator recipe](../recipes/custom-validator.md)

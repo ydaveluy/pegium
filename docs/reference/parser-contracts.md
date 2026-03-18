@@ -3,6 +3,10 @@
 This page documents the parser runtime contracts used by Pegium's expression
 engine.
 
+Use this page when you are working inside Pegium's parser internals or when you
+need to reason precisely about lookahead, recovery, and performance-sensitive
+runtime behavior.
+
 ## Core terms
 
 - `parse(expr, ctx)`: executes the expression in the given mode and may consume
@@ -65,3 +69,9 @@ Keep these concerns separate:
 - lookahead: `probe(...)` and internal `fast_probe`
 - repair: recovery heuristics and edit policies
 - value building: AST construction, feature assignment, and typed extraction
+
+## Related pages
+
+- [Grammar Reference](grammar-reference.md)
+- [Document Lifecycle](document-lifecycle.md)
+- [Start Here](start-here.md)

@@ -1,7 +1,7 @@
 # Grammar Essentials
 
 Pegium grammars are defined directly in C++ by subclassing
-`pegium::parser::Parser` and declaring named rules as members.
+`pegium::parser::PegiumParser` and declaring named rules as members.
 
 ## Start from a parser class
 
@@ -11,9 +11,10 @@ should use in day-to-day Pegium code and defines the entry rule and skipper.
 ```cpp
 using namespace pegium::parser;
 
-class DomainModelParser : public Parser {
+class DomainModelParser : public PegiumParser {
 public:
-  using Parser::parse;
+  using PegiumParser::PegiumParser;
+  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -27,8 +28,7 @@ protected:
   static constexpr auto WS = some(s);
   Terminal<> SL_COMMENT{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
   Terminal<> ML_COMMENT{"ML_COMMENT", "/*"_kw <=> "*/"_kw};
-  Skipper skipper =
-      SkipperBuilder().ignore(WS).hide(ML_COMMENT, SL_COMMENT).build();
+  Skipper skipper = skip(ignored(WS), hidden(ML_COMMENT, SL_COMMENT));
 
   Terminal<std::string> ID{"ID", "a-zA-Z_"_cr + many(w)};
   Rule<std::string> QualifiedName{"QualifiedName", some(ID, "."_kw)};
@@ -40,7 +40,7 @@ protected:
 
 ## The aliases you should use
 
-Inside a `Parser` subclass, Pegium exposes three aliases:
+Inside a `PegiumParser` subclass, Pegium exposes three aliases:
 
 - `Terminal<T>` for terminal rules
 - `Rule<T>` for named non-terminal rules
@@ -52,7 +52,7 @@ Use these aliases instead of spelling `TerminalRule`, `DataTypeRule`,
 ## Entry rule and parser lifecycle
 
 Every parser must override `getEntryRule()`. The returned rule is the root rule
-used by `Parser::parse(...)`.
+used by `PegiumParser::parse(...)`.
 
 Important detail:
 

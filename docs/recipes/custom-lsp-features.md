@@ -22,8 +22,9 @@ Typical wiring:
 
 ```cpp
 auto services = pegium::services::makeDefaultServices(
-    sharedServices, "my-language", std::move(parser));
+    sharedServices, "my-language");
 
+services->parser = std::make_unique<const my::parser::MyParser>(*services);
 services->lsp.hoverProvider = std::make_unique<lsp::MyHoverProvider>(*services);
 ```
 

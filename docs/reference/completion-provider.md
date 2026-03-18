@@ -8,6 +8,9 @@ rewriting the whole provider.
 This keeps the default implementation language-agnostic while still making it
 easy to customize references, keywords, rule-level proposals, and snippets.
 
+Use this page when you already know that completion is the feature you want to
+customize and you need the main extension hooks.
+
 ## Default flow
 
 1. The parser computes reachable `CompletionFeature` values at the cursor.
@@ -186,3 +189,9 @@ Start from the narrowest hook that solves the problem:
 3. `completionForKeyword(...)` or `filterKeyword(...)` for keyword logic
 4. `completionForRule(...)` for snippets and templates
 5. `completionFor(...)` only when you need to replace the dispatch strategy
+
+## Related pages
+
+- [Default LSP Services](lsp-services.md)
+- [Custom LSP Features](../recipes/custom-lsp-features.md)
+- [Scoping](../recipes/scoping/index.md)

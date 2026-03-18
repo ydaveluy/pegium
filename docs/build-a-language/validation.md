@@ -20,9 +20,9 @@ Validation is where you express semantic rules that go beyond syntax:
 
 ```cpp
 registerCheck<MyNode>([](const MyNode &node,
-                         const pegium::ValidationAcceptor &acceptor) {
+                         const pegium::validation::ValidationAcceptor &acceptor) {
   if (node.name.empty()) {
-    acceptor.error("Name must not be empty.", node);
+    acceptor.error(node, "Name must not be empty.");
   }
 });
 ```
@@ -35,7 +35,14 @@ Pegium also supports method-pointer based registration, which keeps validator
 implementations close to the owning class and consistent with the formatter API
 style.
 
-That style is usually better once the validator grows beyond a few checks.
+That style is usually better once the validator grows beyond a few checks:
+
+```cpp
+const MyValidator validator;
+registry.registerChecks(
+    {pegium::validation::ValidationRegistry::makeValidationCheck<
+         &MyValidator::checkNode>(validator)});
+```
 
 ## What to validate
 

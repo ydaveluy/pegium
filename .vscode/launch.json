@@ -16,7 +16,7 @@
             "preLaunchTask": "Prepare Arithmetics Extension"
         },
         {
-            "name": "Run Domainmodel Extension",
+            "name": "Run DomainModel Extension",
             "type": "extensionHost",
             "request": "launch",
             "runtimeExecutable": "${execPath}",
@@ -28,7 +28,7 @@
             "outFiles": [
                 "${workspaceFolder}/examples/domainmodel/vscode/out/**/*.js"
             ],
-            "preLaunchTask": "Prepare Domainmodel Extension"
+            "preLaunchTask": "Prepare DomainModel Extension"
         },
         {
             "name": "Run Requirements Extension",
@@ -61,11 +61,19 @@
             "preLaunchTask": "Prepare Statemachine Extension"
         },
         {
-            "name": "Debug PegiumUnitTest",
+            "name": "Debug PegiumCoreUnitTest",
             "type": "cppdbg",
             "cwd": "${workspaceFolder}",
             "request": "launch",
-            "program": "${workspaceFolder}/build/PegiumUnitTest",
+            "program": "${workspaceFolder}/build/PegiumCoreUnitTest",
+            "args": []
+        },
+        {
+            "name": "Debug PegiumLspUnitTest",
+            "type": "cppdbg",
+            "cwd": "${workspaceFolder}",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/PegiumLspUnitTest",
             "args": []
         },
         {

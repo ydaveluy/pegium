@@ -1,4 +1,4 @@
-# Domainmodel
+# DomainModel
 
 Source:
 [examples/domainmodel](https://github.com/ydaveluy/pegium/tree/main/examples/domainmodel)
