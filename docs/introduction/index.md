@@ -1,56 +1,42 @@
-# Introduction
+# What is Pegium?
 
-Pegium is a C++20 toolkit for building textual languages. It provides the
-runtime pieces needed to move from a grammar to an editor experience:
+Pegium is an open source language engineering toolkit for C++20. It helps you
+build textual languages with first-class support for parsing, AST/CST
+construction, references, validation, formatting, and language-server features.
 
-- parser expressions and named rules
-- AST and CST construction
-- references and scoping
-- validation
-- formatting
-- LSP features and server wiring
+The core idea is simple: language tooling in C++ should feel like framework
+work, not like assembling unrelated parser, workspace, and editor pieces by
+hand.
 
-Pegium is especially useful when you want the ergonomics of a language
-framework, but you want to keep the implementation in modern C++.
+## Start here if
 
-## What Pegium gives you
+- you want a quick mental model of what Pegium is
+- you are deciding whether Pegium fits your project
+- you want to know which section of the docs to read next
 
-Pegium is not just a parser library. It is a stack of cooperating pieces:
+## Where to go next?
 
-1. grammar definitions written directly in C++
-2. AST and CST construction during parsing
-3. references and linking across documents
-4. semantic validation
-5. formatting and source-aware CST utilities
-6. default LSP providers and language-server wiring
+If you are not sure where to begin, open [Choose Your Path](choose-your-path.md).
 
-That combination is what makes it possible to move from a small example parser
-to a language with completion, hover, rename, references, and formatting
-without inventing each layer from scratch.
+### Features
 
-## What kind of projects fit well
+If you want a concise overview of what Pegium provides, start with the
+[features page](features.md).
 
-Pegium works well when:
+### Showcases
 
-- the implementation language should stay C++
-- the language has structure and editor tooling needs, not just parsing
-- the project benefits from AST, scoping, validation, and LSP support living in
-  one framework
-- examples and explicit extension points are more useful than a highly magical
-  code-generation workflow
+If you want to see Pegium in action before diving into the API, browse the
+[showcases page](showcases.md) and the shipped [examples](../examples/index.md).
 
-## How to read the documentation
+### Learn Pegium
 
-If you are new to Pegium:
+If you want the recommended end-to-end workflow, continue with the
+[learn section](../learn/index.md).
 
-1. read [Why Pegium](why-pegium.md)
-2. read [Getting Started](../getting-started/index.md)
-3. follow [Build a Language](../build-a-language/index.md)
+### More details
 
-If you already know Langium:
+If you already understand the workflow and need precise concepts, continue with
+the [reference section](../reference/index.md).
 
-1. read [Pegium for Langium users](langium-users.md)
-2. jump to [Grammar essentials](../build-a-language/grammar.md)
-3. then read [References and scoping](../build-a-language/references-and-scoping.md),
-   [Validation](../build-a-language/validation.md), and
-   [Formatting](../build-a-language/formatting.md)
+If you are looking for a targeted guide rather than a linear tutorial, head to
+the [recipes section](../recipes/index.md).

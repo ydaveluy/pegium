@@ -74,7 +74,7 @@
             "problemMatcher": []
         },
         {
-            "label": "Build Domainmodel LSP Server",
+            "label": "Build DomainModel LSP Server",
             "type": "shell",
             "command": "cmake",
             "args": [
@@ -93,7 +93,7 @@
             "problemMatcher": []
         },
         {
-            "label": "Compile Domainmodel VSCode Extension",
+            "label": "Compile DomainModel VSCode Extension",
             "type": "shell",
             "command": "bash",
             "args": [
@@ -106,7 +106,7 @@
             "problemMatcher": []
         },
         {
-            "label": "Build Domainmodel VSCode Extension",
+            "label": "Build DomainModel VSCode Extension",
             "type": "shell",
             "command": "npm",
             "args": [
@@ -114,7 +114,7 @@
                 "compile"
             ],
             "dependsOn": [
-                "Compile Domainmodel VSCode Extension"
+                "Compile DomainModel VSCode Extension"
             ],
             "options": {
                 "cwd": "${workspaceFolder}/examples/domainmodel"
@@ -122,11 +122,11 @@
             "problemMatcher": "$tsc"
         },
         {
-            "label": "Prepare Domainmodel Extension",
+            "label": "Prepare DomainModel Extension",
             "dependsOrder": "sequence",
             "dependsOn": [
-                "Build Domainmodel LSP Server",
-                "Build Domainmodel VSCode Extension"
+                "Build DomainModel LSP Server",
+                "Build DomainModel VSCode Extension"
             ],
             "problemMatcher": []
         },

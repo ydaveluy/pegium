@@ -53,26 +53,32 @@ extra_css:
 nav:
   - Home: index.md
   - Introduction:
-      - introduction/index.md
+      - What is Pegium?: introduction/index.md
+      - Choose Your Path: introduction/choose-your-path.md
+      - Features: introduction/features.md
+      - Showcases: introduction/showcases.md
       - Why Pegium: introduction/why-pegium.md
       - Pegium for Langium Users: introduction/langium-users.md
-  - Getting Started:
-      - getting-started/index.md
-      - Build the Repository: getting-started/build.md
-      - Run the Examples: getting-started/examples.md
-      - Your First Language: getting-started/first-language.md
-  - Build a Language:
-      - build-a-language/index.md
-      - Grammar Essentials: build-a-language/grammar.md
-      - AST and CST: build-a-language/ast-and-cst.md
-      - References and Scoping: build-a-language/references-and-scoping.md
-      - Validation: build-a-language/validation.md
-      - Formatting: build-a-language/formatting.md
-      - LSP Services: build-a-language/lsp-services.md
-      - Workspace Lifecycle: build-a-language/workspace.md
+  - Learn:
+      - learn/index.md
+      - Workflow:
+          - learn/workflow/index.md
+          - 1. Build the Repository: learn/workflow/install.md
+          - 2. Choose a Starting Point: learn/workflow/scaffold.md
+          - 3. Write the Grammar: learn/workflow/write_grammar.md
+          - 4. Shape the AST and CST: learn/workflow/generate_ast.md
+          - 5. Resolve Cross-References: learn/workflow/resolve_cross_references.md
+          - 6. Create Validations: learn/workflow/create_validations.md
+          - 7. Add Formatting and LSP Services: learn/workflow/generate_everything.md
   - Reference:
       - reference/index.md
+      - Start Here: reference/start-here.md
+      - Glossary: reference/glossary.md
+      - Configuration Services: reference/configuration-services.md
+      - Document Lifecycle: reference/document-lifecycle.md
+      - Semantic Model: reference/semantic-model.md
       - Grammar Reference: reference/grammar-reference.md
+      - Parser Contracts: reference/parser-contracts.md
       - Services and Modules: reference/services-and-modules.md
       - Formatter DSL: reference/formatter-dsl.md
       - Default LSP Services: reference/lsp-services.md
@@ -80,13 +86,23 @@ nav:
       - Workspace Concepts: reference/workspace.md
   - Recipes:
       - recipes/index.md
-      - Custom Validator: recipes/custom-validator.md
-      - Custom Formatter: recipes/custom-formatter.md
-      - Custom Scope Provider: recipes/custom-scope-provider.md
+      - Multiple Languages: recipes/multiple-languages.md
+      - Formatting: recipes/custom-formatter.md
+      - Scoping:
+          - recipes/scoping/index.md
+          - Qualified Names: recipes/scoping/qualified-names.md
+          - Custom Scope Provider: recipes/custom-scope-provider.md
+      - Validation:
+          - recipes/validation/index.md
+          - Dependency Loops: recipes/validation/dependency-loops.md
+          - Custom Validator: recipes/custom-validator.md
+      - Performance:
+          - recipes/performance/index.md
+          - Caches: recipes/performance/caches.md
       - Custom LSP Features: recipes/custom-lsp-features.md
   - Examples:
       - examples/index.md
       - Arithmetics: examples/arithmetics.md
-      - Domainmodel: examples/domainmodel.md
+      - DomainModel: examples/domainmodel.md
       - Requirements: examples/requirements.md
       - Statemachine: examples/statemachine.md

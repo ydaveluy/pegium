@@ -2,6 +2,10 @@
 
 Create a validator class when your language needs semantic rules beyond parsing.
 
+Use this page for the basic validator structure. If your rule needs a
+whole-document graph walk, continue with
+[Dependency Loops](validation/dependency-loops.md).
+
 ## Pattern
 
 1. implement one method per AST node kind you want to validate
@@ -32,3 +36,8 @@ already work.
 
 Look at the validators in the shipped examples, especially `arithmetics` and
 `statemachine`, for the expected structure.
+
+## Related pages
+
+- [Validation](validation/index.md)
+- [Dependency Loops](validation/dependency-loops.md)

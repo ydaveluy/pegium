@@ -1,65 +1,80 @@
-# Statemachine Example (Pegium/C++)
+# Statemachine
 
-This example is implemented in Pegium/C++.
+This example is a compact modeling language centered on semantic validation and
+editor integration.
 
-Full documentation:
+It is a good starting point when your language is built around connected model
+elements and domain rules rather than expression evaluation.
 
-- [Published docs](https://ydaveluy.github.io/pegium/examples/statemachine/)
-- [Docs source](../../docs/examples/statemachine.md)
+## What it shows
 
-It provides:
+- a parser for the `.statemachine` language
+- semantic validation rules
+- formatting and LSP integration
+- a stdio LSP server for the `statemachine` language id
+- a VS Code client for interactive testing
 
-- A parser for the `.statemachine` language.
-- A stdio LSP server (`JSON-RPC`) for the `statemachine` language id.
+## Use this example when
+
+- semantic validation is central to the language
+- the domain is graph- or state-based
+- you want a compact modeling example with editor support
+- you want to study validation-oriented services
 
 ## Build
 
 From the repository root:
 
-```bash
+```sh
 cmake -S . -B build
 cmake --build build -j
 ```
 
-## Run CLI
+## Run the CLI
 
-```bash
+```sh
 ./build/examples/statemachine/pegium-example-statemachine-cli \
   examples/statemachine/example/trafficlight.statemachine
 ```
 
-## Run LSP server (stdio)
+## Run the LSP server
 
-```bash
+```sh
 ./build/examples/statemachine/pegium-example-statemachine-lsp
 ```
 
-## VSCode extension
+## Run the VS Code client
 
-### 1) Build the C++ server
+### 1. Build the C++ server
 
-```bash
+```sh
 cmake -S . -B build
 cmake --build build -j
 ```
 
-### 2) Install and compile extension side
+### 2. Install and compile the extension side
 
-```bash
+```sh
 cd examples/statemachine
 npm install
 npm run compile
 ```
 
-### 3) Run in VSCode
+### 3. Start the extension in VS Code
 
-- Open `examples/statemachine` as the workspace folder in VSCode.
+- Open `examples/statemachine` as the workspace folder in VS Code.
 - Start `Run Statemachine Extension` from `.vscode/launch.json`.
 
-Or from the repository root, press `F5` and select `Run Statemachine Extension`.
+You can also open the repository root in VS Code, press `F5`, and select
+`Run Statemachine Extension`.
 
-If the server binary is not found automatically, set:
+If the server binary is not found automatically, set either:
 
-- setting `pegium.statemachine.serverPath`
-or
-- env var `PEGIUM_STATEMACHINE_SERVER`
+- the `pegium.statemachine.serverPath` setting
+- the `PEGIUM_STATEMACHINE_SERVER` environment variable
+
+## Where to go next
+
+- [Examples Overview](../../docs/examples/index.md)
+- [Learn Pegium](../../docs/learn/index.md)
+- [Statemachine example page](../../docs/examples/statemachine.md)

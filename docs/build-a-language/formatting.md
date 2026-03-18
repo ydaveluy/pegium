@@ -170,14 +170,20 @@ language services:
 
 ```cpp
 auto services = pegium::services::makeDefaultServices(
-    sharedServices, "domain-model", std::move(parser));
+    sharedServices, "domain-model");
+
+services->parser =
+    std::make_unique<const domainmodel::parser::DomainModelParser>(*services);
 
 services->lsp.formatter =
     std::make_unique<lsp::DomainModelFormatter>(*services);
 ```
 
-Without this assignment, the language server keeps the default formatter slot
-empty and formatting requests do nothing.
+`makeDefaultServices(...)` creates the service container and installs the common
+defaults, but you still assign your language parser explicitly.
+
+Without the formatter assignment, the formatter slot stays empty and formatting
+requests do nothing.
 
 ## Practical advice
 

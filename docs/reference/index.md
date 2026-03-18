@@ -1,25 +1,43 @@
 # Reference
 
-This section is the canonical API-oriented documentation for Pegium's
-user-facing framework concepts.
+This section contains the canonical concept and API-oriented documentation for
+Pegium.
 
-Use the reference when you already understand the workflow and need a precise
-description of one subsystem.
+## Start here if
 
-## Pages
+- you already know what subsystem you are looking for
+- you want exact terminology instead of a tutorial
+- you need the stable mental model behind services, documents, and the AST
 
-- [Grammar reference](grammar-reference.md)
-- [Parser contracts](parser-contracts.md)
-- [Services and modules](services-and-modules.md)
+## Where to go next?
+
+If you are not sure which page to read first, open [Start Here](start-here.md).
+
+### Glossary
+
+If you are looking for a specific Pegium term or concept, start with the
+[glossary](glossary.md).
+
+### Grammar
+
+If you are looking for a specific grammar feature, continue with the
+[grammar reference](grammar-reference.md) and [parser contracts](parser-contracts.md).
+
+### Architecture
+
+If you are looking for framework architecture topics, the most useful pages
+are:
+
+- [Configuration Services](configuration-services.md)
+- [Document Lifecycle](document-lifecycle.md)
+- [Semantic Model](semantic-model.md)
+
+### API-oriented pages
+
+Use these when you need more precise subsystem details:
+
+- [Services and Modules](services-and-modules.md)
 - [Formatter DSL](formatter-dsl.md)
 - [Default LSP services](lsp-services.md)
 - [Completion provider](completion-provider.md)
 - [Workspace concepts](workspace.md)
-
-## How to use this section
-
-- read `Build a Language` first if you are still learning the workflow
-- use the reference pages to confirm exact concepts, helpers, and extension
-  points
-- use the recipes when you know the task but want the shortest path to the
-  implementation pattern

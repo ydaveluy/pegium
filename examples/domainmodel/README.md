@@ -1,65 +1,80 @@
-# Domainmodel Example (Pegium/C++)
+# DomainModel
 
-This example is implemented in Pegium/C++.
+This example shows a structure-first modeling DSL with declarations, nesting,
+qualified names, formatting, and rename support.
 
-Full documentation:
+It is a strong starting point when your target language looks more like a
+modeling language than an expression language.
 
-- [Published docs](https://ydaveluy.github.io/pegium/examples/domainmodel/)
-- [Docs source](../../docs/examples/domainmodel.md)
+## What it shows
 
-It provides:
+- a parser for the `.dmodel` language
+- packages, entities, datatypes, and structured AST nodes
+- qualified-name-based references
+- formatter rules for block-oriented syntax
+- a stdio LSP server for the `domain-model` language id
 
-- A parser for the `.dmodel` language.
-- A stdio LSP server (`JSON-RPC`) for the `domain-model` language id.
+## Use this example when
+
+- the language has declarations, nesting, and blocks
+- qualified names matter
+- you want a clear reference and rename example
+- you want a formatter centered on keywords and brace blocks
 
 ## Build
 
 From the repository root:
 
-```bash
+```sh
 cmake -S . -B build
 cmake --build build -j
 ```
 
-## Run CLI
+## Run the CLI
 
-```bash
+```sh
 ./build/examples/domainmodel/pegium-example-domainmodel-cli \
   examples/domainmodel/example/blog.dmodel
 ```
 
-## Run LSP server (stdio)
+## Run the LSP server
 
-```bash
+```sh
 ./build/examples/domainmodel/pegium-example-domainmodel-lsp
 ```
 
-## VSCode extension
+## Run the VS Code client
 
-### 1) Build the C++ server
+### 1. Build the C++ server
 
-```bash
+```sh
 cmake -S . -B build
 cmake --build build -j
 ```
 
-### 2) Install and compile extension side
+### 2. Install and compile the extension side
 
-```bash
+```sh
 cd examples/domainmodel
 npm install
 npm run compile
 ```
 
-### 3) Run in VSCode
+### 3. Start the extension in VS Code
 
-- Open `examples/domainmodel` as the workspace folder in VSCode.
+- Open `examples/domainmodel` as the workspace folder in VS Code.
 - Start `Run DomainModel Extension` from `.vscode/launch.json`.
 
-Or from the repository root, press `F5` and select `Run Domainmodel Extension`.
+You can also open the repository root in VS Code, press `F5`, and select
+`Run DomainModel Extension`.
 
-If the server binary is not found automatically, set:
+If the server binary is not found automatically, set either:
 
-- setting `pegium.domainmodel.serverPath`
-or
-- env var `PEGIUM_DOMAINMODEL_SERVER`
+- the `pegium.domainmodel.serverPath` setting
+- the `PEGIUM_DOMAINMODEL_SERVER` environment variable
+
+## Where to go next
+
+- [Examples Overview](../../docs/examples/index.md)
+- [Learn Pegium](../../docs/learn/index.md)
+- [DomainModel example page](../../docs/examples/domainmodel.md)

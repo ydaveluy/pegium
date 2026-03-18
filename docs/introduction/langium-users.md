@@ -4,6 +4,12 @@ Pegium is inspired by Langium, but it is not a direct port of Langium to C++.
 The mental model is intentionally similar in the areas that matter to language
 authors.
 
+## Read this page if
+
+- you already know Langium and want to transfer that intuition to Pegium
+- you want a concept mapping before reading Pegium-specific APIs
+- you want the quickest path from "Langium mindset" to "Pegium workflow"
+
 ## Concept mapping
 
 | Langium concept | Pegium concept |
@@ -30,7 +36,7 @@ authors.
 
 If you are used to Langium:
 
-- think of `Parser` subclasses as the place where grammar structure lives
+- think of `PegiumParser` subclasses as the place where grammar structure lives
 - think of `Rule<T>` and `Terminal<T>` as the Pegium equivalent of named grammar
   rules and terminals
 - think of `AstNode` structs as the direct equivalent of Langium AST types
@@ -56,8 +62,11 @@ Even with the different implementation language, the workflow remains familiar:
 
 If you already know Langium, start with:
 
-1. [Grammar essentials](../build-a-language/grammar.md)
-2. [References and scoping](../build-a-language/references-and-scoping.md)
-3. [Validation](../build-a-language/validation.md)
-4. [Formatting](../build-a-language/formatting.md)
+1. [Write the Grammar](../learn/workflow/write_grammar.md)
+2. [Resolve Cross-References](../learn/workflow/resolve_cross_references.md)
+3. [Create Validations](../learn/workflow/create_validations.md)
+4. [Add Formatting and LSP Services](../learn/workflow/generate_everything.md)
 5. [Default LSP services](../reference/lsp-services.md)
+
+Then keep [Reference](../reference/index.md) nearby for the precise service and
+document-model terminology.

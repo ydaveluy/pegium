@@ -2,6 +2,10 @@
 
 Pegium ships four examples that cover different language shapes and services.
 
+This page is kept as a focused companion to the newer
+[Examples Overview](../examples/index.md) and [Learn Pegium](../learn/index.md)
+sections.
+
 The examples are not toy fragments. Each of them is a useful template for a
 different kind of language project.
 
@@ -57,5 +61,5 @@ configuration.
 ## Recommended reading after running one example
 
 - [Your first language](first-language.md)
-- [Grammar essentials](../build-a-language/grammar.md)
+- [Workflow](../learn/workflow/index.md)
 - [Examples overview](../examples/index.md)

@@ -2,6 +2,9 @@
 
 Pegium's workspace layer is the backbone for multi-document language features.
 
+Use this page when you want the high-level mental model of documents, indexing,
+and rebuild orchestration before diving into lifecycle details.
+
 ## Main types
 
 - `workspace::Document`
@@ -39,3 +42,9 @@ results instead of recomputing everything ad hoc.
 - avoid custom workspace behavior until your language actually needs it
 - customize scoping or indexing first; customize the workspace infrastructure
   itself only when the default lifecycle is too restrictive
+
+## Related pages
+
+- [Document Lifecycle](document-lifecycle.md)
+- [Configuration Services](configuration-services.md)
+- [Caches](../recipes/performance/caches.md)

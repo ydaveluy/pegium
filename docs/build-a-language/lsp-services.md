@@ -15,22 +15,25 @@ the editor layer.
 
 ## Default providers
 
-Pegium already ships defaults for many features:
+`Services::lsp` exposes slots for many LSP features, but only a subset is
+installed automatically by `makeDefaultServices(...)`.
+
+The current built-in defaults cover:
 
 - completion
 - hover
 - document symbols
-- references
-- definition and type definition
-- rename
+- document highlights
 - folding ranges
-- selection ranges
-- formatter
-- semantic tokens
-- call hierarchy and type hierarchy
+- definition
+- references
+- rename
+- code actions
 
-Not every language needs all of them immediately. The useful part is that the
-slots already exist and can be filled or replaced incrementally.
+Other slots such as formatter, selection ranges, signature help, semantic
+tokens, call hierarchy, type hierarchy, inlay hints, and code lens are
+available on `services->lsp`, but they stay empty until your language installs
+an implementation.
 
 ## Customization strategy
 
@@ -42,8 +45,9 @@ Typical setup:
 
 ```cpp
 auto services = pegium::services::makeDefaultServices(
-    sharedServices, "my-language", std::move(parser));
+    sharedServices, "my-language");
 
+services->parser = std::make_unique<const my::parser::MyParser>(*services);
 services->lsp.formatter = std::make_unique<lsp::MyFormatter>(*services);
 services->lsp.hoverProvider = std::make_unique<lsp::MyHoverProvider>(*services);
 ```
@@ -59,14 +63,16 @@ Defaults tend to be good enough when:
 - symbol lookup is already handled by the standard reference pipeline
 - document symbols follow the AST structure directly
 - folding ranges are mostly based on CST blocks
-- selection ranges and fuzzy matching do not need domain knowledge
+- hover can come from leading comments or documentation providers
 
 ## Good defaults to keep
 
 - document symbol collection
+- document highlights
 - folding ranges
-- fuzzy matching
-- selection ranges
+- definition and references
+- rename when references are modeled correctly
+- the shared fuzzy matcher used by completion
 
 ## Typical language-specific overrides
 

@@ -2,6 +2,10 @@
 
 Customize scoping when visibility rules are more complex than lexical nesting.
 
+If your language only needs package-style or namespace-style qualified names,
+start with [Qualified Names](scoping/qualified-names.md). Reach for a custom
+scope provider only when lookup behavior itself must change.
+
 ## Main entry points
 
 - custom name provider
@@ -34,3 +38,8 @@ Each one solves a different problem:
 Most scoping bugs are easier to diagnose if you first verify exported symbols,
 then visible symbols, then final linker behavior. Try not to change all three
 layers at once.
+
+## Related pages
+
+- [Scoping](scoping/index.md)
+- [Qualified Names](scoping/qualified-names.md)

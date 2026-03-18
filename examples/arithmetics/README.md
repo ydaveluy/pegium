@@ -1,70 +1,80 @@
-# Arithmetics Example (Pegium/C++)
+# Arithmetics
 
-This example is implemented in Pegium/C++.
+This example is the smallest end-to-end Pegium language in the repository.
 
-Full documentation:
+It is a good starting point when you want to understand the full path from
+grammar to CLI and language server without first dealing with a large semantic
+model.
 
-- [Published docs](https://ydaveluy.github.io/pegium/examples/arithmetics/)
-- [Docs source](../../docs/examples/arithmetics.md)
+## What it shows
 
-It provides:
+- a parser for the `.calc` language
+- an evaluator for arithmetic expressions
+- validation and formatting
+- a stdio LSP server for `arithmetics` / `calc`
+- a VS Code client for interactive testing
 
-- A parser for the `.calc` language.
-- A small interpreter for arithmetic evaluations.
-- A stdio LSP server (`JSON-RPC`) for `arithmetics` / `calc` language ids.
+## Use this example when
+
+- your language is expression-heavy
+- you need precedence and associativity
+- you want to study `Infix` rules
+- you want the most compact full-stack Pegium example
 
 ## Build
 
 From the repository root:
 
-```bash
+```sh
 cmake -S . -B build
 cmake --build build -j
 ```
 
-## Run CLI
+## Run the CLI
 
-```bash
+```sh
 ./build/examples/arithmetics/pegium-example-arithmetics-cli \
   examples/arithmetics/example/example.calc
 ```
 
-## Run LSP server (stdio)
+## Run the LSP server
 
-```bash
+```sh
 ./build/examples/arithmetics/pegium-example-arithmetics-lsp
 ```
 
-## VSCode extension
+## Run the VS Code client
 
-The folder now contains a `package.json` + `vscode/src/extension.ts` client that
-starts the Pegium server executable (`pegium-example-arithmetics-lsp`).
+### 1. Build the C++ server
 
-### 1) Build the C++ server
-
-```bash
+```sh
 cmake -S . -B build
 cmake --build build -j
 ```
 
-### 2) Install and compile extension side
+### 2. Install and compile the extension side
 
-```bash
+```sh
 cd examples/arithmetics
 npm install
 npm run compile
 ```
 
-### 3) Run in VSCode
+### 3. Start the extension in VS Code
 
-- Open `examples/arithmetics` as the workspace folder in VSCode.
+- Open `examples/arithmetics` as the workspace folder in VS Code.
 - Start `Run Arithmetics Extension` from `.vscode/launch.json`.
 
-Or from the repository root, simply press `F5` and select
-`Run Arithmetics Extension` (root `.vscode/launch.json`).
+You can also open the repository root in VS Code, press `F5`, and select
+`Run Arithmetics Extension`.
 
-If the server binary is not found automatically, set:
+If the server binary is not found automatically, set either:
 
-- setting `pegium.arithmetics.serverPath`
-or
-- env var `PEGIUM_ARITHMETICS_SERVER`
+- the `pegium.arithmetics.serverPath` setting
+- the `PEGIUM_ARITHMETICS_SERVER` environment variable
+
+## Where to go next
+
+- [Examples Overview](../../docs/examples/index.md)
+- [Learn Pegium](../../docs/learn/index.md)
+- [Arithmetics example page](../../docs/examples/arithmetics.md)

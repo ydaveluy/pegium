@@ -1,30 +1,38 @@
-# Requirements Example (Pegium/C++)
+# Requirements
 
-This example is implemented in Pegium/C++.
+This example demonstrates how to register and serve multiple related languages
+inside one Pegium workspace.
 
-Full documentation:
+It is the best starting point when your real project spans several grammars or
+file types that should still share one document and indexing model.
 
-- [Published docs](https://ydaveluy.github.io/pegium/examples/requirements/)
-- [Docs source](../../docs/examples/requirements.md)
+## What it shows
 
-It provides:
+- a parser for `.req` files (`requirements-lang`)
+- a parser for `.tst` files (`tests-lang`)
+- one shared workspace and one shared stdio LSP server
+- cross-file and cross-language references
+- service registration for multiple language ids
 
-- A parser for `.req` (`requirements-lang`).
-- A parser for `.tst` (`tests-lang`).
-- A single stdio LSP server (`JSON-RPC`) registering both language ids.
+## Use this example when
+
+- several file types belong to one logical workspace
+- references cross file or language boundaries
+- you need a realistic multi-language service setup
+- you want a concrete example for `registerServices(...)`
 
 ## Build
 
 From the repository root:
 
-```bash
+```sh
 cmake -S . -B build
 cmake --build build -j
 ```
 
-## Run CLI
+## Run the CLI
 
-```bash
+```sh
 ./build/examples/requirements/pegium-example-requirements-cli \
   examples/requirements/example/requirements.req
 
@@ -32,38 +40,44 @@ cmake --build build -j
   examples/requirements/example/tests_part1.tst
 ```
 
-## Run LSP server (stdio)
+## Run the LSP server
 
-```bash
+```sh
 ./build/examples/requirements/pegium-example-requirements-lsp
 ```
 
-## VSCode extension
+## Run the VS Code client
 
-### 1) Build the C++ server
+### 1. Build the C++ server
 
-```bash
+```sh
 cmake -S . -B build
 cmake --build build -j
 ```
 
-### 2) Install and compile extension side
+### 2. Install and compile the extension side
 
-```bash
+```sh
 cd examples/requirements
 npm install
 npm run compile
 ```
 
-### 3) Run in VSCode
+### 3. Start the extension in VS Code
 
-- Open `examples/requirements` as the workspace folder in VSCode.
+- Open `examples/requirements` as the workspace folder in VS Code.
 - Start `Run Requirements Extension` from `.vscode/launch.json`.
 
-Or from the repository root, press `F5` and select `Run Requirements Extension`.
+You can also open the repository root in VS Code, press `F5`, and select
+`Run Requirements Extension`.
 
-If the server binary is not found automatically, set:
+If the server binary is not found automatically, set either:
 
-- setting `pegium.requirements.serverPath`
-or
-- env var `PEGIUM_REQUIREMENTS_SERVER`
+- the `pegium.requirements.serverPath` setting
+- the `PEGIUM_REQUIREMENTS_SERVER` environment variable
+
+## Where to go next
+
+- [Examples Overview](../../docs/examples/index.md)
+- [Learn Pegium](../../docs/learn/index.md)
+- [Requirements example page](../../docs/examples/requirements.md)

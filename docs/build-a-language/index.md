@@ -1,23 +1,12 @@
 # Build a Language
 
-Pegium follows a clear pipeline:
+This is a legacy section name kept for readers arriving from older links.
 
-1. parse text into CST + AST
-2. resolve references and compute scopes
-3. validate semantic rules
-4. provide editor tooling through services and LSP providers
+The current end-to-end path now lives under [Learn](../learn/index.md), while
+targeted customization lives under [Recipes](../recipes/index.md).
 
-Use this section as the end-to-end guide to that pipeline.
-
-The order of the pages matches a practical implementation sequence. Most
-projects go through these stages in roughly this order:
-
-1. grammar
-2. AST shape
-3. references and linking
-4. validation
-5. formatting
-6. editor and workspace integration
+If you want the current guided path, start with
+[Pegium's Workflow](../learn/workflow/index.md).
 
 ## Topics
 
@@ -31,11 +20,6 @@ projects go through these stages in roughly this order:
 
 ## Recommended usage
 
-- Read [Grammar essentials](grammar.md) and [AST and CST](ast-and-cst.md)
-  together.
-- Read [References and scoping](references-and-scoping.md) before validation if
-  your language contains names that resolve to declarations.
-- Add formatting after the grammar and CST shape have stabilized enough that
-  source-level selections will not keep changing every day.
-- Read [LSP services](lsp-services.md) and [Workspace lifecycle](workspace.md)
-  once the language already parses and links correctly.
+- Prefer the [Learn](../learn/index.md) section for the primary reading path.
+- Use these legacy pages only when you reached them from an older bookmark or
+  link.
