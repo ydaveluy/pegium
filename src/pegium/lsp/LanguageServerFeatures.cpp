@@ -65,7 +65,7 @@ Result with_document_provider(services::SharedServices &sharedServices,
 
 template <typename Result, typename Accessor, typename Invoker>
 Result with_item_provider(services::SharedServices &sharedServices,
-                          std::string uri, Accessor accessor,
+                          const std::string &uri, Accessor accessor,
                           Invoker invoker) {
   return read_workspace_request(
       sharedServices, [&sharedServices, &uri, &accessor, &invoker]() -> Result {

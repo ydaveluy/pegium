@@ -8,6 +8,8 @@
 #include <variant>
 #include <vector>
 
+#include <pegium/utils/TransparentStringHash.hpp>
+
 namespace pegium::services {
 
 class JsonValue {
@@ -18,7 +20,7 @@ public:
   };
 
   using Array = std::vector<JsonValue>;
-  using Object = std::unordered_map<std::string, JsonValue>;
+  using Object = utils::TransparentStringMap<JsonValue>;
   using Storage =
       std::variant<std::nullptr_t, bool, std::int64_t, double, std::string,
                    Array, Object>;
@@ -54,10 +56,13 @@ public:
   [[nodiscard]] std::string
   toJsonString(const SerializationOptions &options) const;
 
+  friend std::ostream &operator<<(std::ostream &os, const JsonValue &value) {
+    os << value.toJsonString();
+    return os;
+  }
+
 private:
   Storage _value;
 };
-
-std::ostream &operator<<(std::ostream &os, const JsonValue &value);
 
 } // namespace pegium::services

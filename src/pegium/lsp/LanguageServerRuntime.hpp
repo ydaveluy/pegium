@@ -19,7 +19,7 @@ class FileOperationHandler;
 
 void addConfigurationChangeHandler(
     ::lsp::MessageHandler &messageHandler,
-    services::SharedServices &sharedServices,
+    const services::SharedServices &sharedServices,
     std::function<void()> ensureInitialized = {});
 
 void addDiagnosticsHandler(::lsp::MessageHandler &messageHandler,
@@ -34,7 +34,7 @@ void addDocumentUpdateHandler(
 
 void addFileOperationHandler(::lsp::MessageHandler &messageHandler,
                              FileOperationHandler &fileOperationHandler,
-                             std::function<void()> ensureInitialized);
+                             const std::function<void()> &ensureInitialized);
 
 [[nodiscard]] int startLanguageServer(
     services::SharedServices &sharedServices,

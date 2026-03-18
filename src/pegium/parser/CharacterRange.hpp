@@ -91,21 +91,19 @@ private:
   friend struct detail::ParseAccess;
   friend struct detail::ProbeAccess;
 
-  bool probe_impl(ParseContext &ctx) const noexcept {
+  bool probe_impl(const ParseContext &ctx) const noexcept {
     return matches(ctx.cursor());
   }
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     if constexpr (StrictParseModeContext<Context>) {
-      const char *const cursorStart = ctx.cursor();
-      if (matches(cursorStart)) {
+      if (const char *const cursorStart = ctx.cursor(); matches(cursorStart)) {
         ctx.leaf(cursorStart + 1, this);
         return true;
       }
       return false;
     } else if constexpr (RecoveryParseModeContext<Context>) {
-      const char *const cursorStart = ctx.cursor();
-      if (matches(cursorStart)) {
+      if (const char *const cursorStart = ctx.cursor(); matches(cursorStart)) {
         ctx.leaf(cursorStart + 1, this);
         return true;
       }

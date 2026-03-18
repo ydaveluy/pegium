@@ -494,11 +494,11 @@ private:
       OrderedChoiceAssignStatus status = OrderedChoiceAssignStatus::NoSelectable;
       const bool matched = detail::visit_selected_ordered_choice_raw_value(
           element, selectedGrammarElement, view, context,
-          [&astNode, member, &context, &node, &status](auto &&rawValue) {
+          [&astNode, member, &context, &node, &status]<typename RawValue>(
+              RawValue &&rawValue) {
             status = ConversionSupport::convert_raw_to_target(
                          astNode, member,
-                         std::forward<decltype(rawValue)>(rawValue), context,
-                         &node)
+                         std::forward<RawValue>(rawValue), context, &node)
                          ? OrderedChoiceAssignStatus::Assigned
                          : OrderedChoiceAssignStatus::AssignFailed;
           });

@@ -12,6 +12,7 @@
 #include <utility>
 
 #include <pegium/services/SharedServices.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 
 namespace pegium::lsp {
 
@@ -33,7 +34,7 @@ std::optional<::lsp::WorkspaceEdit> DefaultRenameProvider::rename(
   }
 
   WorkspaceEditData edit;
-  std::unordered_set<std::string> seen;
+  utils::TransparentStringSet seen;
   for (const auto &reference :
        referencesService->findReferencesAt(document, offset,
                                            /*includeDeclaration=*/true)) {

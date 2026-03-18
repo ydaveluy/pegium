@@ -12,6 +12,7 @@
 #include <utility>
 
 #include <pegium/services/SharedServices.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 
 namespace pegium::lsp {
 
@@ -29,7 +30,7 @@ DefaultFoldingRangeProvider::getFoldingRanges(
     return {};
   }
 
-  std::unordered_set<std::string> seen;
+  utils::TransparentStringSet seen;
   for (const auto &child : *document.parseResult.cst) {
     collect_folding_ranges(child, document.textView(), rawRanges, seen);
   }

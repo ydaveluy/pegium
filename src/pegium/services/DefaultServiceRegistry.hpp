@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <pegium/services/ServiceRegistry.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 #include <pegium/workspace/TextDocuments.hpp>
 
 namespace pegium::services {
@@ -39,11 +40,10 @@ private:
   void rebuildUriMapsLocked();
 
   mutable std::mutex _mutex;
-  std::unordered_map<std::string, std::unique_ptr<CoreServices>>
-      _servicesByLanguageId;
+  utils::TransparentStringMap<std::unique_ptr<CoreServices>> _servicesByLanguageId;
   std::vector<std::string> _registrationOrder;
-  std::unordered_map<std::string, std::string> _languageIdByExtension;
-  std::unordered_map<std::string, std::string> _languageIdByFileName;
+  utils::TransparentStringMap<std::string> _languageIdByExtension;
+  utils::TransparentStringMap<std::string> _languageIdByFileName;
   const workspace::TextDocuments *_textDocuments = nullptr;
 };
 

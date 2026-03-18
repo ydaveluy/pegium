@@ -21,6 +21,7 @@
 #include <pegium/services/Services.hpp>
 #include <pegium/syntax-tree/AstFeatures.hpp>
 #include <pegium/syntax-tree/CstUtils.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 
 namespace pegium::lsp {
 
@@ -647,7 +648,7 @@ private:
                                HiddenNodeCallback callback);
 
   std::unordered_map<std::type_index, UntypedFormattingCallback> _formatters;
-  std::unordered_map<std::string, HiddenNodeCallback> _hiddenFormatters;
+  utils::TransparentStringMap<HiddenNodeCallback> _hiddenFormatters;
 };
 
 } // namespace pegium::lsp

@@ -559,7 +559,8 @@ find_hidden_replacement(const std::unordered_map<NodeId, std::string> &replaceme
                                           const PendingEdit &edit) {
   auto existing =
       std::string(document.textView().substr(edit.begin, edit.end - edit.begin));
-  existing.erase(std::remove(existing.begin(), existing.end(), '\r'), existing.end());
+  const auto removal = std::ranges::remove(existing, '\r');
+  existing.erase(removal.begin(), removal.end());
   return edit.newText != existing;
 }
 
@@ -645,13 +646,13 @@ void collect_cst_edits(
 
 [[nodiscard]] std::vector<::lsp::TextEdit>
 finalize_edits(const workspace::Document &document, std::vector<PendingEdit> edits) {
-  std::stable_sort(edits.begin(), edits.end(),
-                   [](const PendingEdit &left, const PendingEdit &right) {
-                     if (left.begin != right.begin) {
-                       return left.begin < right.begin;
-                     }
-                     return left.end < right.end;
-                   });
+  std::ranges::stable_sort(edits, [](const PendingEdit &left,
+                                     const PendingEdit &right) {
+    if (left.begin != right.begin) {
+      return left.begin < right.begin;
+    }
+    return left.end < right.end;
+  });
 
   std::vector<PendingEdit> filtered;
   for (const auto &edit : edits) {
@@ -735,7 +736,7 @@ std::string AbstractFormatter::formatMultilineComment(
     if (!line.empty() && line.back() == '\r') {
       line.remove_suffix(1);
     }
-    normalizedLines.push_back(std::string(strip_comment_line_prefix(line)));
+    normalizedLines.emplace_back(strip_comment_line_prefix(line));
     if (next == std::string_view::npos) {
       break;
     }
@@ -967,10 +968,10 @@ AbstractFormatter::fitActions(std::initializer_list<FormattingAction> actions) {
     combined.options.allowLess =
         combined.options.allowLess || action.options.allowLess;
   }
-  std::sort(combined.moves.begin(), combined.moves.end(),
-            [](const FormattingMove &left, const FormattingMove &right) {
-              return compare_moves(left, right) < 0;
-            });
+  std::ranges::sort(combined.moves, [](const FormattingMove &left,
+                                       const FormattingMove &right) {
+    return compare_moves(left, right) < 0;
+  });
   return combined;
 }
 
@@ -1014,7 +1015,7 @@ void AbstractFormatter::registerHiddenFormatter(std::string_view terminalRuleNam
 }
 
 void AbstractFormatter::formatHidden(HiddenNodeFormatter &hidden) const {
-  const auto it = _hiddenFormatters.find(std::string(hidden.ruleName()));
+  const auto it = _hiddenFormatters.find(hidden.ruleName());
   if (it == _hiddenFormatters.end()) {
     return;
   }

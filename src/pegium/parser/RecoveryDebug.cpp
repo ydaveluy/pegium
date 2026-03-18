@@ -94,7 +94,8 @@ fallback_element_text(const grammar::AbstractElement *element) {
 }
 
 [[nodiscard]] std::string
-join_element_text(std::string separator, std::span<const std::string> parts) {
+join_element_text(const std::string &separator,
+                  std::span<const std::string> parts) {
   if (parts.empty()) {
     return {};
   }
@@ -423,7 +424,7 @@ recovery_attempt_to_json(const RecoveryAttempt &attempt,
       {"status", std::string(recovery_attempt_status_name(attempt.status))},
   };
   if (spec != nullptr) {
-    object.emplace("spec", attempt_spec_to_json(*spec));
+    object.try_emplace("spec", attempt_spec_to_json(*spec));
   }
   return object;
 }

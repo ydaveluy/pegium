@@ -122,7 +122,7 @@ effective_file_operation_options(const FileOperationHandler &handler) {
 } // namespace
 
 void addConfigurationChangeHandler(::lsp::MessageHandler &messageHandler,
-                                   services::SharedServices &sharedServices,
+                                   const services::SharedServices &sharedServices,
                                    std::function<void()> ensureInitialized) {
   messageHandler.add<::lsp::notifications::Workspace_DidChangeConfiguration>(
       [&sharedServices,
@@ -286,7 +286,7 @@ void addDocumentUpdateHandler(::lsp::MessageHandler &messageHandler,
 
 void addFileOperationHandler(::lsp::MessageHandler &messageHandler,
                              FileOperationHandler &fileOperationHandler,
-                             std::function<void()> ensureInitialized) {
+                             const std::function<void()> &ensureInitialized) {
   const auto options = effective_file_operation_options(fileOperationHandler);
 
   if (options.didCreate.has_value()) {

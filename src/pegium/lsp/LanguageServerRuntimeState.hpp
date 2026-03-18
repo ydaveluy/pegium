@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include <pegium/utils/Cancellation.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 #include <pegium/workspace/WorkspaceProtocol.hpp>
 
 namespace pegium::lsp {
@@ -46,7 +47,7 @@ private:
   workspace::InitializeCapabilities _initializeCapabilities;
   std::mutex _requestCancellationMutex;
   std::condition_variable _requestCancellationCv;
-  std::unordered_map<std::string, std::shared_ptr<utils::CancellationTokenSource>>
+  utils::TransparentStringMap<std::shared_ptr<utils::CancellationTokenSource>>
       _requestCancellation;
 };
 

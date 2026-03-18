@@ -59,7 +59,7 @@ template <auto Member>
 static constexpr bool IsMany = MemberTraits<Member>::IsMany;
 
 inline void register_handle(const ValueBuildContext &context,
-                            ReferenceHandle handle) {
+                            const ReferenceHandle &handle) {
   if (context.references != nullptr && handle) {
     context.references->push_back(handle);
   }

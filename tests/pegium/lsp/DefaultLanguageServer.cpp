@@ -280,12 +280,11 @@ public:
       : tokenType(std::move(tokenType)),
         tokenModifier(std::move(tokenModifier)) {}
 
-  std::unordered_map<std::string, std::uint32_t> tokenTypes() const override {
+  StringIndexMap tokenTypes() const override {
     return {{tokenType, 0}};
   }
 
-  std::unordered_map<std::string, std::uint32_t>
-  tokenModifiers() const override {
+  StringIndexMap tokenModifiers() const override {
     return {{tokenModifier, 1}};
   }
 

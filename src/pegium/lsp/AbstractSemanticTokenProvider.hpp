@@ -31,11 +31,9 @@ public:
   explicit AbstractSemanticTokenProvider(
       const services::Services &services);
 
-  [[nodiscard]] std::unordered_map<std::string, std::uint32_t>
-  tokenTypes() const override;
+  [[nodiscard]] StringIndexMap tokenTypes() const override;
 
-  [[nodiscard]] std::unordered_map<std::string, std::uint32_t>
-  tokenModifiers() const override;
+  [[nodiscard]] StringIndexMap tokenModifiers() const override;
 
   [[nodiscard]] ::lsp::SemanticTokensOptions
   semanticTokensOptions() const override;
@@ -98,8 +96,7 @@ private:
   void clearSemanticTokenCache(std::string_view uri) const;
 
   mutable std::mutex _semanticTokenCacheMutex;
-  mutable std::unordered_map<std::string, SemanticTokenCacheEntry>
-      _semanticTokenCache;
+  mutable utils::TransparentStringMap<SemanticTokenCacheEntry> _semanticTokenCache;
   mutable std::uint64_t _nextSemanticTokenResultId = 1;
   utils::ScopedDisposable _textDocumentCloseSubscription;
 };

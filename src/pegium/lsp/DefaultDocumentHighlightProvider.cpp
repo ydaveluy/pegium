@@ -12,6 +12,7 @@
 #include <utility>
 
 #include <pegium/services/SharedServices.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 
 namespace pegium::lsp {
 
@@ -42,7 +43,7 @@ DefaultDocumentHighlightProvider::getDocumentHighlight(
   }
 
   std::vector<::lsp::DocumentHighlight> highlights;
-  std::unordered_set<std::string> seen;
+  utils::TransparentStringSet seen;
 
   if (const auto declaration = references->findDeclarationAt(document, offset);
       declaration.has_value() && declaration->documentId == document.id) {

@@ -32,20 +32,4 @@ std::ostream &operator<<(std::ostream &os, ParseDiagnosticKind kind) {
   return os << parse_diagnostic_kind_name(kind);
 }
 
-std::ostream &operator<<(std::ostream &os,
-                         const ParseDiagnostic &diagnostic) {
-  os << "ParseDiagnostic{kind=" << diagnostic.kind
-     << ", offset=" << diagnostic.offset
-     << ", begin=" << diagnostic.beginOffset
-     << ", end=" << diagnostic.endOffset;
-  if (diagnostic.element != nullptr) {
-    os << ", element=" << *diagnostic.element;
-  }
-  if (!diagnostic.message.empty()) {
-    os << ", message=\"" << diagnostic.message << "\"";
-  }
-  os << "}";
-  return os;
-}
-
 } // namespace pegium::parser

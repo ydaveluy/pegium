@@ -28,7 +28,7 @@ get_document(const services::SharedServices &sharedServices,
 ::lsp::Range offset_to_range(const workspace::Document &document,
                              TextOffset begin, TextOffset end);
 
-void ensure_initialized(LanguageServerHandlerContext &server);
+void ensure_initialized(const LanguageServerHandlerContext &server);
 
 std::optional<::lsp::CodeActionKindEnum>
 to_lsp_code_action_kind(std::string_view kind);
@@ -126,7 +126,7 @@ struct wrap_optional_links {
   GotoLinkKind kind = GotoLinkKind::Definition;
 
   [[nodiscard]] Result
-  operator()(LanguageServerHandlerContext &server,
+  operator()(const LanguageServerHandlerContext &server,
              std::optional<std::vector<::lsp::LocationLink>> links,
              const utils::CancellationToken &cancelToken) const {
     if (!links.has_value()) {
@@ -226,7 +226,7 @@ auto adapt_async_result(LanguageServerHandlerContext &server, T &&value,
 }
 
 template <typename F>
-auto dispatch_async(services::SharedServices &sharedServices, F &&task)
+auto dispatch_async(const services::SharedServices &sharedServices, F &&task)
     -> std::future<std::invoke_result_t<F>> {
   (void)sharedServices;
   return std::async(std::launch::deferred, std::forward<F>(task));
@@ -236,9 +236,10 @@ template <typename Result, typename F>
 auto make_async_request(LanguageServerHandlerContext &owner, F &&handler) {
   using Handler = std::decay_t<F>;
   auto handlerPtr = std::make_shared<Handler>(std::forward<F>(handler));
-  return [&owner, handlerPtr](auto &&params) -> std::future<Result> {
-    using Params = std::decay_t<decltype(params)>;
-    Params ownedParams(std::forward<decltype(params)>(params));
+  return [&owner, handlerPtr]<typename Params>(
+             Params &&params) -> std::future<Result> {
+    using OwnedParams = std::decay_t<Params>;
+    OwnedParams ownedParams(std::forward<Params>(params));
     auto cancellation = std::make_shared<utils::CancellationTokenSource>();
     std::string requestKey;
     try {

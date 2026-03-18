@@ -4,7 +4,7 @@
 #include <cassert>
 #include <cctype>
 #include <cstddef>
-#include <cstdio>
+#include <format>
 #include <functional>
 #include <limits>
 #include <string>
@@ -201,9 +201,7 @@ constexpr std::string escape_char(char c) {
     if (std::isprint(static_cast<unsigned char>(c))) {
       return std::string{c};
     }
-    char buf[5];
-    std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<unsigned char>(c));
-    return buf;
+    return std::format("\\x{:02X}", static_cast<unsigned char>(c));
   }
 }
 

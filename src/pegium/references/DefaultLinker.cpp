@@ -17,14 +17,6 @@ namespace pegium::references {
 
 namespace {
 
-TextOffset ref_offset(const AbstractReference &reference) {
-  const auto refNode = reference.getRefNode();
-  if (refNode.has_value()) {
-    return refNode->getBegin();
-  }
-  return 0;
-}
-
 ReferenceResolution resolved_target(AstNode *target,
                                     const workspace::AstNodeDescription &description) {
   return ReferenceResolution{.node = target,
@@ -133,8 +125,8 @@ DefaultLinker::resolveAll(const AbstractReference &reference) const {
       if (candidate == nullptr) {
         continue;
       }
-      const auto key = make_node_key(*candidate);
-      if (key.has_value() && !seen.insert(*key).second) {
+      if (const auto key = make_node_key(*candidate);
+          key.has_value() && !seen.insert(*key).second) {
         continue;
       }
       auto *target = candidate->node != nullptr
@@ -216,8 +208,8 @@ DefaultLinker::getCandidates(const ReferenceInfo &reference) const {
     if (candidate == nullptr) {
       continue;
     }
-    const auto key = make_node_key(*candidate);
-    if (key.has_value() && !seen.insert(*key).second) {
+    if (const auto key = make_node_key(*candidate);
+        key.has_value() && !seen.insert(*key).second) {
       continue;
     }
     descriptions.push_back(*candidate);
@@ -261,7 +253,7 @@ AstNode *DefaultLinker::loadAstNode(
 }
 
 workspace::LinkingError DefaultLinker::createLinkingError(
-    ReferenceInfo reference, std::string message,
+    const ReferenceInfo &reference, std::string message,
     std::optional<workspace::AstNodeDescription> targetDescription) const {
   return workspace::LinkingError{.info = reference,
                                  .message = std::move(message),

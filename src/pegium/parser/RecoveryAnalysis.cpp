@@ -223,12 +223,13 @@ next_recovery_window_token_count(std::uint32_t currentTokenCount,
     return std::nullopt;
   }
 
-  const auto next = std::min<std::uint32_t>(currentTokenCount * 2u,
-                                            options.maxRecoveryWindowTokenCount);
-  if (next <= currentTokenCount) {
+  if (const auto next = std::min<std::uint32_t>(
+          currentTokenCount * 2u, options.maxRecoveryWindowTokenCount);
+      next <= currentTokenCount) {
     return std::nullopt;
+  } else {
+    return next;
   }
-  return next;
 }
 
 } // namespace pegium::parser::detail

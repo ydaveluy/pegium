@@ -16,6 +16,7 @@
 #include <pegium/services/Services.hpp>
 #include <pegium/syntax-tree/CstNodeView.hpp>
 #include <pegium/utils/Cancellation.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 #include <pegium/workspace/IndexManager.hpp>
 #include <pegium/workspace/TextDocument.hpp>
 
@@ -100,7 +101,7 @@ document_highlight_key(const DocumentHighlightData &highlight);
 
 void collect_folding_ranges(const CstNodeView &node, std::string_view text,
                             std::vector<FoldingRangeData> &ranges,
-                            std::unordered_set<std::string> &seen);
+                            utils::TransparentStringSet &seen);
 
 [[nodiscard]] bool is_link_end_char(char c) noexcept;
 

@@ -110,7 +110,7 @@ void append_json_object(std::string &out, const JsonValue::Object &object,
   for (const auto &[key, _] : object) {
     keys.emplace_back(key);
   }
-  std::sort(keys.begin(), keys.end());
+  std::ranges::sort(keys);
 
   if (!options.pretty) {
     out.push_back('{');
@@ -262,11 +262,6 @@ std::string JsonValue::toJsonString(const SerializationOptions &options) const {
   std::string out;
   append_json_value(out, *this, options, 0);
   return out;
-}
-
-std::ostream &operator<<(std::ostream &os, const JsonValue &value) {
-  os << value.toJsonString();
-  return os;
 }
 
 } // namespace pegium::services

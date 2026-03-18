@@ -8,21 +8,22 @@
 #include <lsp/types.h>
 
 #include <pegium/utils/Cancellation.hpp>
+#include <pegium/utils/TransparentStringHash.hpp>
 #include <pegium/workspace/Document.hpp>
 
 namespace pegium::services {
 
 class SemanticTokenProvider {
 public:
+  using StringIndexMap = utils::TransparentStringMap<std::uint32_t>;
+
   virtual ~SemanticTokenProvider() noexcept = default;
 
-  [[nodiscard]] virtual std::unordered_map<std::string, std::uint32_t>
-  tokenTypes() const {
+  [[nodiscard]] virtual StringIndexMap tokenTypes() const {
     return {};
   }
 
-  [[nodiscard]] virtual std::unordered_map<std::string, std::uint32_t>
-  tokenModifiers() const {
+  [[nodiscard]] virtual StringIndexMap tokenModifiers() const {
     return {};
   }
 
