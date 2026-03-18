@@ -115,7 +115,7 @@ public:
             inFlight->second->request_stop();
           }
 
-          for (auto &queued : _queue) {
+          for (const auto &queued : _queue) {
             if (queued.documentId == task.documentId) {
               queued.cancellation.request_stop();
             }
@@ -148,10 +148,10 @@ private:
       }
       _stopping = true;
 
-      for (auto &task : _queue) {
+      for (const auto &task : _queue) {
         task.cancellation.request_stop();
       }
-      for (auto &[documentId, source] : _inFlightByDocumentId) {
+      for (const auto &[documentId, source] : _inFlightByDocumentId) {
         (void)documentId;
         if (source != nullptr) {
           source->request_stop();
@@ -443,8 +443,9 @@ void DefaultDocumentUpdateHandler::didChangeWatchedFiles(
 }
 
 utils::ScopedDisposable DefaultDocumentUpdateHandler::onWatchedFilesChange(
-    std::function<void(const ::lsp::DidChangeWatchedFilesParams &)> listener) {
-  return _onWatchedFilesChange.on(std::move(listener));
+    const std::function<void(const ::lsp::DidChangeWatchedFilesParams &)>
+        &listener) {
+  return _onWatchedFilesChange.on(listener);
 }
 
 } // namespace pegium::lsp

@@ -27,8 +27,8 @@ public:
   void didChangeWatchedFiles(
       const ::lsp::DidChangeWatchedFilesParams &params) override;
   utils::ScopedDisposable onWatchedFilesChange(
-      std::function<void(const ::lsp::DidChangeWatchedFilesParams &)>
-          listener) override;
+      const std::function<void(const ::lsp::DidChangeWatchedFilesParams &)>
+          &listener) override;
 
 private:
   class Impl;

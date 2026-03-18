@@ -231,8 +231,8 @@ private:
       }
     } else {
       if constexpr (is_optional) {
-        const auto result = try_expect_iteration(ctx, /*skipBefore=*/false);
-        if (result.matched && result.blocked) {
+        if (const auto result = try_expect_iteration(ctx, /*skipBefore=*/false);
+            result.matched && result.blocked) {
           ctx.clearFrontierBlock();
         }
         return true;
