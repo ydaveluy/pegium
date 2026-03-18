@@ -72,8 +72,8 @@ public:
     (void)params;
   }
   virtual utils::ScopedDisposable onWatchedFilesChange(
-      std::function<void(const ::lsp::DidChangeWatchedFilesParams &)>
-          listener) {
+      const std::function<void(const ::lsp::DidChangeWatchedFilesParams &)>
+          &listener) {
     (void)listener;
     return {};
   }

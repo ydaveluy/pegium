@@ -294,11 +294,11 @@ void PegiumParser::parse(workspace::Document &document,
         const auto nextWindowTokenCount =
             detail::next_recovery_window_token_count(windowTokenCount, options);
         if (!nextWindowTokenCount.has_value()) {
-          const auto fullHistoryTokenCount =
-              static_cast<std::uint32_t>(std::min<std::size_t>(
-                  failureSnapshot.failureLeafHistory.size(),
-                  std::numeric_limits<std::uint32_t>::max()));
-          if (!triedFullHistoryWindow && window.beginOffset > 0 &&
+          if (const auto fullHistoryTokenCount =
+                  static_cast<std::uint32_t>(std::min<std::size_t>(
+                      failureSnapshot.failureLeafHistory.size(),
+                      std::numeric_limits<std::uint32_t>::max()));
+              !triedFullHistoryWindow && window.beginOffset > 0 &&
               fullHistoryTokenCount > windowTokenCount) {
             PEGIUM_RECOVERY_TRACE(
                 "[parser window] widen to full-history tokenCount ",
