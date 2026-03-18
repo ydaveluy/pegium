@@ -29,16 +29,17 @@ struct TerminalRecoveryCandidate {
 
 [[nodiscard]] constexpr std::uint8_t
 terminal_recovery_choice_priority(TerminalRecoveryChoiceKind kind) noexcept {
+  using enum TerminalRecoveryChoiceKind;
   switch (kind) {
-  case TerminalRecoveryChoiceKind::WordBoundarySplit:
+  case WordBoundarySplit:
     return 0u;
-  case TerminalRecoveryChoiceKind::Fuzzy:
+  case Fuzzy:
     return 1u;
-  case TerminalRecoveryChoiceKind::InsertHidden:
+  case InsertHidden:
     return 2u;
-  case TerminalRecoveryChoiceKind::DeleteScan:
+  case DeleteScan:
     return 3u;
-  case TerminalRecoveryChoiceKind::None:
+  case None:
     return 4u;
   }
   return 4u;

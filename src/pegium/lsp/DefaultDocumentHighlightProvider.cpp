@@ -49,8 +49,7 @@ DefaultDocumentHighlightProvider::getDocumentHighlight(
     if (declaration->nameLength != 0) {
       DocumentHighlightData key{
           .begin = declaration->offset,
-          .end = static_cast<TextOffset>(declaration->offset +
-                                         declaration->nameLength),
+          .end = declaration->offset + declaration->nameLength,
           .kind = ::lsp::DocumentHighlightKind::Write,
       };
       if (seen.insert(document_highlight_key(key)).second) {
@@ -73,7 +72,7 @@ DefaultDocumentHighlightProvider::getDocumentHighlight(
     }
     DocumentHighlightData key{
         .begin = usage.sourceOffset,
-        .end = static_cast<TextOffset>(usage.sourceOffset + usage.sourceLength),
+        .end = usage.sourceOffset + usage.sourceLength,
         .kind = ::lsp::DocumentHighlightKind::Read,
     };
     if (seen.insert(document_highlight_key(key)).second) {

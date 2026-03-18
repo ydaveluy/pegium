@@ -493,7 +493,8 @@ private:
              "OrderedChoice selected node must have a grammar element");
       OrderedChoiceAssignStatus status = OrderedChoiceAssignStatus::NoSelectable;
       const bool matched = detail::visit_selected_ordered_choice_raw_value(
-          element, selectedGrammarElement, view, context, [&](auto &&rawValue) {
+          element, selectedGrammarElement, view, context,
+          [&astNode, member, &context, &node, &status](auto &&rawValue) {
             status = ConversionSupport::convert_raw_to_target(
                          astNode, member,
                          std::forward<decltype(rawValue)>(rawValue), context,

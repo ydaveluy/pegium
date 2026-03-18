@@ -99,7 +99,7 @@ void collect_feature_assignments(const CstNodeView &node,
 
 services::JsonValue convert_rule_value(const grammar::RuleValue &value) {
   return std::visit(
-      []<typename T>(const T &item) -> services::JsonValue {
+      []<typename T>(const T &item) {
         using Value = std::remove_cvref_t<T>;
         if constexpr (std::same_as<Value, std::nullptr_t>) {
           return services::JsonValue(nullptr);
@@ -138,7 +138,7 @@ services::JsonValue convert_reference(const AbstractReference &reference,
   services::JsonValue::Object object;
 
   if (options.includeReferenceText && !reference.getRefText().empty()) {
-    object.emplace("$refText", reference.getRefText());
+    object.try_emplace("$refText", reference.getRefText());
   }
 
   const auto resolved = reference.resolveAll();
@@ -155,14 +155,14 @@ services::JsonValue convert_reference(const AbstractReference &reference,
   }
 
   if (reference.isMulti()) {
-    object.emplace("$refs", std::move(refs));
+    object.try_emplace("$refs", std::move(refs));
   } else if (!refs.empty()) {
-    object.emplace("$ref", refs.front());
+    object.try_emplace("$ref", std::move(refs.front()));
   }
 
   if (options.includeReferenceErrors && reference.hasError() &&
       !reference.getErrorMessage().empty()) {
-    object.emplace("$error", reference.getErrorMessage());
+    object.try_emplace("$error", reference.getErrorMessage());
   }
 
   return services::JsonValue(std::move(object));
@@ -198,7 +198,7 @@ services::JsonValue AstJsonConverter::convert(const AstNode &node,
                                               const Options &options) {
   services::JsonValue::Object object;
   if (options.includeType) {
-    object.emplace("$type", parser::detail::runtime_type_name(typeid(node)));
+    object.try_emplace("$type", parser::detail::runtime_type_name(typeid(node)));
   }
 
   if (!node.hasCstNode()) {
@@ -221,9 +221,8 @@ services::JsonValue AstJsonConverter::convert(const AstNode &node,
     if (!seenFeatures.insert(feature).second) {
       continue;
     }
-    object.emplace(feature,
-                   convert_feature_value(assignment->getValue(&node), *root,
-                                         options));
+    object.try_emplace(feature, convert_feature_value(assignment->getValue(&node),
+                                                      *root, options));
   }
 
   return services::JsonValue(std::move(object));

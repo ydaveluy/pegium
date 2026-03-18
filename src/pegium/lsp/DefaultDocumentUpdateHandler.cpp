@@ -370,12 +370,14 @@ void DefaultDocumentUpdateHandler::applyDocumentUpdate(
   const auto documentId =
       select_update_document_id(changedDocumentIds, deletedDocumentIds);
   workspace::run_with_workspace_write(
-      sharedServices.workspace.workspaceLock.get(), cancelToken, [&]() {
+      sharedServices.workspace.workspaceLock.get(), cancelToken,
+      [this, documentBuilder, &changedDocumentIds, &deletedDocumentIds,
+       &cancelToken, documentId]() {
         auto originalOptions = documentBuilder->updateBuildOptions();
         auto effectiveOptions = originalOptions;
         const bool hasValidationOverride =
             merge_validation_options_for_document(sharedServices, documentId,
-                                                  effectiveOptions);
+                                                 effectiveOptions);
         if (hasValidationOverride) {
           documentBuilder->updateBuildOptions() = effectiveOptions;
         }
@@ -416,16 +418,16 @@ void DefaultDocumentUpdateHandler::didChangeWatchedFiles(
     }
 
     if (change.type == ::lsp::FileChangeType::Deleted) {
-      const auto documentId = documents->getDocumentId(uri);
-      if (documentId != workspace::InvalidDocumentId &&
+      if (const auto documentId = documents->getDocumentId(uri);
+          documentId != workspace::InvalidDocumentId &&
           seenDeleted.insert(documentId).second) {
         deletedDocumentIds.push_back(documentId);
       }
       continue;
     }
 
-    const auto documentId = documents->getOrCreateDocumentId(uri);
-    if (documentId != workspace::InvalidDocumentId &&
+    if (const auto documentId = documents->getOrCreateDocumentId(uri);
+        documentId != workspace::InvalidDocumentId &&
         !seenDeleted.contains(documentId) &&
         seenChanged.insert(documentId).second) {
       changedDocumentIds.push_back(documentId);

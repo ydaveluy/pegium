@@ -116,7 +116,8 @@ public:
       bool matchedAnyElement = false;
       std::size_t elementIndex = 0;
       std::apply(
-          [&](const auto &...element) {
+          [this, &cursor, &matchedFlags, &elementIndex, &matchedAnyElement](
+              const auto &...element) {
             ((matchedAnyElement |=
               terminal_impl(element, cursor, matchedFlags, elementIndex++)),
              ...);

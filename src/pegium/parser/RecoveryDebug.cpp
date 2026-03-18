@@ -35,12 +35,13 @@ namespace {
 
 [[nodiscard]] std::string
 assignment_operator_text(grammar::AssignmentOperator op) {
+  using enum grammar::AssignmentOperator;
   switch (op) {
-  case grammar::AssignmentOperator::Assign:
+  case Assign:
     return "=";
-  case grammar::AssignmentOperator::Append:
+  case Append:
     return "+=";
-  case grammar::AssignmentOperator::EnableIf:
+  case EnableIf:
     return "?=";
   }
   return "?";
@@ -52,40 +53,41 @@ fallback_element_text(const grammar::AbstractElement *element) {
     return "null";
   }
 
+  using enum grammar::ElementKind;
   switch (element->getKind()) {
-  case grammar::ElementKind::Create:
+  case Create:
     return "create";
-  case grammar::ElementKind::Nest:
+  case Nest:
     return "nest";
-  case grammar::ElementKind::Assignment:
+  case Assignment:
     return "assignment";
-  case grammar::ElementKind::AndPredicate:
+  case AndPredicate:
     return "and-predicate";
-  case grammar::ElementKind::AnyCharacter:
+  case AnyCharacter:
     return "any-character";
-  case grammar::ElementKind::CharacterRange:
+  case CharacterRange:
     return "character-range";
-  case grammar::ElementKind::DataTypeRule:
+  case DataTypeRule:
     return "data-type-rule";
-  case grammar::ElementKind::Group:
+  case Group:
     return "group";
-  case grammar::ElementKind::Literal:
+  case Literal:
     return "literal";
-  case grammar::ElementKind::NotPredicate:
+  case NotPredicate:
     return "not-predicate";
-  case grammar::ElementKind::OrderedChoice:
+  case OrderedChoice:
     return "ordered-choice";
-  case grammar::ElementKind::ParserRule:
+  case ParserRule:
     return "parser-rule";
-  case grammar::ElementKind::Repetition:
+  case Repetition:
     return "repetition";
-  case grammar::ElementKind::TerminalRule:
+  case TerminalRule:
     return "terminal-rule";
-  case grammar::ElementKind::UnorderedGroup:
+  case UnorderedGroup:
     return "unordered-group";
-  case grammar::ElementKind::InfixRule:
+  case InfixRule:
     return "infix-rule";
-  case grammar::ElementKind::InfixOperator:
+  case InfixOperator:
     return "infix-operator";
   }
   return "element";
@@ -149,32 +151,33 @@ element_text_impl(const grammar::AbstractElement *element,
     return fallback_element_text(element);
   }
 
+  using enum grammar::ElementKind;
   switch (element->getKind()) {
-  case grammar::ElementKind::Literal: {
+  case Literal: {
     const auto value = static_cast<const grammar::Literal *>(element)->getValue();
     return value.empty() ? "literal" : "`" + std::string(value) + "`";
   }
-  case grammar::ElementKind::TerminalRule:
-  case grammar::ElementKind::DataTypeRule:
-  case grammar::ElementKind::ParserRule:
-  case grammar::ElementKind::InfixRule:
+  case TerminalRule:
+  case DataTypeRule:
+  case ParserRule:
+  case InfixRule:
     return std::string(
         static_cast<const grammar::AbstractRule *>(element)->getName());
-  case grammar::ElementKind::Assignment: {
+  case Assignment: {
     const auto *assignment = static_cast<const grammar::Assignment *>(element);
     return std::string(assignment->getFeature()) +
            assignment_operator_text(assignment->getOperator()) +
            child_text(assignment->getElement(), visited, depth);
   }
-  case grammar::ElementKind::AndPredicate: {
+  case AndPredicate: {
     const auto *predicate = static_cast<const grammar::AndPredicate *>(element);
     return "&" + child_text(predicate->getElement(), visited, depth);
   }
-  case grammar::ElementKind::NotPredicate: {
+  case NotPredicate: {
     const auto *predicate = static_cast<const grammar::NotPredicate *>(element);
     return "!" + child_text(predicate->getElement(), visited, depth);
   }
-  case grammar::ElementKind::Repetition: {
+  case Repetition: {
     const auto *repetition = static_cast<const grammar::Repetition *>(element);
     const auto child = child_text(repetition->getElement(), visited, depth);
     if (repetition->getMin() == 0 &&
@@ -191,35 +194,35 @@ element_text_impl(const grammar::AbstractElement *element,
     return child + "{" + std::to_string(repetition->getMin()) + "," +
            std::to_string(repetition->getMax()) + "}";
   }
-  case grammar::ElementKind::Group: {
+  case Group: {
     const auto *group = static_cast<const grammar::Group *>(element);
     return sequence_text(
         group->size(), [group](std::size_t index) { return group->get(index); },
         " ", visited, depth, "group");
   }
-  case grammar::ElementKind::OrderedChoice: {
+  case OrderedChoice: {
     const auto *choice = static_cast<const grammar::OrderedChoice *>(element);
     return sequence_text(
         choice->size(),
         [choice](std::size_t index) { return choice->get(index); }, " | ",
         visited, depth, "ordered-choice");
   }
-  case grammar::ElementKind::UnorderedGroup: {
+  case UnorderedGroup: {
     const auto *group = static_cast<const grammar::UnorderedGroup *>(element);
     return sequence_text(
         group->size(), [group](std::size_t index) { return group->get(index); },
         " & ", visited, depth, "unordered-group");
   }
-  case grammar::ElementKind::Create: {
+  case Create: {
     const auto *create = static_cast<const grammar::Create *>(element);
     return "create<" + std::string(create->getTypeName()) + ">";
   }
-  case grammar::ElementKind::Nest: {
+  case Nest: {
     const auto *nest = static_cast<const grammar::Nest *>(element);
     return "nest<" + std::string(nest->getTypeName()) + ">." +
            std::string(nest->getFeature());
   }
-  case grammar::ElementKind::InfixOperator: {
+  case InfixOperator: {
     const auto *operatorElement =
         static_cast<const grammar::InfixOperator *>(element);
     const auto assoc =
@@ -319,16 +322,17 @@ attempt_spec_to_json(const RecoveryAttemptSpec &spec) {
 
 std::string_view
 recovery_attempt_status_name(RecoveryAttemptStatus status) noexcept {
+  using enum RecoveryAttemptStatus;
   switch (status) {
-  case RecoveryAttemptStatus::StrictFailure:
+  case StrictFailure:
     return "StrictFailure";
-  case RecoveryAttemptStatus::RecoveredButNotCredible:
+  case RecoveredButNotCredible:
     return "RecoveredButNotCredible";
-  case RecoveryAttemptStatus::Credible:
+  case Credible:
     return "Credible";
-  case RecoveryAttemptStatus::Stable:
+  case Stable:
     return "Stable";
-  case RecoveryAttemptStatus::Selected:
+  case Selected:
     return "Selected";
   }
   return "Unknown";
@@ -360,11 +364,11 @@ services::JsonValue failure_snapshot_to_json(const FailureSnapshot &snapshot) {
   };
   if (snapshot.hasFailureToken &&
       snapshot.failureTokenIndex < snapshot.failureLeafHistory.size()) {
-    object.emplace(
+    object.try_emplace(
         "failureToken",
         failure_leaf_to_json(snapshot.failureLeafHistory[snapshot.failureTokenIndex]));
   } else {
-    object.emplace("failureToken", nullptr);
+    object.try_emplace("failureToken", nullptr);
   }
   return object;
 }

@@ -15,8 +15,8 @@ DefaultDocumentSymbolProvider::getSymbols(
     const utils::CancellationToken &cancelToken) const {
   (void)params;
   utils::throw_if_cancelled(cancelToken);
-  const auto *nameProvider = languageServices.references.nameProvider.get();
-  if (document.parseResult.value == nullptr || nameProvider == nullptr) {
+  if (const auto *nameProvider = languageServices.references.nameProvider.get();
+      document.parseResult.value == nullptr || nameProvider == nullptr) {
     return {};
   }
   return getSymbolTree(*document.parseResult.value, document, cancelToken);

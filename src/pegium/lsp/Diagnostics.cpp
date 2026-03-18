@@ -26,10 +26,11 @@ constexpr int clamp_to_lsp_integer(std::int64_t value) noexcept {
 }
 
 ::lsp::DiagnosticTag to_lsp_diagnostic_tag(services::DiagnosticTag tag) {
+  using enum services::DiagnosticTag;
   switch (tag) {
-  case services::DiagnosticTag::Unnecessary:
+  case Unnecessary:
     return ::lsp::DiagnosticTag::Unnecessary;
-  case services::DiagnosticTag::Deprecated:
+  case Deprecated:
     return ::lsp::DiagnosticTag::Deprecated;
   }
   return ::lsp::DiagnosticTag::Unnecessary;

@@ -141,7 +141,7 @@ private:
       const std::optional<detail::LiteralFuzzyCandidate> &fuzzyCandidate,
       HasWordBoundaryViolation &&hasWordBoundaryViolation) const {
     LocalRecoveryChoice bestChoice;
-    auto considerChoice = [&](const LocalRecoveryChoice &choice) {
+    auto considerChoice = [&bestChoice](const LocalRecoveryChoice &choice) {
       if (detail::is_better_terminal_recovery_candidate(choice, bestChoice)) {
         bestChoice = choice;
       }
@@ -181,7 +181,8 @@ private:
 
     considerChoice(detail::evaluate_delete_scan_terminal_candidate(
         ctx, cursorStart,
-        [&](const char *scanStart) noexcept -> const char * {
+        [this, &ctx, &hasWordBoundaryViolation](
+            const char *scanStart) noexcept -> const char * {
           const char *const scanEnd = terminal(scanStart);
           if (scanEnd == nullptr ||
               !detail::can_apply_recovery_match(ctx, scanEnd) ||
@@ -190,7 +191,7 @@ private:
           }
           return scanEnd;
         },
-        [&](const char *scanEnd) { ctx.leaf(scanEnd, this); }));
+        [this, &ctx](const char *scanEnd) { ctx.leaf(scanEnd, this); }));
 
     return bestChoice;
   }
@@ -202,8 +203,9 @@ private:
       const std::optional<detail::LiteralFuzzyCandidate> &fuzzyCandidate,
       const char *cursorStart, const char *matchedEnd,
       HasWordBoundaryViolation &&hasWordBoundaryViolation) const {
+    using enum LocalRecoveryChoiceKind;
     switch (choice.kind) {
-    case LocalRecoveryChoiceKind::WordBoundarySplit:
+    case WordBoundarySplit:
       if (matchedEnd != nullptr && hasWordBoundaryViolation(matchedEnd) &&
           detail::apply_insert_hidden_gap_recovery_edit(ctx, matchedEnd,
                                                         this)) {
@@ -215,7 +217,7 @@ private:
         return true;
       }
       return false;
-    case LocalRecoveryChoiceKind::Fuzzy: {
+    case Fuzzy: {
       if (!fuzzyCandidate.has_value()) {
         return false;
       }
@@ -235,7 +237,7 @@ private:
       }
       return false;
     }
-    case LocalRecoveryChoiceKind::InsertHidden:
+    case InsertHidden:
       if constexpr (recover_insertable) {
         if (detail::apply_insert_hidden_recovery_edit(ctx, this)) {
           if constexpr (RecoveryParseModeContext<Context>) {
@@ -246,10 +248,11 @@ private:
         }
       }
       return false;
-    case LocalRecoveryChoiceKind::DeleteScan:
+    case DeleteScan:
       return detail::recover_by_delete_scan(
           ctx,
-          [&](const char *scanStart) noexcept -> const char * {
+          [this, &ctx, &hasWordBoundaryViolation](
+              const char *scanStart) noexcept -> const char * {
             const char *const scanEnd = terminal(scanStart);
             if (scanEnd == nullptr ||
                 !detail::can_apply_recovery_match(ctx, scanEnd) ||
@@ -258,14 +261,14 @@ private:
             }
             return scanEnd;
           },
-          [&](const char *scanEnd) {
+          [this, &ctx](const char *scanEnd) {
             if constexpr (RecoveryParseModeContext<Context>) {
               PEGIUM_RECOVERY_TRACE("[literal rule] delete-scan match '",
                                     getValue(), "' at ", ctx.cursorOffset());
             }
             ctx.leaf(scanEnd, this);
           });
-    case LocalRecoveryChoiceKind::None:
+    case None:
       return false;
     }
     return false;
@@ -287,7 +290,7 @@ private:
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     const char *const cursorStart = ctx.cursor();
     const char *const matchedEnd = terminal(cursorStart);
-    const auto hasWordBoundaryViolation = [&](const char *end) noexcept {
+    const auto hasWordBoundaryViolation = [this](const char *end) noexcept {
       if constexpr (!literal.empty() && isWord(literal.back())) {
         return end != nullptr && isWord(*end);
       } else {

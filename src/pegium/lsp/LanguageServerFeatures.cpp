@@ -47,7 +47,8 @@ Result with_document_provider(services::SharedServices &sharedServices,
                               Invoker invoker) {
   return read_document_request(
       sharedServices, std::move(uri),
-      [&](const workspace::Document &document) -> Result {
+      [&sharedServices, &accessor,
+       &invoker](const workspace::Document &document) -> Result {
         if (sharedServices.serviceRegistry == nullptr) {
           return Result{};
         }
@@ -67,7 +68,7 @@ Result with_item_provider(services::SharedServices &sharedServices,
                           std::string uri, Accessor accessor,
                           Invoker invoker) {
   return read_workspace_request(
-      sharedServices, [&]() -> Result {
+      sharedServices, [&sharedServices, &uri, &accessor, &invoker]() -> Result {
         if (sharedServices.workspace.documents == nullptr ||
             sharedServices.serviceRegistry == nullptr) {
           return Result{};
@@ -96,7 +97,8 @@ getCompletion(services::SharedServices &sharedServices,
   return with_document_provider<std::optional<::lsp::CompletionList>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.completionProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getCompletion(document, params, cancelToken);
       });
 }
@@ -110,7 +112,8 @@ getSignatureHelp(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.signatureHelp.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.provideSignatureHelp(document, params, cancelToken);
       });
 }
@@ -122,7 +125,8 @@ getHoverContent(services::SharedServices &sharedServices,
   return with_document_provider<std::optional<::lsp::Hover>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.hoverProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getHoverContent(document, params, cancelToken);
       });
 }
@@ -134,7 +138,8 @@ getCodeLens(services::SharedServices &sharedServices,
   return with_document_provider<std::vector<::lsp::CodeLens>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.codeLensProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.provideCodeLens(document, params, cancelToken);
       });
 }
@@ -148,7 +153,8 @@ getDocumentSymbols(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.documentSymbolProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getSymbols(document, params, cancelToken);
       });
 }
@@ -162,7 +168,8 @@ getDocumentHighlights(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.documentHighlightProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getDocumentHighlight(document, params, cancelToken);
       });
 }
@@ -176,7 +183,8 @@ getFoldingRanges(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.foldingRangeProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getFoldingRanges(document, params, cancelToken);
       });
 }
@@ -188,7 +196,8 @@ getDeclaration(services::SharedServices &sharedServices,
   return with_document_provider<std::optional<std::vector<::lsp::LocationLink>>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.declarationProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getDeclaration(document, params, cancelToken);
       });
 }
@@ -200,7 +209,8 @@ getDefinition(services::SharedServices &sharedServices,
   return with_document_provider<std::optional<std::vector<::lsp::LocationLink>>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.definitionProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getDefinition(document, params, cancelToken);
       });
 }
@@ -214,7 +224,8 @@ getTypeDefinition(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.typeProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getTypeDefinition(document, params, cancelToken);
       });
 }
@@ -228,7 +239,8 @@ getImplementation(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.implementationProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getImplementation(document, params, cancelToken);
       });
 }
@@ -240,7 +252,8 @@ getReferences(services::SharedServices &sharedServices,
   return with_document_provider<std::vector<::lsp::Location>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.referencesProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.findReferences(document, params, cancelToken);
       });
 }
@@ -252,7 +265,8 @@ rename(services::SharedServices &sharedServices,
   return with_document_provider<std::optional<::lsp::WorkspaceEdit>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.renameProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.rename(document, params, cancelToken);
       });
 }
@@ -266,7 +280,8 @@ formatDocument(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.formatter.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.formatDocument(document, params, cancelToken);
       });
 }
@@ -280,7 +295,8 @@ formatDocumentRange(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.formatter.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.formatDocumentRange(document, params, cancelToken);
       });
 }
@@ -292,7 +308,8 @@ formatDocumentOnType(services::SharedServices &sharedServices,
   return with_document_provider<std::vector<::lsp::TextEdit>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.formatter.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.formatDocumentOnType(document, params, cancelToken);
       });
 }
@@ -304,7 +321,8 @@ getInlayHints(services::SharedServices &sharedServices,
   return with_document_provider<std::vector<::lsp::InlayHint>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.inlayHintProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getInlayHints(document, params, cancelToken);
       });
 }
@@ -318,7 +336,8 @@ getSemanticTokensFull(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.semanticTokenProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.semanticHighlight(document, params, cancelToken);
       });
 }
@@ -332,7 +351,8 @@ getSemanticTokensRange(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.semanticTokenProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.semanticHighlightRange(document, params, cancelToken);
       });
 }
@@ -345,7 +365,8 @@ getSemanticTokensDelta(services::SharedServices &sharedServices,
       std::optional<::lsp::OneOf<::lsp::SemanticTokens, ::lsp::SemanticTokensDelta>>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.semanticTokenProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.semanticHighlightDelta(document, params, cancelToken);
       });
 }
@@ -378,7 +399,8 @@ prepareCallHierarchy(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.callHierarchyProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.prepareCallHierarchy(document, params, cancelToken);
       });
 }
@@ -392,7 +414,7 @@ getIncomingCalls(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.callHierarchyProvider.get();
       },
-      [&](const auto &provider) {
+      [&params, &cancelToken](const auto &provider) {
         return provider.incomingCalls(params, cancelToken);
       });
 }
@@ -406,7 +428,7 @@ getOutgoingCalls(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.callHierarchyProvider.get();
       },
-      [&](const auto &provider) {
+      [&params, &cancelToken](const auto &provider) {
         return provider.outgoingCalls(params, cancelToken);
       });
 }
@@ -420,7 +442,8 @@ prepareTypeHierarchy(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.typeHierarchyProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.prepareTypeHierarchy(document, params, cancelToken);
       });
 }
@@ -434,7 +457,9 @@ getTypeHierarchySupertypes(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.typeHierarchyProvider.get();
       },
-      [&](const auto &provider) { return provider.supertypes(params, cancelToken); });
+      [&params, &cancelToken](const auto &provider) {
+        return provider.supertypes(params, cancelToken);
+      });
 }
 
 std::vector<::lsp::TypeHierarchyItem>
@@ -446,7 +471,9 @@ getTypeHierarchySubtypes(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.typeHierarchyProvider.get();
       },
-      [&](const auto &provider) { return provider.subtypes(params, cancelToken); });
+      [&params, &cancelToken](const auto &provider) {
+        return provider.subtypes(params, cancelToken);
+      });
 }
 
 std::optional<std::vector<::lsp::OneOf<::lsp::Command, ::lsp::CodeAction>>>
@@ -457,7 +484,8 @@ getCodeActions(services::SharedServices &sharedServices,
       std::optional<std::vector<::lsp::OneOf<::lsp::Command, ::lsp::CodeAction>>>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.codeActionProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getCodeActions(document, params, cancelToken);
       });
 }
@@ -471,7 +499,8 @@ getDocumentLinks(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.documentLinkProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getDocumentLinks(document, params, cancelToken);
       });
 }
@@ -485,7 +514,8 @@ getSelectionRanges(services::SharedServices &sharedServices,
       [](const auto &services) {
         return services.lsp.selectionRangeProvider.get();
       },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.getSelectionRanges(document, params, cancelToken);
       });
 }
@@ -497,7 +527,8 @@ prepareRename(services::SharedServices &sharedServices,
   return with_document_provider<std::optional<::lsp::PrepareRenameResult>>(
       sharedServices, params.textDocument.uri.toString(),
       [](const auto &services) { return services.lsp.renameProvider.get(); },
-      [&](const auto &provider, const workspace::Document &document) {
+      [&params, &cancelToken](const auto &provider,
+                              const workspace::Document &document) {
         return provider.prepareRename(document, params, cancelToken);
       });
 }
@@ -507,7 +538,9 @@ getWorkspaceSymbols(services::SharedServices &sharedServices,
                     const ::lsp::WorkspaceSymbolParams &params,
                     const utils::CancellationToken &cancelToken) {
   return read_workspace_request(
-      sharedServices, [&]() -> std::vector<::lsp::WorkspaceSymbol> {
+      sharedServices,
+      [&sharedServices, &params,
+       &cancelToken]() -> std::vector<::lsp::WorkspaceSymbol> {
         if (sharedServices.lsp.workspaceSymbolProvider == nullptr) {
           return {};
         }
@@ -521,7 +554,9 @@ resolveWorkspaceSymbol(services::SharedServices &sharedServices,
                        const ::lsp::WorkspaceSymbol &symbol,
                        const utils::CancellationToken &cancelToken) {
   return read_workspace_request(
-      sharedServices, [&]() -> std::optional<::lsp::WorkspaceSymbol> {
+      sharedServices,
+      [&sharedServices, &symbol,
+       &cancelToken]() -> std::optional<::lsp::WorkspaceSymbol> {
         if (sharedServices.lsp.workspaceSymbolProvider == nullptr ||
             !sharedServices.lsp.workspaceSymbolProvider
                  ->supportsResolveSymbol()) {

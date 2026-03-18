@@ -282,7 +282,8 @@ bool run_phase_parallel_or_inline(
     } else {
       scheduler->parallelFor(
           cancelToken, pendingEntries,
-          [&](execution::TaskScheduler::Scope &scope, std::size_t index) {
+          [&entries, &phase](execution::TaskScheduler::Scope &scope,
+                             std::size_t index) {
             phase(entries[index], scope.cancellationToken());
           });
 
@@ -522,7 +523,8 @@ bool DefaultDocumentBuilder::buildInternal(
   } else if (!contentIndexes.empty()) {
     taskScheduler->parallelFor(
         cancelToken, contentIndexes,
-        [&](execution::TaskScheduler::Scope &scope, std::size_t index) {
+        [&entries, &exportedSymbols](execution::TaskScheduler::Scope &scope,
+                                     std::size_t index) {
           exportedSymbols[index] =
               entries[index].services->references.scopeComputation
                   ->collectExportedSymbols(*entries[index].document,
@@ -619,7 +621,8 @@ bool DefaultDocumentBuilder::buildInternal(
     } else if (!referenceIndexes.empty()) {
       taskScheduler->parallelFor(
           cancelToken, referenceIndexes,
-          [&](execution::TaskScheduler::Scope &scope, std::size_t index) {
+          [&linkEntries, &referenceDescriptions](
+              execution::TaskScheduler::Scope &scope, std::size_t index) {
             if (linkEntries[index].services->workspace
                     .referenceDescriptionProvider == nullptr) {
               return;

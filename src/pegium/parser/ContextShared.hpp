@@ -164,18 +164,19 @@ inline void restore_edit_checkpoint(Context &ctx,
 
 [[nodiscard]] constexpr std::uint32_t
 default_edit_cost(ParseDiagnosticKind kind) noexcept {
+  using enum ParseDiagnosticKind;
   switch (kind) {
-  case ParseDiagnosticKind::Inserted:
+  case Inserted:
     return 1;
-  case ParseDiagnosticKind::Replaced:
+  case Replaced:
     return 2;
-  case ParseDiagnosticKind::Deleted:
+  case Deleted:
     return 4;
-  case ParseDiagnosticKind::Recovered:
+  case Recovered:
     return 8;
-  case ParseDiagnosticKind::Incomplete:
+  case Incomplete:
     return 16;
-  case ParseDiagnosticKind::ConversionError:
+  case ConversionError:
     return 0;
   }
   return 16;

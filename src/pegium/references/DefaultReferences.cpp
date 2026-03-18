@@ -109,7 +109,8 @@ declaration_at_named_node_offset(const workspace::Document &document,
   const AstNode *selected = nullptr;
   TextOffset selectedSpan = std::numeric_limits<TextOffset>::max();
 
-  const auto consider = [&](const AstNode &node) {
+  const auto consider =
+      [&nameProvider, offset, &selected, &selectedSpan](const AstNode &node) {
     const auto nameNode = nameProvider->getNameNode(node);
     if (!nameNode.valid()) {
       return;
@@ -123,7 +124,7 @@ declaration_at_named_node_offset(const workspace::Document &document,
       selected = &node;
       selectedSpan = span;
     }
-  };
+      };
 
   consider(*root);
   for (const auto *node : root->getAllContent()) {

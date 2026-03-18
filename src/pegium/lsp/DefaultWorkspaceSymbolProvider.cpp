@@ -35,8 +35,8 @@ symbol_location(const services::SharedServices &sharedServices,
   ::lsp::Location location{};
   location.uri = ::lsp::Uri::parse(document->uri);
   location.range.start = document->offsetToPosition(entry.offset);
-  location.range.end = document->offsetToPosition(
-      static_cast<TextOffset>(entry.offset + entry.nameLength));
+  location.range.end =
+      document->offsetToPosition(entry.offset + entry.nameLength);
   return location;
 }
 

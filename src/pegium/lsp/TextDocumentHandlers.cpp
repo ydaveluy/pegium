@@ -41,12 +41,13 @@ std::vector<workspace::TextDocumentContentChange> to_text_document_changes(
 
 workspace::TextDocumentSaveReason
 to_text_document_save_reason(const ::lsp::TextDocumentSaveReasonEnum &reason) {
+  using enum ::lsp::TextDocumentSaveReason;
   switch (static_cast<::lsp::TextDocumentSaveReason>(reason)) {
-  case ::lsp::TextDocumentSaveReason::AfterDelay:
+  case AfterDelay:
     return workspace::TextDocumentSaveReason::AfterDelay;
-  case ::lsp::TextDocumentSaveReason::FocusOut:
+  case FocusOut:
     return workspace::TextDocumentSaveReason::FocusOut;
-  case ::lsp::TextDocumentSaveReason::Manual:
+  case Manual:
   default:
     return workspace::TextDocumentSaveReason::Manual;
   }
@@ -74,7 +75,7 @@ void addTextDocumentHandlers(::lsp::MessageHandler &messageHandler,
       });
 
   messageHandler.add<::lsp::notifications::TextDocument_DidChange>(
-      [&documents](::lsp::DidChangeTextDocumentParams &&params) {
+      [&documents](const ::lsp::DidChangeTextDocumentParams &params) {
         (void)documents.applyContentChanges(
             params.textDocument.uri.toString(),
             to_text_document_changes(params.contentChanges),
@@ -82,7 +83,7 @@ void addTextDocumentHandlers(::lsp::MessageHandler &messageHandler,
       });
 
   messageHandler.add<::lsp::notifications::TextDocument_DidSave>(
-      [&documents](::lsp::DidSaveTextDocumentParams &&params) {
+      [&documents](const ::lsp::DidSaveTextDocumentParams &params) {
         (void)documents.save(params.textDocument.uri.toString(),
                              params.text ? std::optional<std::string>(
                                                std::string(*params.text))
@@ -90,13 +91,13 @@ void addTextDocumentHandlers(::lsp::MessageHandler &messageHandler,
       });
 
   messageHandler.add<::lsp::notifications::TextDocument_DidClose>(
-      [&documents](::lsp::DidCloseTextDocumentParams &&params) {
+      [&documents](const ::lsp::DidCloseTextDocumentParams &params) {
         (void)documents.close(params.textDocument.uri.toString());
       });
 
   messageHandler.add<::lsp::notifications::TextDocument_WillSave>(
       [&documents, ensureInitialized = ensureInitialized](
-          ::lsp::WillSaveTextDocumentParams &&params) {
+          const ::lsp::WillSaveTextDocumentParams &params) {
         if (ensureInitialized) {
           ensureInitialized();
         }
@@ -106,7 +107,7 @@ void addTextDocumentHandlers(::lsp::MessageHandler &messageHandler,
 
   messageHandler.add<::lsp::requests::TextDocument_WillSaveWaitUntil>(
       [&documents, ensureInitialized = std::move(ensureInitialized)](
-          ::lsp::WillSaveTextDocumentParams &&params) {
+          const ::lsp::WillSaveTextDocumentParams &params) {
         if (ensureInitialized) {
           ensureInitialized();
         }

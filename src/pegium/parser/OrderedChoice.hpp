@@ -232,7 +232,7 @@ private:
   }
 
   bool run_delete_retry_choice(RecoveryContext &ctx) const {
-    return detail::recover_by_delete_retry(ctx, [&]() {
+    return detail::recover_by_delete_retry(ctx, [this, &ctx]() {
       ctx.skip();
       if (!match_choice(ctx)) {
         return false;
@@ -253,13 +253,14 @@ private:
 
     const auto editableCandidate = detail::evaluate_editable_recovery_candidate(
         ctx, entryCheckpoint, baseEditCost, baseEditCount, baseRecoveryEditCount,
-        [&]() { return match_choice(ctx); });
+        [this, &ctx]() { return match_choice(ctx); });
 
     EditableRecoveryCandidate deleteRetryCandidate;
     if (ctx.isInRecoveryPhase()) {
       deleteRetryCandidate = detail::evaluate_editable_recovery_candidate(
           ctx, entryCheckpoint, baseEditCost, baseEditCount,
-          baseRecoveryEditCount, [&]() { return run_delete_retry_choice(ctx); });
+          baseRecoveryEditCount,
+          [this, &ctx]() { return run_delete_retry_choice(ctx); });
     }
 
     detail::stepTraceInc(detail::StepCounter::ChoiceEditablePasses);

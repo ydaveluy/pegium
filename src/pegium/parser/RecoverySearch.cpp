@@ -94,43 +94,46 @@ RecoveryAttempt run_recovery_attempt(const grammar::ParserRule &entryRule,
 }
 
 void classify_recovery_attempt(RecoveryAttempt &attempt) noexcept {
+  using enum RecoveryAttemptStatus;
   if (!attempt.entryRuleMatched) {
-    attempt.status = RecoveryAttemptStatus::StrictFailure;
+    attempt.status = StrictFailure;
     return;
   }
 
   if (attempt.fullMatch || attempt.stableAfterRecovery) {
-    attempt.status = RecoveryAttemptStatus::Stable;
+    attempt.status = Stable;
   } else if (attempt.reachedRecoveryTarget) {
-    attempt.status = RecoveryAttemptStatus::Credible;
+    attempt.status = Credible;
   } else if (attempt.completedRecoveryWindows > 0 ||
              !attempt.parseDiagnostics.empty()) {
-    attempt.status = RecoveryAttemptStatus::RecoveredButNotCredible;
+    attempt.status = RecoveredButNotCredible;
   } else {
-    attempt.status = RecoveryAttemptStatus::StrictFailure;
+    attempt.status = StrictFailure;
   }
 }
 
 void score_recovery_attempt(RecoveryAttempt &attempt) noexcept {
+  using enum ParseDiagnosticKind;
+  using enum RecoveryAttemptStatus;
   attempt.editTrace.diagnosticCount = attempt.parseDiagnostics.size();
   attempt.editTrace.editCount = attempt.editCount;
   attempt.editTrace.editCost = attempt.editCost;
   for (const auto &diagnostic : attempt.parseDiagnostics) {
     switch (diagnostic.kind) {
-    case ParseDiagnosticKind::Inserted:
+    case Inserted:
       ++attempt.editTrace.insertCount;
       ++attempt.editTrace.tokenInsertCount;
       break;
-    case ParseDiagnosticKind::Deleted:
+    case Deleted:
       ++attempt.editTrace.deleteCount;
       ++attempt.editTrace.codepointDeleteCount;
       break;
-    case ParseDiagnosticKind::Replaced:
+    case Replaced:
       ++attempt.editTrace.replaceCount;
       break;
-    case ParseDiagnosticKind::Incomplete:
-    case ParseDiagnosticKind::Recovered:
-    case ParseDiagnosticKind::ConversionError:
+    case Incomplete:
+    case Recovered:
+    case ConversionError:
       break;
     }
   }
@@ -148,9 +151,8 @@ void score_recovery_attempt(RecoveryAttempt &attempt) noexcept {
 
   attempt.score = {
       .entryRuleMatched = attempt.entryRuleMatched,
-      .stable = attempt.status == RecoveryAttemptStatus::Stable,
-      .credible = attempt.status == RecoveryAttemptStatus::Credible ||
-                  attempt.status == RecoveryAttemptStatus::Stable,
+      .stable = attempt.status == Stable,
+      .credible = attempt.status == Credible || attempt.status == Stable,
       .editCost = attempt.editCost,
       .fullMatch = attempt.fullMatch,
       .editSpan = attempt.editTrace.editSpan,
@@ -163,8 +165,8 @@ void score_recovery_attempt(RecoveryAttempt &attempt) noexcept {
 }
 
 bool is_selectable_recovery_attempt(const RecoveryAttempt &attempt) noexcept {
-  return attempt.status == RecoveryAttemptStatus::Credible ||
-         attempt.status == RecoveryAttemptStatus::Stable;
+  using enum RecoveryAttemptStatus;
+  return attempt.status == Credible || attempt.status == Stable;
 }
 
 bool is_better_recovery_attempt(const RecoveryAttempt &lhs,

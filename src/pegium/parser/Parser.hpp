@@ -200,11 +200,12 @@ struct ExpectPath {
 private:
   [[nodiscard]] static constexpr bool
   isRuleElementKind(grammar::ElementKind kind) noexcept {
+    using enum grammar::ElementKind;
     switch (kind) {
-    case grammar::ElementKind::DataTypeRule:
-    case grammar::ElementKind::ParserRule:
-    case grammar::ElementKind::TerminalRule:
-    case grammar::ElementKind::InfixRule:
+    case DataTypeRule:
+    case ParserRule:
+    case TerminalRule:
+    case InfixRule:
       return true;
     default:
       return false;

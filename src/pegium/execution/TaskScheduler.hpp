@@ -245,7 +245,7 @@ private:
 template <typename Range, typename F>
 void TaskScheduler::parallelFor(const utils::CancellationToken &cancelToken,
                                 Range &&range, F &&task) {
-  scope(cancelToken, [&](Scope &scope) {
+  scope(cancelToken, [&range, &task](Scope &scope) {
     scope.parallelFor(std::forward<Range>(range), std::forward<F>(task));
   });
 }

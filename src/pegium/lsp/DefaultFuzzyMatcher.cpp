@@ -38,9 +38,9 @@ bool DefaultFuzzyMatcher::match(std::string_view query,
   for (const auto currentChar : text) {
     const auto current =
         static_cast<unsigned char>(currentChar);
-    const auto expected =
-        static_cast<unsigned char>(query[character]);
-    if (current == expected || to_upper(current) == to_upper(expected)) {
+    if (const auto expected =
+            static_cast<unsigned char>(query[character]);
+        current == expected || to_upper(current) == to_upper(expected)) {
       matchedFirstCharacter = matchedFirstCharacter ||
                               !previous.has_value() ||
                               is_word_transition(*previous, current);

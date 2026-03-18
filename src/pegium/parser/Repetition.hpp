@@ -152,7 +152,8 @@ private:
       }
     } else if constexpr (RecoveryParseModeContext<Context>) {
       detail::stepTraceInc(detail::StepCounter::RepetitionRecoverCalls);
-      auto try_insertable_recovery_iteration = [&](bool skipBetweenIterations) {
+      auto try_insertable_recovery_iteration =
+          [this, &ctx](bool skipBetweenIterations) {
         return try_recovery_iteration(ctx, skipBetweenIterations);
       };
       if constexpr (is_optional) {

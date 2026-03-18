@@ -303,8 +303,8 @@ private:
   public:
     explicit Model(const grammar::InfixRule *owner, Element &&elem,
                    Operators &&...opsIn)
-        : _owner(owner), primary(std::forward<Element>(elem)),
-          ops(OperatorCatalog::make_ops(std::forward<Operators>(opsIn)...)) {}
+        : _owner(owner), primary(detail::move_if_owned<Element>(elem)),
+          ops(OperatorCatalog::make_ops(detail::move_if_owned<Operators>(opsIn)...)) {}
 
     static std::unique_ptr<AstNode>
     getValue(const void *self, const CstNodeView &node,

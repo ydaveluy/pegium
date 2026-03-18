@@ -15,12 +15,13 @@ namespace pegium::converter {
 namespace {
 
 std::string assignment_operator_source(grammar::AssignmentOperator op) {
+  using enum grammar::AssignmentOperator;
   switch (op) {
-  case grammar::AssignmentOperator::Assign:
+  case Assign:
     return "=";
-  case grammar::AssignmentOperator::Append:
+  case Append:
     return "+=";
-  case grammar::AssignmentOperator::EnableIf:
+  case EnableIf:
     return "?=";
   }
   return "=";
@@ -41,21 +42,22 @@ std::string ordered_choice_source(const grammar::OrderedChoice &choice) {
 }
 
 std::string element_source(const grammar::AbstractElement &element) {
+  using enum grammar::ElementKind;
   switch (element.getKind()) {
-  case grammar::ElementKind::DataTypeRule:
-  case grammar::ElementKind::ParserRule:
-  case grammar::ElementKind::TerminalRule:
+  case DataTypeRule:
+  case ParserRule:
+  case TerminalRule:
     return std::string(
         static_cast<const grammar::AbstractRule &>(element).getName());
-  case grammar::ElementKind::Literal: {
+  case Literal: {
     std::ostringstream stream;
     stream << static_cast<const grammar::Literal &>(element);
     return stream.str();
   }
-  case grammar::ElementKind::OrderedChoice:
+  case OrderedChoice:
     return ordered_choice_source(
         static_cast<const grammar::OrderedChoice &>(element));
-  case grammar::ElementKind::Create:
+  case Create:
     return std::string(static_cast<const grammar::Create &>(element).getTypeName());
   default: {
     std::ostringstream stream;
@@ -73,47 +75,48 @@ std::string assignment_source(const grammar::Assignment &assignment) {
 
 std::string grammar_source(const grammar::AbstractElement *grammarElement) {
   assert(grammarElement && "Every CstNode must reference a grammar element");
+  using enum grammar::ElementKind;
   switch (grammarElement->getKind()) {
-  case grammar::ElementKind::Create: {
+  case Create: {
     const auto &create = static_cast<const grammar::Create &>(*grammarElement);
     return "Create(" + std::string(create.getTypeName()) + ")";
   }
-  case grammar::ElementKind::Nest: {
+  case Nest: {
     const auto &nest = static_cast<const grammar::Nest &>(*grammarElement);
     return "Nest(" + std::string(nest.getFeature()) + ")";
   }
-  case grammar::ElementKind::Assignment: {
+  case Assignment: {
     const auto &assignment =
         static_cast<const grammar::Assignment &>(*grammarElement);
     return assignment_source(assignment);
   }
-  case grammar::ElementKind::DataTypeRule:
-  case grammar::ElementKind::ParserRule:
-  case grammar::ElementKind::TerminalRule: {
+  case DataTypeRule:
+  case ParserRule:
+  case TerminalRule: {
     const auto &rule = static_cast<const grammar::AbstractRule &>(*grammarElement);
     return "Rule(" + std::string(rule.getName()) + ")";
   }
-  case grammar::ElementKind::AndPredicate:
+  case AndPredicate:
     return "AndPredicate";
-  case grammar::ElementKind::AnyCharacter:
+  case AnyCharacter:
     return "AnyCharacter";
-  case grammar::ElementKind::CharacterRange:
+  case CharacterRange:
     return "CharacterRange";
-  case grammar::ElementKind::Group:
+  case Group:
     return "Group";
-  case grammar::ElementKind::Literal:
+  case Literal:
     return "Literal";
-  case grammar::ElementKind::NotPredicate:
+  case NotPredicate:
     return "NotPredicate";
-  case grammar::ElementKind::OrderedChoice:
+  case OrderedChoice:
     return "OrderedChoice";
-  case grammar::ElementKind::Repetition:
+  case Repetition:
     return "Repetition";
-  case grammar::ElementKind::UnorderedGroup:
+  case UnorderedGroup:
     return "UnorderedGroup";
-  case grammar::ElementKind::InfixRule:
+  case InfixRule:
     return "InfixRule";
-  case grammar::ElementKind::InfixOperator:
+  case InfixOperator:
     return "InfixOperator";
   }
   return "Unknown";
@@ -133,23 +136,23 @@ services::JsonValue::Array convert_children(const CstNodeView &node,
 services::JsonValue
 CstJsonConverter::convert(const CstNodeView &node, const Options &options) {
   services::JsonValue::Object object;
-  object.emplace("begin", static_cast<std::int64_t>(node.getBegin()));
-  object.emplace("end", static_cast<std::int64_t>(node.getEnd()));
+  object.try_emplace("begin", static_cast<std::int64_t>(node.getBegin()));
+  object.try_emplace("end", static_cast<std::int64_t>(node.getEnd()));
 
   if (options.includeText && node.isLeaf()) {
-    object.emplace("text", std::string(node.getText()));
+    object.try_emplace("text", std::string(node.getText()));
   }
   if (options.includeGrammarSource) {
-    object.emplace("grammarSource", grammar_source(node.getGrammarElement()));
+    object.try_emplace("grammarSource", grammar_source(node.getGrammarElement()));
   }
   if (options.includeHidden && node.isHidden()) {
-    object.emplace("hidden", true);
+    object.try_emplace("hidden", true);
   }
   if (options.includeRecovered && node.isRecovered()) {
-    object.emplace("recovered", true);
+    object.try_emplace("recovered", true);
   }
   if (!node.isLeaf()) {
-    object.emplace("content", convert_children(node, options));
+    object.try_emplace("content", convert_children(node, options));
   }
 
   return services::JsonValue(std::move(object));
@@ -162,7 +165,7 @@ CstJsonConverter::convert(const RootCstNode &root, const Options &options) {
   for (const auto &child : root) {
     content.emplace_back(convert(child, options));
   }
-  object.emplace("content", std::move(content));
+  object.try_emplace("content", std::move(content));
 
   return services::JsonValue(std::move(object));
 }

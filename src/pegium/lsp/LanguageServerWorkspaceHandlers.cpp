@@ -23,9 +23,8 @@ void addLanguageServerWorkspaceHandlers(
     handler.add<::lsp::requests::Workspace_ExecuteCommand>(
         make_async_request<::lsp::Workspace_ExecuteCommandResult>(
             server,
-            [&server, &sharedServices](::lsp::ExecuteCommandParams &&params,
-                                       const utils::CancellationToken &cancelToken)
-                -> std::future<::lsp::Workspace_ExecuteCommandResult> {
+            [&server, &sharedServices](const ::lsp::ExecuteCommandParams &params,
+                                       const utils::CancellationToken &cancelToken) {
               ensure_initialized(server);
               static const ::lsp::LSPArray emptyArguments{};
               const auto &arguments = params.arguments.has_value()
@@ -57,8 +56,7 @@ void addLanguageServerWorkspaceHandlers(
             server,
             [&server, &sharedServices,
              workspaceSymbolRequirement](::lsp::WorkspaceSymbol &&symbol,
-                                         const utils::CancellationToken &cancelToken)
-                -> std::future<::lsp::WorkspaceSymbol> {
+                                         const utils::CancellationToken &cancelToken) {
               ensure_initialized(server);
               wait_until_phase(sharedServices, cancelToken, std::nullopt,
                                workspaceSymbolRequirement);

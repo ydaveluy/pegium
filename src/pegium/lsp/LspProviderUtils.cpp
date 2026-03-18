@@ -110,50 +110,50 @@ std::string grammar_label(const grammar::AbstractElement *element) {
   if (element == nullptr) {
     return {};
   }
+  using enum grammar::ElementKind;
   switch (element->getKind()) {
-  case grammar::ElementKind::ParserRule:
-  case grammar::ElementKind::DataTypeRule:
-  case grammar::ElementKind::TerminalRule:
-  case grammar::ElementKind::InfixRule: {
+  case ParserRule:
+  case DataTypeRule:
+  case TerminalRule:
+  case InfixRule: {
     const auto *rule = static_cast<const grammar::AbstractRule *>(element);
-    const auto name = rule->getName();
-    if (!name.empty()) {
+    if (const auto name = rule->getName(); !name.empty()) {
       return std::string(name);
     }
     return std::string(rule->getTypeName());
   }
-  case grammar::ElementKind::Literal:
+  case Literal:
     return std::string(
         static_cast<const grammar::Literal *>(element)->getValue());
-  case grammar::ElementKind::Assignment: {
+  case Assignment: {
     const auto *assignment = static_cast<const grammar::Assignment *>(element);
     return "assign " + std::string(assignment->getFeature());
   }
-  case grammar::ElementKind::Create:
+  case Create:
     return "create " +
            std::string(static_cast<const grammar::Create *>(element)
                            ->getTypeName());
-  case grammar::ElementKind::Nest:
+  case Nest:
     return "nest " + std::string(
                         static_cast<const grammar::Nest *>(element)
                             ->getFeature());
-  case grammar::ElementKind::Group:
+  case Group:
     return "group";
-  case grammar::ElementKind::OrderedChoice:
+  case OrderedChoice:
     return "ordered-choice";
-  case grammar::ElementKind::UnorderedGroup:
+  case UnorderedGroup:
     return "unordered-group";
-  case grammar::ElementKind::Repetition:
+  case Repetition:
     return "repetition";
-  case grammar::ElementKind::CharacterRange:
+  case CharacterRange:
     return "character-range";
-  case grammar::ElementKind::AnyCharacter:
+  case AnyCharacter:
     return "any-character";
-  case grammar::ElementKind::AndPredicate:
+  case AndPredicate:
     return "and-predicate";
-  case grammar::ElementKind::NotPredicate:
+  case NotPredicate:
     return "not-predicate";
-  case grammar::ElementKind::InfixOperator:
+  case InfixOperator:
     return "infix-operator";
   }
   return "grammar-element";
@@ -175,14 +175,13 @@ LocationData to_location(const workspace::AstNodeDescription &symbol) {
   const auto nameLength = symbol.nameLength;
   return {.documentId = symbol.documentId,
           .begin = symbol.offset,
-          .end = static_cast<TextOffset>(symbol.offset + nameLength)};
+          .end = symbol.offset + nameLength};
 }
 
 LocationData to_location(const workspace::ReferenceDescription &reference) {
   return {.documentId = reference.sourceDocumentId,
           .begin = reference.sourceOffset,
-          .end = static_cast<TextOffset>(reference.sourceOffset +
-                                         reference.sourceLength)};
+          .end = reference.sourceOffset + reference.sourceLength};
 }
 
 std::optional<LocationData> resolve_reference_target_location(
@@ -395,8 +394,7 @@ bool is_link_end_char(char c) noexcept {
 ::lsp::SelectionRange compute_selection_range(const workspace::Document &document,
                                               TextOffset offset) {
   std::vector<SelectionRangeSegment> chain;
-  const auto token = token_at(document.text(), offset);
-  if (!token.text.empty()) {
+  if (const auto token = token_at(document.text(), offset); !token.text.empty()) {
     append_if_distinct(chain, {.begin = token.begin, .end = token.end});
   }
 
@@ -436,8 +434,8 @@ bool is_link_end_char(char c) noexcept {
 bool has_symbol_or_reference(std::string_view token,
                              const workspace::IndexManager &index,
                              const workspace::Documents *documents) {
-  for (const auto &description : index.findElementsByName(token)) {
-    (void)description;
+  auto symbols = index.findElementsByName(token);
+  if (symbols.begin() != symbols.end()) {
     return true;
   }
 

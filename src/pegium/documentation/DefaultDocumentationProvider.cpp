@@ -63,14 +63,15 @@ std::string normalize_jsdoc_line(std::string_view line) {
 
 std::vector<std::string> split_jsdoc_lines(std::string_view comment) {
   const auto body = strip_jsdoc_delimiters(comment);
+  const auto bodyView = std::string_view(body);
   std::vector<std::string> lines;
   std::size_t begin = 0;
-  while (begin <= body.size()) {
-    const auto end = body.find('\n', begin);
+  while (begin <= bodyView.size()) {
+    const auto end = bodyView.find('\n', begin);
     const auto slice =
         end == std::string::npos
-            ? std::string_view(body).substr(begin)
-            : std::string_view(body).substr(begin, end - begin);
+            ? bodyView.substr(begin)
+            : bodyView.substr(begin, end - begin);
     auto normalized = normalize_jsdoc_line(slice);
     lines.push_back(std::move(normalized));
     if (end == std::string::npos) {
@@ -81,7 +82,7 @@ std::vector<std::string> split_jsdoc_lines(std::string_view comment) {
   return lines;
 }
 
-std::string render_jsdoc_markdown(std::vector<std::string> lines) {
+std::string render_jsdoc_markdown(const std::vector<std::string> &lines) {
   std::string markdown;
   for (const auto &line : lines) {
     if (!markdown.empty()) {
@@ -122,7 +123,7 @@ std::optional<std::string> DefaultDocumentationProvider::getDocumentation(
       line = documentationTagRenderer(node, line).value_or("- `" + line + "`");
     }
   }
-  return render_jsdoc_markdown(std::move(lines));
+  return render_jsdoc_markdown(lines);
 }
 
 std::optional<std::string>
@@ -184,17 +185,18 @@ DefaultDocumentationProvider::normalizeJsdocLinks(const AstNode &node,
       continue;
     }
 
+    const auto payloadView = std::string_view(payload);
     std::string target;
     std::string display;
-    if (const auto pipe = payload.find('|'); pipe != std::string::npos) {
-      target = trim(payload.substr(0, pipe));
-      display = trim(payload.substr(pipe + 1));
-    } else if (const auto separator = payload.find_first_of(" \t");
+    if (const auto pipe = payloadView.find('|'); pipe != std::string::npos) {
+      target = trim(payloadView.substr(0, pipe));
+      display = trim(payloadView.substr(pipe + 1));
+    } else if (const auto separator = payloadView.find_first_of(" \t");
                separator != std::string::npos) {
-      target = trim(payload.substr(0, separator));
-      display = trim(payload.substr(separator + 1));
+      target = trim(payloadView.substr(0, separator));
+      display = trim(payloadView.substr(separator + 1));
     } else {
-      target = trim(payload);
+      target = trim(payloadView);
     }
 
     if (display.empty()) {

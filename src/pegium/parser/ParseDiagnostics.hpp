@@ -25,7 +25,7 @@ inline void ensure_parse_diagnostic(std::vector<ParseDiagnostic> &diagnostics,
                                    TextOffset parsedLength,
                                    TextOffset failureVisibleCursorOffset,
                                    bool fullMatch) {
-  const auto hasSyntaxDiagnostic = [&]() {
+  const auto hasSyntaxDiagnostic = [&diagnostics]() {
     for (const auto &diagnostic : diagnostics) {
       if (diagnostic.isSyntax()) {
         return true;
@@ -58,7 +58,6 @@ inline void ensure_parse_diagnostic(std::vector<ParseDiagnostic> &diagnostics,
                            .element = nullptr,
                            .message = {}});
   }
-
 }
 
 } // namespace pegium::parser::detail

@@ -33,19 +33,19 @@ void addLanguageServerLifecycleHandlers(LanguageServerHandlerContext &server,
                                         ::lsp::MessageHandler &handler,
                                         services::SharedServices &sharedServices) {
   handler.add<::lsp::notifications::CancelRequest>(
-      [&server](::lsp::CancelParams &&params) {
+      [&server](const ::lsp::CancelParams &params) {
         server.cancelRequestByKey(request_key_from_cancel_id(params.id));
       });
 
   handler.add<::lsp::requests::Initialize>(
-      [&server](::lsp::InitializeParams &&params) -> ::lsp::InitializeResult {
+      [&server](const ::lsp::InitializeParams &params) {
         auto result = server.initialize(params);
         server.setInitialized(true);
         return result;
       });
 
   handler.add<::lsp::notifications::Initialized>(
-      [&server, &handler, &sharedServices](::lsp::InitializedParams &&params) {
+      [&server, &handler, &sharedServices](const ::lsp::InitializedParams &params) {
         server.initialized(params);
         const auto initializedParams =
             make_workspace_initialized_params(&handler);
@@ -73,7 +73,7 @@ void addLanguageServerLifecycleHandlers(LanguageServerHandlerContext &server,
       });
 
   handler.add<::lsp::requests::Shutdown>(
-      [&server]() -> ::lsp::ShutdownResult {
+      [&server]() {
         server.setShutdownRequested(true);
         return nullptr;
       });

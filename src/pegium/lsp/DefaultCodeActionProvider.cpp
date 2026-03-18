@@ -142,8 +142,9 @@ DefaultCodeActionProvider::extractDefaultCodeActions(
 std::optional<::lsp::CodeAction> DefaultCodeActionProvider::makeDefaultCodeAction(
     const workspace::Document &document, const ::lsp::Diagnostic &diagnostic,
     const DefaultCodeActionEdit &edit) {
-  const auto textSize = static_cast<std::uint32_t>(document.text().size());
-  if (edit.kind != "quickfix" || edit.begin > edit.end || edit.end > textSize) {
+  if (const auto textSize = static_cast<std::uint32_t>(document.text().size());
+      edit.kind != "quickfix" || edit.begin > edit.end ||
+      edit.end > textSize) {
     return std::nullopt;
   }
 

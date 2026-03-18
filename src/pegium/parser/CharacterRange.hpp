@@ -114,10 +114,10 @@ private:
       }
       return detail::apply_delete_scan_terminal_candidate(
           ctx,
-          [&](const char *scanCursor) noexcept -> const char * {
+          [this](const char *scanCursor) noexcept {
             return matches(scanCursor) ? scanCursor + 1 : nullptr;
           },
-          [&](const char *matchedEnd) { ctx.leaf(matchedEnd, this); });
+          [this, &ctx](const char *matchedEnd) { ctx.leaf(matchedEnd, this); });
     } else {
       if (ctx.reachedAnchor()) {
         return false;
@@ -131,14 +131,14 @@ private:
       }
       return detail::apply_delete_scan_terminal_candidate(
           ctx,
-          [&](const char *scanCursor) noexcept -> const char * {
+          [this, &ctx](const char *scanCursor) noexcept -> const char * {
             const auto *matchedEnd =
                 matches(scanCursor) ? scanCursor + 1 : nullptr;
             return detail::can_apply_recovery_match(ctx, matchedEnd)
                        ? matchedEnd
                        : nullptr;
           },
-          [&](const char *matchedEnd) { ctx.leaf(matchedEnd, this); });
+          [this, &ctx](const char *matchedEnd) { ctx.leaf(matchedEnd, this); });
     }
   }
 

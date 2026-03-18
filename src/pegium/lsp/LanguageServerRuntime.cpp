@@ -73,12 +73,13 @@ published_document_version(const std::shared_ptr<workspace::Document> &document)
 
 ::lsp::TextDocumentSaveReason
 to_lsp_save_reason(workspace::TextDocumentSaveReason reason) {
+  using enum workspace::TextDocumentSaveReason;
   switch (reason) {
-  case workspace::TextDocumentSaveReason::AfterDelay:
+  case AfterDelay:
     return ::lsp::TextDocumentSaveReason::AfterDelay;
-  case workspace::TextDocumentSaveReason::FocusOut:
+  case FocusOut:
     return ::lsp::TextDocumentSaveReason::FocusOut;
-  case workspace::TextDocumentSaveReason::Manual:
+  case Manual:
   default:
     return ::lsp::TextDocumentSaveReason::Manual;
   }
@@ -126,7 +127,7 @@ void addConfigurationChangeHandler(::lsp::MessageHandler &messageHandler,
   messageHandler.add<::lsp::notifications::Workspace_DidChangeConfiguration>(
       [&sharedServices,
        ensureInitialized = std::move(ensureInitialized)](
-          ::lsp::DidChangeConfigurationParams &&params) {
+          const ::lsp::DidChangeConfigurationParams &params) {
         if (ensureInitialized) {
           ensureInitialized();
         }
@@ -274,7 +275,7 @@ void addDocumentUpdateHandler(::lsp::MessageHandler &messageHandler,
   if (handler.supportsDidChangeWatchedFiles()) {
     messageHandler.add<::lsp::notifications::Workspace_DidChangeWatchedFiles>(
         [&handler, ensureInitialized = std::move(ensureInitialized)](
-            ::lsp::DidChangeWatchedFilesParams &&params) {
+            const ::lsp::DidChangeWatchedFilesParams &params) {
           if (ensureInitialized) {
             ensureInitialized();
           }
@@ -291,7 +292,7 @@ void addFileOperationHandler(::lsp::MessageHandler &messageHandler,
   if (options.didCreate.has_value()) {
     messageHandler.add<::lsp::notifications::Workspace_DidCreateFiles>(
         [&fileOperationHandler,
-         ensureInitialized = ensureInitialized](::lsp::CreateFilesParams &&params) {
+         ensureInitialized = ensureInitialized](const ::lsp::CreateFilesParams &params) {
           if (ensureInitialized) {
             ensureInitialized();
           }
@@ -302,7 +303,7 @@ void addFileOperationHandler(::lsp::MessageHandler &messageHandler,
   if (options.didRename.has_value()) {
     messageHandler.add<::lsp::notifications::Workspace_DidRenameFiles>(
         [&fileOperationHandler,
-         ensureInitialized = ensureInitialized](::lsp::RenameFilesParams &&params) {
+         ensureInitialized = ensureInitialized](const ::lsp::RenameFilesParams &params) {
           if (ensureInitialized) {
             ensureInitialized();
           }
@@ -313,7 +314,7 @@ void addFileOperationHandler(::lsp::MessageHandler &messageHandler,
   if (options.didDelete.has_value()) {
     messageHandler.add<::lsp::notifications::Workspace_DidDeleteFiles>(
         [&fileOperationHandler,
-         ensureInitialized = ensureInitialized](::lsp::DeleteFilesParams &&params) {
+         ensureInitialized = ensureInitialized](const ::lsp::DeleteFilesParams &params) {
           if (ensureInitialized) {
             ensureInitialized();
           }
@@ -324,7 +325,7 @@ void addFileOperationHandler(::lsp::MessageHandler &messageHandler,
   if (options.willCreate.has_value()) {
     messageHandler.add<::lsp::requests::Workspace_WillCreateFiles>(
         [&fileOperationHandler,
-         ensureInitialized = ensureInitialized](::lsp::CreateFilesParams &&params) {
+         ensureInitialized = ensureInitialized](const ::lsp::CreateFilesParams &params) {
           if (ensureInitialized) {
             ensureInitialized();
           }
@@ -339,7 +340,7 @@ void addFileOperationHandler(::lsp::MessageHandler &messageHandler,
   if (options.willRename.has_value()) {
     messageHandler.add<::lsp::requests::Workspace_WillRenameFiles>(
         [&fileOperationHandler,
-         ensureInitialized = ensureInitialized](::lsp::RenameFilesParams &&params) {
+         ensureInitialized = ensureInitialized](const ::lsp::RenameFilesParams &params) {
           if (ensureInitialized) {
             ensureInitialized();
           }
@@ -355,7 +356,7 @@ void addFileOperationHandler(::lsp::MessageHandler &messageHandler,
     messageHandler.add<::lsp::requests::Workspace_WillDeleteFiles>(
         [&fileOperationHandler,
          ensureInitialized = ensureInitialized](
-            ::lsp::DeleteFilesParams &&params) {
+            const ::lsp::DeleteFilesParams &params) {
           if (ensureInitialized) {
             ensureInitialized();
           }
