@@ -43,7 +43,7 @@ evaluate_insert_hidden_terminal_candidate(Context &ctx,
                                           const Element *element) {
   return evaluate_terminal_recovery_candidate(
       ctx, cursorStart, TerminalRecoveryChoiceKind::InsertHidden, 1u, 0u, 1u,
-      [&]() { return apply_insert_hidden_recovery_edit(ctx, element); });
+      [&ctx, element]() { return apply_insert_hidden_recovery_edit(ctx, element); });
 }
 
 template <EditableParseModeContext Context, typename Element>
@@ -55,8 +55,7 @@ evaluate_insert_hidden_gap_terminal_candidate(Context &ctx,
                                               std::uint32_t extraPenalty = 0u) {
   return evaluate_terminal_recovery_candidate(
       ctx, cursorStart, TerminalRecoveryChoiceKind::WordBoundarySplit, 1u, 0u,
-      1u,
-      [&]() {
+      1u, [&ctx, position, element]() {
         return apply_insert_hidden_gap_recovery_edit(ctx, position, element);
       },
       extraPenalty);
@@ -74,8 +73,7 @@ evaluate_replace_leaf_terminal_candidate(Context &ctx,
                                          std::uint32_t operationCount) {
   return evaluate_terminal_recovery_candidate(
       ctx, cursorStart, TerminalRecoveryChoiceKind::Fuzzy, distance,
-      substitutionCount, operationCount,
-      [&]() {
+      substitutionCount, operationCount, [&ctx, endPtr, element, editCost]() {
         return apply_replace_leaf_recovery_edit(ctx, endPtr, element, editCost);
       });
 }

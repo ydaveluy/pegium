@@ -50,7 +50,7 @@ bool merge_validation_options_for_language(
 std::shared_ptr<workspace::Document>
 get_document(const services::SharedServices &sharedServices,
              std::string_view uri) {
-  return with_workspace_read_lock(sharedServices, [&]() {
+  return with_workspace_read_lock(sharedServices, [&sharedServices, uri]() {
     if (sharedServices.workspace.documents == nullptr) {
       return std::shared_ptr<workspace::Document>{};
     }
@@ -76,32 +76,33 @@ void ensure_initialized(LanguageServerHandlerContext &server) {
 
 std::optional<::lsp::CodeActionKindEnum>
 to_lsp_code_action_kind(std::string_view kind) {
+  using enum ::lsp::CodeActionKind;
   if (kind.empty()) {
     return std::nullopt;
   }
   if (kind == "quickfix") {
-    return ::lsp::CodeActionKind::QuickFix;
+    return QuickFix;
   }
   if (kind == "refactor") {
-    return ::lsp::CodeActionKind::Refactor;
+    return Refactor;
   }
   if (kind == "refactor.extract") {
-    return ::lsp::CodeActionKind::RefactorExtract;
+    return RefactorExtract;
   }
   if (kind == "refactor.inline") {
-    return ::lsp::CodeActionKind::RefactorInline;
+    return RefactorInline;
   }
   if (kind == "refactor.rewrite") {
-    return ::lsp::CodeActionKind::RefactorRewrite;
+    return RefactorRewrite;
   }
   if (kind == "source") {
-    return ::lsp::CodeActionKind::Source;
+    return Source;
   }
   if (kind == "source.organizeImports") {
-    return ::lsp::CodeActionKind::SourceOrganizeImports;
+    return SourceOrganizeImports;
   }
   if (kind == "source.fixAll") {
-    return ::lsp::CodeActionKind::SourceFixAll;
+    return SourceFixAll;
   }
   return std::nullopt;
 }
@@ -111,17 +112,16 @@ ensure_document_loaded(services::SharedServices &sharedServices,
                        std::string_view uri,
                        ServiceRequirement requiredState,
                        const utils::CancellationToken &cancelToken) {
-  auto document = get_document(sharedServices, uri);
-  if (document != nullptr) {
+  if (auto document = get_document(sharedServices, uri); document != nullptr) {
     return document;
   }
   if (sharedServices.serviceRegistry == nullptr) {
     return nullptr;
   }
 
-  const auto *languageServices =
-      get_services_for_uri(sharedServices.serviceRegistry.get(), uri);
-  if (languageServices == nullptr || languageServices->languageId.empty()) {
+  if (const auto *languageServices =
+          get_services_for_uri(sharedServices.serviceRegistry.get(), uri);
+      languageServices == nullptr || languageServices->languageId.empty()) {
     return nullptr;
   }
 
@@ -130,8 +130,7 @@ ensure_document_loaded(services::SharedServices &sharedServices,
     return nullptr;
   }
 
-  auto text = fileSystem->readFile(uri);
-  if (!text.has_value()) {
+  if (auto text = fileSystem->readFile(uri); !text.has_value()) {
     return nullptr;
   }
 
@@ -141,7 +140,8 @@ ensure_document_loaded(services::SharedServices &sharedServices,
   }
 
   return workspace::run_with_workspace_write(
-      sharedServices.workspace.workspaceLock.get(), cancelToken, [&]() {
+      sharedServices.workspace.workspaceLock.get(), cancelToken,
+      [&sharedServices, &cancelToken, uri, requiredState]() {
         auto created =
             sharedServices.workspace.documents->getOrCreateDocument(uri, cancelToken);
         if (created == nullptr) {

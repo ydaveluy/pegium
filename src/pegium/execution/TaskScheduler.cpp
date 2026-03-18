@@ -151,8 +151,7 @@ void TaskScheduler::join(const std::shared_ptr<TaskGroupState> &group,
   }
 
   while (group->pending.load(std::memory_order_acquire) != 0U) {
-    ScheduledTask task;
-    if (tryPopTask(task, executionContext)) {
+    if (ScheduledTask task; tryPopTask(task, executionContext)) {
       executeTask(std::move(task), executionContext);
       continue;
     }
@@ -260,13 +259,9 @@ void TaskScheduler::executeTask(ScheduledTask task,
     }
   }
 
-  if (task.group->pending.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
-    std::scoped_lock lock(task.group->mutex);
-    task.group->cv.notify_all();
-  } else {
-    std::scoped_lock lock(task.group->mutex);
-    task.group->cv.notify_all();
-  }
+  task.group->pending.fetch_sub(1, std::memory_order_acq_rel);
+  std::scoped_lock lock(task.group->mutex);
+  task.group->cv.notify_all();
 }
 
 void TaskScheduler::workerLoop(std::size_t workerIndex,
@@ -274,8 +269,7 @@ void TaskScheduler::workerLoop(std::size_t workerIndex,
   const ExecutionContext executionContext(this, workerIndex);
 
   while (!stopToken.stop_requested() && !_stopping.load()) {
-    ScheduledTask task;
-    if (tryPopTask(task, executionContext)) {
+    if (ScheduledTask task; tryPopTask(task, executionContext)) {
       executeTask(std::move(task), executionContext);
       continue;
     }

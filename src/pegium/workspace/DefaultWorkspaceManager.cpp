@@ -403,7 +403,8 @@ std::future<void> DefaultWorkspaceManager::initializeWorkspace(
 
                       run_with_workspace_write(
                           sharedCoreServices.workspace.workspaceLock.get(),
-                          cancelToken, [&]() {
+                          cancelToken,
+                          [this, &folders, &uniqueFileUris, &cancelToken]() {
                             auto loadedDocuments = performStartup(
                                 folders, uniqueFileUris, cancelToken);
                             utils::throw_if_cancelled(cancelToken);
@@ -473,7 +474,7 @@ std::vector<std::shared_ptr<Document>> DefaultWorkspaceManager::performStartup(
 std::vector<std::string>
 DefaultWorkspaceManager::searchFolder(std::string_view workspaceUri) const {
   return run_with_workspace_read(sharedCoreServices.workspace.workspaceLock.get(),
-                                 [&]() {
+                                 [this, workspaceUri]() {
     if (sharedCoreServices.workspace.fileSystemProvider == nullptr) {
       return std::vector<std::string>{};
     }

@@ -55,7 +55,8 @@ DefaultReferenceDescriptionProvider::createDescriptions(
 
     bool emitted = false;
     reference->forEachResolvedTargetDescription(
-        [&](const AstNodeDescription *target) {
+        [&description, &descriptions,
+         &emitted](const AstNodeDescription *target) {
           emitted = true;
           auto resolvedDescription = description;
           apply_resolved_target(resolvedDescription, target);

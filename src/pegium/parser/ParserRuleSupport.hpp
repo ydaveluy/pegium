@@ -32,13 +32,16 @@ template <typename T> struct ParserRuleBuildSupport {
     std::vector<PendingAssignmentEntry> pendingOverflowEntries;
     const auto &root = node.root();
 
-    const auto clearPendingAssignments = [&]() noexcept {
+    const auto clearPendingAssignments =
+        [&pendingInlineCount, &pendingOverflowEntries]() noexcept {
       pendingInlineCount = 0;
       pendingOverflowEntries.clear();
-    };
+        };
 
-    const auto addPendingAssignment = [&](const grammar::Assignment *assignment,
-                                          NodeId nodeId) {
+    const auto addPendingAssignment =
+        [&pendingInlineCount, &pendingInlineEntries,
+         &pendingOverflowEntries](const grammar::Assignment *assignment,
+                                  NodeId nodeId) {
       if (pendingInlineCount < pendingInlineEntries.size()) {
         pendingInlineEntries[pendingInlineCount++] = PendingAssignmentEntry{
             .assignment = assignment,
@@ -50,9 +53,11 @@ template <typename T> struct ParserRuleBuildSupport {
           .assignment = assignment,
           .nodeId = nodeId,
       });
-    };
+        };
 
-    const auto applyPendingAssignments = [&](AstNode *targetNode) {
+    const auto applyPendingAssignments =
+        [&pendingInlineCount, &pendingInlineEntries, &pendingOverflowEntries,
+         &root, &buildContext](AstNode *targetNode) {
       if (pendingInlineCount == 0 && pendingOverflowEntries.empty()) [[likely]] {
         return;
       }
@@ -72,12 +77,13 @@ template <typename T> struct ParserRuleBuildSupport {
         entry.assignment->execute(targetNode, CstNodeView(&root, entry.nodeId),
                                   buildContext);
       }
-    };
+        };
 
-    const auto applyAndClearPendingAssignments = [&](AstNode *targetNode) {
+    const auto applyAndClearPendingAssignments =
+        [&applyPendingAssignments, &clearPendingAssignments](AstNode *targetNode) {
       applyPendingAssignments(targetNode);
       clearPendingAssignments();
-    };
+        };
 
     if (node.isLeaf()) {
       auto leafNode = std::make_unique<T>();
@@ -91,14 +97,15 @@ template <typename T> struct ParserRuleBuildSupport {
       if (cstNode.isHidden) {
         continue;
       }
+      using enum grammar::ElementKind;
       switch (view.getGrammarElement()->getKind()) {
-      case grammar::ElementKind::Assignment: {
+      case Assignment: {
         addPendingAssignment(
             static_cast<const grammar::Assignment *>(cstNode.grammarElement),
             view.id());
         break;
       }
-      case grammar::ElementKind::Create: {
+      case Create: {
         currentNode =
             static_cast<const grammar::Create *>(cstNode.grammarElement)
                 ->getValue();
@@ -106,7 +113,7 @@ template <typename T> struct ParserRuleBuildSupport {
         currentNode->setCstNode(node);
         break;
       }
-      case grammar::ElementKind::Nest: {
+      case Nest: {
         if (!currentNode) {
           currentNode = std::make_unique<T>();
           currentNode->setCstNode(node);
@@ -119,14 +126,14 @@ template <typename T> struct ParserRuleBuildSupport {
         currentNode->setCstNode(node);
         break;
       }
-      case grammar::ElementKind::ParserRule: {
+      case ParserRule: {
         currentNode =
             static_cast<const grammar::ParserRule *>(cstNode.grammarElement)
                 ->getValue(view, buildContext);
         assert(currentNode != nullptr && currentNode->hasCstNode());
         break;
       }
-      case grammar::ElementKind::InfixRule: {
+      case InfixRule: {
         const auto *infixRule =
             static_cast<const grammar::InfixRule *>(cstNode.grammarElement);
         applyAndClearPendingAssignments(currentNode.get());

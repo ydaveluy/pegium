@@ -41,7 +41,7 @@ constexpr std::array<std::string_view, 10> kSemanticTokenModifiers = {
 std::unordered_map<std::string, std::uint32_t> make_type_map() {
   std::unordered_map<std::string, std::uint32_t> map;
   for (std::uint32_t index = 0; index < kSemanticTokenTypes.size(); ++index) {
-    map.emplace(std::string(kSemanticTokenTypes[index]), index);
+    map.try_emplace(std::string(kSemanticTokenTypes[index]), index);
   }
   return map;
 }
@@ -49,7 +49,7 @@ std::unordered_map<std::string, std::uint32_t> make_type_map() {
 std::unordered_map<std::string, std::uint32_t> make_modifier_map() {
   std::unordered_map<std::string, std::uint32_t> map;
   for (std::uint32_t index = 0; index < kSemanticTokenModifiers.size(); ++index) {
-    map.emplace(std::string(kSemanticTokenModifiers[index]), 1u << index);
+    map.try_emplace(std::string(kSemanticTokenModifiers[index]), 1u << index);
   }
   return map;
 }
@@ -124,7 +124,7 @@ void append_semantic_token(
   tokens.push_back(
       {.line = token.range.start.line,
        .character = token.range.start.character,
-       .length = static_cast<std::uint32_t>(endOffset - startOffset),
+       .length = endOffset - startOffset,
        .type = typeIt->second,
        .modifiers = modifiers});
 }
@@ -292,7 +292,8 @@ void AbstractSemanticTokenProvider::highlightKeyword(
     return;
   }
 
-  auto emit = [&](std::size_t itemIndex) {
+  auto emit = [this, &document, &node, keyword, type, &acceptor,
+               modifiers](std::size_t itemIndex) {
     if (auto cstNode = find_node_for_keyword(node.getCstNode(), keyword, itemIndex);
         cstNode.has_value()) {
       highlightRange(
@@ -323,11 +324,13 @@ AbstractSemanticTokenProvider::buildSemanticTokens(
   }
 
   std::vector<EncodedSemanticToken> tokens;
-  const SemanticTokenAcceptor acceptor = [&](SemanticTokenInfo token) {
+  const SemanticTokenAcceptor acceptor =
+      [&document, &range, &tokens](SemanticTokenInfo token) {
     append_semantic_token(document, range, std::move(token), tokens);
-  };
+      };
 
-  auto visit = [&](const auto &self, const AstNode &node) -> void {
+  auto visit = [this, &document, &range, &cancelToken,
+                &acceptor](const auto &self, const AstNode &node) {
     if (!node.hasCstNode()) {
       return;
     }

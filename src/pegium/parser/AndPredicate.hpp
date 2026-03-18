@@ -87,7 +87,9 @@ private:
       auto probeCtx = ExpectContext{remaining, ctx.skipper(),
                                     static_cast<TextOffset>(remaining.size())};
       probeCtx.setInRecoveryPhase(false);
-      return with_no_edits(probeCtx, [&]() { return parse(_element, probeCtx); });
+      return with_no_edits(probeCtx, [this, &probeCtx]() {
+        return parse(_element, probeCtx);
+      });
     }
   }
 };

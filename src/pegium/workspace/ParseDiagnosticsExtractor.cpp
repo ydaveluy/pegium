@@ -115,8 +115,9 @@ format_expect_element(const grammar::AbstractElement *element) {
     return {};
   }
 
+  using enum grammar::ElementKind;
   switch (element->getKind()) {
-  case grammar::ElementKind::Literal: {
+  case Literal: {
     const auto *literal = static_cast<const grammar::Literal *>(element);
     const auto value = literal->getValue();
     if (value.empty()) {
@@ -126,7 +127,7 @@ format_expect_element(const grammar::AbstractElement *element) {
         std::ranges::all_of(value, [](char c) { return parser::isWord(c); });
     return keywordLike ? quote_keyword(value) : std::string(value);
   }
-  case grammar::ElementKind::Assignment:
+  case Assignment:
     return format_expect_element(
         static_cast<const grammar::Assignment *>(element)->getElement());
   default:
@@ -461,7 +462,7 @@ previous_visible_leaf_end(const Document &document, TextOffset offset) {
   if (diagnostics.size() < 2) {
     return false;
   }
-  return std::ranges::all_of(diagnostics, [&](const auto &diagnostic) {
+  return std::ranges::all_of(diagnostics, [&diagnostics](const auto &diagnostic) {
     return diagnostic.kind == parser::ParseDiagnosticKind::Inserted &&
            diagnostic.offset == diagnostics.front().offset;
   });
@@ -531,20 +532,21 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
   }
   auto diagnostic = make_base_diagnostic(zeroWidth, zeroWidth, "parse.incomplete");
 
+  using enum parser::ParseDiagnosticKind;
   switch (parseDiagnostic.kind) {
-  case parser::ParseDiagnosticKind::Inserted:
+  case Inserted:
     diagnostic.code = services::DiagnosticCode(std::string("parse.inserted"));
     diagnostic.message = expected.empty() ? "Unexpected input."
                                           : "Expecting " + expected;
     maybe_attach_insert_code_action(diagnostic, parseDiagnostic, zeroWidth);
     break;
-  case parser::ParseDiagnosticKind::Deleted:
+  case Deleted:
     diagnostic = make_base_diagnostic(foundToken.begin, foundToken.end,
                                       "parse.deleted");
     diagnostic.message = unexpectedMessage;
     maybe_attach_delete_code_action(diagnostic);
     break;
-  case parser::ParseDiagnosticKind::Replaced:
+  case Replaced:
     diagnostic = make_base_diagnostic(foundToken.begin, foundToken.end,
                                       "parse.replaced");
     if (!expected.empty() && !foundToken.image.empty()) {
@@ -559,7 +561,7 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
     maybe_attach_replace_code_action(diagnostic, parseDiagnostic, foundToken.begin,
                                      foundToken.end);
     break;
-  case parser::ParseDiagnosticKind::Incomplete:
+  case Incomplete:
     diagnostic.code = services::DiagnosticCode(std::string("parse.incomplete"));
     if (!expected.empty()) {
       diagnostic.message = "Expecting " + expected;
@@ -567,11 +569,11 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
       diagnostic.message = unexpectedMessage;
     }
     break;
-  case parser::ParseDiagnosticKind::Recovered:
+  case Recovered:
     diagnostic.code = services::DiagnosticCode(std::string("parse.recovered"));
     diagnostic.message = "Recovered parse node";
     break;
-  case parser::ParseDiagnosticKind::ConversionError:
+  case ConversionError:
     break;
   }
 

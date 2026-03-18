@@ -168,7 +168,7 @@ text::Position TextDocument::offsetToPosition(TextOffset offset) const {
   }();
   const auto clampedInLine = std::min(std::max(clamped, lineStart), lineEnd);
 
-  const auto column = [&]() -> std::uint32_t {
+  const auto column = [this, lineStart, clampedInLine]() -> std::uint32_t {
     const auto *bytes =
         reinterpret_cast<const std::uint8_t *>(_text.data()) + lineStart;
     const auto *bytesEnd =

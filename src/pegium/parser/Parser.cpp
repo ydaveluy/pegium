@@ -8,18 +8,19 @@ namespace {
 
 [[nodiscard]] constexpr std::string_view
 parse_diagnostic_kind_name(ParseDiagnosticKind kind) noexcept {
+  using enum ParseDiagnosticKind;
   switch (kind) {
-  case ParseDiagnosticKind::Inserted:
+  case Inserted:
     return "Inserted";
-  case ParseDiagnosticKind::Deleted:
+  case Deleted:
     return "Deleted";
-  case ParseDiagnosticKind::Replaced:
+  case Replaced:
     return "Replaced";
-  case ParseDiagnosticKind::Incomplete:
+  case Incomplete:
     return "Incomplete";
-  case ParseDiagnosticKind::Recovered:
+  case Recovered:
     return "Recovered";
-  case ParseDiagnosticKind::ConversionError:
+  case ConversionError:
     return "ConversionError";
   }
   return "Unknown";

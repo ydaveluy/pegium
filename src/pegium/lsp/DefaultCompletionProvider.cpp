@@ -112,8 +112,8 @@ const AstNode *find_completion_node(const workspace::Document &document,
     }
   }
 
-  const auto size = static_cast<TextOffset>(document.textView().size());
-  if (anchorOffset < size) {
+  if (const auto size = static_cast<TextOffset>(document.textView().size());
+      anchorOffset < size) {
     if (const auto *node = find_ast_node_at_offset(*root, anchorOffset + 1);
         node != nullptr) {
       return node;
@@ -197,7 +197,9 @@ DefaultCompletionProvider::getCompletion(
   std::vector<::lsp::CompletionItem> items;
   std::unordered_map<std::string, std::size_t> itemsByKey;
 
-  const auto accept = [&](const CompletionContext &context, CompletionValue value) {
+  const auto accept =
+      [this, &items, &itemsByKey](const CompletionContext &context,
+                                  CompletionValue value) {
     ::lsp::CompletionItem item{};
     if (!fillCompletionItem(context, value, item)) {
       return;
@@ -226,7 +228,7 @@ DefaultCompletionProvider::getCompletion(
     CompletionContext context{document, params, offset, tokenOffset,
                               tokenEndOffset, token.text, prefix, node,
                               reference, &feature};
-    completionFor(context, [&](CompletionValue value) {
+    completionFor(context, [&accept, &context](CompletionValue value) {
       accept(context, std::move(value));
     });
     if (!continueCompletion(context)) {
@@ -247,7 +249,7 @@ DefaultCompletionProvider::getCompletion(
         CompletionContext context{document, params, offset, offset, offset,
                                   {},          {},     node,   reference,
                                   &feature};
-        completionFor(context, [&](CompletionValue value) {
+        completionFor(context, [&accept, &context](CompletionValue value) {
           accept(context, std::move(value));
         });
         if (!continueCompletion(context)) {

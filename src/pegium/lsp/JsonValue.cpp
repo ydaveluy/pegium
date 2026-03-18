@@ -47,7 +47,7 @@ services::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
   if (value.isObject()) {
     services::JsonValue::Object out;
     for (const auto &[key, entry] : value.object().keyValueMap()) {
-      out.emplace(key, from_lsp_any(entry));
+      out.try_emplace(key, from_lsp_any(entry));
     }
     return out;
   }
@@ -90,16 +90,17 @@ services::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
 
 services::DiagnosticSeverity
 from_lsp_diagnostic_severity(::lsp::DiagnosticSeverity severity) {
+  using enum ::lsp::DiagnosticSeverity;
   switch (severity) {
-  case ::lsp::DiagnosticSeverity::Error:
+  case Error:
     return services::DiagnosticSeverity::Error;
-  case ::lsp::DiagnosticSeverity::Warning:
+  case Warning:
     return services::DiagnosticSeverity::Warning;
-  case ::lsp::DiagnosticSeverity::Information:
+  case Information:
     return services::DiagnosticSeverity::Information;
-  case ::lsp::DiagnosticSeverity::Hint:
+  case Hint:
     return services::DiagnosticSeverity::Hint;
-  case ::lsp::DiagnosticSeverity::MAX_VALUE:
+  case MAX_VALUE:
     break;
   }
   return services::DiagnosticSeverity::Error;
@@ -107,14 +108,15 @@ from_lsp_diagnostic_severity(::lsp::DiagnosticSeverity severity) {
 
 ::lsp::DiagnosticSeverity
 to_lsp_diagnostic_severity(services::DiagnosticSeverity severity) {
+  using enum services::DiagnosticSeverity;
   switch (severity) {
-  case services::DiagnosticSeverity::Error:
+  case Error:
     return ::lsp::DiagnosticSeverity::Error;
-  case services::DiagnosticSeverity::Warning:
+  case Warning:
     return ::lsp::DiagnosticSeverity::Warning;
-  case services::DiagnosticSeverity::Information:
+  case Information:
     return ::lsp::DiagnosticSeverity::Information;
-  case services::DiagnosticSeverity::Hint:
+  case Hint:
     return ::lsp::DiagnosticSeverity::Hint;
   }
   return ::lsp::DiagnosticSeverity::Error;

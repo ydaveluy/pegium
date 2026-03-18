@@ -98,10 +98,10 @@ private:
   selectLocalRecoveryChoice(Context &ctx, const char *cursorStart) const {
     const auto deleteCandidate = detail::evaluate_delete_scan_terminal_candidate(
         ctx, cursorStart,
-        [&](const char *scanCursor) noexcept {
+        [this, &ctx](const char *scanCursor) noexcept {
           return deleteScanMatchEnd(ctx, scanCursor);
         },
-        [&](const char *matched) { ctx.leaf(matched, this); });
+        [this, &ctx](const char *matched) { ctx.leaf(matched, this); });
     if (deleteCandidate.kind != LocalRecoveryChoiceKind::None) {
       return deleteCandidate;
     }
@@ -114,8 +114,9 @@ private:
   [[gnu::cold, gnu::noinline]]
   bool applyLocalRecoveryChoice(Context &ctx,
                                 const LocalRecoveryChoice &choice) const {
+    using enum LocalRecoveryChoiceKind;
     switch (choice.kind) {
-    case LocalRecoveryChoiceKind::InsertHidden:
+    case InsertHidden:
       if (detail::apply_insert_hidden_recovery_edit(ctx, this)) {
         if constexpr (RecoveryParseModeContext<Context>) {
           PEGIUM_RECOVERY_TRACE("[terminal rule] insert-hidden ", getName(),
@@ -124,22 +125,22 @@ private:
         return true;
       }
       return false;
-    case LocalRecoveryChoiceKind::DeleteScan:
+    case DeleteScan:
       return detail::apply_delete_scan_terminal_candidate(
           ctx,
-          [&](const char *scanCursor) noexcept {
+          [this, &ctx](const char *scanCursor) noexcept {
             return deleteScanMatchEnd(ctx, scanCursor);
           },
-          [&](const char *matched) {
+          [this, &ctx](const char *matched) {
             if constexpr (RecoveryParseModeContext<Context>) {
               PEGIUM_RECOVERY_TRACE("[terminal rule] delete-scan match ",
                                     getName(), " offset=", ctx.cursorOffset());
             }
             ctx.leaf(matched, this);
           });
-    case LocalRecoveryChoiceKind::WordBoundarySplit:
-    case LocalRecoveryChoiceKind::Fuzzy:
-    case LocalRecoveryChoiceKind::None:
+    case WordBoundarySplit:
+    case Fuzzy:
+    case None:
       return false;
     }
     return false;

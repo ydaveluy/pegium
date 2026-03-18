@@ -15,16 +15,17 @@ AbstractInlayHintProvider::getInlayHints(const workspace::Document &document,
   const auto rangeEnd = document.positionToOffset(params.range.end);
 
   std::vector<::lsp::InlayHint> hints;
-  const InlayHintAcceptor acceptor = [&](::lsp::InlayHint hint) {
+  const InlayHintAcceptor acceptor = [&hints](::lsp::InlayHint hint) {
     hints.push_back(std::move(hint));
   };
 
-  auto visit = [&](const auto &self, const AstNode &node) -> void {
+  auto visit = [this, rangeBegin, rangeEnd, &cancelToken,
+                &acceptor](const auto &self, const AstNode &node) {
     if (!node.hasCstNode()) {
       return;
     }
-    const auto cstNode = node.getCstNode();
-    if (cstNode.getEnd() < rangeBegin || cstNode.getBegin() > rangeEnd) {
+    if (const auto cstNode = node.getCstNode();
+        cstNode.getEnd() < rangeBegin || cstNode.getBegin() > rangeEnd) {
       return;
     }
 

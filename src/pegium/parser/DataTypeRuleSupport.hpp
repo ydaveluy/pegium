@@ -64,13 +64,14 @@ template <typename T> struct DataTypeRuleValueSupport {
         const auto *grammarElement = child.grammarElement;
         assert(grammarElement);
 
+        using enum grammar::ElementKind;
         switch (grammarElement->getKind()) {
-        case grammar::ElementKind::Literal:
-        case grammar::ElementKind::CharacterRange:
-        case grammar::ElementKind::AnyCharacter:
+        case Literal:
+        case CharacterRange:
+        case AnyCharacter:
           append_text_fragment(value, it.getText());
           break;
-        case grammar::ElementKind::TerminalRule:
+        case TerminalRule:
           static_cast<const grammar::TerminalRule *>(grammarElement)
               ->appendTextValue(value, it, context);
           break;

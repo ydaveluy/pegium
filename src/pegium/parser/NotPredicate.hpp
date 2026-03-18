@@ -75,8 +75,10 @@ private:
       auto probeCtx = ExpectContext{remaining, ctx.skipper(),
                                     static_cast<TextOffset>(remaining.size())};
       probeCtx.setInRecoveryPhase(false);
-      return with_no_edits(probeCtx,
-                           [&]() { return !parser::attempt_fast_probe(probeCtx, _element); });
+      return with_no_edits(
+          probeCtx, [this, &probeCtx]() {
+            return !parser::attempt_fast_probe(probeCtx, _element);
+          });
     }
   }
 };

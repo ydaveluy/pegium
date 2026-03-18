@@ -19,7 +19,8 @@ DefaultScopeComputation::collectExportedSymbols(
     return exports;
   }
 
-  auto add_exported = [&](const AstNode &node) {
+  auto add_exported = [descriptionProvider, &document,
+                       &exports](const AstNode &node) {
     auto description = descriptionProvider->createDescription(node, document);
     if (!description.has_value()) {
       return;

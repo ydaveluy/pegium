@@ -5,12 +5,13 @@
 namespace pegium::grammar {
 
 std::ostream &operator<<(std::ostream &os, const AssignmentOperator &op) {
+  using enum AssignmentOperator;
   switch (op) {
-  case AssignmentOperator::Assign:
+  case Assign:
     return os << '=';
-  case AssignmentOperator::Append:
+  case Append:
     return os << "+=";
-  case AssignmentOperator::EnableIf:
+  case EnableIf:
     return os << "?=";
   }
   return os;

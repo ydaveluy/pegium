@@ -67,14 +67,15 @@ enum class GotoLinkKind : std::uint8_t {
 [[nodiscard]] inline bool
 goto_link_support_enabled(const workspace::InitializeCapabilities &capabilities,
                           GotoLinkKind kind) noexcept {
+  using enum GotoLinkKind;
   switch (kind) {
-  case GotoLinkKind::Declaration:
+  case Declaration:
     return capabilities.declarationLinkSupport;
-  case GotoLinkKind::Definition:
+  case Definition:
     return capabilities.definitionLinkSupport;
-  case GotoLinkKind::TypeDefinition:
+  case TypeDefinition:
     return capabilities.typeDefinitionLinkSupport;
-  case GotoLinkKind::Implementation:
+  case Implementation:
     return capabilities.implementationLinkSupport;
   }
   return false;
@@ -254,7 +255,7 @@ auto make_async_request(LanguageServerHandlerContext &owner, F &&handler) {
         owner.sharedServices(),
         [&owner, requestKey, cancellation, handlerPtr,
          ownedParams = std::move(ownedParams)]() mutable -> Result {
-          const auto cleanup = [&]() {
+          const auto cleanup = [&owner, &requestKey, &cancellation]() {
             if (!requestKey.empty()) {
               owner.clearRequestCancellation(requestKey, cancellation);
             }
@@ -289,7 +290,7 @@ auto create_request_handler(LanguageServerHandlerContext &server,
       [&server, &sharedServices, requiredState,
        serviceCall = Call(std::forward<ServiceCall>(serviceCall)),
        adapter = ResultAdapter(std::forward<Adapter>(adapter))](
-          Params &&params, const utils::CancellationToken &cancelToken)
+          const Params &params, const utils::CancellationToken &cancelToken)
           -> std::future<Result> {
         ensure_initialized(server);
         const std::string uri = params.textDocument.uri.toString();
@@ -313,7 +314,7 @@ auto create_item_request_handler(LanguageServerHandlerContext &server,
       [&server, &sharedServices, requiredState,
        serviceCall = Call(std::forward<ServiceCall>(serviceCall)),
        adapter = ResultAdapter(std::forward<Adapter>(adapter))](
-          Params &&params, const utils::CancellationToken &cancelToken)
+          const Params &params, const utils::CancellationToken &cancelToken)
           -> std::future<Result> {
         ensure_initialized(server);
         const std::string uri = params.item.uri.toString();
@@ -338,7 +339,7 @@ auto create_server_request_handler(LanguageServerHandlerContext &server,
       [&server, &sharedServices, requiredState,
        serviceCall = Call(std::forward<ServiceCall>(serviceCall)),
        adapter = ResultAdapter(std::forward<Adapter>(adapter))](
-          Params &&params, const utils::CancellationToken &cancelToken)
+          const Params &params, const utils::CancellationToken &cancelToken)
           -> std::future<Result> {
         ensure_initialized(server);
         wait_until_phase(sharedServices, cancelToken, std::nullopt,

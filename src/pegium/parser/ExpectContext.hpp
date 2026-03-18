@@ -286,8 +286,8 @@ struct ExpectContext {
     if (!trackEditState || position < begin || position > anchor) {
       return false;
     }
-    const auto offset = static_cast<TextOffset>(position - begin);
-    if (!detail::can_insert(allowInsert, canEditAtOffset(offset)) ||
+    if (const auto offset = static_cast<TextOffset>(position - begin);
+        !detail::can_insert(allowInsert, canEditAtOffset(offset)) ||
         !canAffordEdit(ParseDiagnosticKind::Inserted)) {
       return false;
     }
@@ -448,11 +448,12 @@ private:
     if (lhs == nullptr || rhs == nullptr || lhs->getKind() != rhs->getKind()) {
       return false;
     }
+    using enum grammar::ElementKind;
     switch (lhs->getKind()) {
-    case grammar::ElementKind::Literal:
+    case Literal:
       return static_cast<const grammar::Literal *>(lhs)->getValue() ==
              static_cast<const grammar::Literal *>(rhs)->getValue();
-    case grammar::ElementKind::Assignment: {
+    case Assignment: {
       const auto *lhsAssignment = static_cast<const grammar::Assignment *>(lhs);
       const auto *rhsAssignment = static_cast<const grammar::Assignment *>(rhs);
       return lhsAssignment->getOperator() == rhsAssignment->getOperator() &&
@@ -463,10 +464,10 @@ private:
              lhsAssignment->getReferenceType() ==
                  rhsAssignment->getReferenceType();
     }
-    case grammar::ElementKind::DataTypeRule:
-    case grammar::ElementKind::ParserRule:
-    case grammar::ElementKind::TerminalRule:
-    case grammar::ElementKind::InfixRule:
+    case DataTypeRule:
+    case ParserRule:
+    case TerminalRule:
+    case InfixRule:
       return static_cast<const grammar::AbstractRule *>(lhs)->getName() ==
              static_cast<const grammar::AbstractRule *>(rhs)->getName();
     default:

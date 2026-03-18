@@ -44,7 +44,7 @@ template <typename T> bool has_provider(T *provider) {
 template <typename Accessor>
 bool any_language_has_provider(const services::SharedServices &sharedServices,
                                Accessor accessor) {
-  return any_language_supports(sharedServices, [&](const auto &services) {
+  return any_language_supports(sharedServices, [&accessor](const auto &services) {
     return has_provider(accessor(services));
   });
 }
@@ -121,7 +121,10 @@ merge_completion_options(const services::SharedServices &sharedServices) {
   bool resolveProvider = false;
   std::optional<::lsp::CompletionOptionsCompletionItem> completionItem;
 
-  for_each_language_service(sharedServices, [&](const auto &services) {
+  for_each_language_service(
+      sharedServices,
+      [&hasProvider, &triggerCharacters, &allCommitCharacters, &resolveProvider,
+       &completionItem](const auto &services) {
     const auto *provider = services.lsp.completionProvider.get();
     if (provider == nullptr) {
       return;
@@ -139,7 +142,7 @@ merge_completion_options(const services::SharedServices &sharedServices) {
     if (options->completionItem.has_value() && !completionItem.has_value()) {
       completionItem = *options->completionItem;
     }
-  });
+      });
 
   if (!hasProvider) {
     return std::nullopt;
@@ -166,7 +169,9 @@ merge_signature_help_options(const services::SharedServices &sharedServices) {
   std::set<std::string> triggerCharacters;
   std::set<std::string> retriggerCharacters;
 
-  for_each_language_service(sharedServices, [&](const auto &services) {
+  for_each_language_service(sharedServices,
+                            [&triggerCharacters,
+                             &retriggerCharacters](const auto &services) {
     const auto *provider = services.lsp.signatureHelp.get();
     if (provider == nullptr) {
       return;
@@ -174,7 +179,7 @@ merge_signature_help_options(const services::SharedServices &sharedServices) {
     const auto options = provider->signatureHelpOptions();
     insert_strings(triggerCharacters, options.triggerCharacters);
     insert_strings(retriggerCharacters, options.retriggerCharacters);
-  });
+                            });
 
   if (triggerCharacters.empty()) {
     return std::nullopt;
@@ -191,7 +196,7 @@ merge_signature_help_options(const services::SharedServices &sharedServices) {
 std::optional<::lsp::DocumentOnTypeFormattingOptions>
 find_format_on_type_options(const services::SharedServices &sharedServices) {
   std::optional<::lsp::DocumentOnTypeFormattingOptions> result;
-  for_each_language_service(sharedServices, [&](const auto &services) {
+  for_each_language_service(sharedServices, [&result](const auto &services) {
     if (result.has_value()) {
       return;
     }
@@ -230,7 +235,9 @@ merge_semantic_token_options(const services::SharedServices &sharedServices) {
   bool delta = true;
   bool range = true;
 
-  for_each_language_service(sharedServices, [&](const auto &services) {
+  for_each_language_service(sharedServices,
+                            [&hasProvider, &tokenTypes, &tokenModifiers, &full,
+                             &delta, &range](const auto &services) {
     const auto *provider = services.lsp.semanticTokenProvider.get();
     if (provider == nullptr) {
       return;
@@ -257,7 +264,7 @@ merge_semantic_token_options(const services::SharedServices &sharedServices) {
     } else if (const auto *asBool = std::get_if<bool>(&*options.range)) {
       range = range && *asBool;
     }
-  });
+                            });
 
   if (!hasProvider) {
     return std::nullopt;
@@ -453,10 +460,10 @@ DefaultLanguageServer::initialize(const ::lsp::InitializeParams &params) {
   if (hasSelectionRangeProvider) {
     result.capabilities.selectionRangeProvider = true;
   }
-  const bool hasRename = any_language_has_provider(
-      sharedServices,
-      [](const auto &services) { return services.lsp.renameProvider.get(); });
-  if (hasRename) {
+  if (const bool hasRename = any_language_has_provider(
+          sharedServices,
+          [](const auto &services) { return services.lsp.renameProvider.get(); });
+      hasRename) {
     ::lsp::RenameOptions renameOptions{};
     renameOptions.prepareProvider = true;
     result.capabilities.renameProvider = std::move(renameOptions);

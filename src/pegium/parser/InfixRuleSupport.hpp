@@ -32,6 +32,15 @@ struct InfixOperator;
 
 namespace pegium::parser::detail {
 
+template <typename T>
+constexpr decltype(auto) move_if_owned(T &value) noexcept {
+  if constexpr (std::is_reference_v<T>) {
+    return value;
+  } else {
+    return std::move(value);
+  }
+}
+
 template <typename T, auto Left, auto Op, auto Right, typename Element,
           typename... Operators>
 struct InfixRuleModelTraits {
@@ -132,7 +141,7 @@ template <typename Element> struct InfixOperatorValueSupport {
     ValueBuildContext context;
     grammar::RuleValue value{std::int8_t{0}};
     const bool visited =
-        visit_raw_value(element, node, context, [&](auto &&rawValue) {
+        visit_raw_value(element, node, context, [&value](auto &&rawValue) {
           value = to_rule_value(std::forward<decltype(rawValue)>(rawValue));
         });
     if (!visited) {
@@ -202,7 +211,8 @@ private:
       const CstNodeView &operatorNode, const ValueBuildContext &context) {
     bool assigned = false;
     const bool visited = operatorExpression.visitRawValue(
-        operatorNode, context, [&]<typename RawValue>(RawValue &&rawValue) {
+        operatorNode, context,
+        [&assigned, node]<typename RawValue>(RawValue &&rawValue) {
           assigned = assign_operator_raw(node, std::forward<RawValue>(rawValue));
         });
     assert(visited && "Infix operator node must yield a raw value.");
@@ -290,7 +300,7 @@ private:
 template <typename Model, typename... Operators> struct InfixRuleOperatorCatalog {
   template <std::size_t... Is>
   static auto make_ops_impl(std::index_sequence<Is...>, Operators &&...in) {
-    auto tup = std::tuple<Operators...>{std::forward<Operators>(in)...};
+    auto tup = std::tuple<Operators...>{move_if_owned<Operators>(in)...};
     ((std::get<Is>(tup).setPrecedence(
          static_cast<std::int32_t>(sizeof...(Operators) - Is))),
      ...);
@@ -299,7 +309,7 @@ template <typename Model, typename... Operators> struct InfixRuleOperatorCatalog
 
   static auto make_ops(Operators &&...in) {
     return make_ops_impl(std::index_sequence_for<Operators...>{},
-                         std::forward<Operators>(in)...);
+                         move_if_owned<Operators>(in)...);
   }
 
   template <std::size_t... Is>

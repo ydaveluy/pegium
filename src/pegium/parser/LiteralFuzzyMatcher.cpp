@@ -73,9 +73,11 @@ normalize_fuzzy_edit_cost(std::size_t literalSize,
 reconstruct_candidate(const std::vector<DpCell> &cells, std::size_t cols,
                       std::string_view literal, std::size_t consumed,
                       const DpCell &cell) noexcept {
-  const auto cell_at = [&](std::size_t literalIndex,
-                           std::size_t consumedIndex) noexcept
-      -> const DpCell & { return cells[literalIndex * cols + consumedIndex]; };
+  const auto cell_at =
+      [&cells, cols](std::size_t literalIndex,
+                     std::size_t consumedIndex) noexcept -> const DpCell & {
+    return cells[literalIndex * cols + consumedIndex];
+  };
 
   LiteralFuzzyCandidate candidate{
       .consumed = consumed,
@@ -207,13 +209,16 @@ find_best_literal_fuzzy_candidate(std::string_view literal,
   const auto rows = literal.size() + 1u;
   const auto cols = input.size() + 1u;
   std::vector<DpCell> cells(rows * cols);
-  const auto cell_at = [&](std::size_t literalIndex,
-                           std::size_t consumedIndex) noexcept -> DpCell & {
+  const auto cell_at =
+      [&cells, cols](std::size_t literalIndex,
+                     std::size_t consumedIndex) noexcept -> DpCell & {
     return cells[literalIndex * cols + consumedIndex];
   };
-  const auto cell_at_const = [&](std::size_t literalIndex,
-                                 std::size_t consumedIndex) noexcept
-      -> const DpCell & { return cells[literalIndex * cols + consumedIndex]; };
+  const auto cell_at_const =
+      [&cells, cols](std::size_t literalIndex,
+                     std::size_t consumedIndex) noexcept -> const DpCell & {
+    return cells[literalIndex * cols + consumedIndex];
+  };
 
   cell_at(0u, 0u) = {.operations = 0u,
                      .weightedCost = 0u,
