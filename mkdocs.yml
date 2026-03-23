@@ -99,6 +99,7 @@ nav:
       - reference/index.md
       - Glossary: reference/glossary.md
       - Configuration Services: reference/configuration-services.md
+      - Completion Provider: reference/completion-provider.md
       - Document Lifecycle: reference/document-lifecycle.md
       - Semantic Model: reference/semantic-model.md
       - Grammar Reference: reference/grammar-reference.md

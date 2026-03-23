@@ -27,6 +27,7 @@ are:
 
 Use these when you need the exact user-facing surface of a Pegium subsystem:
 
+- [Completion Provider](completion-provider.md)
 - [Formatter DSL](formatter-dsl.md)
 
 For LSP, completion, workspace, and other advanced customization, prefer the
