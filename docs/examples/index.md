@@ -31,7 +31,31 @@ The best way to reuse an example is usually:
 3. shrink the grammar and AST to your actual needs
 4. add back domain-specific validation, references, and formatting
 
-## Where to go next
+## Running them
+
+After building the repository, each example exposes matching CLI and LSP
+entrypoints under `./build/examples/...`.
+
+For a quick first pass:
+
+```bash
+./build/examples/arithmetics/pegium-example-arithmetics-cli \
+  examples/arithmetics/example/example.calc
+
+./build/examples/arithmetics/pegium-example-arithmetics-lsp
+```
+
+## A good reading order
+
+If you want to understand the examples as a progression rather than as isolated
+projects, a useful order is:
+
+1. `arithmetics` for the smallest full parser-to-editor path
+2. `domainmodel` for nested declarations, qualified names, and rename
+3. `statemachine` for validation-heavy modeling
+4. `requirements` for multiple related languages in one workspace
+
+## Where to go from here?
 
 - [Learn Pegium](../learn/index.md)
 - [Recipes](../recipes/index.md)

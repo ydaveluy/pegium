@@ -18,19 +18,24 @@
 #include <lsp/types.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/LanguageServerFeatures.hpp>
+#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
 
 namespace pegium::test {
 
-inline const services::Services *
-lookup_services(const services::SharedServices &sharedServices,
+inline const pegium::Services *
+lookup_services(const pegium::SharedServices &sharedServices,
                 std::string_view languageId) {
-  const auto *coreServices =
-      sharedServices.serviceRegistry->getServicesByLanguageId(languageId);
-  if (coreServices == nullptr) {
-    return nullptr;
+  for (const auto *coreServices : sharedServices.serviceRegistry->all()) {
+    if (coreServices != nullptr &&
+        coreServices->languageMetaData.languageId == languageId) {
+      const auto *services = as_services(coreServices);
+      if (services != nullptr) {
+        return services;
+      }
+    }
   }
-  return dynamic_cast<const services::Services *>(coreServices);
+  return nullptr;
 }
 
 struct ParseHelperOptions {
@@ -38,7 +43,7 @@ struct ParseHelperOptions {
 };
 
 inline std::shared_ptr<workspace::Document>
-parseDocument(services::SharedServices &sharedServices,
+parseDocument(pegium::SharedServices &sharedServices,
               std::string_view languageId, std::string text,
               const ParseHelperOptions &options = {}) {
   static std::uint32_t nextDocumentId = 1;
@@ -123,7 +128,7 @@ inline ::lsp::TextDocumentPositionParams
 textDocumentPositionParams(const workspace::Document &document, TextOffset offset) {
   ::lsp::TextDocumentPositionParams params{};
   params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document.uri));
-  params.position = document.offsetToPosition(offset);
+  params.position = document.textDocument().positionAt(offset);
   return params;
 }
 
@@ -164,23 +169,23 @@ referenceParams(const workspace::Document &document, TextOffset offset,
                 bool includeDeclaration) {
   ::lsp::ReferenceParams params{};
   params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document.uri));
-  params.position = document.offsetToPosition(offset);
+  params.position = document.textDocument().positionAt(offset);
   params.context.includeDeclaration = includeDeclaration;
   return params;
 }
 
 inline std::string applyTextEdits(const workspace::Document &document,
                                   std::vector<::lsp::TextEdit> edits) {
-  auto text = document.text();
-  std::sort(edits.begin(), edits.end(),
-            [&document](const auto &left, const auto &right) {
-              return document.positionToOffset(left.range.start) >
-                     document.positionToOffset(right.range.start);
-            });
+  const auto &textDocument = document.textDocument();
+  auto text = std::string(textDocument.getText());
+  std::ranges::sort(edits, [&document](const auto &left, const auto &right) {
+    return document.textDocument().offsetAt(left.range.start) >
+           document.textDocument().offsetAt(right.range.start);
+  });
 
   for (const auto &edit : edits) {
-    const auto begin = document.positionToOffset(edit.range.start);
-    const auto end = document.positionToOffset(edit.range.end);
+    const auto begin = textDocument.offsetAt(edit.range.start);
+    const auto end = textDocument.offsetAt(edit.range.end);
     text.replace(begin, end - begin, edit.newText);
   }
   return text;
@@ -228,7 +233,7 @@ struct ExpectedSymbols {
 };
 
 inline std::shared_ptr<workspace::Document>
-expectSymbols(services::SharedServices &sharedServices,
+expectSymbols(pegium::SharedServices &sharedServices,
               std::string_view languageId, const ExpectedSymbols &expected) {
   auto document =
       parseDocument(sharedServices, languageId, expected.text,
@@ -237,7 +242,7 @@ expectSymbols(services::SharedServices &sharedServices,
     return nullptr;
   }
 
-  const auto symbols = pegium::lsp::getDocumentSymbols(
+  const auto symbols = pegium::getDocumentSymbols(
       sharedServices,
       ::lsp::DocumentSymbolParams{
           .textDocument =
@@ -270,9 +275,9 @@ struct ExpectedWorkspaceSymbols {
 };
 
 inline void expectWorkspaceSymbols(
-    services::SharedServices &sharedServices,
+    pegium::SharedServices &sharedServices,
     const ExpectedWorkspaceSymbols &expected) {
-  const auto symbols = pegium::lsp::getWorkspaceSymbols(
+  const auto symbols = pegium::getWorkspaceSymbols(
       sharedServices, ::lsp::WorkspaceSymbolParams{.query = expected.query});
 
   if (expected.check) {
@@ -306,7 +311,7 @@ struct ExpectedFoldings {
 };
 
 inline std::shared_ptr<workspace::Document>
-expectFoldings(services::SharedServices &sharedServices,
+expectFoldings(pegium::SharedServices &sharedServices,
                std::string_view languageId, const ExpectedFoldings &expected) {
   const auto marked = replaceIndices(expected);
   auto document =
@@ -316,15 +321,14 @@ expectFoldings(services::SharedServices &sharedServices,
     return nullptr;
   }
 
-  auto ranges = pegium::lsp::getFoldingRanges(
+  auto ranges = pegium::getFoldingRanges(
       sharedServices,
       ::lsp::FoldingRangeParams{
           .textDocument =
               {.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri))}});
-  std::sort(ranges.begin(), ranges.end(),
-            [](const auto &left, const auto &right) {
-              return left.startLine < right.startLine;
-            });
+  std::ranges::sort(ranges, [](const auto &left, const auto &right) {
+    return left.startLine < right.startLine;
+  });
 
   if (expected.check) {
     expected.check(ranges, marked.ranges);
@@ -338,8 +342,10 @@ expectFoldings(services::SharedServices &sharedServices,
   }
   for (std::size_t index = 0; index < marked.ranges.size(); ++index) {
     const auto [begin, end] = marked.ranges[index];
-    EXPECT_EQ(ranges[index].startLine, document->offsetToPosition(begin).line);
-    EXPECT_EQ(ranges[index].endLine, document->offsetToPosition(end).line);
+    EXPECT_EQ(ranges[index].startLine,
+              document->textDocument().positionAt(begin).line);
+    EXPECT_EQ(ranges[index].endLine,
+              document->textDocument().positionAt(end).line);
   }
   return document;
 }
@@ -357,7 +363,7 @@ struct ExpectedCompletion {
 };
 
 inline std::shared_ptr<workspace::Document>
-expectCompletion(services::SharedServices &sharedServices,
+expectCompletion(pegium::SharedServices &sharedServices,
                  std::string_view languageId, const ExpectedCompletion &expected) {
   const auto marked = replaceIndices(expected);
   auto document =
@@ -372,7 +378,7 @@ expectCompletion(services::SharedServices &sharedServices,
                   << " is out of range.";
     return document;
   }
-  auto completion = pegium::lsp::getCompletion(
+  auto completion = pegium::getCompletion(
       sharedServices, completionParams(*document, marked.indices[expected.index]));
   if (!completion.has_value()) {
     ADD_FAILURE() << "No completion result was produced.";
@@ -385,7 +391,7 @@ expectCompletion(services::SharedServices &sharedServices,
   }
 
   auto items = completion->items;
-  std::sort(items.begin(), items.end(), [](const auto &left, const auto &right) {
+  std::ranges::sort(items, [](const auto &left, const auto &right) {
     const auto leftSort = left.sortText.value_or(left.label);
     const auto rightSort = right.sortText.value_or(right.label);
     return leftSort < rightSort;
@@ -415,7 +421,7 @@ struct ExpectedGoToDefinition {
 };
 
 inline std::shared_ptr<workspace::Document>
-expectGoToDefinition(services::SharedServices &sharedServices,
+expectGoToDefinition(pegium::SharedServices &sharedServices,
                      std::string_view languageId,
                      const ExpectedGoToDefinition &expected) {
   const auto marked = replaceIndices(expected);
@@ -431,7 +437,7 @@ expectGoToDefinition(services::SharedServices &sharedServices,
                   << " is out of range.";
     return document;
   }
-  auto links = pegium::lsp::getDefinition(
+  auto links = pegium::getDefinition(
       sharedServices, definitionParams(*document, marked.indices[expected.index]));
   if (!links.has_value()) {
     ADD_FAILURE() << "No definition result was produced.";
@@ -458,9 +464,9 @@ expectGoToDefinition(services::SharedServices &sharedServices,
   for (std::size_t index = 0; index < expectedRanges.size(); ++index) {
     const auto [begin, end] = marked.ranges[expectedRanges[index]];
     EXPECT_TRUE(samePosition((*links)[index].targetSelectionRange.start,
-                             document->offsetToPosition(begin)));
+                             document->textDocument().positionAt(begin)));
     EXPECT_TRUE(samePosition((*links)[index].targetSelectionRange.end,
-                             document->offsetToPosition(end)));
+                             document->textDocument().positionAt(end)));
   }
   return document;
 }
@@ -475,7 +481,7 @@ struct ExpectedFindReferences {
 };
 
 inline std::shared_ptr<workspace::Document>
-expectFindReferences(services::SharedServices &sharedServices,
+expectFindReferences(pegium::SharedServices &sharedServices,
                      std::string_view languageId,
                      const ExpectedFindReferences &expected) {
   const auto marked = replaceIndices(expected);
@@ -487,7 +493,7 @@ expectFindReferences(services::SharedServices &sharedServices,
   }
 
   for (const auto offset : marked.indices) {
-    const auto references = pegium::lsp::getReferences(
+    const auto references = pegium::getReferences(
         sharedServices, referenceParams(*document, offset,
                                         expected.includeDeclaration));
     if (references.size() != marked.ranges.size()) {
@@ -499,9 +505,11 @@ expectFindReferences(services::SharedServices &sharedServices,
       const auto match = std::ranges::any_of(
           marked.ranges, [&](const auto &expectedRange) {
             return samePosition(reference.range.start,
-                                document->offsetToPosition(expectedRange.first)) &&
+                                document->textDocument().positionAt(
+                                    expectedRange.first)) &&
                    samePosition(reference.range.end,
-                                document->offsetToPosition(expectedRange.second));
+                                document->textDocument().positionAt(
+                                    expectedRange.second));
           });
       EXPECT_TRUE(match);
     }
@@ -522,7 +530,7 @@ struct ExpectedHover {
 };
 
 inline std::shared_ptr<workspace::Document>
-expectHover(services::SharedServices &sharedServices,
+expectHover(pegium::SharedServices &sharedServices,
             std::string_view languageId, const ExpectedHover &expected) {
   const auto marked = replaceIndices(expected);
   auto document =
@@ -537,7 +545,7 @@ expectHover(services::SharedServices &sharedServices,
                   << " is out of range.";
     return document;
   }
-  const auto hover = pegium::lsp::getHoverContent(
+  const auto hover = pegium::getHoverContent(
       sharedServices, hoverParams(*document, marked.indices[expected.index]));
 
   if (expected.check) {
@@ -569,7 +577,7 @@ struct ExpectedHighlight {
 };
 
 inline std::shared_ptr<workspace::Document>
-expectHighlight(services::SharedServices &sharedServices,
+expectHighlight(pegium::SharedServices &sharedServices,
                 std::string_view languageId,
                 const ExpectedHighlight &expected) {
   const auto marked = replaceIndices(expected);
@@ -585,7 +593,7 @@ expectHighlight(services::SharedServices &sharedServices,
                   << " is out of range.";
     return document;
   }
-  const auto highlights = pegium::lsp::getDocumentHighlights(
+  const auto highlights = pegium::getDocumentHighlights(
       sharedServices, highlightParams(*document, marked.indices[expected.index]));
 
   std::vector<std::size_t> expectedRanges;
@@ -608,9 +616,11 @@ expectHighlight(services::SharedServices &sharedServices,
   for (std::size_t index = 0; index < expectedRanges.size(); ++index) {
     const auto [begin, end] = marked.ranges[expectedRanges[index]];
     EXPECT_TRUE(
-        samePosition(highlights[index].range.start, document->offsetToPosition(begin)));
+        samePosition(highlights[index].range.start,
+                     document->textDocument().positionAt(begin)));
     EXPECT_TRUE(
-        samePosition(highlights[index].range.end, document->offsetToPosition(end)));
+        samePosition(highlights[index].range.end,
+                     document->textDocument().positionAt(end)));
   }
   return document;
 }
@@ -627,7 +637,7 @@ struct ExpectFormatting {
 };
 
 inline std::shared_ptr<workspace::Document>
-expectFormatting(services::SharedServices &sharedServices,
+expectFormatting(pegium::SharedServices &sharedServices,
                  std::string_view languageId,
                  const ExpectFormatting &expected) {
   auto document =
@@ -639,7 +649,7 @@ expectFormatting(services::SharedServices &sharedServices,
 
   std::vector<::lsp::TextEdit> edits;
   if (expected.range.has_value()) {
-    edits = pegium::lsp::formatDocumentRange(
+    edits = pegium::formatDocumentRange(
         sharedServices,
         ::lsp::DocumentRangeFormattingParams{
             .textDocument =
@@ -648,7 +658,7 @@ expectFormatting(services::SharedServices &sharedServices,
             .options = expected.options,
         });
   } else {
-    edits = pegium::lsp::formatDocument(
+    edits = pegium::formatDocument(
         sharedServices,
         ::lsp::DocumentFormattingParams{
             .textDocument =

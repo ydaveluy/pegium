@@ -6,13 +6,13 @@
 
 #include <pegium/LspExpectTestSupport.hpp>
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/grammar/AbstractElement.hpp>
-#include <pegium/grammar/Literal.hpp>
-#include <pegium/lsp/DefaultCompletionProvider.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/services/Services.hpp>
+#include <pegium/core/grammar/AbstractElement.hpp>
+#include <pegium/core/grammar/Literal.hpp>
+#include <pegium/lsp/completion/DefaultCompletionProvider.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/lsp/services/Services.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 using namespace pegium::parser;
@@ -207,13 +207,11 @@ public:
 
 protected:
   std::vector<const workspace::AstNodeDescription *> getReferenceCandidates(
-      const CompletionContext &context,
-      const references::ScopeQueryContext &scopeContext) const override {
-    auto candidates =
-        DefaultCompletionProvider::getReferenceCandidates(context, scopeContext);
+      const CompletionContext &context, const ReferenceInfo &reference) const override {
+    auto candidates = DefaultCompletionProvider::getReferenceCandidates(
+        context, reference);
     std::erase_if(candidates, [](const auto *candidate) {
-      return candidate == nullptr ||
-             !std::string_view(candidate->name).starts_with("A");
+      return !std::string_view(candidate->name).starts_with("A");
     });
     return candidates;
   }
@@ -278,26 +276,39 @@ const ::lsp::TextEdit *text_edit(const ::lsp::CompletionItem &item) {
 }
 
 template <typename Provider, typename ParserType>
-std::unique_ptr<services::Services> make_services_with_provider(
-    const services::SharedServices &sharedServices, std::string languageId,
+std::unique_ptr<pegium::Services> make_services_with_provider(
+    const pegium::SharedServices &sharedServices, std::string languageId,
     std::vector<std::string> fileExtensions = {".completion"}) {
-  auto services = test::make_services<ParserType>(sharedServices,
+  auto services = test::make_uninstalled_services<ParserType>(sharedServices,
                                                   std::move(languageId),
                                                   std::move(fileExtensions));
+  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultLspServices(*services);
   services->lsp.completionProvider = std::make_unique<Provider>(*services);
   return services;
 }
 
 class DefaultCompletionProviderTest : public ::testing::Test {
 protected:
-  std::unique_ptr<services::SharedServices> shared = test::make_shared_services();
+  std::unique_ptr<pegium::SharedServices> shared = test::make_empty_shared_services();
+
+  DefaultCompletionProviderTest() {
+    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedLspServices(*shared);
+    pegium::test::initialize_shared_workspace_for_tests(*shared);
+  }
 
   template <typename ParserType>
   void registerParserServices(std::string languageId,
                               std::vector<std::string> fileExtensions) {
-    ASSERT_TRUE(shared->serviceRegistry->registerServices(
-        test::make_services<ParserType>(*shared, std::move(languageId),
-                                        std::move(fileExtensions))));
+    {
+      auto registeredServices = 
+        test::make_uninstalled_services<ParserType>(*shared, std::move(languageId),
+                                        std::move(fileExtensions));
+      pegium::services::installDefaultCoreServices(*registeredServices);
+      pegium::installDefaultLspServices(*registeredServices);
+      shared->serviceRegistry->registerServices(std::move(registeredServices));
+    }
   }
 
   template <typename Provider, typename ParserType>
@@ -306,7 +317,7 @@ protected:
                                     ".completion"}) {
     auto services = make_services_with_provider<Provider, ParserType>(
         *shared, std::move(languageId), std::move(fileExtensions));
-    ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+    shared->serviceRegistry->registerServices(std::move(services));
   }
 
   template <typename Check>
@@ -537,4 +548,4 @@ TEST_F(DefaultCompletionProviderTest,
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

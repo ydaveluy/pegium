@@ -3,11 +3,12 @@
 #include <string>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/AbstractInlayHintProvider.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/syntax-tree/AstUtils.hpp>
+#include <pegium/lsp/semantic/AbstractInlayHintProvider.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/syntax-tree/AstUtils.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 using namespace pegium::parser;
@@ -43,14 +44,18 @@ protected:
 #pragma clang diagnostic pop
 };
 
-const services::Services *lookup_services(const services::SharedServices &shared,
-                                          std::string_view languageId) {
-  const auto *coreServices =
-      shared.serviceRegistry->getServicesByLanguageId(languageId);
-  if (coreServices == nullptr) {
-    return nullptr;
+const pegium::Services *lookup_services(const pegium::SharedServices &shared,
+                                        std::string_view languageId) {
+  for (const auto *coreServices : shared.serviceRegistry->all()) {
+    if (coreServices != nullptr &&
+        coreServices->languageMetaData.languageId == languageId) {
+      const auto *services = as_services(coreServices);
+      if (services != nullptr) {
+        return services;
+      }
+    }
   }
-  return dynamic_cast<const services::Services *>(coreServices);
+  return nullptr;
 }
 
 class TestInlayHintProvider final : public AbstractInlayHintProvider {
@@ -70,16 +75,26 @@ protected:
     visitedNames.push_back(entry->name);
 
     ::lsp::InlayHint hint{};
-    hint.position = getDocument(astNode).offsetToPosition(astNode.getCstNode().getBegin());
+    hint.position = getDocument(astNode)
+                        .textDocument()
+                        .positionAt(astNode.getCstNode().getBegin());
     hint.label = entry->name;
     acceptor(std::move(hint));
   }
 };
 
 TEST(AbstractInlayHintProviderTest, VisitsOnlyAstNodesInRequestedRange) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<HintParser>(*shared, "hint", {".hint"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<HintParser>(*shared, "hint", {".hint"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("hint.hint"), "hint",
@@ -93,10 +108,10 @@ TEST(AbstractInlayHintProviderTest, VisitsOnlyAstNodesInRequestedRange) {
   TestInlayHintProvider provider(*services);
 
   ::lsp::InlayHintParams params{};
-  params.range.start = document->offsetToPosition(
-      static_cast<TextOffset>(document->text().find("entry Beta")));
-  params.range.end = document->offsetToPosition(
-      static_cast<TextOffset>(document->text().size()));
+  params.range.start = document->textDocument().positionAt(
+      static_cast<TextOffset>(document->textDocument().getText().find("entry Beta")));
+  params.range.end = document->textDocument().positionAt(
+      static_cast<TextOffset>(document->textDocument().getText().size()));
 
   const auto hints =
       provider.getInlayHints(*document, params, utils::default_cancel_token);
@@ -107,4 +122,4 @@ TEST(AbstractInlayHintProviderTest, VisitsOnlyAstNodesInRequestedRange) {
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.14)
 
 add_library(pegium_example_domainmodel
     src/DomainModelModule.cpp
-    src/Language.cpp
+    src/cli/CliUtils.cpp
+    src/cli/Generator.cpp
     src/lsp/DomainModelFormatter.cpp
     src/lsp/DomainModelRenameProvider.cpp
     src/references/DomainModelScopeComputation.cpp
@@ -18,13 +19,19 @@ target_include_directories(pegium_example_domainmodel
 )
 
 target_compile_features(pegium_example_domainmodel PUBLIC cxx_std_20)
-target_link_libraries(pegium_example_domainmodel PUBLIC pegium)
+target_link_libraries(pegium_example_domainmodel PUBLIC
+    pegium
+    PegiumCli
+)
 
 add_executable(pegium-example-domainmodel-cli
     src/cli_main.cpp
 )
 target_compile_features(pegium-example-domainmodel-cli PRIVATE cxx_std_20)
-target_link_libraries(pegium-example-domainmodel-cli PRIVATE pegium_example_domainmodel)
+target_link_libraries(pegium-example-domainmodel-cli PRIVATE
+    PegiumCli
+    pegium_example_domainmodel
+)
 
 add_executable(pegium-example-domainmodel-lsp
     src/lsp_main.cpp

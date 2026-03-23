@@ -6,3 +6,6 @@ out/
 .vscode-test/
 .cache/
 /Testing
+/tools/
+
+AGENTS.md

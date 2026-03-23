@@ -1,8 +1,9 @@
 #pragma once
 
-#include <pegium/grammar/ParserRule.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <pegium/core/grammar/ParserRule.hpp>
+#include <pegium/ParseSupport.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/workspace/Document.hpp>
 
 namespace pegium::test {
 
@@ -36,7 +37,16 @@ inline void parse_rule(const grammar::ParserRule &entryRule,
                        const parser::Skipper &skipper,
                        const parser::ParseOptions &options = {}) {
   RuleParser parser(entryRule, skipper, options);
-  parser.parse(document);
+  apply_parse_result(document,
+                     parser.parse(document.textDocument().getText()));
+}
+
+[[nodiscard]] inline parser::ParseResult
+parse_rule_result(const grammar::ParserRule &entryRule, std::string_view text,
+                  const parser::Skipper &skipper,
+                  const parser::ParseOptions &options = {}) {
+  RuleParser parser(entryRule, skipper, options);
+  return parser.parse(text);
 }
 
 } // namespace pegium::test

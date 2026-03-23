@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
-#include <pegium/lsp/AbstractCallHierarchyProvider.hpp>
+#include <pegium/lsp/hierarchy/AbstractCallHierarchyProvider.hpp>
 
 #include "AbstractNavigationProviderTestUtils.hpp"
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 using namespace test_navigation;
@@ -44,6 +44,9 @@ protected:
   void customizeCallHierarchyItem(
       const AstNode &, ::lsp::CallHierarchyItem &item) const override {
     item.detail = "custom call";
+    item.selectionRange.start.line = item.range.start.line;
+    item.selectionRange.start.character = 0;
+    item.selectionRange.end = item.selectionRange.start;
   }
 
 private:
@@ -58,9 +61,17 @@ private:
 
 TEST(AbstractCallHierarchyProviderTest,
      CreatesDefaultItemAndDelegatesIncomingOutgoing) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<NavigationParser>(*shared, "nav", {".nav"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<NavigationParser>(*shared, "nav", {".nav"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("call-hierarchy.nav"), "nav",
@@ -75,7 +86,7 @@ TEST(AbstractCallHierarchyProviderTest,
 
   ::lsp::CallHierarchyPrepareParams prepareParams{};
   prepareParams.position =
-      document->offsetToPosition(use_name_offset(*document) + 1);
+      document->textDocument().positionAt(use_name_offset(*document) + 1);
 
   const auto items = provider.prepareCallHierarchy(
       *document, prepareParams, utils::default_cancel_token);
@@ -84,6 +95,8 @@ TEST(AbstractCallHierarchyProviderTest,
   EXPECT_EQ(items[0].kind, ::lsp::SymbolKind::Method);
   EXPECT_EQ(items[0].uri.toString(), document->uri);
   EXPECT_EQ(items[0].detail.value_or(""), "custom call");
+  EXPECT_EQ(items[0].range.start.character, 0u);
+  EXPECT_EQ(items[0].selectionRange.start.character, 0u);
 
   ::lsp::CallHierarchyIncomingCallsParams incomingParams{};
   incomingParams.item = items[0];
@@ -101,4 +114,4 @@ TEST(AbstractCallHierarchyProviderTest,
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

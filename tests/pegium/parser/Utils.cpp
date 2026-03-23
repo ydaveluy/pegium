@@ -7,10 +7,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include <pegium/utils/Collections.hpp>
-#include <pegium/utils/Cancellation.hpp>
-#include <pegium/utils/Event.hpp>
-#include <pegium/utils/Index.hpp>
+#include <pegium/core/utils/Collections.hpp>
+#include <pegium/core/utils/Cancellation.hpp>
+#include <pegium/core/utils/Event.hpp>
+#include <pegium/core/utils/Index.hpp>
 
 namespace {
 
@@ -49,6 +49,28 @@ TEST(UtilsTest, DisposableAndEventEmitterSupportSubscriptionLifecycle) {
   store.dispose();
   EXPECT_EQ(disposed, 2);
   EXPECT_TRUE(store.disposed());
+}
+
+TEST(UtilsTest, EventEmitterPreservesRegistrationOrder) {
+  pegium::utils::EventEmitter<int> emitter;
+  std::vector<int> calls;
+
+  auto first = emitter.on([&calls](const int &value) { calls.push_back(value); });
+  auto second =
+      emitter.on([&calls](const int &value) { calls.push_back(value * 10); });
+  auto third =
+      emitter.on([&calls](const int &value) { calls.push_back(value * 100); });
+
+  emitter.emit(2);
+  EXPECT_EQ(calls, (std::vector<int>{2, 20, 200}));
+
+  calls.clear();
+  second.dispose();
+  emitter.emit(3);
+  EXPECT_EQ(calls, (std::vector<int>{3, 300}));
+
+  first.dispose();
+  third.dispose();
 }
 
 TEST(UtilsTest, CollectionHelpersExposeContainsKeysAndValues) {

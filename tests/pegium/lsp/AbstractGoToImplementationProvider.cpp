@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
-#include <pegium/lsp/AbstractGoToImplementationProvider.hpp>
+#include <pegium/lsp/navigation/AbstractGoToImplementationProvider.hpp>
 
 #include "AbstractNavigationProviderTestUtils.hpp"
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 using namespace test_navigation;
@@ -33,9 +33,17 @@ protected:
 
 TEST(AbstractGoToImplementationProviderTest,
      DelegatesResolvedDeclarationNode) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<NavigationParser>(*shared, "nav", {".nav"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<NavigationParser>(*shared, "nav", {".nav"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("implementation.nav"), "nav",
@@ -49,7 +57,8 @@ TEST(AbstractGoToImplementationProviderTest,
   TestImplementationProvider provider(*services);
 
   ::lsp::ImplementationParams params{};
-  params.position = document->offsetToPosition(use_name_offset(*document) + 1);
+  params.position =
+      document->textDocument().positionAt(use_name_offset(*document) + 1);
 
   const auto links =
       provider.getImplementation(*document, params, utils::default_cancel_token);
@@ -60,4 +69,4 @@ TEST(AbstractGoToImplementationProviderTest,
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

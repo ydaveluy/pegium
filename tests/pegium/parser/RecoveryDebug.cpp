@@ -2,14 +2,14 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <memory>
 #include <string_view>
 #include <vector>
 
 #include <pegium/RecoveryHarnessTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/parser/RecoveryDebug.hpp>
-#include <pegium/parser/RecoverySearch.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/parser/RecoveryDebug.hpp>
+#include <pegium/core/parser/RecoverySearch.hpp>
+#include <pegium/core/text/TextSnapshot.hpp>
 
 using namespace pegium::parser;
 
@@ -37,7 +37,6 @@ struct RecoveryDebugDefinition : pegium::AstNode {
 };
 
 struct RecoveryAttemptHarness {
-  std::unique_ptr<pegium::workspace::Document> document;
   detail::RecoveryAttempt attempt;
   detail::RecoveryAttemptSpec spec;
 };
@@ -48,20 +47,19 @@ RecoveryAttemptHarness bestRecoveryAttempt(const RuleType &entryRule,
                                            const Skipper &skipper,
                                            ParseOptions options = {}) {
   RecoveryAttemptHarness harness;
-  harness.document = std::make_unique<pegium::workspace::Document>();
-  harness.document->setText(std::string{text});
+  const auto snapshot = pegium::text::TextSnapshot::copy(text);
 
   const auto strictResult =
-      detail::run_strict_parse(entryRule, skipper, *harness.document);
+      detail::run_strict_parse(entryRule, skipper, snapshot);
   const auto failureAnalysis = detail::analyze_failure(
-      entryRule, skipper, *harness.document, strictResult.summary);
+      entryRule, skipper, snapshot, strictResult.summary);
   const auto window = detail::compute_recovery_window(
       failureAnalysis.snapshot,
       std::max<std::uint32_t>(1u, options.recoveryWindowTokenCount));
   const auto spec = detail::build_recovery_attempt_spec({}, window);
 
-  auto attempt = detail::run_recovery_attempt(entryRule, skipper, options,
-                                              *harness.document, spec);
+  auto attempt =
+      detail::run_recovery_attempt(entryRule, skipper, options, snapshot, spec);
   detail::classify_recovery_attempt(attempt);
   detail::score_recovery_attempt(attempt);
   if (!harness.attempt.cst ||

@@ -1,27 +1,29 @@
 #pragma once
 
 #include <requirements/ast.hpp>
+#include <requirements/services/Services.hpp>
 
-#include <pegium/services/Services.hpp>
-#include <pegium/validation/ValidationRegistry.hpp>
+#include <pegium/core/validation/ValidationAcceptor.hpp>
+
+namespace pegium::workspace {
+class Documents;
+}
 
 namespace requirements::services::validation {
 
 class RequirementsValidator final {
 public:
-  static void registerValidationChecks(
-      pegium::validation::ValidationRegistry &registry,
-      const pegium::services::Services &services);
+  void checkRequirementNameContainsANumber(
+      const requirements::ast::Requirement &requirement,
+      const pegium::validation::ValidationAcceptor &accept) const;
 
-private:
-  explicit RequirementsValidator(
-      const pegium::services::Services &services) noexcept
-      : _services(&services) {}
-
-  void checkRequirement(const requirements::ast::Requirement &requirement,
-                        const pegium::validation::ValidationAcceptor &accept) const;
-
-  const pegium::services::Services *_services;
+  void checkRequirementIsCoveredByATest(
+      const requirements::ast::Requirement &requirement,
+      const pegium::validation::ValidationAcceptor &accept,
+      const pegium::workspace::Documents &documents) const;
 };
+
+void registerRequirementsValidationChecks(
+    requirements::services::RequirementsLangServices &services);
 
 } // namespace requirements::services::validation

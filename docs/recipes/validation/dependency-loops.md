@@ -20,32 +20,53 @@ to inspect a larger graph:
 That is why this kind of check often belongs on the root model node rather than
 on the individual reference node.
 
+## Two common cases
+
+### Simple parent-style relations
+
+If the dependency shape is basically `1:n`, you can often detect cycles by
+walking one chain while remembering the visited nodes. Typical examples are
+parent links or superclass chains.
+
+### General graphs
+
+If the dependency shape is really `n:m`, a graph-oriented approach is usually
+clearer. Function calls, imports, and many dependency networks fall into that
+category.
+
+That is the case in `arithmetics`, where one definition may call several other
+definitions and may itself be called from many places.
+
 ## A living example
 
 In `examples/arithmetics/src/validation/ArithmeticsValidator.cpp`, recursion is
-checked in `checkModule(...)`.
+checked in `checkFunctionRecursion(...)`.
 
 The validator first registers a model-level check:
 
 ```cpp
 registry.registerChecks(
     {pegium::validation::ValidationRegistry::makeValidationCheck<
-         &ArithmeticsValidator::checkDivisionByZero>(validator),
+         &ArithmeticsValidator::checkDivByZero>(validator),
      pegium::validation::ValidationRegistry::makeValidationCheck<
-         &ArithmeticsValidator::checkDefinition>(validator),
+         &ArithmeticsValidator::checkUniqueParameters>(validator),
      pegium::validation::ValidationRegistry::makeValidationCheck<
-         &ArithmeticsValidator::checkFunctionCall>(validator),
+         &ArithmeticsValidator::checkNormalizable>(validator),
      pegium::validation::ValidationRegistry::makeValidationCheck<
-         &ArithmeticsValidator::checkModule>(validator)});
+         &ArithmeticsValidator::checkUniqueDefinitions>(validator),
+     pegium::validation::ValidationRegistry::makeValidationCheck<
+         &ArithmeticsValidator::checkFunctionRecursion>(validator),
+     pegium::validation::ValidationRegistry::makeValidationCheck<
+         &ArithmeticsValidator::checkMatchingParameters>(validator)});
 ```
 
-`checkModule(...)` then gets the whole `Module`, which is the right level to
-see all definitions and calls together.
+`checkFunctionRecursion(...)` then gets the whole `Module`, which is the right
+level to see all definitions and calls together.
 
-## Step 1: build a dependency graph from the AST
+## Step 1: build the dependency view from the AST
 
 The example walks each definition, collects nested `FunctionCall` nodes, and
-records edges by name:
+follows resolved targets:
 
 ```cpp
 for (const auto &statement : module.statements) {
@@ -54,63 +75,61 @@ for (const auto &statement : module.statements) {
     continue;
   }
 
-  std::vector<const FunctionCall *> calls;
-  collect_function_calls(definition->expr.get(), calls);
-  for (const auto *call : calls) {
-    const auto *callee = as_definition(call->func.get());
-    if (callee == nullptr) {
-      continue;
-    }
-    graph[definition->name].push_back(callee->name);
-  }
+  auto remainingCalls =
+      get_not_traversed_nested_calls(*definition, traversedFunctions);
+  // ...
 }
 ```
 
-This keeps the validation logic independent from LSP concerns. By the time
-validation runs, references have already been linked, so `call->func.get()`
-can resolve directly to the target definition.
+Because linking already ran before validation, the validator can work from
+resolved target definitions instead of raw reference text.
 
 ## Step 2: detect the cycle
 
-The same validator uses a depth-first search with three states:
+The same validator then walks those call relationships and records the
+recursive paths it finds. Whether you use a visited-set walk, a DFS with
+visitation states, or a graph library depends on the shape of your problem.
 
-- `Unvisited`
-- `Visiting`
-- `Visited`
-
-Seeing a node already marked as `Visiting` means the walk just found a cycle.
-That is enough for many language rules, and it avoids bringing in an extra
-graph dependency when you only need cycle detection.
+The important part is that the validation is attached to the whole model, not
+to one isolated reference.
 
 ## Step 3: report the most precise diagnostic you can
 
-Once a cycle is found, the example reports the error on the definition name
-when possible:
+Once a cycle is found, the example reports the error on the individual call
+sites participating in that cycle:
 
 ```cpp
-if (hasCycle) {
-  if (cycleDefinition != nullptr) {
-    accept.error(*cycleDefinition, "Recursion is not allowed.")
-        .property<&Definition::name>();
-  } else {
-    accept.error(module, "Recursion is not allowed.");
+for (const auto &cycle : callCycles) {
+  const auto cycleMessage = print_cycle(cycle, callsTree);
+  for (const auto &entry : iterate_back(cycle, callsTree)) {
+    accept
+        .error(*entry.call,
+               std::format("Recursion is not allowed [{}]", cycleMessage))
+        .property<&FunctionCall::func>();
   }
 }
 ```
 
-That pattern is worth copying: compute globally, but attach the diagnostic to
-the smallest useful node.
+That pattern is worth keeping in mind: compute globally, but attach the
+diagnostic to the smallest useful node or property.
 
-## Simple cycles versus complex graphs
+## Loop detection versus dependency ordering
 
-Not every cycle check needs a full graph walk.
+Some domains need more than "is there a cycle?".
 
-For simple `1:n` relations such as a parent chain, walking upward while keeping
-track of visited nodes is often enough.
+If the dependency graph is acyclic, you may also want a dependency order for
+later processing, code generation, or evaluation. The same graph view that
+helps with cycle detection is often the right basis for that second step as
+well.
 
-For call graphs, import graphs, or other `n:m` relations, a graph-oriented
-approach like the `arithmetics` example scales better and is usually easier to
-extend.
+## When to use this pattern
+
+This pattern is a good fit when:
+
+- the rule depends on relationships between many nodes
+- one node can depend on several others
+- a local validator method would not have enough context
+- the best diagnostic still needs to point back to one concrete node
 
 ## Related pages
 

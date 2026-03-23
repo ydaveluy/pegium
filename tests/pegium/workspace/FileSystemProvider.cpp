@@ -4,8 +4,8 @@
 #include <fstream>
 #include <stdexcept>
 
-#include <pegium/utils/UriUtils.hpp>
-#include <pegium/workspace/FileSystemProvider.hpp>
+#include <pegium/core/utils/UriUtils.hpp>
+#include <pegium/core/workspace/FileSystemProvider.hpp>
 
 namespace pegium::workspace {
 namespace {
@@ -14,7 +14,8 @@ TEST(EmptyFileSystemProviderTest, ReturnsEmptyOrThrows) {
   EmptyFileSystemProvider provider;
 
   EXPECT_FALSE(provider.exists("file:///tmp/missing.test"));
-  EXPECT_FALSE(provider.readFile("file:///tmp/missing.test").has_value());
+  EXPECT_THROW((void)provider.readFile("file:///tmp/missing.test"),
+               std::runtime_error);
   EXPECT_TRUE(provider.readDirectory("file:///tmp/missing").empty());
   EXPECT_THROW((void)provider.stat("file:///tmp/missing.test"),
                std::runtime_error);
@@ -49,8 +50,7 @@ TEST(LocalFileSystemProviderTest, UsesUrisForStatAndDirectoryEntries) {
   EXPECT_EQ(childStat.uri, childUri);
 
   const auto content = provider.readFile(childUri);
-  ASSERT_TRUE(content.has_value());
-  EXPECT_EQ(*content, "alpha");
+  EXPECT_EQ(content, "alpha");
 
   const auto entries = provider.readDirectory(rootUri);
   ASSERT_EQ(entries.size(), 1u);
@@ -58,6 +58,17 @@ TEST(LocalFileSystemProviderTest, UsesUrisForStatAndDirectoryEntries) {
   EXPECT_TRUE(entries.front().isFile);
 
   std::filesystem::remove_all(rootPath);
+}
+
+TEST(LocalFileSystemProviderTest, ThrowsOnMissingFileOrDirectory) {
+  LocalFileSystemProvider provider;
+
+  EXPECT_THROW((void)provider.stat("file:///tmp/pegium-tests/missing.test"),
+               std::runtime_error);
+  EXPECT_THROW((void)provider.readFile("file:///tmp/pegium-tests/missing.test"),
+               std::runtime_error);
+  EXPECT_THROW((void)provider.readDirectory("file:///tmp/pegium-tests/missing"),
+               std::runtime_error);
 }
 
 } // namespace

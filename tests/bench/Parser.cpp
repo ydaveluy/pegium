@@ -1,8 +1,8 @@
 #include "BenchmarkSupport.hpp"
 
 #include <charconv>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/workspace/Document.hpp>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -76,12 +76,18 @@ std::string make_expression_source(std::size_t targetBytes, bool malformed,
 BenchmarkTimings run_iteration(const std::string &source,
                                bool expectDiagnostics) {
   ParserBenchHarness parser;
-  pegium::workspace::Document document;
-  document.setText(source);
+  auto textDocument = std::make_shared<pegium::workspace::TextDocument>(
+      pegium::workspace::TextDocument::create("file:///bench-parser.expr",
+                                              "bench", 1, source));
+  pegium::workspace::Document document(std::move(textDocument));
 
   using Clock = std::chrono::steady_clock;
   const auto start = Clock::now();
-  parser.parse(document);
+  document.parseResult = parser.parse(text::TextSnapshot::copy(document.textDocument().getText()));
+  document.references = document.parseResult.references;
+  if (document.parseResult.cst != nullptr) {
+    document.parseResult.cst->attachDocument(document);
+  }
   const auto end = Clock::now();
 
   if (document.parseResult.cst == nullptr) {

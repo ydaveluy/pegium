@@ -1,19 +1,19 @@
 # Choose Your Path
 
-Use this page when you know you want to work with Pegium, but you are not yet
-sure which section of the documentation matches your goal.
+This page helps you choose the right section of the documentation once you know
+you want to work with Pegium, but are not yet sure where to begin.
 
 ## Start with Introduction if
 
 - you are still deciding whether Pegium fits your project
 - you want the high-level picture before reading APIs
-- you are coming from Langium and want the concept mapping first
+- you want the concept mapping first
 
 Useful pages:
 
 - [What is Pegium?](index.md)
 - [Why Pegium](why-pegium.md)
-- [Pegium for Langium Users](langium-users.md)
+- [Pegium Mental Model](mental-model.md)
 
 ## Start with Learn if
 
@@ -49,8 +49,9 @@ Useful pages:
 Useful pages:
 
 - [Reference](../reference/index.md)
-- [Start Here](../reference/start-here.md)
 - [Glossary](../reference/glossary.md)
+- [Configuration Services](../reference/configuration-services.md)
+- [Document Lifecycle](../reference/document-lifecycle.md)
 
 ## Start with Examples if
 
@@ -65,7 +66,7 @@ Useful pages:
 - [DomainModel](../examples/domainmodel.md)
 - [Requirements](../examples/requirements.md)
 
-## Rule of thumb
+## Quick orientation
 
 Read `Introduction` to orient yourself, `Learn` to build something, `Recipes`
 to solve targeted tasks, and `Reference` to confirm exact concepts and APIs.

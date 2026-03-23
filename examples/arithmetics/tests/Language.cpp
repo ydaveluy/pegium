@@ -4,11 +4,14 @@
 #include <arithmetics/services/Module.hpp>
 
 #include <pegium/ExampleTestSupport.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <lsp/json/json.h>
 #include <lsp/serialization.h>
 
 namespace arithmetics::tests {
 namespace {
+
+using pegium::as_services;
 
 TEST(ArithmeticsLanguageTest, ParsesAndEvaluatesModule) {
   parser::ArithmeticParser parser;
@@ -203,7 +206,10 @@ TEST(ArithmeticsLanguageTest, CommentProviderReturnsLeadingBlockComment) {
       "def value: 1;\n",
       pegium::test::make_file_uri("comments.calc"), "arithmetics");
 
-  auto shared = pegium::test::make_shared_services();
+  auto shared = pegium::test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
       arithmetics::services::create_language_services(*shared, "arithmetics");
 
@@ -229,7 +235,10 @@ TEST(ArithmeticsLanguageTest, DocumentationProviderRendersJSDocMarkdown) {
       "def value: 1;\n",
       pegium::test::make_file_uri("documentation.calc"), "arithmetics");
 
-  auto shared = pegium::test::make_shared_services();
+  auto shared = pegium::test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
       arithmetics::services::create_language_services(*shared, "arithmetics");
 
@@ -246,7 +255,10 @@ TEST(ArithmeticsLanguageTest, DocumentationProviderRendersJSDocMarkdown) {
 }
 
 TEST(ArithmeticsLanguageTest, HoverReturnsNoContentWithoutDocumentation) {
-  auto shared = pegium::test::make_shared_services();
+  auto shared = pegium::test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   ASSERT_TRUE(arithmetics::services::register_language_services(*shared));
 
   const auto uri = pegium::test::make_file_uri("hover.calc");
@@ -260,10 +272,8 @@ TEST(ArithmeticsLanguageTest, HoverReturnsNoContentWithoutDocumentation) {
       "2 * c + 1 - 3;\n");
   ASSERT_NE(document, nullptr);
 
-  const auto *coreServices = shared->serviceRegistry->getServices(uri);
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services =
-      dynamic_cast<const pegium::services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->lsp.hoverProvider, nullptr);
 
@@ -283,7 +293,10 @@ TEST(ArithmeticsLanguageTest, HoverReturnsNoContentWithoutDocumentation) {
 }
 
 TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForModuleName) {
-  auto shared = pegium::test::make_shared_services();
+  auto shared = pegium::test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   ASSERT_TRUE(arithmetics::services::register_language_services(*shared));
 
   const auto uri = pegium::test::make_file_uri("root-hover.calc");
@@ -298,10 +311,8 @@ TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForModuleName) {
       "2 * c + 1 - 3;\n");
   ASSERT_NE(document, nullptr);
 
-  const auto *coreServices = shared->serviceRegistry->getServices(uri);
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services =
-      dynamic_cast<const pegium::services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->lsp.hoverProvider, nullptr);
 
@@ -319,7 +330,10 @@ TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForModuleName) {
 }
 
 TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForDefinitionName) {
-  auto shared = pegium::test::make_shared_services();
+  auto shared = pegium::test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   ASSERT_TRUE(arithmetics::services::register_language_services(*shared));
 
   const auto uri = pegium::test::make_file_uri("definition-hover.calc");
@@ -333,10 +347,8 @@ TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForDefinitionName) {
       "2 * c + 1 - 3;\n");
   ASSERT_NE(document, nullptr);
 
-  const auto *coreServices = shared->serviceRegistry->getServices(uri);
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services =
-      dynamic_cast<const pegium::services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->lsp.hoverProvider, nullptr);
 
@@ -354,7 +366,10 @@ TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForDefinitionName) {
 }
 
 TEST(ArithmeticsLanguageTest, HoverResultSerializesForDocumentedRootAndReference) {
-  auto shared = pegium::test::make_shared_services();
+  auto shared = pegium::test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   ASSERT_TRUE(arithmetics::services::register_language_services(*shared));
 
   const auto uri = pegium::test::make_file_uri("documented-hover.calc");
@@ -369,10 +384,8 @@ TEST(ArithmeticsLanguageTest, HoverResultSerializesForDocumentedRootAndReference
       "2 * c + 1 - 3;\n");
   ASSERT_NE(document, nullptr);
 
-  const auto *coreServices = shared->serviceRegistry->getServices(uri);
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services =
-      dynamic_cast<const pegium::services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->lsp.hoverProvider, nullptr);
 

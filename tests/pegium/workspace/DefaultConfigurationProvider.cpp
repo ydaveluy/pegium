@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <variant>
+
 #include <pegium/CoreTestSupport.hpp>
-#include <pegium/workspace/DefaultConfigurationProvider.hpp>
+#include <pegium/core/workspace/DefaultConfigurationProvider.hpp>
 
 namespace pegium::workspace {
 namespace {
@@ -21,11 +23,16 @@ make_ready_future(std::vector<services::JsonValue> value) {
 
 TEST(DefaultConfigurationProviderTest,
      InitializedFetchesConfigurationAndPublishesSectionUpdates) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services(*shared, "test", {".test"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
-  DefaultConfigurationProvider provider(shared->serviceRegistry.get());
+  DefaultConfigurationProvider provider(*shared);
 
   InitializeParams initializeParams{};
   initializeParams.capabilities.workspaceConfiguration = true;
@@ -51,23 +58,23 @@ TEST(DefaultConfigurationProviderTest,
       [&fetchedSections](std::vector<std::string> sections) {
         fetchedSections = std::move(sections);
         services::JsonValue::Object buildConfig;
-        buildConfig.emplace("ignorePatterns", "generated, out");
+        buildConfig.try_emplace("workspaceRoot", "src");
 
         services::JsonValue::Object pegiumConfig;
-        pegiumConfig.emplace("build", std::move(buildConfig));
+        pegiumConfig.try_emplace("build", std::move(buildConfig));
 
         services::JsonValue::Object validationConfig;
-        validationConfig.emplace("enabled", false);
-        validationConfig.emplace(
+        validationConfig.try_emplace("enabled", false);
+        validationConfig.try_emplace(
             "categories",
             services::JsonValue::Array{services::JsonValue("syntax"),
                                        services::JsonValue("types")});
 
         services::JsonValue::Object sectionConfig;
-        sectionConfig.emplace("validation", std::move(validationConfig));
-        return make_ready_future(
-            std::vector<services::JsonValue>{services::JsonValue(pegiumConfig),
-                                             services::JsonValue(sectionConfig)});
+        sectionConfig.try_emplace("validation", std::move(validationConfig));
+        return make_ready_future(std::vector<services::JsonValue>{
+            services::JsonValue(pegiumConfig),
+            services::JsonValue(sectionConfig)});
       };
 
   auto future = provider.initialized(initializedParams);
@@ -83,29 +90,30 @@ TEST(DefaultConfigurationProviderTest,
   const auto buildValue = provider.getConfiguration("pegium", "build");
   ASSERT_TRUE(buildValue.has_value());
   ASSERT_TRUE(buildValue->isObject());
-  EXPECT_EQ(buildValue->object().at("ignorePatterns").string(), "generated, out");
+  EXPECT_EQ(buildValue->object().at("workspaceRoot").string(), "src");
 
-  const auto validationValue =
-      provider.getConfiguration("test", "validation");
+  const auto validationValue = provider.getConfiguration("test", "validation");
   ASSERT_TRUE(validationValue.has_value());
   ASSERT_TRUE(validationValue->isObject());
 
-  const auto configuration =
-      provider.getWorkspaceConfiguration(
-          test::make_file_uri("configuration.test"));
-  EXPECT_FALSE(configuration.validation.enabled);
-  ASSERT_EQ(configuration.validation.categories.size(), 2u);
-  EXPECT_EQ(configuration.validation.categories[0], "syntax");
-  EXPECT_EQ(configuration.validation.categories[1], "types");
+  const auto configuration = provider.getWorkspaceConfiguration(
+      test::make_file_uri("configuration.test"));
+  ASSERT_TRUE(std::holds_alternative<bool>(configuration.validation));
+  EXPECT_FALSE(std::get<bool>(configuration.validation));
 }
 
-TEST(DefaultConfigurationProviderTest, MissingConfigurationValueReturnsNullopt) {
-  DefaultConfigurationProvider provider(nullptr);
+TEST(DefaultConfigurationProviderTest,
+     MissingConfigurationValueReturnsNullopt) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  DefaultConfigurationProvider provider(*shared);
   EXPECT_FALSE(provider.getConfiguration("missing", "prop").has_value());
 }
 
 TEST(DefaultConfigurationProviderTest, UpdateConfigurationStoresAndPublishes) {
-  DefaultConfigurationProvider provider(nullptr);
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  DefaultConfigurationProvider provider(*shared);
 
   std::vector<ConfigurationProvider::ConfigurationSectionUpdate> updates;
   auto onUpdate = provider.onConfigurationSectionUpdate(
@@ -113,7 +121,7 @@ TEST(DefaultConfigurationProviderTest, UpdateConfigurationStoresAndPublishes) {
   (void)onUpdate;
 
   services::JsonValue::Object settings;
-  settings.emplace("prop", "foo");
+  settings.try_emplace("prop", "foo");
 
   ConfigurationChangeParams params;
   params.settings = services::JsonValue(
@@ -129,18 +137,21 @@ TEST(DefaultConfigurationProviderTest, UpdateConfigurationStoresAndPublishes) {
   EXPECT_EQ(updates.front().section, "someLang");
 }
 
-TEST(DefaultConfigurationProviderTest, UpdateConfigurationOverwritesLanguageSettings) {
-  DefaultConfigurationProvider provider(nullptr);
+TEST(DefaultConfigurationProviderTest,
+     UpdateConfigurationOverwritesLanguageSettings) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  DefaultConfigurationProvider provider(*shared);
 
   ConfigurationChangeParams params;
-  params.settings = services::JsonValue(
-      services::JsonValue::Object{{"someLang", services::JsonValue(
-                                                   services::JsonValue::Object{{"prop", "bar"}})}});
+  params.settings = services::JsonValue(services::JsonValue::Object{
+      {"someLang",
+       services::JsonValue(services::JsonValue::Object{{"prop", "bar"}})}});
   provider.updateConfiguration(params);
 
-  params.settings = services::JsonValue(
-      services::JsonValue::Object{{"someLang", services::JsonValue(
-                                                   services::JsonValue::Object{{"prop", "bar2"}})}});
+  params.settings = services::JsonValue(services::JsonValue::Object{
+      {"someLang",
+       services::JsonValue(services::JsonValue::Object{{"prop", "bar2"}})}});
   provider.updateConfiguration(params);
 
   const auto value = provider.getConfiguration("someLang", "prop");

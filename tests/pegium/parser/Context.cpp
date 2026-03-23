@@ -1,9 +1,10 @@
 #include <gtest/gtest.h>
 #include <pegium/TestCstBuilderHarness.hpp>
 #include <pegium/TestRuleParser.hpp>
-#include <pegium/parser/RecoveryAnalysis.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/RecoveryAnalysis.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 #include <memory>
+#include <pegium/core/text/TextSnapshot.hpp>
 
 using namespace pegium::parser;
 
@@ -118,10 +119,9 @@ TEST(ContextTest, IgnoreAndHideAreApplied) {
   DataTypeRule<std::string> rule{"Rule", "a"_kw + "b"_kw};
   ParserRule<StringNode> root{"Root", assign<&StringNode::value>(rule)};
 
-  pegium::workspace::Document document;
-  document.setText("a// comment\n   b");
-  pegium::test::parse_rule(root, document, skip(ignored(ws), hidden(comment)));
-  const auto &result = document.parseResult;
+  const auto result =
+      pegium::test::parse_rule_result(root, "a// comment\n   b",
+                                      skip(ignored(ws), hidden(comment)));
 
   ASSERT_TRUE(result.value);
   auto *typed = pegium::ast_ptr_cast<StringNode>(result.value);
@@ -224,11 +224,9 @@ TEST(ContextTest, RunStrictParseUsesPlainContextWithoutFailureRecorder) {
   ParserRule<ContextDispatchNode> entry{
       "Entry", ContextDispatchExpr{parseContextUsed, trackedParseContextUsed}};
 
-  pegium::workspace::Document document;
-  document.setText("a");
+  const auto text = pegium::text::TextSnapshot::copy("a");
 
-  const auto result =
-      detail::run_strict_parse(entry, NoOpSkipper(), document);
+  const auto result = detail::run_strict_parse(entry, NoOpSkipper(), text);
 
   EXPECT_TRUE(result.summary.entryRuleMatched);
   EXPECT_TRUE(parseContextUsed);
@@ -241,12 +239,11 @@ TEST(ContextTest, RunStrictParseUsesTrackedContextWhenFailureRecorderIsPresent) 
   ParserRule<ContextDispatchNode> entry{
       "Entry", ContextDispatchExpr{parseContextUsed, trackedParseContextUsed}};
 
-  pegium::workspace::Document document;
-  document.setText("a");
-  detail::FailureHistoryRecorder recorder(document.textView().data());
+  const auto text = pegium::text::TextSnapshot::copy("a");
+  detail::FailureHistoryRecorder recorder(text.view().data());
 
   const auto result =
-      detail::run_strict_parse(entry, NoOpSkipper(), document,
+      detail::run_strict_parse(entry, NoOpSkipper(), text,
                                pegium::utils::default_cancel_token, &recorder);
 
   EXPECT_TRUE(result.summary.entryRuleMatched);

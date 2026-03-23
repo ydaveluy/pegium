@@ -2,23 +2,23 @@
 
 #include <statemachine/ast.hpp>
 
-#include <pegium/services/Services.hpp>
-#include <pegium/validation/ValidationRegistry.hpp>
+#include <statemachine/services/Services.hpp>
+#include <pegium/core/validation/ValidationRegistry.hpp>
 
 namespace statemachine::services::validation {
 
 class StatemachineValidator final {
 public:
-  static void registerValidationChecks(
-      pegium::validation::ValidationRegistry &registry,
-      const pegium::services::Services &services);
-
-private:
   void checkStateNameStartsWithCapital(
       const statemachine::ast::State &state,
       const pegium::validation::ValidationAcceptor &accept) const;
-  void checkUniqueNames(const statemachine::ast::Statemachine &model,
-                        const pegium::validation::ValidationAcceptor &accept) const;
+
+  void checkUniqueStatesAndEvents(
+      const statemachine::ast::Statemachine &model,
+      const pegium::validation::ValidationAcceptor &accept) const;
 };
+
+void registerValidationChecks(
+    statemachine::services::StatemachineServices &services);
 
 } // namespace statemachine::services::validation

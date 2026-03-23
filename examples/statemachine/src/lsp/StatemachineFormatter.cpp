@@ -2,7 +2,7 @@
 
 namespace statemachine::services::lsp {
 void StatemachineFormatter::formatStatemachine(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::Statemachine *model) const {
   auto formatter = builder.getNodeFormatter(model);
   formatter.keyword("statemachine").append(oneSpace);
@@ -20,7 +20,7 @@ void StatemachineFormatter::formatStatemachine(
   formatter.properties<&ast::Statemachine::states>().prepend(newLines(2));
 }
 
-void StatemachineFormatter::formatState(pegium::lsp::FormattingBuilder &builder,
+void StatemachineFormatter::formatState(pegium::FormattingBuilder &builder,
                                         const ast::State *state) const {
   auto formatter = builder.getNodeFormatter(state);
   formatter.keyword("state").append(oneSpace);
@@ -44,14 +44,14 @@ void StatemachineFormatter::formatState(pegium::lsp::FormattingBuilder &builder,
 }
 
 void StatemachineFormatter::formatTransition(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::Transition *transition) const {
   auto formatter = builder.getNodeFormatter(transition);
   formatter.keyword("=>").prepend(oneSpace).append(oneSpace);
 }
 
 StatemachineFormatter::StatemachineFormatter(
-    const pegium::services::Services &services)
+    const pegium::Services &services)
     : AbstractFormatter(services) {
   on<ast::Statemachine>(&StatemachineFormatter::formatStatemachine);
   on<ast::State>(&StatemachineFormatter::formatState);

@@ -1,6 +1,6 @@
 # Pegium's Workflow
 
-Pegium's workflow can be expressed as a short sequence of practical steps:
+Pegium's workflow can be summarized as a short sequence of practical steps:
 
 1. build the repository
 2. choose a starting point
@@ -11,20 +11,16 @@ Pegium's workflow can be expressed as a short sequence of practical steps:
 7. add formatting and LSP services
 
 The exact needs of a real project may go beyond this sequence, but this is the
-recommended common path for building a language with Pegium.
-
-## Start here if
-
-- you want the recommended order of implementation
-- you are turning one of the examples into your own language
-- you need to know which tasks are foundational and which ones come later
+common path we recommend for building a language with Pegium. For advanced
+topics and one-off customization tasks, continue with the
+[recipes](../../recipes/index.md).
 
 ## Explanation
 
-You can think of the workflow as three blocks:
+This workflow breaks down into three parts:
 
-- environment and repository setup
-- the core language loop you revisit as the grammar evolves
+- the initial setup, which you normally do once
+- the core language work, which you revisit as the grammar evolves
 - advanced customization, which is usually better handled through the
   [recipes](../../recipes/index.md)
 
@@ -72,8 +68,3 @@ and workspace behavior where needed.
 Everything beyond the common workflow is better handled through the
 [recipes](../../recipes/index.md) and [reference](../../reference/index.md)
 pages.
-
-## Rule of thumb
-
-Do not over-customize early. Get parsing, AST shape, references, and
-validation working first, then move on to formatter and LSP refinements.

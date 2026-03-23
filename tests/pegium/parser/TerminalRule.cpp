@@ -1,10 +1,8 @@
 #include <cstdint>
 #include <gtest/gtest.h>
-#include <memory>
 #include <pegium/TestCstBuilderHarness.hpp>
 #include <pegium/TestRuleParser.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 #include <ranges>
 #include <variant>
 
@@ -24,15 +22,12 @@ template <typename T> struct TerminalPairNode : pegium::AstNode {
 };
 
 template <typename T>
-auto parseTerminalRule(const TerminalRule<T> &rule, std::string_view text,
-                       const Skipper &skipper,
-                       const ParseOptions &options = {}) {
+ParseResult parseTerminalRule(const TerminalRule<T> &rule, std::string_view text,
+                              const Skipper &skipper,
+                              const ParseOptions &options = {}) {
   ParserRule<TerminalValueNode<T>> root{
       "Root", assign<&TerminalValueNode<T>::value>(rule)};
-  auto document = std::make_unique<pegium::workspace::Document>();
-  document->setText(std::string{text});
-  pegium::test::parse_rule(root, *document, skipper, options);
-  return std::move(document);
+  return pegium::test::parse_rule_result(root, text, skipper, options);
 }
 
 } // namespace
@@ -41,9 +36,7 @@ TEST(TerminalRuleTest, ParseRequiresFullConsumption) {
   TerminalRule<std::string_view> terminal{"T", "hello"_kw};
 
   {
-    auto document =
-        parseTerminalRule(terminal, "hello", SkipperBuilder().build());
-    auto &result = document->parseResult;
+    auto result = parseTerminalRule(terminal, "hello", SkipperBuilder().build());
     ASSERT_TRUE(result.value);
     EXPECT_TRUE(result.fullMatch);
     auto *typed = pegium::ast_ptr_cast<TerminalValueNode<std::string_view>>(
@@ -53,9 +46,8 @@ TEST(TerminalRuleTest, ParseRequiresFullConsumption) {
   }
 
   {
-    auto document =
+    auto result =
         parseTerminalRule(terminal, "helloX", SkipperBuilder().build());
-    auto &result = document->parseResult;
     EXPECT_FALSE(result.fullMatch);
     ASSERT_TRUE(result.value);
     ASSERT_EQ(result.parseDiagnostics.size(), 1u);
@@ -72,9 +64,7 @@ TEST(TerminalRuleTest, IntegralConversionUsesFromChars) {
   TerminalRule<int> number{"Number", some(d)};
 
   {
-    auto document =
-        parseTerminalRule(number, "12345", SkipperBuilder().build());
-    auto &result = document->parseResult;
+    auto result = parseTerminalRule(number, "12345", SkipperBuilder().build());
     ASSERT_TRUE(result.value);
     EXPECT_TRUE(result.fullMatch);
     auto *typed =
@@ -84,9 +74,8 @@ TEST(TerminalRuleTest, IntegralConversionUsesFromChars) {
   }
 
   {
-    auto document =
+    auto result =
         parseTerminalRule(number, "12345x", SkipperBuilder().build());
-    auto &result = document->parseResult;
     EXPECT_FALSE(result.fullMatch);
     ASSERT_TRUE(result.value);
     ASSERT_EQ(result.parseDiagnostics.size(), 1u);
@@ -124,15 +113,13 @@ TEST(TerminalRuleTest, ParseRuleLeavesCursorAtTokenEnd) {
 TEST(TerminalRuleTest, BoolConversionMapsTrueAndFalse) {
   TerminalRule<bool> flag{"Flag", "true"_kw | "false"_kw};
 
-  auto document = parseTerminalRule(flag, "true", SkipperBuilder().build());
-  auto &yes = document->parseResult;
+  auto yes = parseTerminalRule(flag, "true", SkipperBuilder().build());
   ASSERT_TRUE(yes.value);
   auto *yesTyped = pegium::ast_ptr_cast<TerminalValueNode<bool>>(yes.value);
   ASSERT_TRUE(yesTyped != nullptr);
   EXPECT_TRUE(yesTyped->value);
 
-  document = parseTerminalRule(flag, "false", SkipperBuilder().build());
-  auto &no = document->parseResult;
+  auto no = parseTerminalRule(flag, "false", SkipperBuilder().build());
   ASSERT_TRUE(no.value);
   auto *noTyped = pegium::ast_ptr_cast<TerminalValueNode<bool>>(no.value);
   ASSERT_TRUE(noTyped != nullptr);
@@ -143,8 +130,7 @@ TEST(TerminalRuleTest, FloatingPointConversionAndFailurePaths) {
   TerminalRule<double> number{"Number", some(dot)};
 
   {
-    auto document = parseTerminalRule(number, "12.5", SkipperBuilder().build());
-    auto &result = document->parseResult;
+    auto result = parseTerminalRule(number, "12.5", SkipperBuilder().build());
     ASSERT_TRUE(result.value);
     auto *typed =
         pegium::ast_ptr_cast<TerminalValueNode<double>>(result.value);
@@ -160,8 +146,7 @@ TEST(TerminalRuleTest, CharRuleCanUseCustomConverter) {
     return opt::conversion_value<char>(sv.empty() ? '\0' : sv.front());
   });
 
-  auto document = parseTerminalRule(ch, "x", SkipperBuilder().build());
-  auto &result = document->parseResult;
+  auto result = parseTerminalRule(ch, "x", SkipperBuilder().build());
   ASSERT_TRUE(result.value);
   auto *typed = pegium::ast_ptr_cast<TerminalValueNode<char>>(result.value);
   ASSERT_TRUE(typed != nullptr);
@@ -175,8 +160,7 @@ TEST(TerminalRuleTest, ConstructorOptionCanSetValueConverter) {
                                  static_cast<int>(sv.size()) + 1);
                            })};
 
-  auto document = parseTerminalRule(number, "42", SkipperBuilder().build());
-  auto &result = document->parseResult;
+  auto result = parseTerminalRule(number, "42", SkipperBuilder().build());
   ASSERT_TRUE(result.value);
   auto *typed = pegium::ast_ptr_cast<TerminalValueNode<int>>(result.value);
   ASSERT_TRUE(typed != nullptr);
@@ -191,8 +175,7 @@ TEST(TerminalRuleTest, ConverterCanSetValue) {
             return opt::conversion_value<int>(static_cast<int>(sv.size()) + 2);
           })};
 
-  auto document = parseTerminalRule(number, "42", SkipperBuilder().build());
-  auto &result = document->parseResult;
+  auto result = parseTerminalRule(number, "42", SkipperBuilder().build());
   ASSERT_TRUE(result.fullMatch);
   ASSERT_TRUE(result.value);
   EXPECT_TRUE(result.parseDiagnostics.empty());
@@ -211,8 +194,7 @@ TEST(TerminalRuleTest,
             return opt::conversion_error<int>("bad number");
           })};
 
-  auto document = parseTerminalRule(number, "42", SkipperBuilder().build());
-  auto &result = document->parseResult;
+  auto result = parseTerminalRule(number, "42", SkipperBuilder().build());
   ASSERT_TRUE(result.fullMatch);
   ASSERT_TRUE(result.value);
   ASSERT_EQ(result.parseDiagnostics.size(), 1u);
@@ -235,11 +217,8 @@ TEST(TerminalRuleTest, MultipleConverterFailuresProduceOrderedDiagnostics) {
       "Root", assign<&TerminalPairNode<int>::first>(number) + " "_kw +
                   assign<&TerminalPairNode<int>::second>(number)};
 
-  pegium::workspace::Document document;
-  document.setText("1 2");
-  pegium::test::parse_rule(root, document, SkipperBuilder().build());
-
-  const auto &result = document.parseResult;
+  const auto result =
+      pegium::test::parse_rule_result(root, "1 2", SkipperBuilder().build());
   ASSERT_TRUE(result.fullMatch);
   ASSERT_TRUE(result.value);
   ASSERT_EQ(result.parseDiagnostics.size(), 2u);
@@ -329,31 +308,31 @@ TEST(TerminalRuleTest, RecoveryInsertDoesNotMaterializeHiddenCstNodes) {
 TEST(TerminalRuleTest, CanOverrideRule) {
   TerminalRule<bool> rule{"RuleWithOverrides", "a"_kw};
   auto skipper = SkipperBuilder().build();
-  EXPECT_TRUE(parseTerminalRule(rule, "a", skipper)->parseResult.fullMatch);
-  EXPECT_FALSE(parseTerminalRule(rule, "b", skipper)->parseResult.fullMatch);
-  EXPECT_FALSE(parseTerminalRule(rule, "c", skipper)->parseResult.fullMatch);
-  EXPECT_FALSE(parseTerminalRule(rule, "d", skipper)->parseResult.fullMatch);
+  EXPECT_TRUE(parseTerminalRule(rule, "a", skipper).fullMatch);
+  EXPECT_FALSE(parseTerminalRule(rule, "b", skipper).fullMatch);
+  EXPECT_FALSE(parseTerminalRule(rule, "c", skipper).fullMatch);
+  EXPECT_FALSE(parseTerminalRule(rule, "d", skipper).fullMatch);
 
   // first override
   rule = rule.super() | "b"_kw;
-  EXPECT_TRUE(parseTerminalRule(rule, "a", skipper)->parseResult.fullMatch);
-  EXPECT_TRUE(parseTerminalRule(rule, "b", skipper)->parseResult.fullMatch);
-  EXPECT_FALSE(parseTerminalRule(rule, "c", skipper)->parseResult.fullMatch);
-  EXPECT_FALSE(parseTerminalRule(rule, "d", skipper)->parseResult.fullMatch);
+  EXPECT_TRUE(parseTerminalRule(rule, "a", skipper).fullMatch);
+  EXPECT_TRUE(parseTerminalRule(rule, "b", skipper).fullMatch);
+  EXPECT_FALSE(parseTerminalRule(rule, "c", skipper).fullMatch);
+  EXPECT_FALSE(parseTerminalRule(rule, "d", skipper).fullMatch);
 
   // second override
   rule = rule.super() | "c"_kw;
-  EXPECT_TRUE(parseTerminalRule(rule, "a", skipper)->parseResult.fullMatch);
-  EXPECT_TRUE(parseTerminalRule(rule, "b", skipper)->parseResult.fullMatch);
-  EXPECT_TRUE(parseTerminalRule(rule, "c", skipper)->parseResult.fullMatch);
-  EXPECT_FALSE(parseTerminalRule(rule, "d", skipper)->parseResult.fullMatch);
+  EXPECT_TRUE(parseTerminalRule(rule, "a", skipper).fullMatch);
+  EXPECT_TRUE(parseTerminalRule(rule, "b", skipper).fullMatch);
+  EXPECT_TRUE(parseTerminalRule(rule, "c", skipper).fullMatch);
+  EXPECT_FALSE(parseTerminalRule(rule, "d", skipper).fullMatch);
 
   // third override
   rule = "d"_kw;
-  EXPECT_FALSE(parseTerminalRule(rule, "a", skipper)->parseResult.fullMatch);
-  EXPECT_FALSE(parseTerminalRule(rule, "b", skipper)->parseResult.fullMatch);
-  EXPECT_FALSE(parseTerminalRule(rule, "c", skipper)->parseResult.fullMatch);
-  EXPECT_TRUE(parseTerminalRule(rule, "d", skipper)->parseResult.fullMatch);
+  EXPECT_FALSE(parseTerminalRule(rule, "a", skipper).fullMatch);
+  EXPECT_FALSE(parseTerminalRule(rule, "b", skipper).fullMatch);
+  EXPECT_FALSE(parseTerminalRule(rule, "c", skipper).fullMatch);
+  EXPECT_TRUE(parseTerminalRule(rule, "d", skipper).fullMatch);
 }
 
 TEST(TerminalRuleTest, EnumGetValueUsesUnderlyingVariantType) {
@@ -362,8 +341,7 @@ TEST(TerminalRuleTest, EnumGetValueUsesUnderlyingVariantType) {
     return opt::conversion_value<TerminalMode>(TerminalMode::Single);
   });
 
-  auto document = parseTerminalRule(mode, "m", SkipperBuilder().build());
-  auto &parsed = document->parseResult;
+  auto parsed = parseTerminalRule(mode, "m", SkipperBuilder().build());
   ASSERT_TRUE(parsed.value);
   auto *typed =
       pegium::ast_ptr_cast<TerminalValueNode<TerminalMode>>(parsed.value);

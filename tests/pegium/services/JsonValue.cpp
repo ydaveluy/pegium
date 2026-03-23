@@ -2,7 +2,7 @@
 
 #include <sstream>
 
-#include <pegium/services/JsonValue.hpp>
+#include <pegium/core/services/JsonValue.hpp>
 
 namespace pegium::services {
 namespace {

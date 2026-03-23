@@ -1,19 +1,20 @@
 #include <gtest/gtest.h>
 
+#include <pegium/CoreTestSupport.hpp>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include <pegium/execution/TaskScheduler.hpp>
 #include <pegium/TestRuleParser.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/services/CoreServices.hpp>
-#include <pegium/services/SharedCoreServices.hpp>
-#include <pegium/validation/DefaultDocumentValidator.hpp>
-#include <pegium/validation/DefaultValidationRegistry.hpp>
-#include <pegium/validation/DocumentValidator.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <pegium/core/execution/TaskScheduler.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/validation/DefaultDocumentValidator.hpp>
+#include <pegium/core/validation/DefaultValidationRegistry.hpp>
+#include <pegium/core/validation/DocumentValidator.hpp>
+#include <pegium/core/workspace/Document.hpp>
 
 #include "ValidationTestUtils.hpp"
 
@@ -28,8 +29,23 @@ struct ValidationRootNode : pegium::AstNode {
   vector<pointer<ValidationNodeA>> nodes;
 };
 
+std::unique_ptr<services::SharedCoreServices>
+make_validation_shared_services(
+    std::optional<std::size_t> workerCount = std::nullopt) {
+  auto sharedServices = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*sharedServices);
+  if (workerCount.has_value()) {
+    sharedServices->execution.taskScheduler =
+        std::make_shared<execution::TaskScheduler>(*workerCount);
+  }
+  return sharedServices;
+}
+
 TEST(DefaultDocumentValidatorTest, SupportsBuiltInAndCustomCategories) {
-  auto registry = std::make_unique<DefaultValidationRegistry>();
+  auto sharedServices = make_validation_shared_services();
+  services::CoreServices languageServices(*sharedServices);
+  languageServices.languageMetaData.languageId = "mini";
+  auto registry = std::make_unique<DefaultValidationRegistry>(languageServices);
   registry->registerCheck<ValidationRefNode>(
       [](const ValidationRefNode &, const ValidationAcceptor &acceptor) {
         services::Diagnostic diagnostic;
@@ -40,34 +56,37 @@ TEST(DefaultDocumentValidatorTest, SupportsBuiltInAndCustomCategories) {
         acceptor(std::move(diagnostic));
       },
       "fast");
-
-  services::SharedCoreServices sharedServices;
-  services::CoreServices languageServices(sharedServices);
-  languageServices.languageId = "mini";
   languageServices.validation.validationRegistry = std::move(registry);
   DefaultDocumentValidator validator(languageServices);
 
   ParserRule<ValidationRefNode> root{
-      "Root",
-      "prefix"_kw + ":"_kw + assign<&ValidationRefNode::ref>("UnknownSymbol"_kw)};
+      "Root", "prefix"_kw + ":"_kw +
+                  assign<&ValidationRefNode::ref>("UnknownSymbol"_kw)};
 
-  workspace::Document document;
-  document.uri = "file:///validation.pg";
-  document.languageId = "mini";
-  document.setText("prefix:UnknownSymbol");
+  workspace::Document document(
+      test::make_text_document("file:///validation.pg", "mini",
+                               "prefix:UnknownSymbol"));
+  document.id = 1u;
   pegium::test::parse_rule(root, document, SkipperBuilder().build());
   ASSERT_TRUE(document.parseResult.value != nullptr);
   ASSERT_FALSE(document.references.empty());
-  document.references.front().get()->setResolution(
-      ReferenceResolution{.node = nullptr,
-                          .description = nullptr,
-                          .errorMessage =
-                              "Could not resolve reference 'UnknownSymbol'."});
+  auto *reference = dynamic_cast<AbstractSingleReference *>(
+      document.references.front().get());
+  ASSERT_NE(reference, nullptr);
+  document.state = workspace::DocumentState::Parsed;
+  EXPECT_EQ(reference->resolve(), nullptr);
+  EXPECT_FALSE(reference->hasError());
 
   ValidationOptions builtInOnly;
-  builtInOnly.enabled = true;
   builtInOnly.categories = {"built-in"};
-  const auto builtInDiagnostics = validator.validateDocument(document, builtInOnly);
+  EXPECT_TRUE(validator.validateDocument(document, builtInOnly, {}).empty());
+
+  document.state = workspace::DocumentState::ComputedScopes;
+  EXPECT_EQ(reference->resolve(), nullptr);
+  ASSERT_TRUE(reference->hasError());
+
+  const auto builtInDiagnostics =
+      validator.validateDocument(document, builtInOnly, {});
   ASSERT_EQ(builtInDiagnostics.size(), 1u);
   EXPECT_EQ(builtInDiagnostics.front().message,
             "Unresolved reference: UnknownSymbol");
@@ -76,9 +95,9 @@ TEST(DefaultDocumentValidatorTest, SupportsBuiltInAndCustomCategories) {
   EXPECT_EQ(builtInDiagnostics.front().end, 20);
 
   ValidationOptions customOnly;
-  customOnly.enabled = true;
   customOnly.categories = {"fast"};
-  const auto customDiagnostics = validator.validateDocument(document, customOnly);
+  const auto customDiagnostics =
+      validator.validateDocument(document, customOnly, {});
   ASSERT_EQ(customDiagnostics.size(), 1u);
   EXPECT_EQ(customDiagnostics.front().message, "Custom warning");
   EXPECT_EQ(customDiagnostics.front().source, "mini");
@@ -87,13 +106,16 @@ TEST(DefaultDocumentValidatorTest, SupportsBuiltInAndCustomCategories) {
   EXPECT_EQ(customDiagnostics.front().begin, 12);
   EXPECT_EQ(customDiagnostics.front().end, 14);
 
-  ValidationOptions disabled;
-  disabled.enabled = false;
-  EXPECT_TRUE(validator.validateDocument(document, disabled).empty());
+  ValidationOptions unrelatedOnly;
+  unrelatedOnly.categories = {"slow"};
+  EXPECT_TRUE(validator.validateDocument(document, unrelatedOnly, {}).empty());
 }
 
 TEST(DefaultDocumentValidatorTest, RunsBeforeAndAfterDocumentHooks) {
-  auto registry = std::make_unique<DefaultValidationRegistry>();
+  auto sharedServices = make_validation_shared_services();
+  services::CoreServices languageServices(*sharedServices);
+  languageServices.languageMetaData.languageId = "mini";
+  auto registry = std::make_unique<DefaultValidationRegistry>(languageServices);
   std::vector<std::string> phases;
   registry->registerBeforeDocument(
       [&phases](const pegium::AstNode &, const ValidationAcceptor &acceptor,
@@ -120,34 +142,29 @@ TEST(DefaultDocumentValidatorTest, RunsBeforeAndAfterDocumentHooks) {
         acceptor(std::move(diagnostic));
       },
       "fast");
-  registry->registerAfterDocument(
-      [&phases](const pegium::AstNode &, const ValidationAcceptor &acceptor,
-                std::span<const std::string>,
-                const utils::CancellationToken &) {
-        phases.push_back("after");
-        services::Diagnostic diagnostic;
-        diagnostic.severity = services::DiagnosticSeverity::Hint;
-        diagnostic.message = "After";
-        diagnostic.begin = 3;
-        diagnostic.end = 3;
-        acceptor(std::move(diagnostic));
-      });
-
-  services::SharedCoreServices sharedServices;
-  services::CoreServices languageServices(sharedServices);
-  languageServices.languageId = "mini";
+  registry->registerAfterDocument([&phases](const pegium::AstNode &,
+                                            const ValidationAcceptor &acceptor,
+                                            std::span<const std::string>,
+                                            const utils::CancellationToken &) {
+    phases.push_back("after");
+    services::Diagnostic diagnostic;
+    diagnostic.severity = services::DiagnosticSeverity::Hint;
+    diagnostic.message = "After";
+    diagnostic.begin = 3;
+    diagnostic.end = 3;
+    acceptor(std::move(diagnostic));
+  });
   languageServices.validation.validationRegistry = std::move(registry);
   DefaultDocumentValidator validator(languageServices);
 
-  workspace::Document document;
-  document.uri = "file:///validation-hooks.pg";
-  document.languageId = "mini";
+  workspace::Document document(test::make_text_document(
+      "file:///validation-hooks.pg", "mini", {}));
+  document.id = 2u;
   document.parseResult.value = std::make_unique<ValidationNodeA>();
 
   ValidationOptions options;
-  options.enabled = true;
   options.categories = {"fast"};
-  const auto diagnostics = validator.validateDocument(document, options);
+  const auto diagnostics = validator.validateDocument(document, options, {});
 
   ASSERT_EQ(phases, (std::vector<std::string>{"before", "node", "after"}));
   ASSERT_EQ(diagnostics.size(), 3u);
@@ -157,34 +174,40 @@ TEST(DefaultDocumentValidatorTest, RunsBeforeAndAfterDocumentHooks) {
 }
 
 TEST(DefaultDocumentValidatorTest, UsesReferenceNodeRangeWhenAvailable) {
-  auto registry = std::make_unique<DefaultValidationRegistry>();
-  services::SharedCoreServices sharedServices;
-  services::CoreServices languageServices(sharedServices);
-  languageServices.languageId = "mini";
+  auto sharedServices = make_validation_shared_services();
+  services::CoreServices languageServices(*sharedServices);
+  languageServices.languageMetaData.languageId = "mini";
+  auto registry = std::make_unique<DefaultValidationRegistry>(languageServices);
   languageServices.validation.validationRegistry = std::move(registry);
   DefaultDocumentValidator validator(languageServices);
 
   ParserRule<ValidationRefNode> root{
-      "Root",
-      "prefix"_kw + ":"_kw + assign<&ValidationRefNode::ref>("UnknownSymbol"_kw)};
+      "Root", "prefix"_kw + ":"_kw +
+                  assign<&ValidationRefNode::ref>("UnknownSymbol"_kw)};
 
-  workspace::Document document;
-  document.uri = "file:///validation-ref.pg";
-  document.languageId = "mini";
-  document.setText("prefix:UnknownSymbol");
+  workspace::Document document(
+      test::make_text_document("file:///validation-ref.pg", "mini",
+                               "prefix:UnknownSymbol"));
+  document.id = 3u;
   pegium::test::parse_rule(root, document, SkipperBuilder().build());
   ASSERT_TRUE(document.parseResult.value != nullptr);
   ASSERT_FALSE(document.references.empty());
-  document.references.front().get()->setResolution(
-      ReferenceResolution{.node = nullptr,
-                          .description = nullptr,
-                          .errorMessage =
-                              "Could not resolve reference 'UnknownSymbol'."});
+  auto *reference = dynamic_cast<AbstractSingleReference *>(
+      document.references.front().get());
+  ASSERT_NE(reference, nullptr);
+  document.state = workspace::DocumentState::Parsed;
+  EXPECT_EQ(reference->resolve(), nullptr);
+  EXPECT_FALSE(reference->hasError());
 
   ValidationOptions builtInOnly;
-  builtInOnly.enabled = true;
   builtInOnly.categories = {"built-in"};
-  const auto diagnostics = validator.validateDocument(document, builtInOnly);
+  EXPECT_TRUE(validator.validateDocument(document, builtInOnly, {}).empty());
+
+  document.state = workspace::DocumentState::ComputedScopes;
+  EXPECT_EQ(reference->resolve(), nullptr);
+  ASSERT_TRUE(reference->hasError());
+
+  const auto diagnostics = validator.validateDocument(document, builtInOnly, {});
   ASSERT_EQ(diagnostics.size(), 1u);
   EXPECT_EQ(diagnostics.front().message, "Unresolved reference: UnknownSymbol");
   EXPECT_EQ(diagnostics.front().begin, 7u);
@@ -192,8 +215,57 @@ TEST(DefaultDocumentValidatorTest, UsesReferenceNodeRangeWhenAvailable) {
 }
 
 TEST(DefaultDocumentValidatorTest,
+     BuiltInParseDiagnosticsUseLanguageIdAsSourceAndStopCustomValidation) {
+  auto parser = std::make_unique<test::FakeParser>();
+  parser->fullMatch = false;
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  parser::ParseDiagnostic insertedDiagnostic;
+  insertedDiagnostic.kind = ParseDiagnosticKind::Inserted;
+  insertedDiagnostic.offset = 0;
+  insertedDiagnostic.element = std::addressof(id);
+  parser->parseDiagnostics.push_back(insertedDiagnostic);
+
+  auto sharedServicesPtr = make_validation_shared_services();
+  services::CoreServices languageServices(*sharedServicesPtr);
+  languageServices.languageMetaData.languageId = "mini";
+  languageServices.parser = std::move(parser);
+  auto registry = std::make_unique<DefaultValidationRegistry>(languageServices);
+  bool customValidationRan = false;
+  registry->registerCheck<ValidationNodeA>(
+      [&customValidationRan](const ValidationNodeA &,
+                             const ValidationAcceptor &acceptor) {
+        customValidationRan = true;
+        services::Diagnostic diagnostic;
+        diagnostic.severity = services::DiagnosticSeverity::Warning;
+        diagnostic.message = "Custom warning";
+        acceptor(std::move(diagnostic));
+      },
+      "fast");
+  languageServices.validation.validationRegistry = std::move(registry);
+  DefaultDocumentValidator validator(languageServices);
+
+  workspace::Document document(test::make_text_document(
+      "file:///validation-parse-source.pg", "mini", {}));
+  document.id = 4u;
+  document.parseResult.value = std::make_unique<ValidationNodeA>();
+  document.parseResult.parseDiagnostics.push_back(insertedDiagnostic);
+
+  ValidationOptions options;
+  options.stopAfterParsingErrors = true;
+  const auto diagnostics = validator.validateDocument(document, options, {});
+
+  ASSERT_EQ(diagnostics.size(), 1u);
+  EXPECT_EQ(diagnostics.front().source, "mini");
+  EXPECT_EQ(std::get<std::string>(*diagnostics.front().code), "parse.inserted");
+  EXPECT_FALSE(customValidationRan);
+}
+
+TEST(DefaultDocumentValidatorTest,
      PreservesDiagnosticOrderWhenValidatingDescendantsInParallel) {
-  auto registry = std::make_unique<DefaultValidationRegistry>();
+  auto sharedServices = make_validation_shared_services(1);
+  services::CoreServices languageServices(*sharedServices);
+  languageServices.languageMetaData.languageId = "mini";
+  auto registry = std::make_unique<DefaultValidationRegistry>(languageServices);
   registry->registerCheck<ValidationRootNode>(
       [](const ValidationRootNode &, const ValidationAcceptor &acceptor) {
         services::Diagnostic diagnostic;
@@ -214,12 +286,6 @@ TEST(DefaultDocumentValidatorTest,
         acceptor(std::move(diagnostic));
       },
       "fast");
-
-  services::SharedCoreServices sharedServices;
-  sharedServices.execution.taskScheduler =
-      std::make_shared<execution::TaskScheduler>(1);
-  services::CoreServices languageServices(sharedServices);
-  languageServices.languageId = "mini";
   languageServices.validation.validationRegistry = std::move(registry);
   DefaultDocumentValidator validator(languageServices);
 
@@ -227,14 +293,13 @@ TEST(DefaultDocumentValidatorTest,
   ParserRule<ValidationRootNode> rootRule{
       "Root", some(append<&ValidationRootNode::nodes>(nodeRule))};
 
-  workspace::Document document;
-  document.uri = "file:///validation-order.pg";
-  document.languageId = "mini";
-  document.setText(std::string(260, ','));
+  workspace::Document document(test::make_text_document(
+      "file:///validation-order.pg", "mini", std::string(260, ',')));
+  document.id = 5u;
   pegium::test::parse_rule(rootRule, document, SkipperBuilder().build());
   ASSERT_TRUE(document.parseResult.value != nullptr);
-  const auto *rootNode =
-      dynamic_cast<const ValidationRootNode *>(document.parseResult.value.get());
+  const auto *rootNode = dynamic_cast<const ValidationRootNode *>(
+      document.parseResult.value.get());
   ASSERT_NE(rootNode, nullptr);
   std::vector<std::string> expectedMessages;
   for (const auto *node : rootNode->getAllContent<ValidationNodeA>()) {
@@ -242,9 +307,8 @@ TEST(DefaultDocumentValidatorTest,
   }
 
   ValidationOptions options;
-  options.enabled = true;
   options.categories = {"fast"};
-  const auto diagnostics = validator.validateDocument(document, options);
+  const auto diagnostics = validator.validateDocument(document, options, {});
 
   ASSERT_EQ(diagnostics.size(), expectedMessages.size() + 1U);
   EXPECT_EQ(diagnostics.front().message, "root");

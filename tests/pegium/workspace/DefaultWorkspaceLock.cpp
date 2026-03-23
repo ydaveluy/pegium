@@ -1,15 +1,53 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <future>
+#include <optional>
 #include <thread>
+#include <vector>
 
 #include <pegium/CoreTestSupport.hpp>
-#include <pegium/workspace/DefaultWorkspaceLock.hpp>
+#include <pegium/core/workspace/DefaultWorkspaceLock.hpp>
 
 namespace pegium::workspace {
 namespace {
+
+TEST(DefaultWorkspaceLockTest, WriteActionsAreExecutedSequentially) {
+  DefaultWorkspaceLock lock;
+
+  constexpr std::size_t kActionCount = 5;
+  std::atomic<int> counter = 0;
+  std::vector<std::promise<void>> gates;
+  std::vector<std::shared_future<void>> gateFutures;
+  std::vector<std::future<void>> futures;
+  gates.reserve(kActionCount);
+  gateFutures.reserve(kActionCount);
+  futures.reserve(kActionCount);
+
+  for (std::size_t index = 0; index < kActionCount; ++index) {
+    gates.emplace_back();
+    gateFutures.push_back(gates.back().get_future().share());
+  }
+
+  for (std::size_t index = 0; index < kActionCount; ++index) {
+    futures.push_back(lock.write([&, index](const utils::CancellationToken &) {
+      ++counter;
+      gateFutures[index].wait();
+    }));
+  }
+
+  for (std::size_t index = 0; index < kActionCount; ++index) {
+    ASSERT_TRUE(test::wait_until(
+        [&counter, index]() { return counter.load() == index + 1; }));
+    gates[index].set_value();
+  }
+
+  for (auto &future : futures) {
+    future.get();
+  }
+}
 
 TEST(DefaultWorkspaceLockTest, NewWriteCancelsPreviousWrite) {
   DefaultWorkspaceLock lock;
@@ -42,6 +80,46 @@ TEST(DefaultWorkspaceLockTest, NewWriteCancelsPreviousWrite) {
   EXPECT_TRUE(secondExecuted.load());
 }
 
+TEST(DefaultWorkspaceLockTest, WriteActionsHavePriorityOverQueuedReads) {
+  DefaultWorkspaceLock lock;
+
+  std::promise<void> releaseFirstWrite;
+  auto releaseFirstWriteFuture = releaseFirstWrite.get_future().share();
+  std::promise<void> secondWriteStarted;
+  auto secondWriteStartedFuture = secondWriteStarted.get_future();
+  std::atomic<int> counter = 0;
+
+  auto firstWrite =
+      lock.write([&](const utils::CancellationToken &) {
+        ++counter;
+        releaseFirstWriteFuture.wait();
+      });
+
+  auto readResult = std::async(std::launch::async, [&]() {
+    std::optional<int> result;
+    auto future = lock.read([&counter, &result]() { result = counter.load(); });
+    future.get();
+    return *result;
+  });
+
+  auto secondWrite =
+      lock.write([&](const utils::CancellationToken &) {
+        ++counter;
+        secondWriteStarted.set_value();
+      });
+
+  ASSERT_TRUE(test::wait_until([&counter]() { return counter.load() == 1; }));
+  releaseFirstWrite.set_value();
+  ASSERT_EQ(secondWriteStartedFuture.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+
+  EXPECT_EQ(counter.load(), 2);
+  EXPECT_EQ(readResult.get(), 2);
+
+  firstWrite.get();
+  secondWrite.get();
+}
+
 TEST(DefaultWorkspaceLockTest, ReadsObserveCompletedWrites) {
   DefaultWorkspaceLock lock;
 
@@ -60,11 +138,17 @@ TEST(DefaultWorkspaceLockTest, ReadsObserveCompletedWrites) {
 TEST(DefaultWorkspaceLockTest, ReadActionResultCanBeAwaited) {
   DefaultWorkspaceLock lock;
 
-  auto future = lock.read([]() -> void {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  auto future = std::async(std::launch::async, [&]() {
+    std::optional<int> result;
+    auto read = lock.read([&result]() {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      result = 42;
+    });
+    read.get();
+    return *result;
   });
 
-  EXPECT_NO_THROW(future.get());
+  EXPECT_EQ(future.get(), 42);
 }
 
 TEST(DefaultWorkspaceLockTest, CancelWriteStopsCurrentWriteAction) {

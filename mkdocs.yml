@@ -54,11 +54,11 @@ nav:
   - Home: index.md
   - Introduction:
       - What is Pegium?: introduction/index.md
-      - Choose Your Path: introduction/choose-your-path.md
       - Features: introduction/features.md
       - Showcases: introduction/showcases.md
       - Why Pegium: introduction/why-pegium.md
-      - Pegium for Langium Users: introduction/langium-users.md
+      - Choose Your Path: introduction/choose-your-path.md
+      - Pegium Mental Model: introduction/mental-model.md
   - Learn:
       - learn/index.md
       - Workflow:
@@ -70,20 +70,15 @@ nav:
           - 5. Resolve Cross-References: learn/workflow/resolve_cross_references.md
           - 6. Create Validations: learn/workflow/create_validations.md
           - 7. Add Formatting and LSP Services: learn/workflow/generate_everything.md
-  - Reference:
-      - reference/index.md
-      - Start Here: reference/start-here.md
-      - Glossary: reference/glossary.md
-      - Configuration Services: reference/configuration-services.md
-      - Document Lifecycle: reference/document-lifecycle.md
-      - Semantic Model: reference/semantic-model.md
-      - Grammar Reference: reference/grammar-reference.md
-      - Parser Contracts: reference/parser-contracts.md
-      - Services and Modules: reference/services-and-modules.md
-      - Formatter DSL: reference/formatter-dsl.md
-      - Default LSP Services: reference/lsp-services.md
-      - Completion Provider: reference/completion-provider.md
-      - Workspace Concepts: reference/workspace.md
+      - Build a Language:
+          - build-a-language/index.md
+          - Grammar Essentials: build-a-language/grammar.md
+          - AST and CST: build-a-language/ast-and-cst.md
+          - References and Scoping: build-a-language/references-and-scoping.md
+          - Validation: build-a-language/validation.md
+          - Formatting: build-a-language/formatting.md
+          - LSP Services: build-a-language/lsp-services.md
+          - Workspace Lifecycle: build-a-language/workspace.md
   - Recipes:
       - recipes/index.md
       - Multiple Languages: recipes/multiple-languages.md
@@ -100,6 +95,14 @@ nav:
           - recipes/performance/index.md
           - Caches: recipes/performance/caches.md
       - Custom LSP Features: recipes/custom-lsp-features.md
+  - Reference:
+      - reference/index.md
+      - Glossary: reference/glossary.md
+      - Configuration Services: reference/configuration-services.md
+      - Document Lifecycle: reference/document-lifecycle.md
+      - Semantic Model: reference/semantic-model.md
+      - Grammar Reference: reference/grammar-reference.md
+      - Formatter DSL: reference/formatter-dsl.md
   - Examples:
       - examples/index.md
       - Arithmetics: examples/arithmetics.md

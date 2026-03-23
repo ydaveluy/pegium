@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-#include <pegium/utils/UriUtils.hpp>
+#include <pegium/core/utils/UriUtils.hpp>
 
 namespace pegium::utils {
 namespace {

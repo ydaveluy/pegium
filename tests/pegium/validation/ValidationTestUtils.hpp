@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pegium/syntax-tree/AstNode.hpp>
+#include <pegium/core/syntax-tree/AstNode.hpp>
 
 namespace pegium::validation::test_support {
 

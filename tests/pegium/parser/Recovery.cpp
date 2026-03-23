@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
+#include <pegium/ParseJsonTestSupport.hpp>
 #include <pegium/TestRuleParser.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 
 #include <algorithm>
 #include <string>
@@ -70,59 +70,44 @@ struct ValueNode : pegium::AstNode {
   T value{};
 };
 
-struct ParsedDocument {
-  pegium::workspace::Document document;
-  pegium::parser::ParseResult &parseResult;
+struct ParsedResult {
+  pegium::parser::ParseResult result;
   std::unique_ptr<pegium::RootCstNode> &cst;
   std::unique_ptr<pegium::AstNode> &value;
   std::vector<pegium::parser::ParseDiagnostic> &parseDiagnostics;
   pegium::TextOffset &parsedLength;
   bool &fullMatch;
 
-  template <typename ParseFn>
-  ParsedDocument(std::string_view text, ParseFn &&parseFn)
-      : parseResult(document.parseResult), cst(parseResult.cst),
-        value(parseResult.value),
-        parseDiagnostics(parseResult.parseDiagnostics),
-        parsedLength(parseResult.parsedLength), fullMatch(parseResult.fullMatch) {
-    document.setText(std::string{text});
-    parseFn(document);
-  }
+  explicit ParsedResult(pegium::parser::ParseResult parseResult)
+      : result(std::move(parseResult)), cst(result.cst), value(result.value),
+        parseDiagnostics(result.parseDiagnostics),
+        parsedLength(result.parsedLength), fullMatch(result.fullMatch) {}
 };
 
 template <typename T>
-ParsedDocument parseDataType(const DataTypeRule<T> &rule, std::string_view text,
-                             const Skipper &skipper,
-                             const ParseOptions &options = {}) {
+ParsedResult parseDataType(const DataTypeRule<T> &rule, std::string_view text,
+                           const Skipper &skipper,
+                           const ParseOptions &options = {}) {
   ParserRule<ValueNode<T>> root{"Root", assign<&ValueNode<T>::value>(rule)};
-  return ParsedDocument{text,
-                        [&](pegium::workspace::Document &document) {
-                          pegium::test::parse_rule(root, document, skipper,
-                                                   options);
-                        }};
+  return ParsedResult{
+      pegium::test::parse_rule_result(root, text, skipper, options)};
 }
 
 template <typename T>
-ParsedDocument parseTerminal(const TerminalRule<T> &rule, std::string_view text,
-                             const Skipper &skipper,
-                             const ParseOptions &options = {}) {
+ParsedResult parseTerminal(const TerminalRule<T> &rule, std::string_view text,
+                           const Skipper &skipper,
+                           const ParseOptions &options = {}) {
   ParserRule<ValueNode<T>> root{"Root", assign<&ValueNode<T>::value>(rule)};
-  return ParsedDocument{text,
-                        [&](pegium::workspace::Document &document) {
-                          pegium::test::parse_rule(root, document, skipper,
-                                                   options);
-                        }};
+  return ParsedResult{
+      pegium::test::parse_rule_result(root, text, skipper, options)};
 }
 
 template <typename RuleType>
-ParsedDocument parseRule(const RuleType &rule, std::string_view text,
-                         const Skipper &skipper,
-                         const ParseOptions &options = {}) {
-  return ParsedDocument{text,
-                        [&](pegium::workspace::Document &document) {
-                          pegium::test::parse_rule(rule, document, skipper,
-                                                   options);
-                        }};
+ParsedResult parseRule(const RuleType &rule, std::string_view text,
+                       const Skipper &skipper,
+                       const ParseOptions &options = {}) {
+  return ParsedResult{
+      pegium::test::parse_rule_result(rule, text, skipper, options)};
 }
 
 } // namespace

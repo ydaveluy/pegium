@@ -3,9 +3,10 @@
 #include <optional>
 #include <string>
 
-#include <pegium/utils/Caching.hpp>
+#include <pegium/core/utils/Caching.hpp>
 
 #include "CacheTestUtils.hpp"
+#include "CacheKeyTestUtils.hpp"
 
 namespace pegium::utils {
 namespace {
@@ -45,6 +46,20 @@ TEST(WorkspaceCacheTest, InvalidatesOnTrackedBuildStateAndDisposesCleanly) {
   cache.dispose();
   EXPECT_EQ(builder->buildPhaseListenerCount(), 0u);
   EXPECT_EQ(builder->updateListenerCount(), 0u);
+}
+
+TEST(WorkspaceCacheTest, SupportsCustomHashAndEqualityForKeys) {
+  test::RecordingEventDocumentBuilder *builder = nullptr;
+  auto shared = make_cache_shared_services(builder);
+  WorkspaceCache<test_support::NamedKey, std::string, test_support::NamedKeyHash,
+                 test_support::NamedKeyEqual>
+      cache(*shared);
+
+  cache.set({.value = "key"}, "value");
+
+  EXPECT_TRUE(cache.has({.value = "key"}));
+  EXPECT_EQ(cache.get({.value = "key"}), std::optional<std::string>("value"));
+  EXPECT_TRUE(cache.erase({.value = "key"}));
 }
 
 } // namespace

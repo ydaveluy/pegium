@@ -10,17 +10,17 @@
 #include <lsp/messages.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/CallHierarchyProvider.hpp>
-#include <pegium/lsp/DefaultLanguageServer.hpp>
-#include <pegium/lsp/LanguageServerHandlerContext.hpp>
-#include <pegium/lsp/LanguageServerRequestHandlerParts.hpp>
-#include <pegium/lsp/RenameProvider.hpp>
-#include <pegium/lsp/TypeDefinitionProvider.hpp>
+#include <pegium/lsp/hierarchy/CallHierarchyProvider.hpp>
+#include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
+#include <pegium/lsp/runtime/LanguageServerHandlerContext.hpp>
+#include <pegium/lsp/runtime/LanguageServerRequestHandlerParts.hpp>
+#include <pegium/lsp/navigation/RenameProvider.hpp>
+#include <pegium/lsp/navigation/TypeDefinitionProvider.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
-class TestPrepareRenameProvider final : public services::RenameProvider {
+class TestPrepareRenameProvider final : public ::pegium::RenameProvider {
 public:
   enum class Mode : std::uint8_t {
     Null,
@@ -71,7 +71,7 @@ private:
   Mode mode;
 };
 
-class TestTypeDefinitionProvider final : public services::TypeDefinitionProvider {
+class TestTypeDefinitionProvider final : public ::pegium::TypeDefinitionProvider {
 public:
   std::optional<std::vector<::lsp::LocationLink>>
   getTypeDefinition(const workspace::Document &, const ::lsp::TypeDefinitionParams &,
@@ -89,7 +89,7 @@ public:
   }
 };
 
-class TestCallHierarchyProvider final : public services::CallHierarchyProvider {
+class TestCallHierarchyProvider final : public ::pegium::CallHierarchyProvider {
 public:
   std::vector<::lsp::CallHierarchyItem>
   prepareCallHierarchy(const workspace::Document &,
@@ -112,7 +112,7 @@ public:
 };
 
 std::shared_ptr<workspace::Document>
-register_document(services::SharedServices &sharedServices,
+register_document(pegium::SharedServices &sharedServices,
                   std::string_view fileName = "request-shape.test") {
   auto document = test::open_and_build_document(
       sharedServices, test::make_file_uri(fileName), "test", "alpha");
@@ -121,7 +121,7 @@ register_document(services::SharedServices &sharedServices,
 }
 
 LanguageServerHandlerContext make_context(DefaultLanguageServer &server,
-                                          services::SharedServices &shared,
+                                          pegium::SharedServices &shared,
                                           LanguageServerRuntimeState &runtimeState,
                                           workspace::InitializeCapabilities caps = {}) {
   runtimeState.setInitialized(true);
@@ -144,11 +144,28 @@ LanguageServerHandlerContext make_context(DefaultLanguageServer &server,
   return test::parse_last_written_message(stream.written()).object();
 }
 
+void expect_missing_service_request_failed(const ::lsp::json::Object &response,
+                                           std::string_view uri) {
+  ASSERT_TRUE(response.contains("error"));
+  const auto &error = response.get("error").object();
+  EXPECT_EQ(error.get("code").integer(),
+            static_cast<int>(::lsp::MessageError::RequestFailed));
+  EXPECT_EQ(error.get("message").string(),
+            "Could not find service instance for uri: '" + std::string(uri) +
+                "'");
+}
+
 class LanguageServerTextDocumentHandlersTest : public ::testing::Test {
 protected:
-  std::unique_ptr<services::SharedServices> shared = test::make_shared_services();
+  std::unique_ptr<pegium::SharedServices> shared = test::make_empty_shared_services();
   DefaultLanguageServer server{*shared};
   LanguageServerRuntimeState runtimeState;
+
+  LanguageServerTextDocumentHandlersTest() {
+    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedLspServices(*shared);
+    pegium::test::initialize_shared_workspace_for_tests(*shared);
+  }
 
   struct HandlerHarness {
     test::MemoryStream stream;
@@ -162,9 +179,11 @@ protected:
   std::shared_ptr<workspace::Document>
   registerTestLanguageAndDocument(Configure &&configure,
                                   std::string_view fileName) {
-    auto services = test::make_services(*shared, "test", {".test"});
+    auto services = test::make_uninstalled_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*services);
+    pegium::installDefaultLspServices(*services);
     configure(*services);
-    EXPECT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+    shared->serviceRegistry->registerServices(std::move(services));
     if (testing::Test::HasFatalFailure() || testing::Test::HasNonfatalFailure()) {
       return nullptr;
     }
@@ -291,6 +310,113 @@ TEST_F(LanguageServerTextDocumentHandlersTest,
 }
 
 TEST_F(LanguageServerTextDocumentHandlersTest,
+       PrepareRenameReturnsNullWhenNoServiceMatchesUri) {
+  auto context = makeContext();
+  auto harness = makeHarness(context);
+
+  ::lsp::PrepareRenameParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(
+      ::lsp::Uri::parse(test::make_file_uri("unknown-service.test")));
+  params.position = text::Position(0, 0);
+
+  harness->stream.pushInput(test::make_request_message(
+      7, ::lsp::requests::TextDocument_PrepareRename::Method, params));
+  harness->handler.processIncomingMessages();
+
+  const auto response = wait_for_response_object(harness->stream);
+  EXPECT_TRUE(response.get("result").isNull());
+  EXPECT_FALSE(response.contains("error"));
+}
+
+TEST_F(LanguageServerTextDocumentHandlersTest,
+       IncomingCallHierarchyReturnsRequestFailedWhenNoServiceMatchesItemUri) {
+  auto context = makeContext();
+  auto harness = makeHarness(context);
+
+  const auto uri = test::make_file_uri("unknown-call-hierarchy.test");
+  ::lsp::CallHierarchyIncomingCallsParams params{};
+  params.item.name = "Missing";
+  params.item.kind = ::lsp::SymbolKind::Function;
+  params.item.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  params.item.range.start = text::Position(0, 0);
+  params.item.range.end = text::Position(0, 7);
+  params.item.selectionRange = params.item.range;
+
+  harness->stream.pushInput(test::make_request_message(
+      8, ::lsp::requests::CallHierarchy_IncomingCalls::Method, params));
+  harness->handler.processIncomingMessages();
+
+  const auto response = wait_for_response_object(harness->stream);
+  expect_missing_service_request_failed(response, uri);
+}
+
+TEST_F(LanguageServerTextDocumentHandlersTest,
+       OutgoingCallHierarchyReturnsRequestFailedWhenNoServiceMatchesItemUri) {
+  auto context = makeContext();
+  auto harness = makeHarness(context);
+
+  const auto uri = test::make_file_uri("unknown-call-hierarchy.test");
+  ::lsp::CallHierarchyOutgoingCallsParams params{};
+  params.item.name = "Missing";
+  params.item.kind = ::lsp::SymbolKind::Function;
+  params.item.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  params.item.range.start = text::Position(0, 0);
+  params.item.range.end = text::Position(0, 7);
+  params.item.selectionRange = params.item.range;
+
+  harness->stream.pushInput(test::make_request_message(
+      9, ::lsp::requests::CallHierarchy_OutgoingCalls::Method, params));
+  harness->handler.processIncomingMessages();
+
+  const auto response = wait_for_response_object(harness->stream);
+  expect_missing_service_request_failed(response, uri);
+}
+
+TEST_F(LanguageServerTextDocumentHandlersTest,
+       TypeHierarchySupertypesReturnsRequestFailedWhenNoServiceMatchesItemUri) {
+  auto context = makeContext();
+  auto harness = makeHarness(context);
+
+  const auto uri = test::make_file_uri("unknown-type-hierarchy.test");
+  ::lsp::TypeHierarchySupertypesParams params{};
+  params.item.name = "Missing";
+  params.item.kind = ::lsp::SymbolKind::Class;
+  params.item.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  params.item.range.start = text::Position(0, 0);
+  params.item.range.end = text::Position(0, 5);
+  params.item.selectionRange = params.item.range;
+
+  harness->stream.pushInput(test::make_request_message(
+      10, ::lsp::requests::TypeHierarchy_Supertypes::Method, params));
+  harness->handler.processIncomingMessages();
+
+  const auto response = wait_for_response_object(harness->stream);
+  expect_missing_service_request_failed(response, uri);
+}
+
+TEST_F(LanguageServerTextDocumentHandlersTest,
+       TypeHierarchySubtypesReturnsRequestFailedWhenNoServiceMatchesItemUri) {
+  auto context = makeContext();
+  auto harness = makeHarness(context);
+
+  const auto uri = test::make_file_uri("unknown-type-hierarchy.test");
+  ::lsp::TypeHierarchySubtypesParams params{};
+  params.item.name = "Missing";
+  params.item.kind = ::lsp::SymbolKind::Class;
+  params.item.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  params.item.range.start = text::Position(0, 0);
+  params.item.range.end = text::Position(0, 5);
+  params.item.selectionRange = params.item.range;
+
+  harness->stream.pushInput(test::make_request_message(
+      11, ::lsp::requests::TypeHierarchy_Subtypes::Method, params));
+  harness->handler.processIncomingMessages();
+
+  const auto response = wait_for_response_object(harness->stream);
+  expect_missing_service_request_failed(response, uri);
+}
+
+TEST_F(LanguageServerTextDocumentHandlersTest,
        TypeDefinitionReturnsLocationLinksWhenClientSupportsThem) {
   auto document = registerTestLanguageAndDocument(
       [](auto &services) {
@@ -366,4 +492,4 @@ TEST_F(LanguageServerTextDocumentHandlersTest,
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

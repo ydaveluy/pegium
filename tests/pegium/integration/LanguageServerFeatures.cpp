@@ -14,10 +14,24 @@
 
 #include <pegium/ExampleTestSupport.hpp>
 #include <pegium/LspExpectTestSupport.hpp>
-#include <pegium/lsp/LanguageServerFeatures.hpp>
+#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
 
 namespace pegium::integration {
 namespace {
+
+using pegium::as_services;
+
+bool is_parse_diagnostic(const services::Diagnostic &diagnostic) {
+  if (diagnostic.source == "parse") {
+    return true;
+  }
+  if (!diagnostic.code.has_value()) {
+    return false;
+  }
+  const auto *code = std::get_if<std::string>(&*diagnostic.code);
+  return code != nullptr && code->starts_with("parse.");
+}
 
 std::optional<::lsp::TextEdit>
 completion_text_edit(const ::lsp::CompletionItem &item) {
@@ -70,7 +84,7 @@ struct CompletionProbe {
   ::lsp::CompletionList completion;
 };
 
-CompletionProbe completion_probe(services::SharedServices &shared,
+CompletionProbe completion_probe(pegium::SharedServices &shared,
                                  std::string_view languageId,
                                  std::string textWithMarker) {
   const pegium::test::ExpectedCompletion expected{.text = std::move(textWithMarker)};
@@ -83,7 +97,7 @@ CompletionProbe completion_probe(services::SharedServices &shared,
   }
 
   auto completion =
-      pegium::lsp::getCompletion(shared,
+      pegium::getCompletion(shared,
                                  test::completionParams(*document, marked.indices[0]));
   EXPECT_TRUE(completion.has_value());
   if (!completion.has_value()) {
@@ -104,7 +118,9 @@ std::string apply_completion_choice(
   if (itemIt == probe.completion.items.end()) {
     ADD_FAILURE() << "Expected completion item " << label
                   << " in " << testing::PrintToString(labels);
-    auto text = probe.document != nullptr ? probe.document->text() : std::string{};
+    auto text = probe.document != nullptr
+                    ? std::string(probe.document->textDocument().getText())
+                    : std::string{};
     text.insert(std::min<std::size_t>(probe.offset, text.size()), "<|>");
     return text;
   }
@@ -112,7 +128,9 @@ std::string apply_completion_choice(
   const auto edit = completion_text_edit(*itemIt);
   if (!edit.has_value()) {
     ADD_FAILURE() << "Completion item " << label << " has no text edit";
-    auto text = probe.document != nullptr ? probe.document->text() : std::string{};
+    auto text = probe.document != nullptr
+                    ? std::string(probe.document->textDocument().getText())
+                    : std::string{};
     text.insert(std::min<std::size_t>(probe.offset, text.size()), "<|>");
     return text;
   }
@@ -122,9 +140,10 @@ std::string apply_completion_choice(
     replacement = std::string(snippetReplacement);
   }
 
-  auto text = probe.document->text();
-  const auto begin = probe.document->positionToOffset(edit->range.start);
-  const auto end = probe.document->positionToOffset(edit->range.end);
+  const auto &textDocument = probe.document->textDocument();
+  auto text = std::string(textDocument.getText());
+  const auto begin = textDocument.offsetAt(edit->range.start);
+  const auto end = textDocument.offsetAt(edit->range.end);
   text.replace(begin, end - begin, replacement);
   text.insert(begin + replacement.size(), "<|>");
   return text;
@@ -132,7 +151,13 @@ std::string apply_completion_choice(
 
 class LanguageServerFeaturesIntegrationTest : public ::testing::Test {
 protected:
-  std::unique_ptr<services::SharedServices> shared = test::make_shared_services();
+  std::unique_ptr<pegium::SharedServices> shared = test::make_empty_shared_services();
+
+  LanguageServerFeaturesIntegrationTest() {
+    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedLspServices(*shared);
+    pegium::test::initialize_shared_workspace_for_tests(*shared);
+  }
 
   void SetUp() override {
     ASSERT_TRUE(arithmetics::services::register_language_services(*shared));
@@ -162,9 +187,10 @@ protected:
     return completion_probe(*shared, "arithmetics", std::move(text));
   }
 
-  const services::Services *arithmeticsServices() const {
-    return dynamic_cast<const services::Services *>(
-        shared->serviceRegistry->getServicesByLanguageId("arithmetics"));
+  const pegium::Services *arithmeticsServices() const {
+    const auto *coreServices =
+        &shared->serviceRegistry->getServices(test::make_file_uri("lookup.calc"));
+    return as_services(coreServices);
   }
 
   static std::string completionLabelDump(const ::lsp::CompletionList &completion) {
@@ -187,8 +213,9 @@ protected:
 
   static void expectNoParseDiagnostics(const workspace::Document &document) {
     EXPECT_TRUE(std::ranges::none_of(
-        document.diagnostics,
-        [](const auto &diagnostic) { return diagnostic.source == "parse"; }));
+        document.diagnostics, [](const auto &diagnostic) {
+          return is_parse_diagnostic(diagnostic);
+        }));
   }
 };
 
@@ -207,7 +234,7 @@ TEST_F(LanguageServerFeaturesIntegrationTest,
   params.position.line = 2;
   params.position.character = 1;
 
-  const auto locations = pegium::lsp::getDefinition(*shared, params);
+  const auto locations = pegium::getDefinition(*shared, params);
   ASSERT_TRUE(locations.has_value());
   ASSERT_EQ(locations->size(), 1u);
   EXPECT_EQ(locations->front().targetUri.toString(), document->uri);
@@ -229,7 +256,7 @@ TEST_F(LanguageServerFeaturesIntegrationTest,
   params.position.character = 1;
   params.context.includeDeclaration = true;
 
-  const auto references = pegium::lsp::getReferences(*shared, params);
+  const auto references = pegium::getReferences(*shared, params);
   EXPECT_EQ(references.size(), 2u);
 }
 
@@ -247,7 +274,7 @@ TEST_F(LanguageServerFeaturesIntegrationTest,
   params.position.line = 2;
   params.position.character = 2;
 
-  const auto range = pegium::lsp::prepareRename(*shared, params);
+  const auto range = pegium::prepareRename(*shared, params);
   ASSERT_TRUE(range.has_value());
   ASSERT_TRUE(std::holds_alternative<::lsp::Range>(*range));
   const auto &renameRange = std::get<::lsp::Range>(*range);
@@ -272,7 +299,7 @@ TEST_F(LanguageServerFeaturesIntegrationTest,
   params.position.character = 2;
   params.newName = "renamed";
 
-  const auto edit = pegium::lsp::rename(*shared, params);
+  const auto edit = pegium::rename(*shared, params);
   ASSERT_TRUE(edit.has_value());
   ASSERT_TRUE(edit->changes.has_value());
   const auto changeIt =
@@ -299,7 +326,7 @@ TEST_F(LanguageServerFeaturesIntegrationTest,
   ::lsp::WorkspaceSymbolParams params{};
   params.query = "val";
 
-  const auto symbols = pegium::lsp::getWorkspaceSymbols(*shared, params);
+  const auto symbols = pegium::getWorkspaceSymbols(*shared, params);
   ASSERT_FALSE(symbols.empty());
   EXPECT_TRUE(std::ranges::any_of(symbols, [&document](const auto &symbol) {
     if (symbol.name != "value") {
@@ -330,7 +357,7 @@ TEST_F(LanguageServerFeaturesIntegrationTest,
   ::lsp::FoldingRangeParams params{};
   params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
 
-  const auto ranges = pegium::lsp::getFoldingRanges(*shared, params);
+  const auto ranges = pegium::getFoldingRanges(*shared, params);
   EXPECT_TRUE(ranges.empty());
 }
 

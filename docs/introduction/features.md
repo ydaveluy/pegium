@@ -1,55 +1,68 @@
 # Features
 
-Pegium combines the core pieces of a textual language workbench in one C++20
-framework.
+Designing a language is hard, whether you are building a small DSL or a larger
+programming-language-like system. You have to parse source text, produce a
+semantic model, resolve references, manage multi-file workspaces, and provide a
+good editing experience.
 
-## Read this page if
+Pegium exists to remove that framework work so you can focus on the semantics
+of your language.
 
-- you want a quick inventory of what Pegium provides
-- you need a concise feature overview for a teammate or stakeholder
-- you want to jump from capabilities to the right doc section
+In this chapter, you will get a closer look at the main areas Pegium covers:
+
+- grammar and parsing
+- semantic models
+- cross-references and linking
+- workspace management
+- editing support
 
 ## Grammar and parsing
 
-- grammars are written directly in C++ through `PegiumParser`
-- parser expressions cover terminals, named rules, repetitions, lookahead, and
-  infix parsing
-- recovery-aware parsing and expectation tracing are built into the parser
-  runtime
+Pegium grammars are written directly in C++ through `PegiumParser`
+subclasses. Parser expressions cover terminals, named rules, repetitions,
+lookahead, skippers, and infix parsing. The parser runtime already includes
+expectation tracking and recovery-aware behavior, so parsing is not just a
+one-shot syntax check.
 
-## Semantic model
+## Semantic models
 
-- AST nodes are regular C++ types
-- CST nodes remain available for source-aware features
-- references keep both the written text and the resolved target
+Pegium does not stop at producing syntax trees. AST nodes are ordinary C++20
+types, which means the semantic model of your language stays directly visible
+in your codebase. At the same time, the CST remains available for source-aware
+tasks such as formatting, comment handling, and precise editor selections.
 
-## Language services
+This makes it practical to keep semantic logic, tooling, and source mapping in
+one coherent runtime model.
 
-- references, scoping, linking, and validation are explicit services
-- formatters are installed through typed formatter classes
-- shared services support multi-document and multi-language workspaces
+## Cross-references and linking
 
-## Editor support
+Real languages need names to resolve to declarations. Pegium models references
+explicitly through the reference pipeline: name computation, scope computation,
+scope providers, linking, and workspace indexing. Once this is wired, the same
+information can be reused for linking, completion, rename, and navigation.
 
-- language servers are built on top of the same document model
-- default providers cover completion, hover, document symbols, references,
-  rename, definition, and more
-- the examples show complete CLI plus LSP setups
+## Workspace management
 
-## Practical workflow
+Most languages quickly become multi-file languages. Pegium includes shared
+workspace services that keep track of documents, indexing, and rebuilds across
+an entire project. This allows references and diagnostics to work across files
+instead of being limited to one isolated parse result.
 
-Pegium works best when you follow the same high-level loop throughout the
-project:
+## Editing support
 
-1. write the grammar
-2. shape the AST and CST
-3. resolve references
-4. create validations
-5. add formatting and LSP behavior
+Pegium is also built for editor integration. Language servers sit on top of the
+same document and semantic model, and the default service set already covers a
+broad set of LSP features such as completion, hover, definition, references,
+rename, document symbols, and code actions.
 
-## Continue with
+Formatter, validation, completion, hover, and other features remain explicit
+services, so you can keep the defaults where they fit and replace only the
+parts that are specific to your language.
 
-- [Learn Pegium](../learn/index.md) for the recommended workflow
-- [Showcases](showcases.md) for complete example languages
-- [Choose Your Path](choose-your-path.md) if you are still deciding where to go
-  next
+## Try it out
+
+If you want to see these features working together, continue with
+[showcases](showcases.md) or the shipped [examples](../examples/index.md).
+
+If you want to start building your own language, the next stop is the
+[workflow](../learn/workflow/index.md).

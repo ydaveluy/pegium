@@ -7,6 +7,17 @@ Pegium's `domainmodel` example uses this pattern for packages and types. The
 important idea is that globally exported names can be qualified while local
 lookup can still keep short names available inside the right container.
 
+## What is the problem?
+
+Qualified names are useful as soon as one short name is no longer enough. Once
+users can write names such as `blog.User` or `sales.Invoice`, the language can
+disambiguate declarations without forcing everything into one flat namespace.
+
+At the same time, users usually still expect local short names to work inside
+the right container. That means qualified names are rarely just a lookup
+problem. They are usually a question of how symbols are exported and how local
+symbols are precomputed.
+
 ## What needs to change?
 
 For qualified names, you usually do not replace the linker. Instead, you
@@ -18,6 +29,10 @@ The `domainmodel` example does this with:
 - a `QualifiedNameProvider`
 - a custom `DomainModelScopeComputation`
 - the existing default scope provider
+
+This approach is also usually cheaper than a heavily custom scope lookup,
+because most of the work is done once per document during scope computation
+instead of once per reference during completion or linking.
 
 ## Step 1: define how names are joined
 
@@ -92,4 +107,4 @@ depend on the reference site, continue with
 
 - [Examples: DomainModel](../../examples/domainmodel.md)
 - [Custom Scope Provider](../custom-scope-provider.md)
-- [Workspace Concepts](../../reference/workspace.md)
+- [Workspace Lifecycle](../../build-a-language/workspace.md)

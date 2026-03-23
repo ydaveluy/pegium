@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <gtest/gtest.h>
-#include <pegium/parser/LiteralFuzzyMatcher.hpp>
+#include <pegium/core/parser/LiteralFuzzyMatcher.hpp>
 
 using namespace pegium::parser::detail;
 

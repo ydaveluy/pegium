@@ -2,13 +2,15 @@
 
 #include <pegium/LspExpectTestSupport.hpp>
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/services/Services.hpp>
-#include <pegium/workspace/AstDescriptions.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
+#include <pegium/core/workspace/AstDescriptions.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
+using pegium::as_services;
 using namespace pegium::parser;
 
 struct SymbolEntry : AstNode {
@@ -45,20 +47,25 @@ protected:
 };
 
 TEST(DefaultDocumentSymbolProviderTest, ReturnsEmptyWithoutAstOrNameProvider) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services(*shared, "test", {".test"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
-  workspace::Document document;
+  workspace::Document document(
+      test::make_text_document(test::make_file_uri("symbols.test"), "test",
+                               "alpha beta"));
   document.id = 1;
-  document.uri = test::make_file_uri("symbols.test");
-  document.languageId = "test";
-  document.setText("alpha beta");
 
-  const auto *coreServices =
-      shared->serviceRegistry->getServicesByLanguageId("test");
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services = dynamic_cast<const services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(document.uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->lsp.documentSymbolProvider, nullptr);
 
@@ -68,9 +75,17 @@ TEST(DefaultDocumentSymbolProviderTest, ReturnsEmptyWithoutAstOrNameProvider) {
 }
 
 TEST(DefaultDocumentSymbolProviderTest, UsesAstNamesWhenAvailable) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<SymbolParser>(*shared, "symbols", {".symbols"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<SymbolParser>(*shared, "symbols", {".symbols"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = pegium::test::expectSymbols(
       *shared, "symbols",
@@ -81,5 +96,37 @@ TEST(DefaultDocumentSymbolProviderTest, UsesAstNamesWhenAvailable) {
   ASSERT_NE(document, nullptr);
 }
 
+TEST(DefaultDocumentSymbolProviderTest, UsesFullNodeRangeAndNameSelectionRange) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices =
+        test::make_uninstalled_services<SymbolParser>(*shared, "symbols", {".symbols"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("document-symbols.symbols"), "symbols",
+      "entry Alpha\n");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  const auto symbols = services->lsp.documentSymbolProvider->getSymbols(
+      *document, ::lsp::DocumentSymbolParams{}, utils::default_cancel_token);
+  ASSERT_EQ(symbols.size(), 1u);
+  EXPECT_EQ(symbols[0].name, "Alpha");
+  EXPECT_EQ(symbols[0].range.start.character, 0u);
+  EXPECT_EQ(symbols[0].range.end.character, 11u);
+  EXPECT_EQ(symbols[0].selectionRange.start.character, 6u);
+  EXPECT_EQ(symbols[0].selectionRange.end.character, 11u);
+}
+
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

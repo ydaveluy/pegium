@@ -2,7 +2,7 @@
 
 Create a validator class when your language needs semantic rules beyond parsing.
 
-Use this page for the basic validator structure. If your rule needs a
+This page covers the basic validator structure. If your rule needs a
 whole-document graph walk, continue with
 [Dependency Loops](validation/dependency-loops.md).
 
@@ -13,6 +13,42 @@ whole-document graph walk, continue with
 3. report diagnostics with `ValidationAcceptor`
 
 This usually ends up as a small class plus one registry setup point.
+
+## A concrete example
+
+The `domainmodel` example uses the following registration pattern:
+
+```cpp
+void registerValidationChecks(
+    domainmodel::services::DomainModelServices &services) {
+  auto &registry = *services.validation.validationRegistry;
+  auto &validator = *services.domainModel.validation.domainModelValidator;
+  registry.registerChecks(
+      {pegium::validation::ValidationRegistry::makeValidationCheck<
+           &DomainModelValidator::checkEntityNameStartsWithCapital>(validator),
+       pegium::validation::ValidationRegistry::makeValidationCheck<
+           &DomainModelValidator::checkDataTypeNameStartsWithCapital>(validator)});
+}
+```
+
+One validator method then attaches a diagnostic directly to the relevant
+property:
+
+```cpp
+void DomainModelValidator::checkEntityNameStartsWithCapital(
+    const Entity &entity,
+    const pegium::validation::ValidationAcceptor &accept) const {
+  if (entity.name.empty()) {
+    return;
+  }
+  const auto first = entity.name.front();
+  if (std::toupper(static_cast<unsigned char>(first)) == first) {
+    return;
+  }
+  accept.warning(entity, "Type name should start with a capital.")
+      .property<&Entity::name>();
+}
+```
 
 ## Typical workflow
 

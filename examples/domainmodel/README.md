@@ -34,7 +34,7 @@ cmake --build build -j
 
 ```sh
 ./build/examples/domainmodel/pegium-example-domainmodel-cli \
-  examples/domainmodel/example/blog.dmodel
+  generate examples/domainmodel/example/blog.dmodel
 ```
 
 ## Run the LSP server

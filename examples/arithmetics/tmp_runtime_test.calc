@@ -1,4 +1,0 @@
-module Demo
-def value: 1 / 0;
-def inc(x): x + 1;
-inc(value)

@@ -1,11 +1,10 @@
 #include <gtest/gtest.h>
+#include <pegium/ParseJsonTestSupport.hpp>
 #include <pegium/TestCstBuilderHarness.hpp>
 #include <pegium/TestRuleParser.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 #include <array>
 #include <cctype>
-#include <memory>
 #include <ranges>
 #include <vector>
 
@@ -18,35 +17,28 @@ struct DataValueNode : pegium::AstNode {
   T value{};
 };
 
-struct ParsedDocument {
-  pegium::workspace::Document document;
-  pegium::parser::ParseResult &parseResult;
+struct ParsedResult {
+  pegium::parser::ParseResult result;
   std::unique_ptr<pegium::RootCstNode> &cst;
   std::unique_ptr<pegium::AstNode> &value;
   std::vector<pegium::parser::ParseDiagnostic> &parseDiagnostics;
   pegium::TextOffset &parsedLength;
   bool &fullMatch;
 
-  template <typename RuleType>
-  ParsedDocument(const RuleType &rule, std::string_view text,
-                 const Skipper &skipper,
-                 const ParseOptions &options = {})
-      : parseResult(document.parseResult), cst(parseResult.cst),
-        value(parseResult.value),
-        parseDiagnostics(parseResult.parseDiagnostics),
-        parsedLength(parseResult.parsedLength), fullMatch(parseResult.fullMatch) {
-    document.setText(std::string{text});
-    pegium::test::parse_rule(rule, document, skipper, options);
-  }
+  explicit ParsedResult(pegium::parser::ParseResult parseResult)
+      : result(std::move(parseResult)), cst(result.cst), value(result.value),
+        parseDiagnostics(result.parseDiagnostics),
+        parsedLength(result.parsedLength), fullMatch(result.fullMatch) {}
 };
 
 template <typename T>
-ParsedDocument
+ParsedResult
 parseDataTypeRule(const DataTypeRule<T> &rule, std::string_view text,
                   const Skipper &skipper,
                   const ParseOptions &options = {}) {
   ParserRule<DataValueNode<T>> root{"Root", assign<&DataValueNode<T>::value>(rule)};
-  return ParsedDocument{root, text, skipper, options};
+  return ParsedResult{
+      pegium::test::parse_rule_result(root, text, skipper, options)};
 }
 
 } // namespace
@@ -230,11 +222,8 @@ TEST(DataTypeRuleTest, ArithmeticChainCstRangesAreCorrect) {
       "Expression", number + many("+"_kw + number)};
 
   constexpr std::string_view input = "1 + 2 + 3 +4";
-  pegium::workspace::Document document;
-  document.setText(std::string{input});
-  pegium::test::parse_rule(expression, document,
-                           SkipperBuilder().ignore(ws).build());
-  const auto &result = document.parseResult;
+  const auto result =
+      pegium::test::Parse(expression, input, SkipperBuilder().ignore(ws).build());
   ASSERT_TRUE(result.value != nullptr);
   ASSERT_TRUE(result.cst != nullptr);
 

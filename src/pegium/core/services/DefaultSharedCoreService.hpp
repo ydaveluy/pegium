@@ -1,0 +1,18 @@
+#pragma once
+
+#include <pegium/core/services/SharedCoreServices.hpp>
+
+namespace pegium::services {
+
+/// Convenience base class for default services bound to shared core services.
+class DefaultSharedCoreService {
+public:
+  explicit DefaultSharedCoreService(const SharedCoreServices &shared)
+      : shared(shared) {}
+  virtual ~DefaultSharedCoreService() noexcept = default;
+
+protected:
+  const SharedCoreServices &shared;
+};
+
+} // namespace pegium::services

@@ -4,9 +4,7 @@
 #include <unordered_set>
 
 #include <pegium/CoreTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/utils/Stream.hpp>
-#include <pegium/workspace/AstNodeLocator.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 
 namespace pegium::references {
 namespace {
@@ -69,9 +67,11 @@ bool has_diagnostic_message(const workspace::Document &document,
 }
 
 bool register_language(services::SharedCoreServices &sharedServices) {
-  return sharedServices.serviceRegistry->registerServices(
-      test::make_core_services<MultiReferenceParser>(sharedServices,
-                                                     "multi-ref", {".mr"}));
+  auto services = test::make_uninstalled_core_services<MultiReferenceParser>(
+      sharedServices, "multi-ref", {".mr"});
+  pegium::services::installDefaultCoreServices(*services);
+  sharedServices.serviceRegistry->registerServices(std::move(services));
+  return true;
 }
 
 std::shared_ptr<workspace::Document>
@@ -82,7 +82,8 @@ open_and_build(services::SharedCoreServices &sharedServices,
 }
 
 TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsInSameDocument) {
-  auto shared = test::make_shared_core_services();
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
   ASSERT_TRUE(register_language(*shared));
 
   auto document = open_and_build(
@@ -98,24 +99,39 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsInSameDocument) {
   ASSERT_EQ(model->persons.size(), 3u);
   ASSERT_EQ(model->greetings.size(), 1u);
 
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.workspace.astNodeLocator, nullptr);
+  ASSERT_NE(services.workspace.referenceDescriptionProvider, nullptr);
+  const auto &locator = *services.workspace.astNodeLocator;
+
   const auto &reference = model->greetings.front()->person;
   EXPECT_EQ(reference.getRefText(), "Alice");
   EXPECT_FALSE(reference.hasError());
-  ASSERT_EQ(reference.items().size(), 2u);
+  ASSERT_EQ(reference.size(), 2u);
+  ASSERT_NE(reference.data(), nullptr);
+  ASSERT_NE(reference.front(), nullptr);
+  ASSERT_NE(reference.back(), nullptr);
+  EXPECT_EQ(reference.front()->name, "Alice");
+  EXPECT_EQ(reference.back()->name, "Alice");
+  EXPECT_EQ(reference[0]->name, "Alice");
+  EXPECT_EQ(reference[1]->name, "Alice");
+  EXPECT_TRUE(reference);
 
   std::unordered_set<std::string> targetPaths;
-  for (const auto &item : reference.items()) {
-    ASSERT_NE(item.ref, nullptr);
-    EXPECT_EQ(item.ref->name, "Alice");
-    ASSERT_NE(item.description, nullptr);
-    EXPECT_EQ(item.description->documentId, document->id);
-    targetPaths.insert(workspace::AstNodeLocator::getAstNodePath(*item.ref));
+  for (const auto *target : reference) {
+    ASSERT_NE(target, nullptr);
+    EXPECT_EQ(target->name, "Alice");
+    targetPaths.insert(locator.getAstNodePath(*target));
   }
   EXPECT_EQ(targetPaths.size(), 2u);
 
-  ASSERT_EQ(document->referenceDescriptions.size(), 2u);
-  for (const auto &description : document->referenceDescriptions) {
-    EXPECT_EQ(description.sourceText(document->textView()), "Alice");
+  const auto descriptions =
+      services.workspace.referenceDescriptionProvider->createDescriptions(
+          *document);
+  ASSERT_EQ(descriptions.size(), 2u);
+  for (const auto &description : descriptions) {
+    EXPECT_EQ(description.sourceText(document->textDocument().getText()),
+              "Alice");
     EXPECT_TRUE(description.isResolved());
     ASSERT_TRUE(description.targetDocumentId.has_value());
     EXPECT_EQ(*description.targetDocumentId, document->id);
@@ -123,7 +139,8 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsInSameDocument) {
 }
 
 TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsAcrossDocuments) {
-  auto shared = test::make_shared_core_services();
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
   ASSERT_TRUE(register_language(*shared));
 
   auto firstDocument =
@@ -141,12 +158,18 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsAcrossDocuments) {
   auto *model = dynamic_cast<Model *>(secondDocument->parseResult.value.get());
   ASSERT_NE(model, nullptr);
   const auto &reference = model->greetings.front()->person;
-  ASSERT_EQ(reference.items().size(), 3u);
+  ASSERT_EQ(reference.size(), 3u);
 
+  const auto &services =
+      shared->serviceRegistry->getServices(secondDocument->uri);
+  ASSERT_NE(services.workspace.referenceDescriptionProvider, nullptr);
+  const auto descriptions =
+      services.workspace.referenceDescriptionProvider->createDescriptions(
+          *secondDocument);
   std::unordered_map<workspace::DocumentId, std::size_t> targetsByDocumentId;
-  for (const auto &item : reference.items()) {
-    ASSERT_NE(item.description, nullptr);
-    ++targetsByDocumentId[item.description->documentId];
+  for (const auto &description : descriptions) {
+    ASSERT_TRUE(description.targetDocumentId.has_value());
+    ++targetsByDocumentId[*description.targetDocumentId];
   }
 
   EXPECT_EQ(targetsByDocumentId[firstDocument->id], 1u);
@@ -154,7 +177,8 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsAcrossDocuments) {
 }
 
 TEST(MultiReferenceTest, IndexesOneLogicalReferenceAgainstEachResolvedTarget) {
-  auto shared = test::make_shared_core_services();
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
   ASSERT_TRUE(register_language(*shared));
 
   auto document = open_and_build(
@@ -167,7 +191,6 @@ TEST(MultiReferenceTest, IndexesOneLogicalReferenceAgainstEachResolvedTarget) {
 
   auto *model = dynamic_cast<Model *>(document->parseResult.value.get());
   ASSERT_NE(model, nullptr);
-  ASSERT_EQ(document->referenceDescriptions.size(), 2u);
 
   const auto firstAliceKey = workspace::NodeKey{
       .documentId = document->id,
@@ -176,18 +199,19 @@ TEST(MultiReferenceTest, IndexesOneLogicalReferenceAgainstEachResolvedTarget) {
       .documentId = document->id,
       .symbolId = document->makeSymbolId(*model->persons[2])};
 
-  auto firstReferences = utils::collect(
-      shared->workspace.indexManager->findAllReferences(firstAliceKey, true));
-  auto secondReferences = utils::collect(
-      shared->workspace.indexManager->findAllReferences(secondAliceKey, true));
+  auto firstReferences =
+      shared->workspace.indexManager->findAllReferences(firstAliceKey);
+  auto secondReferences =
+      shared->workspace.indexManager->findAllReferences(secondAliceKey);
 
-  ASSERT_EQ(firstReferences.size(), 2u);
-  ASSERT_EQ(secondReferences.size(), 2u);
+  ASSERT_EQ(firstReferences.size(), 1u);
+  ASSERT_EQ(secondReferences.size(), 1u);
 }
 
 TEST(MultiReferenceTest,
      ReferencesServiceIncludesSharedUsageForEachMatchingDeclaration) {
-  auto shared = test::make_shared_core_services();
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
   ASSERT_TRUE(register_language(*shared));
 
   auto document = open_and_build(
@@ -201,23 +225,26 @@ TEST(MultiReferenceTest,
   auto *model = dynamic_cast<Model *>(document->parseResult.value.get());
   ASSERT_NE(model, nullptr);
 
-  const auto *services = shared->serviceRegistry->getServices(document->uri);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->references.references, nullptr);
-  ASSERT_NE(services->references.nameProvider, nullptr);
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.references.references, nullptr);
+  ASSERT_NE(services.references.nameProvider, nullptr);
 
   const auto secondAliceName =
-      services->references.nameProvider->getNameNode(*model->persons[2]);
-  ASSERT_TRUE(secondAliceName.valid());
+      services.references.nameProvider->getName(*model->persons[2]);
+  ASSERT_TRUE(secondAliceName.has_value());
+  EXPECT_EQ(*secondAliceName, "Alice");
+  const auto secondAliceNode =
+      services.references.nameProvider->getNameNode(*model->persons[2]);
+  ASSERT_TRUE(secondAliceNode.has_value());
 
-  auto references = utils::collect(
-      services->references.references->findReferencesAt(
-          *document, secondAliceName.getBegin(), true));
+  auto references = services.references.references->findReferences(
+      *model->persons[2], {.includeDeclaration = true});
   ASSERT_EQ(references.size(), 2u);
 }
 
 TEST(MultiReferenceTest, ReportsUnresolvedReferenceWhenNoCandidateMatches) {
-  auto shared = test::make_shared_core_services();
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
   ASSERT_TRUE(register_language(*shared));
 
   auto document = open_and_build(
@@ -231,11 +258,17 @@ TEST(MultiReferenceTest, ReportsUnresolvedReferenceWhenNoCandidateMatches) {
   ASSERT_EQ(model->greetings.size(), 1u);
 
   const auto &reference = model->greetings.front()->person;
-  EXPECT_TRUE(reference.items().empty());
+  EXPECT_TRUE(reference.empty());
+  EXPECT_FALSE(reference);
   EXPECT_TRUE(reference.hasError());
   EXPECT_NE(reference.getErrorMessage().find("Alice"), std::string::npos);
 
-  EXPECT_TRUE(document->referenceDescriptions.empty());
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.workspace.referenceDescriptionProvider, nullptr);
+  EXPECT_TRUE(
+      services.workspace.referenceDescriptionProvider->createDescriptions(
+          *document)
+          .empty());
   EXPECT_TRUE(has_diagnostic_message(*document, "Unresolved reference: Alice"));
 }
 

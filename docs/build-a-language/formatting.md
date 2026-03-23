@@ -1,20 +1,22 @@
 # Formatting
 
-Formatting is implemented by deriving from `pegium::lsp::AbstractFormatter`.
+Formatting is implemented by deriving from `pegium::AbstractFormatter`.
 
-## Minimal formatter shape
+The formatter is a regular class stored in `services->lsp.formatter`. It works
+on top of the CST, which is why formatting becomes much easier once your
+grammar and AST shape are already reasonably stable.
 
-A formatter is a regular class stored in `services->lsp.formatter`.
+## Creating a formatter
 
 Typical header:
 
 ```cpp
-class DomainModelFormatter : public pegium::lsp::AbstractFormatter {
+class DomainModelFormatter : public pegium::AbstractFormatter {
 public:
-  explicit DomainModelFormatter(const pegium::services::Services &services);
+  explicit DomainModelFormatter(const pegium::Services &services);
 
 protected:
-  virtual void formatEntity(pegium::lsp::FormattingBuilder &builder,
+  virtual void formatEntity(pegium::FormattingBuilder &builder,
                             const ast::Entity *entity) const;
   virtual void formatLineComment(HiddenNodeFormatter &comment) const;
 };
@@ -24,7 +26,7 @@ Typical implementation:
 
 ```cpp
 DomainModelFormatter::DomainModelFormatter(
-    const pegium::services::Services &services)
+    const pegium::Services &services)
     : AbstractFormatter(services) {
   on<ast::Entity>(&DomainModelFormatter::formatEntity);
   onHidden("SL_COMMENT", &DomainModelFormatter::formatLineComment);
@@ -34,7 +36,7 @@ DomainModelFormatter::DomainModelFormatter(
 That constructor is where you declare which formatting method should run for
 each exact AST type or hidden terminal rule.
 
-## First formatting rule
+## Formatting one node
 
 Inside a formatting method:
 
@@ -46,7 +48,7 @@ Example:
 
 ```cpp
 void DomainModelFormatter::formatEntity(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::Entity *entity) const {
   auto formatter = builder.getNodeFormatter(entity);
   formatter.keyword("entity").append(oneSpace);
@@ -66,6 +68,9 @@ This does three things:
 - forces one space after `entity`
 - normalizes spacing around `extends`
 - formats the `{ ... }` block with the generic block helper
+
+This is the basic pattern of the whole formatting DSL: select a region, then
+attach spacing, line-break, or indentation actions to it.
 
 ## Registering several rules
 

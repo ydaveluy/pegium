@@ -10,8 +10,8 @@ that setup with `.req` and `.tst` files sharing one workspace.
 ## What is the core idea?
 
 In Pegium, multiple languages usually share the same
-`pegium::services::SharedServices`, while each concrete language gets its own
-`pegium::services::Services` instance.
+`pegium::SharedServices`, while each concrete language gets its own
+`pegium::Services` instance.
 
 That means:
 
@@ -28,17 +28,16 @@ The example builds one service factory for requirements files and another one
 for test files:
 
 ```cpp
-std::unique_ptr<pegium::services::Services>
-make_requirements_services(const pegium::services::SharedServices &sharedServices,
+std::unique_ptr<RequirementsLangServices>
+make_requirements_services(const pegium::SharedServices &sharedServices,
                            std::string languageId) {
-  auto services =
-      pegium::services::makeDefaultServices(sharedServices, std::move(languageId));
+  auto services = pegium::services::makeDefaultServices<RequirementsLangServices>(
+      sharedServices, std::move(languageId));
   services->parser =
       std::make_unique<const requirements::parser::RequirementsParser>(*services);
   services->languageMetaData.fileExtensions = {".req"};
   services->lsp.formatter = std::make_unique<lsp::RequirementsFormatter>(*services);
-  validation::RequirementsValidator::registerValidationChecks(
-      *services->validation.validationRegistry, *services);
+  validation::registerRequirementsValidationChecks(*services);
   return services;
 }
 ```
@@ -52,15 +51,11 @@ Once each language has its own `Services` object, register all of them in the
 shared registry:
 
 ```cpp
-bool register_language_services(pegium::services::SharedServices &sharedServices) {
-  if (!sharedServices.serviceRegistry->registerServices(
-          make_requirements_services(sharedServices, "requirements-lang"))) {
-    return false;
-  }
-  if (!sharedServices.serviceRegistry->registerServices(
-          make_tests_services(sharedServices, "tests-lang"))) {
-    return false;
-  }
+bool register_language_services(pegium::SharedServices &sharedServices) {
+  sharedServices.serviceRegistry->registerServices(
+      make_requirements_services(sharedServices, "requirements-lang"));
+  sharedServices.serviceRegistry->registerServices(
+      make_tests_services(sharedServices, "tests-lang"));
   return true;
 }
 ```

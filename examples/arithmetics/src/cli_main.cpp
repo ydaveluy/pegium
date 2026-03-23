@@ -1,61 +1,84 @@
 #include <arithmetics/parser/Parser.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <arithmetics/services/Module.hpp>
 
-#include <fstream>
+#include <pegium/cli/CliUtils.hpp>
+#include <pegium/core/validation/DiagnosticRanges.hpp>
+
 #include <iostream>
-#include <iterator>
-#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace {
 
-std::string read_text_file(const std::string &path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in.is_open()) {
-    throw std::runtime_error("Unable to open file: " + path);
+struct EvalOptions {
+  std::string fileName;
+};
+
+std::optional<EvalOptions> parse_eval_args(int argc, char **argv) {
+  if (argc != 3 || std::string_view(argv[1]) != "eval") {
+    return std::nullopt;
   }
-  return std::string(std::istreambuf_iterator<char>(in),
-                     std::istreambuf_iterator<char>());
+  return EvalOptions{.fileName = argv[2]};
 }
 
-void print_parse_diagnostics(
-    const std::vector<pegium::parser::ParseDiagnostic> &diagnostics) {
-  for (const auto &diagnostic : diagnostics) {
-    std::cerr << diagnostic << '\n';
+int eval_cli(const EvalOptions &options) {
+  auto shared = pegium::cli::make_shared_services();
+  auto services = arithmetics::services::create_language_services(shared);
+  auto &arithmeticsServices = *services;
+  shared.serviceRegistry->registerServices(std::move(services));
+
+  auto document = pegium::cli::build_document_from_path(
+      options.fileName, arithmeticsServices);
+  if (pegium::cli::has_error_diagnostics(*document)) {
+    std::cerr << "There are validation errors:\n";
+    pegium::cli::print_error_diagnostics(*document, std::cerr);
+    return 2;
   }
+
+  auto *module = pegium::ast_ptr_cast<arithmetics::ast::Module>(document->parseResult.value);
+  if (module == nullptr) {
+    std::cerr << "Unable to evaluate invalid arithmetics module.\n";
+    return 2;
+  }
+
+  const auto results = arithmetics::interpret_evaluations(*module);
+  for (const auto &statement : module->statements) {
+    const auto *evaluation =
+        dynamic_cast<const arithmetics::ast::Evaluation *>(statement.get());
+    if (evaluation == nullptr || evaluation->expression == nullptr) {
+      continue;
+    }
+
+    const auto result = results.find(evaluation);
+    if (result == results.end()) {
+      continue;
+    }
+
+    const auto [begin, end] =
+        pegium::validation::range_of(*evaluation->expression);
+    const auto &textDocument = document->textDocument();
+    const auto position = textDocument.positionAt(begin);
+    const auto text = textDocument.getText().substr(begin, end - begin);
+    std::cout << "line " << position.line + 1 << ": " << text << " ===> "
+              << result->second << '\n';
+  }
+
+  return 0;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 2) {
-    std::cerr << "Usage: pegium-example-arithmetics-cli <file.calc>\n";
+  const auto options = parse_eval_args(argc, argv);
+  if (!options.has_value()) {
+    std::cerr << "Usage: pegium-example-arithmetics-cli eval <file.calc>\n";
     return 1;
   }
 
   try {
-    const auto input = read_text_file(argv[1]);
-
-    auto parser = std::make_unique<arithmetics::parser::ArithmeticParser>();
-    pegium::workspace::Document document;
-    document.setText(input);
-    parser->parse(document);
-    auto &result = document.parseResult;
-
-    auto *module = pegium::ast_ptr_cast<arithmetics::ast::Module>(result.value);
-    if (!result.value || !module) {
-      std::cerr << "Parse failed.\n";
-      print_parse_diagnostics(result.parseDiagnostics);
-      return 2;
-    }
-
-    const auto values = arithmetics::evaluate_module(*module);
-    for (std::size_t i = 0; i < values.size(); ++i) {
-      std::cout << "[" << i << "] " << values[i] << '\n';
-    }
-
-    return 0;
+    return eval_cli(*options);
   } catch (const std::exception &error) {
     std::cerr << "Fatal error: " << error.what() << '\n';
     return 3;

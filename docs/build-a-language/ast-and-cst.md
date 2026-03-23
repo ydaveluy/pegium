@@ -22,6 +22,25 @@ The AST should model language semantics:
 - cross-references
 - optional and repeated properties
 
+## AST construction contract
+
+Pegium parses directly into your C++ AST types, but parser-managed AST nodes
+are created as empty mutable shells and then filled through grammar
+assignments.
+
+In practice, that means:
+
+- concrete AST node types produced by `Rule<T>`, `create<T>()`,
+  `nest<T, ...>()`, or `Infix<T, ...>` must be default-constructible
+- constructor-enforced semantic invariants are not the intended modeling style
+  for parser-managed AST nodes
+- if your application needs a stricter domain model, build it after parsing as
+  a separate layer
+
+This is a current limitation of the generic runtime design. It keeps the
+grammar API lightweight and avoids requiring explicit hierarchy metadata for
+every AST type.
+
 ## AST field types
 
 Pegium supports a small set of field shapes that cover the common language

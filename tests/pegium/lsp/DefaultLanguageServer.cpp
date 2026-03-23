@@ -1,28 +1,37 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
+#include <future>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
+#include <vector>
 
+#include <lsp/connection.h>
+#include <lsp/messagehandler.h>
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/CallHierarchyProvider.hpp>
-#include <pegium/lsp/CodeLensProvider.hpp>
-#include <pegium/lsp/DeclarationProvider.hpp>
-#include <pegium/lsp/DefaultLanguageServer.hpp>
-#include <pegium/lsp/DocumentLinkProvider.hpp>
-#include <pegium/lsp/ExecuteCommandHandler.hpp>
-#include <pegium/lsp/FileOperationHandler.hpp>
-#include <pegium/lsp/ImplementationProvider.hpp>
-#include <pegium/lsp/InlayHintProvider.hpp>
-#include <pegium/lsp/SelectionRangeProvider.hpp>
-#include <pegium/lsp/SemanticTokenProvider.hpp>
-#include <pegium/lsp/SignatureHelpProvider.hpp>
-#include <pegium/lsp/TypeDefinitionProvider.hpp>
-#include <pegium/lsp/TypeHierarchyProvider.hpp>
-#include <pegium/lsp/WorkspaceSymbolProvider.hpp>
+#include <pegium/lsp/hierarchy/CallHierarchyProvider.hpp>
+#include <pegium/lsp/code-actions/CodeLensProvider.hpp>
+#include <pegium/lsp/navigation/DeclarationProvider.hpp>
+#include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
+#include <pegium/lsp/runtime/internal/LanguageClientFactory.hpp>
+#include <pegium/lsp/navigation/DocumentLinkProvider.hpp>
+#include <pegium/lsp/services/ExecuteCommandHandler.hpp>
+#include <pegium/lsp/workspace/FileOperationHandler.hpp>
+#include <pegium/lsp/navigation/ImplementationProvider.hpp>
+#include <pegium/lsp/semantic/InlayHintProvider.hpp>
+#include <pegium/lsp/ranges/SelectionRangeProvider.hpp>
+#include <pegium/lsp/semantic/SemanticTokenProvider.hpp>
+#include <pegium/lsp/semantic/SignatureHelpProvider.hpp>
+#include <pegium/lsp/navigation/TypeDefinitionProvider.hpp>
+#include <pegium/lsp/hierarchy/TypeHierarchyProvider.hpp>
+#include <pegium/lsp/symbols/WorkspaceSymbolProvider.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
-class TestSelectionRangeProvider final : public services::SelectionRangeProvider {
+class TestSelectionRangeProvider final : public ::pegium::SelectionRangeProvider {
 public:
   std::vector<::lsp::SelectionRange>
   getSelectionRanges(const workspace::Document &,
@@ -32,11 +41,319 @@ public:
   }
 };
 
+class TestCompletionProvider final : public ::pegium::CompletionProvider {
+public:
+  [[nodiscard]] std::optional<CompletionProviderOptions>
+  completionOptions() const noexcept override {
+    return CompletionProviderOptions{
+        .triggerCharacters = {"."},
+        .allCommitCharacters = {";"},
+    };
+  }
+
+  std::optional<::lsp::CompletionList>
+  getCompletion(const workspace::Document &, const ::lsp::CompletionParams &,
+                const utils::CancellationToken &) const override {
+    return ::lsp::CompletionList{};
+  }
+};
+
 class TestSavingDocumentUpdateHandler final : public DocumentUpdateHandler {
 public:
   [[nodiscard]] bool supportsDidSaveDocument() const noexcept override {
     return true;
   }
+};
+
+class TestFullSaveLifecycleDocumentUpdateHandler final
+    : public DocumentUpdateHandler {
+public:
+  [[nodiscard]] bool supportsDidSaveDocument() const noexcept override {
+    return true;
+  }
+
+  [[nodiscard]] bool supportsWillSaveDocument() const noexcept override {
+    return true;
+  }
+
+  [[nodiscard]] bool
+  supportsWillSaveDocumentWaitUntil() const noexcept override {
+    return true;
+  }
+};
+
+class RecordingConfigurationProvider final : public workspace::ConfigurationProvider {
+public:
+  void initialize(const workspace::InitializeParams &) override {
+    order.push_back("configuration.initialize");
+  }
+
+  std::future<void>
+  initialized(const workspace::InitializedParams &) override {
+    initializedStarted = true;
+    order.push_back("configuration.initialized");
+    std::promise<void> promise;
+    promise.set_value();
+    return promise.get_future();
+  }
+
+  [[nodiscard]] bool isReady() const noexcept override { return true; }
+
+  void updateConfiguration(const workspace::ConfigurationChangeParams &) override {}
+
+  std::optional<services::JsonValue>
+  getConfiguration(std::string_view, std::string_view) const override {
+    return std::nullopt;
+  }
+
+  utils::ScopedDisposable onConfigurationSectionUpdate(
+      typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener) override {
+    return {};
+  }
+
+  workspace::WorkspaceConfiguration
+  getWorkspaceConfigurationForLanguage(std::string_view) const override {
+    return {};
+  }
+
+  workspace::WorkspaceConfiguration
+  getWorkspaceConfiguration(std::string_view) const override {
+    return {};
+  }
+
+  std::vector<std::string> order;
+  std::atomic<bool> initializedStarted = false;
+};
+
+class RecordingWorkspaceManager final : public workspace::WorkspaceManager {
+public:
+  explicit RecordingWorkspaceManager(std::vector<std::string> &order)
+      : order(order) {
+    std::promise<void> promise;
+    promise.set_value();
+    readyFuture = promise.get_future().share();
+  }
+
+  workspace::BuildOptions &initialBuildOptions() override { return options; }
+
+  const workspace::BuildOptions &initialBuildOptions() const override {
+    return options;
+  }
+
+  std::shared_future<void> ready() const override { return readyFuture; }
+
+  std::optional<std::vector<workspace::WorkspaceFolder>>
+  workspaceFolders() const override {
+    return std::vector<workspace::WorkspaceFolder>{};
+  }
+
+  void initialize(const workspace::InitializeParams &) override {
+    order.push_back("workspace.initialize");
+  }
+
+  std::future<void>
+  initialized(const workspace::InitializedParams &) override {
+    initializedStarted = true;
+    order.push_back("workspace.initialized");
+    std::promise<void> promise;
+    promise.set_value();
+    return promise.get_future();
+  }
+
+  void initializeWorkspace(std::span<const workspace::WorkspaceFolder>,
+                           utils::CancellationToken cancelToken = {}) override {
+    utils::throw_if_cancelled(cancelToken);
+  }
+
+  std::vector<std::string> searchFolder(std::string_view) const override {
+    return {};
+  }
+
+  bool shouldIncludeEntry(const workspace::FileSystemNode &) const override {
+    return true;
+  }
+
+  std::vector<std::string> &order;
+  mutable workspace::BuildOptions options{};
+  std::shared_future<void> readyFuture;
+  std::atomic<bool> initializedStarted = false;
+};
+
+class BlockingConfigurationProvider final : public workspace::ConfigurationProvider {
+public:
+  explicit BlockingConfigurationProvider(std::shared_future<void> gate)
+      : gate(std::move(gate)) {}
+
+  void initialize(const workspace::InitializeParams &) override {}
+
+  std::future<void>
+  initialized(const workspace::InitializedParams &) override {
+    initializedStarted = true;
+    auto waitGate = gate;
+    return std::async(std::launch::async,
+                      [waitGate]() mutable { waitGate.wait(); });
+  }
+
+  [[nodiscard]] bool isReady() const noexcept override { return false; }
+
+  void updateConfiguration(const workspace::ConfigurationChangeParams &) override {}
+
+  std::optional<services::JsonValue>
+  getConfiguration(std::string_view, std::string_view) const override {
+    return std::nullopt;
+  }
+
+  utils::ScopedDisposable onConfigurationSectionUpdate(
+      typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener) override {
+    return {};
+  }
+
+  workspace::WorkspaceConfiguration
+  getWorkspaceConfigurationForLanguage(std::string_view) const override {
+    return {};
+  }
+
+  workspace::WorkspaceConfiguration
+  getWorkspaceConfiguration(std::string_view) const override {
+    return {};
+  }
+
+  std::shared_future<void> gate;
+  std::atomic<bool> initializedStarted = false;
+};
+
+class BlockingWorkspaceManager final : public workspace::WorkspaceManager {
+public:
+  explicit BlockingWorkspaceManager(std::shared_future<void> gate)
+      : gate(std::move(gate)) {
+    std::promise<void> promise;
+    promise.set_value();
+    readyFuture = promise.get_future().share();
+  }
+
+  workspace::BuildOptions &initialBuildOptions() override { return options; }
+
+  const workspace::BuildOptions &initialBuildOptions() const override {
+    return options;
+  }
+
+  std::shared_future<void> ready() const override { return readyFuture; }
+
+  std::optional<std::vector<workspace::WorkspaceFolder>>
+  workspaceFolders() const override {
+    return std::vector<workspace::WorkspaceFolder>{};
+  }
+
+  void initialize(const workspace::InitializeParams &) override {}
+
+  std::future<void>
+  initialized(const workspace::InitializedParams &) override {
+    initializedStarted = true;
+    auto waitGate = gate;
+    return std::async(std::launch::async,
+                      [waitGate]() mutable { waitGate.wait(); });
+  }
+
+  void initializeWorkspace(std::span<const workspace::WorkspaceFolder>,
+                           utils::CancellationToken cancelToken = {}) override {
+    utils::throw_if_cancelled(cancelToken);
+  }
+
+  std::vector<std::string> searchFolder(std::string_view) const override {
+    return {};
+  }
+
+  bool shouldIncludeEntry(const workspace::FileSystemNode &) const override {
+    return true;
+  }
+
+  std::shared_future<void> gate;
+  std::shared_future<void> readyFuture;
+  mutable workspace::BuildOptions options{};
+  std::atomic<bool> initializedStarted = false;
+};
+
+class FailingConfigurationProvider final : public workspace::ConfigurationProvider {
+public:
+  void initialize(const workspace::InitializeParams &) override {}
+
+  std::future<void>
+  initialized(const workspace::InitializedParams &) override {
+    return std::async(std::launch::async, []() -> void {
+      throw std::runtime_error("configuration init failed");
+    });
+  }
+
+  [[nodiscard]] bool isReady() const noexcept override { return false; }
+
+  void updateConfiguration(const workspace::ConfigurationChangeParams &) override {}
+
+  std::optional<services::JsonValue>
+  getConfiguration(std::string_view, std::string_view) const override {
+    return std::nullopt;
+  }
+
+  utils::ScopedDisposable onConfigurationSectionUpdate(
+      typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener) override {
+    return {};
+  }
+
+  workspace::WorkspaceConfiguration
+  getWorkspaceConfigurationForLanguage(std::string_view) const override {
+    return {};
+  }
+
+  workspace::WorkspaceConfiguration
+  getWorkspaceConfiguration(std::string_view) const override {
+    return {};
+  }
+};
+
+class FailingWorkspaceManager final : public workspace::WorkspaceManager {
+public:
+  FailingWorkspaceManager() {
+    std::promise<void> promise;
+    promise.set_value();
+    readyFuture = promise.get_future().share();
+  }
+
+  workspace::BuildOptions &initialBuildOptions() override { return options; }
+
+  const workspace::BuildOptions &initialBuildOptions() const override {
+    return options;
+  }
+
+  std::shared_future<void> ready() const override { return readyFuture; }
+
+  std::optional<std::vector<workspace::WorkspaceFolder>>
+  workspaceFolders() const override {
+    return std::vector<workspace::WorkspaceFolder>{};
+  }
+
+  void initialize(const workspace::InitializeParams &) override {}
+
+  std::future<void>
+  initialized(const workspace::InitializedParams &) override {
+    return std::async(std::launch::async, []() -> void {
+      throw std::runtime_error("workspace init failed");
+    });
+  }
+
+  void initializeWorkspace(std::span<const workspace::WorkspaceFolder>,
+                           utils::CancellationToken cancelToken = {}) override {
+    utils::throw_if_cancelled(cancelToken);
+  }
+
+  std::vector<std::string> searchFolder(std::string_view) const override {
+    return {};
+  }
+
+  bool shouldIncludeEntry(const workspace::FileSystemNode &) const override {
+    return true;
+  }
+
+  workspace::BuildOptions options{};
+  std::shared_future<void> readyFuture;
 };
 
 class TestExecuteCommandHandler final : public ExecuteCommandHandler {
@@ -52,34 +369,31 @@ public:
   }
 };
 
+::lsp::FileOperationOptions make_test_file_operation_options() {
+  ::lsp::FileOperationFilter fileFilter{};
+  fileFilter.pattern.glob = "**/*";
+  fileFilter.scheme = "file";
+
+  ::lsp::FileOperationRegistrationOptions registration{};
+  registration.filters.push_back(std::move(fileFilter));
+
+  ::lsp::FileOperationOptions options{};
+  options.didCreate = registration;
+  return options;
+}
+
 class TestFileOperationHandler final : public FileOperationHandler {
 public:
-  [[nodiscard]] bool supportsDidCreateFiles() const noexcept override {
-    return true;
-  }
-
   [[nodiscard]] const ::lsp::FileOperationOptions &
   fileOperationOptions() const noexcept override {
     return options;
   }
 
 private:
-  ::lsp::FileOperationOptions options = [] {
-    ::lsp::FileOperationFilter fileFilter{};
-    fileFilter.pattern.glob = "**/*";
-    fileFilter.scheme = "file";
-
-    ::lsp::FileOperationRegistrationOptions registration{};
-    registration.filters.push_back(std::move(fileFilter));
-
-    ::lsp::FileOperationOptions out{};
-    out.didCreate = registration;
-    return out;
-  }();
+  ::lsp::FileOperationOptions options = make_test_file_operation_options();
 };
 
-class DeclaredButUnsupportedFileOperationHandler final
-    : public FileOperationHandler {
+class EmptyFileOperationHandler final : public FileOperationHandler {
 public:
   [[nodiscard]] const ::lsp::FileOperationOptions &
   fileOperationOptions() const noexcept override {
@@ -87,21 +401,10 @@ public:
   }
 
 private:
-  ::lsp::FileOperationOptions options = [] {
-    ::lsp::FileOperationFilter fileFilter{};
-    fileFilter.pattern.glob = "**/*";
-    fileFilter.scheme = "file";
-
-    ::lsp::FileOperationRegistrationOptions registration{};
-    registration.filters.push_back(std::move(fileFilter));
-
-    ::lsp::FileOperationOptions out{};
-    out.didCreate = registration;
-    return out;
-  }();
+  ::lsp::FileOperationOptions options{};
 };
 
-class TestWorkspaceSymbolProvider final : public services::WorkspaceSymbolProvider {
+class TestWorkspaceSymbolProvider final : public ::pegium::WorkspaceSymbolProvider {
 public:
   explicit TestWorkspaceSymbolProvider(bool resolveProvider)
       : resolveProvider(resolveProvider) {}
@@ -129,7 +432,7 @@ private:
   bool resolveProvider = false;
 };
 
-class TestFormatter : public services::Formatter {
+class TestFormatter : public ::pegium::Formatter {
 public:
   std::vector<::lsp::TextEdit>
   formatDocument(const workspace::Document &, const ::lsp::DocumentFormattingParams &,
@@ -156,7 +459,7 @@ public:
   }
 };
 
-class TestSignatureHelpProvider final : public services::SignatureHelpProvider {
+class TestSignatureHelpProvider final : public ::pegium::SignatureHelpProvider {
 public:
   ::lsp::SignatureHelpOptions signatureHelpOptions() const override {
     ::lsp::SignatureHelpOptions options{};
@@ -172,7 +475,7 @@ public:
   }
 };
 
-class TestDeclarationProvider final : public services::DeclarationProvider {
+class TestDeclarationProvider final : public ::pegium::DeclarationProvider {
 public:
   std::optional<std::vector<::lsp::LocationLink>>
   getDeclaration(const workspace::Document &, const ::lsp::DeclarationParams &,
@@ -181,7 +484,7 @@ public:
   }
 };
 
-class TestTypeDefinitionProvider final : public services::TypeDefinitionProvider {
+class TestTypeDefinitionProvider final : public ::pegium::TypeDefinitionProvider {
 public:
   std::optional<std::vector<::lsp::LocationLink>>
   getTypeDefinition(const workspace::Document &,
@@ -191,7 +494,7 @@ public:
   }
 };
 
-class TestImplementationProvider final : public services::ImplementationProvider {
+class TestImplementationProvider final : public ::pegium::ImplementationProvider {
 public:
   std::optional<std::vector<::lsp::LocationLink>>
   getImplementation(const workspace::Document &,
@@ -201,7 +504,7 @@ public:
   }
 };
 
-class TestCodeLensProvider final : public services::CodeLensProvider {
+class TestCodeLensProvider final : public ::pegium::CodeLensProvider {
 public:
   std::vector<::lsp::CodeLens>
   provideCodeLens(const workspace::Document &, const ::lsp::CodeLensParams &,
@@ -210,7 +513,7 @@ public:
   }
 };
 
-class TestDocumentLinkProvider final : public services::DocumentLinkProvider {
+class TestDocumentLinkProvider final : public ::pegium::DocumentLinkProvider {
 public:
   std::vector<::lsp::DocumentLink>
   getDocumentLinks(const workspace::Document &,
@@ -220,7 +523,7 @@ public:
   }
 };
 
-class TestCallHierarchyProvider final : public services::CallHierarchyProvider {
+class TestCallHierarchyProvider final : public ::pegium::CallHierarchyProvider {
 public:
   std::vector<::lsp::CallHierarchyItem>
   prepareCallHierarchy(const workspace::Document &,
@@ -242,7 +545,7 @@ public:
   }
 };
 
-class TestTypeHierarchyProvider final : public services::TypeHierarchyProvider {
+class TestTypeHierarchyProvider final : public ::pegium::TypeHierarchyProvider {
 public:
   std::vector<::lsp::TypeHierarchyItem>
   prepareTypeHierarchy(const workspace::Document &,
@@ -264,7 +567,7 @@ public:
   }
 };
 
-class TestInlayHintProvider final : public services::InlayHintProvider {
+class TestInlayHintProvider final : public ::pegium::InlayHintProvider {
 public:
   std::vector<::lsp::InlayHint>
   getInlayHints(const workspace::Document &, const ::lsp::InlayHintParams &,
@@ -273,7 +576,7 @@ public:
   }
 };
 
-class TestSemanticTokenProvider final : public services::SemanticTokenProvider {
+class TestSemanticTokenProvider final : public ::pegium::SemanticTokenProvider {
 public:
   explicit TestSemanticTokenProvider(std::string tokenType = "type",
                                      std::string tokenModifier = "declaration")
@@ -319,9 +622,17 @@ private:
 };
 
 TEST(DefaultLanguageServerTest, InitializeAdvertisesCapabilitiesFromRegisteredServices) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services(*shared, "test", {".test"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   DefaultLanguageServer server(*shared);
   const auto result = server.initialize(::lsp::InitializeParams{});
@@ -343,6 +654,7 @@ TEST(DefaultLanguageServerTest, InitializeAdvertisesCapabilitiesFromRegisteredSe
       *textSync.save));
 
   EXPECT_TRUE(result.capabilities.completionProvider.has_value());
+  EXPECT_FALSE(result.capabilities.completionProvider->completionItem.has_value());
   ASSERT_TRUE(result.capabilities.hoverProvider.has_value());
   EXPECT_TRUE(std::get<bool>(*result.capabilities.hoverProvider));
   ASSERT_TRUE(result.capabilities.definitionProvider.has_value());
@@ -372,10 +684,16 @@ TEST(DefaultLanguageServerTest, InitializeAdvertisesCapabilitiesFromRegisteredSe
 }
 
 TEST(DefaultLanguageServerTest, OptInServicesAdvertiseCapabilitiesWhenInstalledExplicitly) {
-  auto shared = test::make_shared_services();
-  auto services = test::make_services(*shared, "test", {".test"});
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  auto services = test::make_uninstalled_services(*shared, "test", {".test"});
+  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultLspServices(*services);
   services->lsp.selectionRangeProvider =
       std::make_unique<TestSelectionRangeProvider>();
+  services->lsp.completionProvider = std::make_unique<TestCompletionProvider>();
   services->lsp.signatureHelp = std::make_unique<TestSignatureHelpProvider>();
   services->lsp.declarationProvider =
       std::make_unique<TestDeclarationProvider>();
@@ -401,13 +719,21 @@ TEST(DefaultLanguageServerTest, OptInServicesAdvertiseCapabilitiesWhenInstalledE
   shared->lsp.workspaceSymbolProvider =
       std::make_unique<TestWorkspaceSymbolProvider>(true);
 
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+  shared->serviceRegistry->registerServices(std::move(services));
 
   DefaultLanguageServer server(*shared);
   const auto result = server.initialize(::lsp::InitializeParams{});
 
   ASSERT_TRUE(result.capabilities.selectionRangeProvider.has_value());
   EXPECT_TRUE(std::get<bool>(*result.capabilities.selectionRangeProvider));
+  ASSERT_TRUE(result.capabilities.completionProvider.has_value());
+  ASSERT_TRUE(result.capabilities.completionProvider->triggerCharacters.has_value());
+  EXPECT_EQ((*result.capabilities.completionProvider->triggerCharacters)[0], ".");
+  ASSERT_TRUE(
+      result.capabilities.completionProvider->allCommitCharacters.has_value());
+  EXPECT_EQ(
+      (*result.capabilities.completionProvider->allCommitCharacters)[0], ";");
+  EXPECT_FALSE(result.capabilities.completionProvider->completionItem.has_value());
 
   ASSERT_TRUE(result.capabilities.signatureHelpProvider.has_value());
   ASSERT_TRUE(
@@ -475,7 +801,10 @@ TEST(DefaultLanguageServerTest, OptInServicesAdvertiseCapabilitiesWhenInstalledE
 }
 
 TEST(DefaultLanguageServerTest, InitializeAndInitializedEmitCallbacks) {
-  auto shared = test::make_shared_services();
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   DefaultLanguageServer server(*shared);
 
   bool sawInitialize = false;
@@ -498,11 +827,167 @@ TEST(DefaultLanguageServerTest, InitializeAndInitializedEmitCallbacks) {
 }
 
 TEST(DefaultLanguageServerTest,
+     InitializeCallsDefaultServicesBeforeOnInitialize) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+
+  auto configurationProvider = std::make_shared<RecordingConfigurationProvider>();
+  auto workspaceManager =
+      std::make_unique<RecordingWorkspaceManager>(configurationProvider->order);
+  shared->workspace.configurationProvider = configurationProvider;
+  shared->workspace.workspaceManager = std::move(workspaceManager);
+
+  DefaultLanguageServer server(*shared);
+  auto onInitialize = server.onInitialize(
+      [order = &configurationProvider->order](const ::lsp::InitializeParams &) {
+        order->push_back("event.initialize");
+      });
+  (void)onInitialize;
+
+  (void)server.initialize(::lsp::InitializeParams{});
+
+  EXPECT_EQ(configurationProvider->order,
+            (std::vector<std::string>{"configuration.initialize",
+                                      "workspace.initialize",
+                                      "event.initialize"}));
+}
+
+TEST(DefaultLanguageServerTest,
+     InitializedStartsDefaultServicesBeforeEventAndDoesNotBlock) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+
+  std::promise<void> gatePromise;
+  auto gate = gatePromise.get_future().share();
+  auto configurationProvider =
+      std::make_shared<BlockingConfigurationProvider>(gate);
+  auto workspaceManager = std::make_unique<BlockingWorkspaceManager>(gate);
+  auto *workspaceManagerPtr = workspaceManager.get();
+  shared->workspace.configurationProvider = configurationProvider;
+  shared->workspace.workspaceManager = std::move(workspaceManager);
+
+  test::MemoryStream stream;
+  ::lsp::Connection connection(stream);
+  ::lsp::MessageHandler handler(connection);
+  shared->lsp.languageClient =
+      make_message_handler_language_client(handler, *shared->observabilitySink);
+
+  DefaultLanguageServer server(*shared);
+  bool sawInitialized = false;
+  auto onInitialized = server.onInitialized(
+      [&](const ::lsp::InitializedParams &) {
+        sawInitialized = true;
+        EXPECT_TRUE(configurationProvider->initializedStarted.load());
+        EXPECT_TRUE(workspaceManagerPtr->initializedStarted.load());
+      });
+  (void)onInitialized;
+
+  auto future = std::async(std::launch::async, [&]() {
+    server.initialized(::lsp::InitializedParams{});
+  });
+
+  EXPECT_EQ(future.wait_for(std::chrono::milliseconds(200)),
+            std::future_status::ready);
+  future.get();
+
+  EXPECT_TRUE(sawInitialized);
+  EXPECT_TRUE(configurationProvider->initializedStarted.load());
+  EXPECT_TRUE(workspaceManagerPtr->initializedStarted.load());
+
+  gatePromise.set_value();
+  shared->lsp.languageClient.reset();
+}
+
+TEST(DefaultLanguageServerTest, LifecycleEventsAreOneShot) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+
+  DefaultLanguageServer server(*shared);
+  std::size_t initializeCount = 0;
+  std::size_t initializedCount = 0;
+
+  auto onInitialize = server.onInitialize(
+      [&](const ::lsp::InitializeParams &) { ++initializeCount; });
+  auto onInitialized = server.onInitialized(
+      [&](const ::lsp::InitializedParams &) { ++initializedCount; });
+  (void)onInitialize;
+  (void)onInitialized;
+
+  (void)server.initialize(::lsp::InitializeParams{});
+  (void)server.initialize(::lsp::InitializeParams{});
+  server.initialized(::lsp::InitializedParams{});
+  server.initialized(::lsp::InitializedParams{});
+
+  EXPECT_EQ(initializeCount, 1u);
+  EXPECT_EQ(initializedCount, 1u);
+}
+
+TEST(DefaultLanguageServerTest,
+     InitializedPublishesObservationsForBackgroundFailuresAndDoesNotBlock) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  auto recordingSink = std::make_shared<test::RecordingObservabilitySink>();
+  shared->observabilitySink = recordingSink;
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+
+  shared->workspace.configurationProvider =
+      std::make_shared<FailingConfigurationProvider>();
+  shared->workspace.workspaceManager =
+      std::make_unique<FailingWorkspaceManager>();
+
+  DefaultLanguageServer server(*shared);
+  auto future = std::async(std::launch::async, [&]() {
+    server.initialized(::lsp::InitializedParams{});
+  });
+
+  EXPECT_EQ(future.wait_for(std::chrono::milliseconds(200)),
+            std::future_status::ready);
+  future.get();
+
+  ASSERT_TRUE(recordingSink->waitForCount(2));
+  const auto observations = recordingSink->observations();
+
+  bool sawConfigurationFailure = false;
+  bool sawWorkspaceFailure = false;
+  for (const auto &observation : observations) {
+    if (observation.code !=
+        observability::ObservationCode::LspRuntimeBackgroundTaskFailed) {
+      continue;
+    }
+    if (observation.category == "ConfigurationProvider.initialized") {
+      sawConfigurationFailure =
+          observation.message.find("configuration init failed") !=
+          std::string::npos;
+    }
+    if (observation.category == "WorkspaceManager.initialized") {
+      sawWorkspaceFailure =
+          observation.message.find("workspace init failed") !=
+          std::string::npos;
+    }
+  }
+
+  EXPECT_TRUE(sawConfigurationFailure);
+  EXPECT_TRUE(sawWorkspaceFailure);
+}
+
+TEST(DefaultLanguageServerTest,
      InitializeAdvertisesOnTypeFormattingWhenFormatterProvidesOptions) {
-  auto shared = test::make_shared_services();
-  auto services = test::make_services(*shared, "test", {".test"});
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  auto services = test::make_uninstalled_services(*shared, "test", {".test"});
+  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultLspServices(*services);
   services->lsp.formatter = std::make_unique<TestOnTypeFormatter>();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+  shared->serviceRegistry->registerServices(std::move(services));
 
   DefaultLanguageServer server(*shared);
   const auto result = server.initialize(::lsp::InitializeParams{});
@@ -526,15 +1011,22 @@ TEST(DefaultLanguageServerTest,
 
 TEST(DefaultLanguageServerTest,
      InitializeRejectsConflictingSemanticTokenLegendIndexes) {
-  auto shared = test::make_shared_services();
-  auto first = test::make_services(*shared, "first", {".first"});
-  auto second = test::make_services(*shared, "second", {".second"});
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  auto first = test::make_uninstalled_services(*shared, "first", {".first"});
+  pegium::services::installDefaultCoreServices(*first);
+  pegium::installDefaultLspServices(*first);
+  auto second = test::make_uninstalled_services(*shared, "second", {".second"});
+  pegium::services::installDefaultCoreServices(*second);
+  pegium::installDefaultLspServices(*second);
   first->lsp.semanticTokenProvider =
       std::make_unique<TestSemanticTokenProvider>("type");
   second->lsp.semanticTokenProvider =
       std::make_unique<TestSemanticTokenProvider>("class");
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(first)));
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(second)));
+  shared->serviceRegistry->registerServices(std::move(first));
+  shared->serviceRegistry->registerServices(std::move(second));
 
   DefaultLanguageServer server(*shared);
   EXPECT_THROW((void)server.initialize(::lsp::InitializeParams{}),
@@ -542,10 +1034,13 @@ TEST(DefaultLanguageServerTest,
 }
 
 TEST(DefaultLanguageServerTest,
-     DoesNotAdvertiseUnsupportedFileOperationsEvenWhenDeclaredInOptions) {
-  auto shared = test::make_shared_services();
+     DoesNotAdvertiseConcreteFileOperationsWhenNoOperationsAreDeclared) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   shared->lsp.fileOperationHandler =
-      std::make_unique<DeclaredButUnsupportedFileOperationHandler>();
+      std::make_unique<EmptyFileOperationHandler>();
 
   DefaultLanguageServer server(*shared);
   const auto result = server.initialize(::lsp::InitializeParams{});
@@ -556,7 +1051,10 @@ TEST(DefaultLanguageServerTest,
 
 TEST(DefaultLanguageServerTest,
      TextDocumentSyncSaveDependsOnDocumentUpdateHandlerSupport) {
-  auto shared = test::make_shared_services();
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   shared->lsp.documentUpdateHandler =
       std::make_unique<TestSavingDocumentUpdateHandler>();
 
@@ -579,5 +1077,35 @@ TEST(DefaultLanguageServerTest,
       *textSync.save));
 }
 
+TEST(DefaultLanguageServerTest,
+     TextDocumentSyncReflectsExplicitDocumentSaveLifecycleSupport) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  shared->lsp.documentUpdateHandler =
+      std::make_unique<TestFullSaveLifecycleDocumentUpdateHandler>();
+
+  DefaultLanguageServer server(*shared);
+  const auto result = server.initialize(::lsp::InitializeParams{});
+
+  ASSERT_TRUE(result.capabilities.textDocumentSync.has_value());
+  const auto &textSync =
+      std::get<::lsp::TextDocumentSyncOptions>(*result.capabilities.textDocumentSync);
+  ASSERT_TRUE(textSync.save.has_value());
+  EXPECT_TRUE(std::visit(
+      [](const auto &save) {
+        using Save = std::decay_t<decltype(save)>;
+        if constexpr (std::is_same_v<Save, bool>) {
+          return save;
+        } else {
+          return true;
+        }
+      },
+      *textSync.save));
+  EXPECT_TRUE(textSync.willSave.value_or(false));
+  EXPECT_TRUE(textSync.willSaveWaitUntil.value_or(false));
+}
+
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

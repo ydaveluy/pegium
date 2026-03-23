@@ -8,16 +8,23 @@
 #include <lsp/messages.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/DefaultLanguageServer.hpp>
-#include <pegium/lsp/LanguageServerHandlerContext.hpp>
-#include <pegium/lsp/LanguageServerRequestHandlerParts.hpp>
-#include <pegium/lsp/LanguageServerRuntimeState.hpp>
-#include <pegium/workspace/Configuration.hpp>
-#include <pegium/workspace/DocumentBuilder.hpp>
-#include <pegium/workspace/WorkspaceManager.hpp>
+#include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
+#include <pegium/lsp/runtime/LanguageServerHandlerContext.hpp>
+#include <pegium/lsp/runtime/LanguageServerRequestHandlerParts.hpp>
+#include <pegium/lsp/runtime/LanguageServerRuntimeState.hpp>
+#include <pegium/lsp/runtime/internal/LanguageClientFactory.hpp>
+#include <pegium/core/workspace/Configuration.hpp>
+#include <pegium/core/workspace/DocumentBuilder.hpp>
+#include <pegium/core/workspace/WorkspaceManager.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
+
+std::shared_future<void> make_ready_shared_future() {
+  std::promise<void> promise;
+  promise.set_value();
+  return promise.get_future().share();
+}
 
 class BlockingConfigurationProvider final
     : public workspace::ConfigurationProvider {
@@ -83,7 +90,7 @@ public:
 class BlockingWorkspaceManager final : public workspace::WorkspaceManager {
 public:
   explicit BlockingWorkspaceManager(std::shared_future<void> gate)
-      : gate(std::move(gate)) {}
+      : gate(std::move(gate)), readyFuture(make_ready_shared_future()) {}
 
   workspace::BuildOptions &initialBuildOptions() override { return options; }
 
@@ -91,39 +98,31 @@ public:
     return options;
   }
 
-  bool isReady() const noexcept override { return false; }
+  std::shared_future<void> ready() const override { return readyFuture; }
 
-  void waitUntilReady(utils::CancellationToken cancelToken = {}) const override {
-    utils::throw_if_cancelled(cancelToken);
-  }
-
-  std::vector<workspace::WorkspaceFolder> workspaceFolders() const override {
-    return {};
+  std::optional<std::vector<workspace::WorkspaceFolder>>
+  workspaceFolders() const override {
+    return std::vector<workspace::WorkspaceFolder>{};
   }
 
   void initialize(const workspace::InitializeParams &params) override {
     (void)params;
   }
 
-  std::future<void> initialized(
-      const workspace::InitializedParams &params,
-      utils::CancellationToken cancelToken = {}) override {
+  std::future<void>
+  initialized(const workspace::InitializedParams &params) override {
     (void)params;
-    utils::throw_if_cancelled(cancelToken);
     ++initializedCalls;
     auto waitGate = gate;
     return std::async(std::launch::async,
                       [waitGate]() mutable { waitGate.wait(); });
   }
 
-  std::future<void> initializeWorkspace(
+  void initializeWorkspace(
       std::span<const workspace::WorkspaceFolder> workspaceFolders,
       utils::CancellationToken cancelToken = {}) override {
     (void)workspaceFolders;
     utils::throw_if_cancelled(cancelToken);
-    std::promise<void> promise;
-    promise.set_value();
-    return promise.get_future();
   }
 
   std::vector<std::string>
@@ -132,22 +131,22 @@ public:
     return {};
   }
 
-  bool shouldIncludeEntry(std::string_view workspaceUri, std::string_view path,
-                          bool isDirectory) const override {
-    (void)workspaceUri;
-    (void)path;
-    (void)isDirectory;
+  bool shouldIncludeEntry(const workspace::FileSystemNode &entry) const override {
+    (void)entry;
     return true;
   }
 
   std::shared_future<void> gate;
+  std::shared_future<void> readyFuture;
   workspace::BuildOptions options{};
   std::atomic<int> initializedCalls = 0;
 };
 
 TEST(LanguageServerLifecycleHandlersTest,
      InitializedNotificationDoesNotBlockOnBackgroundInitializationFutures) {
-  auto shared = test::make_shared_services();
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
 
   std::promise<void> gatePromise;
   auto gate = gatePromise.get_future().share();
@@ -167,6 +166,8 @@ TEST(LanguageServerLifecycleHandlersTest,
   test::MemoryStream stream;
   ::lsp::Connection connection(stream);
   ::lsp::MessageHandler handler(connection);
+  shared->lsp.languageClient =
+      make_message_handler_language_client(handler, *shared->observabilitySink);
   addLanguageServerLifecycleHandlers(context, handler, *shared);
 
   stream.pushInput(test::make_notification_message(
@@ -180,7 +181,7 @@ TEST(LanguageServerLifecycleHandlersTest,
   EXPECT_EQ(configurationProvider->initializedCalls.load(), 1);
   EXPECT_TRUE(configurationProvider->sawRegisterHandler);
   EXPECT_TRUE(configurationProvider->sawFetchHandler);
-  EXPECT_EQ(workspaceManagerPtr->initializedCalls.load(), 0);
+  EXPECT_EQ(workspaceManagerPtr->initializedCalls.load(), 1);
 
   gatePromise.set_value();
   future.get();
@@ -189,7 +190,8 @@ TEST(LanguageServerLifecycleHandlersTest,
     return workspaceManagerPtr->initializedCalls.load() == 1;
   }));
   EXPECT_EQ(workspaceManagerPtr->initializedCalls.load(), 1);
+  shared->lsp.languageClient.reset();
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

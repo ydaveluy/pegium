@@ -4,16 +4,16 @@
 
 #include <lsp/types.h>
 
-#include <pegium/lsp/JsonValue.hpp>
+#include <pegium/lsp/support/JsonValue.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 TEST(JsonValueTest, RoundTripsNestedValuesBetweenPegiumAndLsp) {
   services::JsonValue::Object nestedObject;
-  nestedObject.emplace("name", "demo");
-  nestedObject.emplace("enabled", true);
-  nestedObject.emplace("count", std::int64_t{42});
+  nestedObject.try_emplace("name", "demo");
+  nestedObject.try_emplace("enabled", true);
+  nestedObject.try_emplace("count", std::int64_t{42});
 
   services::JsonValue::Array nestedArray;
   nestedArray.emplace_back(nullptr);
@@ -23,8 +23,8 @@ TEST(JsonValueTest, RoundTripsNestedValuesBetweenPegiumAndLsp) {
   });
 
   services::JsonValue::Object root;
-  root.emplace("object", std::move(nestedObject));
-  root.emplace("array", std::move(nestedArray));
+  root.try_emplace("object", std::move(nestedObject));
+  root.try_emplace("array", std::move(nestedArray));
 
   const services::JsonValue value{std::move(root)};
   const auto roundTripped = from_lsp_any(to_lsp_any(value));
@@ -79,4 +79,4 @@ TEST(JsonValueTest, ConvertsDiagnosticSeverityBothWays) {
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

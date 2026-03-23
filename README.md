@@ -36,19 +36,18 @@ parser stack.
 
 ## Get Started
 
-Build Pegium and the shipped examples:
+Open the repository root in VS Code, go to `Run and Debug`, pick one of
+`Run Arithmetics Extension`, `Run DomainModel Extension`,
+`Run Requirements Extension`, or `Run Statemachine Extension`, then press
+`F5`.
 
-```sh
-cmake -S . -B build
-cmake --build build -j
-```
+On the first launch, VS Code runs the matching `Prepare ... Extension` task for
+you: it configures CMake, builds the example language server, installs the
+extension dependencies if needed, and compiles the VS Code extension.
 
-Then run one of the example languages, for example:
-
-```sh
-./build/examples/arithmetics/pegium-example-arithmetics-cli \
-  examples/arithmetics/example/example.calc
-```
+VS Code then opens a new Extension Development Host window on the corresponding
+example workspace, so you can immediately try the language features on the
+shipped sample files.
 
 If you are new to the project, the best documentation entry points are:
 
@@ -91,15 +90,6 @@ Pegium ships several end-to-end examples in this repository:
   showing shared workspace behavior and cross-language references
 - **[statemachine](examples/statemachine/README.md)**: a modeling language that
   emphasizes validation and editor integration
-
-## Documentation Locally
-
-To preview the documentation locally:
-
-```sh
-python3 -m pip install -r requirements-docs.txt
-mkdocs serve
-```
 
 ## License
 

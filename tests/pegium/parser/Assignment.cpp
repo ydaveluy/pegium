@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include <pegium/ParseJsonTestSupport.hpp>
 #include <pegium/TestRuleParser.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 #include <string>
 #include <variant>
 
@@ -46,6 +46,18 @@ struct AssignmentFeatureNode : pegium::AstNode {
 
 struct ReferenceInfoNode : pegium::AstNode {
   reference<DerivedLeafNode> refOne;
+  vector<reference<DerivedLeafNode>> refs;
+};
+
+struct OptionalRuleReferenceNode : pegium::AstNode {
+  optional<reference<DerivedLeafNode>> superType;
+};
+
+struct OptionalRuleMultiReferenceNode : pegium::AstNode {
+  optional<multi_reference<DerivedLeafNode>> superTypes;
+};
+
+struct VectorRuleReferenceNode : pegium::AstNode {
   vector<reference<DerivedLeafNode>> refs;
 };
 
@@ -254,6 +266,41 @@ struct ReferenceInfoParser final : PegiumParser {
   }
 };
 
+struct OptionalRuleReferenceParser final : PegiumParser {
+  Terminal<std::string> ID{"ID", "a-zA-Z_"_cr + many(w)};
+  Rule<std::string> QualifiedName{"QualifiedName", some(ID, "."_kw)};
+  Rule<OptionalRuleReferenceNode> Root{
+      "Root", assign<&OptionalRuleReferenceNode::superType>(QualifiedName)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
+};
+
+struct OptionalRuleMultiReferenceParser final : PegiumParser {
+  Terminal<std::string> ID{"ID", "a-zA-Z_"_cr + many(w)};
+  Rule<std::string> QualifiedName{"QualifiedName", some(ID, "."_kw)};
+  Rule<OptionalRuleMultiReferenceNode> Root{
+      "Root", assign<&OptionalRuleMultiReferenceNode::superTypes>(QualifiedName)};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
+};
+
+struct VectorRuleReferenceParser final : PegiumParser {
+  Terminal<std::string> ID{"ID", "a-zA-Z_"_cr + many(w)};
+  Rule<std::string> QualifiedName{"QualifiedName", some(ID, "."_kw)};
+  Rule<VectorRuleReferenceNode> Root{
+      "Root",
+      append<&VectorRuleReferenceNode::refs>(QualifiedName) +
+          many(","_kw + append<&VectorRuleReferenceNode::refs>(QualifiedName))};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
+};
+
 struct PointerChoiceParser final : PegiumParser {
   Rule<DerivedLeafNode> Child{"Child",
                               assign<&DerivedLeafNode::name>("child"_kw)};
@@ -339,13 +386,10 @@ template <typename T> const T *ast_as(const ParseResult &result) {
 }
 
 template <typename RuleType>
-auto parse_rule(const RuleType &rule, std::string_view text,
-                const Skipper &skipper = SkipperBuilder().build(),
-                const ParseOptions &options = {}) {
-  auto document = std::make_unique<pegium::workspace::Document>();
-  document->setText(std::string{text});
-  pegium::test::parse_rule(rule, *document, skipper, options);
-  return document;
+ParseResult parse_rule(const RuleType &rule, std::string_view text,
+                       const Skipper &skipper = SkipperBuilder().build(),
+                       const ParseOptions &options = {}) {
+  return pegium::test::parse_rule_result(rule, text, skipper, options);
 }
 
 } // namespace
@@ -353,7 +397,7 @@ auto parse_rule(const RuleType &rule, std::string_view text,
 TEST(AssignmentTest, AssignAppendAndEnableIfPopulateAstNode) {
   AssignmentParser parser;
 
-  auto document = pegium::test::ExpectAst(
+  auto result = pegium::test::ExpectParsedAst(
       parser.Root, "id:tag,tag!child",
       R"json({
   "$type": "AssignmentNode",
@@ -368,7 +412,7 @@ TEST(AssignmentTest, AssignAppendAndEnableIfPopulateAstNode) {
     "tag"
   ]
 })json");
-  auto resultValue = ast_as<AssignmentNode>(document->parseResult);
+  auto resultValue = ast_as<AssignmentNode>(result);
   ASSERT_TRUE(resultValue != nullptr);
   ASSERT_TRUE(resultValue->child != nullptr);
   EXPECT_EQ(resultValue->child->getContainer(), resultValue);
@@ -419,7 +463,8 @@ TEST(AssignmentTest, OptionalReferenceAndPointerAssignmentsAreHandled) {
   }
 })json",
       {.includeReferenceErrors = false});
-  auto resultValue = ast_as<AssignmentFeatureNode>(document->parseResult);
+  const auto &result = document->parseResult;
+  auto resultValue = ast_as<AssignmentFeatureNode>(result);
   ASSERT_TRUE(resultValue != nullptr);
 
   const auto refOneNode = resultValue->refOne.getRefNode();
@@ -461,7 +506,8 @@ TEST(AssignmentTest, ReferenceAssignmentsCaptureSourceCstNode) {
   }
 })json",
       {.includeReferenceErrors = false});
-  auto resultValue = ast_as<AssignmentFeatureNode>(document->parseResult);
+  const auto &result = document->parseResult;
+  auto resultValue = ast_as<AssignmentFeatureNode>(result);
   ASSERT_TRUE(resultValue != nullptr);
 
   const auto refNode = resultValue->refOne.getRefNode();
@@ -471,7 +517,56 @@ TEST(AssignmentTest, ReferenceAssignmentsCaptureSourceCstNode) {
   EXPECT_EQ(refNode->getEnd(), 7u);
 }
 
-TEST(AssignmentTest, ReferenceAssignmentsPropagatePropertyAndIndexMetadata) {
+TEST(AssignmentTest, OptionalReferenceAssignmentsAcceptDataTypeRules) {
+  OptionalRuleReferenceParser parser;
+
+  auto document = pegium::test::ExpectAst(
+      parser.Root, "base.Type",
+      R"json({
+  "$type": "OptionalRuleReferenceNode",
+  "superType": {
+    "$refText": "base.Type"
+  }
+})json",
+      {.includeReferenceErrors = false});
+  const auto &result = document->parseResult;
+  auto resultValue = ast_as<OptionalRuleReferenceNode>(result);
+  ASSERT_TRUE(resultValue != nullptr);
+  ASSERT_TRUE(resultValue->superType.has_value());
+  EXPECT_EQ(resultValue->superType->getRefText(), "base.Type");
+  EXPECT_EQ(result.references.size(), 1u);
+  EXPECT_EQ(result.references.front().getConst(), &resultValue->superType.value());
+}
+
+TEST(AssignmentTest, OptionalMultiReferenceAssignmentsAcceptDataTypeRules) {
+  OptionalRuleMultiReferenceParser parser;
+
+  auto result = parse_rule(parser.Root, "base.Type");
+  auto resultValue = ast_as<OptionalRuleMultiReferenceNode>(result);
+  ASSERT_TRUE(resultValue != nullptr);
+  ASSERT_TRUE(resultValue->superTypes.has_value());
+  EXPECT_EQ(resultValue->superTypes->getRefText(), "base.Type");
+  EXPECT_EQ(result.references.size(), 1u);
+  EXPECT_EQ(result.references.front().getConst(),
+            &resultValue->superTypes.value());
+}
+
+TEST(AssignmentTest, VectorReferenceAssignmentsAcceptDataTypeRules) {
+  VectorRuleReferenceParser parser;
+
+  auto result = parse_rule(parser.Root, "base.Type,other.Type");
+  auto resultValue = ast_as<VectorRuleReferenceNode>(result);
+  ASSERT_TRUE(resultValue != nullptr);
+  ASSERT_EQ(resultValue->refs.size(), 2u);
+  EXPECT_EQ(resultValue->refs[0].getRefText(), "base.Type");
+  EXPECT_EQ(resultValue->refs[1].getRefText(), "other.Type");
+
+  ASSERT_EQ(result.references.size(), 2u);
+  EXPECT_EQ(result.references[0].getConst(), &resultValue->refs[0]);
+  EXPECT_EQ(result.references[1].getConst(), &resultValue->refs[1]);
+}
+
+TEST(AssignmentTest, ReferenceAssignmentsPropagateAssignmentMetadata) {
   ReferenceInfoParser parser;
 
   auto document = pegium::test::ExpectAst(
@@ -491,33 +586,41 @@ TEST(AssignmentTest, ReferenceAssignmentsPropagatePropertyAndIndexMetadata) {
   ]
 })json",
       {.includeReferenceErrors = false});
-  auto resultValue = ast_as<ReferenceInfoNode>(document->parseResult);
+  const auto &result = document->parseResult;
+  auto resultValue = ast_as<ReferenceInfoNode>(result);
   ASSERT_TRUE(resultValue != nullptr);
 
-  ASSERT_EQ(document->references.size(), 3u);
+  ASSERT_EQ(result.references.size(), 3u);
 
-  const auto *optionalRef = document->references[0].getConst();
+  const auto *optionalRef = result.references[0].getConst();
   ASSERT_NE(optionalRef, nullptr);
-  EXPECT_EQ(optionalRef->getProperty(), "refOne");
-  EXPECT_FALSE(optionalRef->getPropertyIndex().has_value());
+  EXPECT_EQ(optionalRef->getFeature(), "refOne");
+  EXPECT_EQ(optionalRef->getAssignment().getOperator(),
+            pegium::grammar::AssignmentOperator::Assign);
+  EXPECT_EQ(&pegium::makeReferenceInfo(*optionalRef).getAssignment(),
+            &optionalRef->getAssignment());
 
-  const auto *firstRef = document->references[1].getConst();
+  const auto *firstRef = result.references[1].getConst();
   ASSERT_NE(firstRef, nullptr);
-  EXPECT_EQ(firstRef->getProperty(), "refs");
-  ASSERT_TRUE(firstRef->getPropertyIndex().has_value());
-  EXPECT_EQ(*firstRef->getPropertyIndex(), 0u);
+  EXPECT_EQ(firstRef->getFeature(), "refs");
+  EXPECT_EQ(firstRef->getAssignment().getOperator(),
+            pegium::grammar::AssignmentOperator::Append);
+  EXPECT_EQ(&pegium::makeReferenceInfo(*firstRef).getAssignment(),
+            &firstRef->getAssignment());
 
-  const auto *secondRef = document->references[2].getConst();
+  const auto *secondRef = result.references[2].getConst();
   ASSERT_NE(secondRef, nullptr);
-  EXPECT_EQ(secondRef->getProperty(), "refs");
-  ASSERT_TRUE(secondRef->getPropertyIndex().has_value());
-  EXPECT_EQ(*secondRef->getPropertyIndex(), 1u);
+  EXPECT_EQ(secondRef->getFeature(), "refs");
+  EXPECT_EQ(secondRef->getAssignment().getOperator(),
+            pegium::grammar::AssignmentOperator::Append);
+  EXPECT_EQ(&pegium::makeReferenceInfo(*secondRef).getAssignment(),
+            &secondRef->getAssignment());
 }
 
 TEST(AssignmentTest, OrderedChoiceParserRuleValueUsesAstPointerPath) {
   PointerChoiceParser parser;
 
-  auto document = pegium::test::ExpectAst(
+  auto result = pegium::test::ExpectParsedAst(
       parser.Root, "child",
       R"json({
   "$type": "PointerChoiceNode",
@@ -526,7 +629,7 @@ TEST(AssignmentTest, OrderedChoiceParserRuleValueUsesAstPointerPath) {
     "name": "child"
   }
 })json");
-  auto resultValue = ast_as<PointerChoiceNode>(document->parseResult);
+  auto resultValue = ast_as<PointerChoiceNode>(result);
   ASSERT_TRUE(resultValue != nullptr);
   ASSERT_TRUE(resultValue->child != nullptr);
   EXPECT_EQ(resultValue->child->getContainer(), resultValue);
@@ -553,20 +656,20 @@ TEST(AssignmentTest, OrderedChoiceSupportsVariantBoolAndAstNodeValues) {
   StrictOrderedChoiceParser parser;
 
   {
-    auto document = pegium::test::ExpectAst(
+    auto result = pegium::test::ExpectParsedAst(
         parser.Root, "true",
         R"json({
   "$type": "StrictChoiceNode",
   "value": true
 })json");
-    auto resultValue = ast_as<StrictChoiceNode>(document->parseResult);
+    auto resultValue = ast_as<StrictChoiceNode>(result);
     ASSERT_TRUE(resultValue != nullptr);
     ASSERT_TRUE(std::holds_alternative<bool>(resultValue->value));
     EXPECT_TRUE(std::get<bool>(resultValue->value));
   }
 
   {
-    auto document = pegium::test::ExpectAst(
+    auto result = pegium::test::ExpectParsedAst(
         parser.Root, "child",
         R"json({
   "$type": "StrictChoiceNode",
@@ -575,7 +678,7 @@ TEST(AssignmentTest, OrderedChoiceSupportsVariantBoolAndAstNodeValues) {
     "name": "child"
   }
 })json");
-    auto resultValue = ast_as<StrictChoiceNode>(document->parseResult);
+    auto resultValue = ast_as<StrictChoiceNode>(result);
     ASSERT_TRUE(resultValue != nullptr);
     ASSERT_TRUE(std::holds_alternative<std::unique_ptr<StrictChildNode>>(
         resultValue->value));
@@ -591,13 +694,12 @@ TEST(AssignmentTest, OrderedChoiceSupportsTerminalAndDataTypeKinds) {
   VariantSourceParser parser;
 
   {
-    auto document = pegium::test::ExpectAst(
+    auto result = pegium::test::ExpectParsedAst(
         parser.Root, "true",
         R"json({
   "$type": "VariantSourceNode",
   "value": true
 })json");
-    auto &result = document->parseResult;
     ASSERT_TRUE(result.value);
     auto resultValue = ast_as<VariantSourceNode>(result);
     ASSERT_TRUE(resultValue != nullptr);
@@ -606,13 +708,12 @@ TEST(AssignmentTest, OrderedChoiceSupportsTerminalAndDataTypeKinds) {
   }
 
   {
-    auto document = pegium::test::ExpectAst(
+    auto result = pegium::test::ExpectParsedAst(
         parser.Root, "ab",
         R"json({
   "$type": "VariantSourceNode",
   "value": "ab"
 })json");
-    auto &result = document->parseResult;
     ASSERT_TRUE(result.value);
     auto resultValue = ast_as<VariantSourceNode>(result);
     ASSERT_TRUE(resultValue != nullptr);
@@ -625,7 +726,7 @@ TEST(AssignmentTest, OrderedChoiceConvertsUnderlyingRuleValueBackToEnum) {
   EnumChoiceParser parser;
 
   {
-    auto document = pegium::test::ExpectAst(
+    auto result = pegium::test::ExpectParsedAst(
         parser.Root, "A:B:A",
         R"json({
   "$type": "EnumChoiceNode",
@@ -633,7 +734,6 @@ TEST(AssignmentTest, OrderedChoiceConvertsUnderlyingRuleValueBackToEnum) {
   "mode": 1,
   "variantMode": 1
 })json");
-    auto &result = document->parseResult;
     ASSERT_TRUE(result.value);
     auto resultValue = ast_as<EnumChoiceNode>(result);
     ASSERT_TRUE(resultValue != nullptr);
@@ -646,7 +746,7 @@ TEST(AssignmentTest, OrderedChoiceConvertsUnderlyingRuleValueBackToEnum) {
   }
 
   {
-    auto document = pegium::test::ExpectAst(
+    auto result = pegium::test::ExpectParsedAst(
         parser.Root, "B:A:B",
         R"json({
   "$type": "EnumChoiceNode",
@@ -654,7 +754,6 @@ TEST(AssignmentTest, OrderedChoiceConvertsUnderlyingRuleValueBackToEnum) {
   "mode": 2,
   "variantMode": 2
 })json");
-    auto &result = document->parseResult;
     ASSERT_TRUE(result.value);
     auto resultValue = ast_as<EnumChoiceNode>(result);
     ASSERT_TRUE(resultValue != nullptr);
@@ -680,8 +779,7 @@ TEST(AssignmentTest, AssignOnBoolWithNonBoolElementSetsTrue) {
 TEST(AssignmentTest, DirectObjectValuesAssignAndAppendSharedPointers) {
   DirectValueParser parser;
 
-  auto document = parse_rule(parser.Root, "leaf:leaf");
-  auto &result = document->parseResult;
+  auto result = parse_rule(parser.Root, "leaf:leaf");
   ASSERT_TRUE(result.value);
   auto resultValue = ast_as<DirectValueNode>(result);
   ASSERT_TRUE(resultValue != nullptr);

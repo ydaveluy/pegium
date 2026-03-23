@@ -3,81 +3,147 @@
 #include <typeindex>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/references/References.hpp>
-#include <pegium/services/Services.hpp>
-#include <pegium/workspace/AstDescriptions.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/references/References.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
+#include <pegium/core/syntax-tree/AstUtils.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
+
+using pegium::as_services;
+using namespace pegium::parser;
 
 struct DefinitionType {};
 
-class TestReferences final : public references::References {
-public:
-  std::optional<workspace::AstNodeDescription> declaration;
-  std::vector<workspace::ReferenceDescription> references;
+struct HighlightEntry : AstNode {
+  string name;
+  string other;
+};
 
-  std::optional<workspace::AstNodeDescription>
-  findDeclarationAt(const workspace::Document &, TextOffset) const override {
-    return declaration;
+class HighlightParser final : public PegiumParser {
+public:
+  using PegiumParser::PegiumParser;
+  using PegiumParser::parse;
+
+protected:
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return EntryRule;
   }
 
-  utils::stream<workspace::ReferenceDescriptionOrDeclaration>
-  findReferencesAt(const workspace::Document &, TextOffset,
-                   bool includeDeclaration) const override {
-    std::vector<workspace::ReferenceDescriptionOrDeclaration> results;
-    if (includeDeclaration && declaration.has_value()) {
-      results.emplace_back(*declaration);
+  const Skipper &getSkipper() const noexcept override { return skipper; }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wuninitialized"
+  static constexpr auto WS = some(s);
+  Skipper skipper = SkipperBuilder().ignore(WS).build();
+
+  Terminal<std::string> ID{"ID", "a-zA-Z_"_cr + many(w)};
+  Rule<HighlightEntry> EntryRule{"Entry", assign<&HighlightEntry::name>(ID) +
+                                              assign<&HighlightEntry::other>(ID)};
+#pragma clang diagnostic pop
+};
+
+class TestReferences final : public references::References {
+public:
+  std::vector<const AstNode *> declarations;
+  CstNodeView declarationNode;
+  std::vector<workspace::ReferenceDescription> usages;
+
+  std::vector<const AstNode *>
+  findDeclarations(const CstNodeView &) const override {
+    return declarations;
+  }
+
+  std::vector<CstNodeView>
+  findDeclarationNodes(const CstNodeView &) const override {
+    if (declarationNode.valid()) {
+      return {declarationNode};
     }
-    for (const auto &reference : references) {
-      results.emplace_back(reference);
+    return {};
+  }
+
+  std::vector<workspace::ReferenceDescription>
+  findReferences(const AstNode &targetNode,
+                 const references::FindReferencesOptions &options) const override {
+    std::vector<workspace::ReferenceDescription> results;
+    if (options.includeDeclaration && declarationNode.valid()) {
+      const auto &document = getDocument(targetNode);
+      results.push_back(workspace::ReferenceDescription{
+          .sourceDocumentId = document.id,
+          .sourceOffset = declarationNode.getBegin(),
+          .sourceLength = declarationNode.getEnd() - declarationNode.getBegin(),
+          .referenceType = std::type_index(typeid(void)),
+          .local = true,
+          .targetDocumentId = document.id,
+          .targetSymbolId = document.makeSymbolId(targetNode),
+      });
     }
-    return utils::make_stream<workspace::ReferenceDescriptionOrDeclaration>(
-        std::move(results));
+    for (const auto &usage : usages) {
+      if (options.documentId.has_value() &&
+          usage.sourceDocumentId != *options.documentId) {
+        continue;
+      }
+      results.push_back(usage);
+    }
+    return results;
   }
 };
 
 TEST(DefaultDocumentHighlightProviderTest,
      HighlightsDeclarationAndLocalReferences) {
-  auto shared = test::make_shared_services();
-  auto services = test::make_services(*shared, "test", {".test"});
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  auto registeredServices =
+      test::make_uninstalled_services<HighlightParser>(*shared, "test", {".test"});
+  pegium::services::installDefaultCoreServices(*registeredServices);
+  pegium::installDefaultLspServices(*registeredServices);
 
   auto references = std::make_unique<TestReferences>();
-  references->declaration = workspace::AstNodeDescription{
-      .name = "value",
-      .documentId = 1,
-      .offset = 0,
-      .nameLength = 5,
-  };
-  references->references.push_back(workspace::ReferenceDescription{
+  auto *recordingReferences = references.get();
+  references->usages.push_back(workspace::ReferenceDescription{
       .sourceDocumentId = 1,
       .sourceOffset = 6,
       .sourceLength = 5,
       .referenceType = std::type_index(typeid(DefinitionType)),
+      .targetDocumentId = 1,
+      .targetSymbolId = 0,
   });
-  services->references.references = std::move(references);
+  registeredServices->references.references = std::move(references);
 
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+  shared->serviceRegistry->registerServices(std::move(registeredServices));
 
-  workspace::Document document;
-  document.id = 1;
-  document.uri = test::make_file_uri("highlights.test");
-  document.languageId = "test";
-  document.setText("value value");
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("highlights.test"), "test", "value value");
+  ASSERT_NE(document, nullptr);
 
-  const auto *coreServices =
-      shared->serviceRegistry->getServicesByLanguageId("test");
-  ASSERT_NE(coreServices, nullptr);
-  const auto *fullServices = dynamic_cast<const services::Services *>(coreServices);
-  ASSERT_NE(fullServices, nullptr);
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+  ASSERT_NE(services->references.nameProvider, nullptr);
+
+  auto *target = document->parseResult.value.get();
+  ASSERT_NE(target, nullptr);
+  recordingReferences->declarations.push_back(target);
+  if (auto nameNode = services->references.nameProvider->getNameNode(*target);
+      nameNode.has_value()) {
+    recordingReferences->declarationNode = *nameNode;
+  } else {
+    recordingReferences->declarationNode = CstNodeView{};
+  }
+  ASSERT_TRUE(recordingReferences->declarationNode.valid());
+  recordingReferences->usages[0].targetSymbolId = document->makeSymbolId(*target);
 
   ::lsp::DocumentHighlightParams params{};
   params.position.line = 0;
   params.position.character = 7;
 
   const auto highlights =
-      fullServices->lsp.documentHighlightProvider->getDocumentHighlight(document,
-                                                                       params);
+      services->lsp.documentHighlightProvider->getDocumentHighlight(*document,
+                                                                    params);
   ASSERT_EQ(highlights.size(), 2u);
   EXPECT_EQ(highlights[0].kind, ::lsp::DocumentHighlightKind::Write);
   EXPECT_EQ(highlights[0].range.start.character, 0u);
@@ -86,4 +152,4 @@ TEST(DefaultDocumentHighlightProviderTest,
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

@@ -8,20 +8,12 @@ The core idea is simple: language tooling in C++ should feel like framework
 work, not like assembling unrelated parser, workspace, and editor pieces by
 hand.
 
-## Start here if
-
-- you want a quick mental model of what Pegium is
-- you are deciding whether Pegium fits your project
-- you want to know which section of the docs to read next
-
-## Where to go next?
-
-If you are not sure where to begin, open [Choose Your Path](choose-your-path.md).
+## Where to go from here?
 
 ### Features
 
-If you want a concise overview of what Pegium provides, start with the
-[features page](features.md).
+If you want a closer look at the capabilities Pegium provides out of the box,
+continue with the [features page](features.md).
 
 ### Showcases
 
@@ -30,8 +22,8 @@ If you want to see Pegium in action before diving into the API, browse the
 
 ### Learn Pegium
 
-If you want the recommended end-to-end workflow, continue with the
-[learn section](../learn/index.md).
+If you want the recommended step-by-step path for building a language, continue
+with the [learn section](../learn/index.md).
 
 ### More details
 
@@ -40,3 +32,6 @@ the [reference section](../reference/index.md).
 
 If you are looking for a targeted guide rather than a linear tutorial, head to
 the [recipes section](../recipes/index.md).
+
+If you are still unsure where to begin, open
+[Choose Your Path](choose-your-path.md).

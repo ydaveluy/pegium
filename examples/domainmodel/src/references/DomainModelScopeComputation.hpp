@@ -1,24 +1,21 @@
 #pragma once
 
-#include <memory>
 #include <vector>
 
 #include <domainmodel/ast.hpp>
+#include <domainmodel/services/Services.hpp>
 
-#include <pegium/references/DefaultScopeComputation.hpp>
-
-#include "QualifiedNameProvider.hpp"
+#include <pegium/core/references/DefaultScopeComputation.hpp>
 
 namespace domainmodel::services::references {
 
 class DomainModelScopeComputation final
     : public pegium::references::DefaultScopeComputation {
 public:
-  DomainModelScopeComputation(
-      const pegium::services::CoreServices &services,
-      std::shared_ptr<const QualifiedNameProvider> qualifiedNameProvider);
+  using pegium::references::DefaultScopeComputation::DefaultScopeComputation;
 
-  std::vector<pegium::workspace::AstNodeDescription> collectExportedSymbols(
+  std::vector<pegium::workspace::AstNodeDescription>
+  collectExportedSymbols(
       const pegium::workspace::Document &document,
       const pegium::utils::CancellationToken &cancelToken) const override;
 
@@ -28,24 +25,17 @@ public:
 
 private:
   std::vector<pegium::workspace::AstNodeDescription> processContainer(
-      const ast::DomainModel &container,
-      const pegium::workspace::Document &document,
-      pegium::workspace::LocalSymbols &symbols,
-      const pegium::utils::CancellationToken &cancelToken) const;
-
-  std::vector<pegium::workspace::AstNodeDescription> processContainer(
-      const ast::PackageDeclaration &container,
-      const pegium::workspace::Document &document,
-      pegium::workspace::LocalSymbols &symbols,
-      const pegium::utils::CancellationToken &cancelToken) const;
-
-  void collectExportedSymbols(
+      const pegium::AstNode &container,
       const std::vector<pegium::AstNode::pointer<ast::AbstractElement>> &elements,
-      std::string_view qualifier, const pegium::workspace::Document &document,
-      std::vector<pegium::workspace::AstNodeDescription> &symbols,
-      const pegium::utils::CancellationToken &cancelToken) const;
+      const pegium::workspace::Document &document,
+      pegium::workspace::LocalSymbols &symbols,
+      const pegium::utils::CancellationToken &cancelToken,
+      const QualifiedNameProvider *qualifiedNameProvider) const;
 
-  std::shared_ptr<const QualifiedNameProvider> _qualifiedNameProvider;
+  [[nodiscard]] pegium::workspace::AstNodeDescription createQualifiedDescription(
+      const ast::PackageDeclaration &package,
+      pegium::workspace::AstNodeDescription description,
+      const QualifiedNameProvider *qualifiedNameProvider) const;
 };
 
 } // namespace domainmodel::services::references

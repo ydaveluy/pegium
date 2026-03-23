@@ -3,13 +3,15 @@
 #include <lsp/json/json.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/services/Services.hpp>
-#include <pegium/workspace/AstDescriptions.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
+#include <pegium/core/workspace/AstDescriptions.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
+using pegium::as_services;
 using namespace pegium::parser;
 
 struct HoverEntry : AstNode {
@@ -53,41 +55,49 @@ protected:
 };
 
 TEST(MultilineCommentHoverProviderTest, ReturnsNoHoverWithoutDocumentation) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services(*shared, "test", {".test"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices =
+        test::make_uninstalled_services<HoverParser>(*shared, "test",
+                                                     {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
-  workspace::Document document;
-  document.id = 1;
-  document.uri = test::make_file_uri("hover.test");
-  document.languageId = "test";
-  document.setText("value");
-  document.localSymbols.emplace(nullptr, workspace::AstNodeDescription{
-                                             .name = "value",
-                                             .documentId = document.id,
-                                             .offset = 0,
-                                         });
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("hover.test"), "test", "entry Value\n");
+  ASSERT_NE(document, nullptr);
 
-  const auto *coreServices =
-      shared->serviceRegistry->getServicesByLanguageId("test");
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services = dynamic_cast<const services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
 
   ::lsp::HoverParams params{};
   params.position.line = 0;
-  params.position.character = 1;
+  params.position.character = 7;
 
   const auto hover =
-      services->lsp.hoverProvider->getHoverContent(document, params,
+      services->lsp.hoverProvider->getHoverContent(*document, params,
                                                    utils::default_cancel_token);
   EXPECT_FALSE(hover.has_value());
 }
 
 TEST(MultilineCommentHoverProviderTest, UsesDocumentationWhenAvailable) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<HoverParser>(*shared, "docs", {".docs"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<HoverParser>(*shared, "docs", {".docs"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("hover.docs"), "docs",
@@ -97,10 +107,8 @@ TEST(MultilineCommentHoverProviderTest, UsesDocumentationWhenAvailable) {
       "entry Value\n");
   ASSERT_NE(document, nullptr);
 
-  const auto *coreServices =
-      shared->serviceRegistry->getServicesByLanguageId("docs");
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services = dynamic_cast<const services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
 
   ::lsp::HoverParams params{};
@@ -116,9 +124,17 @@ TEST(MultilineCommentHoverProviderTest, UsesDocumentationWhenAvailable) {
 }
 
 TEST(MultilineCommentHoverProviderTest, UsesDocumentationWhenHoveringNamedRootNode) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<HoverParser>(*shared, "docs", {".docs"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<HoverParser>(*shared, "docs", {".docs"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("root-hover.docs"), "docs",
@@ -129,10 +145,8 @@ TEST(MultilineCommentHoverProviderTest, UsesDocumentationWhenHoveringNamedRootNo
       "entry Value\n");
   ASSERT_NE(document, nullptr);
 
-  const auto *coreServices =
-      shared->serviceRegistry->getServicesByLanguageId("docs");
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services = dynamic_cast<const services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
 
   ::lsp::HoverParams params{};
@@ -162,4 +176,4 @@ TEST(MultilineCommentHoverProviderTest, HoverMarkupWithControlCharactersSerializ
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

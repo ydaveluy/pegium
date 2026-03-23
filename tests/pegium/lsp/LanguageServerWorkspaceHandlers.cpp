@@ -8,12 +8,12 @@
 #include <lsp/messages.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/DefaultLanguageServer.hpp>
-#include <pegium/lsp/ExecuteCommandHandler.hpp>
-#include <pegium/lsp/LanguageServerHandlerContext.hpp>
-#include <pegium/lsp/LanguageServerRequestHandlerParts.hpp>
+#include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
+#include <pegium/lsp/services/ExecuteCommandHandler.hpp>
+#include <pegium/lsp/runtime/LanguageServerHandlerContext.hpp>
+#include <pegium/lsp/runtime/LanguageServerRequestHandlerParts.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 class TestExecuteCommandHandler final : public ExecuteCommandHandler {
@@ -51,7 +51,7 @@ public:
   mutable std::size_t lastArgumentCount = 0;
 };
 
-class TestWorkspaceSymbolProvider final : public services::WorkspaceSymbolProvider {
+class TestWorkspaceSymbolProvider final : public ::pegium::WorkspaceSymbolProvider {
 public:
   std::vector<::lsp::WorkspaceSymbol>
   getSymbols(const ::lsp::WorkspaceSymbolParams &params,
@@ -88,10 +88,16 @@ public:
 
 class LanguageServerWorkspaceHandlersTest : public ::testing::Test {
 protected:
-  std::unique_ptr<services::SharedServices> shared = test::make_shared_services();
+  std::unique_ptr<pegium::SharedServices> shared = test::make_empty_shared_services();
   DefaultLanguageServer server{*shared};
   LanguageServerRuntimeState runtimeState;
   LanguageServerHandlerContext context{server, *shared, runtimeState};
+
+  LanguageServerWorkspaceHandlersTest() {
+    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedLspServices(*shared);
+    pegium::test::initialize_shared_workspace_for_tests(*shared);
+  }
 
   struct HandlerHarness {
     test::MemoryStream stream;
@@ -196,4 +202,4 @@ TEST_F(LanguageServerWorkspaceHandlersTest,
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

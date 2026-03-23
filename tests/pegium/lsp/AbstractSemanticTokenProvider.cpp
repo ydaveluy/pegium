@@ -1,17 +1,27 @@
 #include <gtest/gtest.h>
 
-#include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/AbstractSemanticTokenProvider.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/services/Services.hpp>
+#include <algorithm>
+#include <cstdint>
+#include <vector>
 
-namespace pegium::lsp {
+#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/semantic/AbstractSemanticTokenProvider.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
+
+namespace pegium {
 namespace {
 
+using pegium::as_services;
 using namespace pegium::parser;
 
 struct SemanticEntry : AstNode {
   string name;
+};
+
+struct QuotedSemanticEntry : AstNode {
+  string value;
 };
 
 class SemanticParser final : public PegiumParser {
@@ -37,9 +47,32 @@ protected:
 #pragma clang diagnostic pop
 };
 
+class QuotedSemanticParser final : public PegiumParser {
+public:
+  using PegiumParser::PegiumParser;
+  using PegiumParser::parse;
+
+protected:
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return EntryRule;
+  }
+
+  const Skipper &getSkipper() const noexcept override { return skipper; }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wuninitialized"
+  static constexpr auto WS = some(s);
+  Skipper skipper = SkipperBuilder().ignore(WS).build();
+
+  Terminal<std::string> TEXT{"TEXT", "\""_kw <=> "\""_kw};
+  Rule<QuotedSemanticEntry> EntryRule{
+      "Entry", "entry"_kw + assign<&QuotedSemanticEntry::value>(TEXT)};
+#pragma clang diagnostic pop
+};
+
 class TestSemanticTokenProvider final : public AbstractSemanticTokenProvider {
 public:
-  explicit TestSemanticTokenProvider(const services::Services &services)
+  explicit TestSemanticTokenProvider(const pegium::Services &services)
       : AbstractSemanticTokenProvider(services) {}
 
 protected:
@@ -53,20 +86,81 @@ protected:
   }
 };
 
+class TestQuotedSemanticTokenProvider final : public AbstractSemanticTokenProvider {
+public:
+  explicit TestQuotedSemanticTokenProvider(const pegium::Services &services)
+      : AbstractSemanticTokenProvider(services) {}
+
+protected:
+  void highlightElement(const AstNode &node,
+                        const SemanticTokenAcceptor &acceptor) const override {
+    if (dynamic_cast<const QuotedSemanticEntry *>(&node) == nullptr) {
+      return;
+    }
+    highlightProperty(node, "value", "string", acceptor);
+  }
+};
+
+struct DecodedSemanticToken {
+  std::uint32_t line = 0;
+  std::uint32_t character = 0;
+  std::uint32_t length = 0;
+  std::uint32_t type = 0;
+  std::uint32_t modifiers = 0;
+};
+
+std::vector<DecodedSemanticToken>
+decode_semantic_tokens(const ::lsp::Array<std::uint32_t> &data) {
+  std::vector<DecodedSemanticToken> tokens;
+  std::uint32_t line = 0;
+  std::uint32_t character = 0;
+
+  for (std::size_t index = 0; index + 4 < data.size(); index += 5) {
+    line += data[index];
+    character = data[index] == 0 ? character + data[index + 1] : data[index + 1];
+    tokens.push_back({.line = line,
+                      .character = character,
+                      .length = data[index + 2],
+                      .type = data[index + 3],
+                      .modifiers = data[index + 4]});
+  }
+
+  return tokens;
+}
+
+void initialize_multiline_semantic_tokens(pegium::SharedServices &shared,
+                                          bool enabled) {
+  ASSERT_NE(shared.lsp.languageServer, nullptr);
+
+  ::lsp::InitializeParams params{};
+  params.capabilities.textDocument.emplace();
+  params.capabilities.textDocument->semanticTokens.emplace();
+  params.capabilities.textDocument->semanticTokens->multilineTokenSupport =
+      enabled;
+
+  (void)shared.lsp.languageServer->initialize(params);
+}
+
 TEST(AbstractSemanticTokenProviderTest, ExposesLegendAndEncodesTokens) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<SemanticParser>(*shared, "semantic", {".semantic"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<SemanticParser>(*shared, "semantic", {".semantic"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("semantic.semantic"), "semantic",
       "entry Foo");
   ASSERT_NE(document, nullptr);
 
-  const auto *coreServices =
-      shared->serviceRegistry->getServicesByLanguageId("semantic");
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services = dynamic_cast<const services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestSemanticTokenProvider provider(*services);
@@ -88,20 +182,231 @@ TEST(AbstractSemanticTokenProviderTest, ExposesLegendAndEncodesTokens) {
   EXPECT_EQ(tokens->data.size(), 10u);
 }
 
+TEST(AbstractSemanticTokenProviderTest, EncodesAsciiTokenLengthInUtf16Units) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_services<QuotedSemanticParser>(
+        *shared, "quoted-semantic", {".qsemantic"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("semantic-ascii.qsemantic"),
+      "quoted-semantic", "entry \"Foo\"");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  TestQuotedSemanticTokenProvider provider(*services);
+
+  ::lsp::SemanticTokensParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+
+  const auto tokens =
+      provider.semanticHighlight(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(tokens.has_value());
+
+  const auto decoded = decode_semantic_tokens(tokens->data);
+  const auto tokenTypes = provider.tokenTypes();
+  const auto it = std::ranges::find_if(decoded, [&tokenTypes](const auto &token) {
+    return token.type == tokenTypes.at("string");
+  });
+  ASSERT_NE(it, decoded.end());
+  EXPECT_EQ(it->line, 0u);
+  EXPECT_EQ(it->character, 6u);
+  EXPECT_EQ(it->length, 5u);
+}
+
+TEST(AbstractSemanticTokenProviderTest, EncodesAccentTokenLengthInUtf16Units) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_services<QuotedSemanticParser>(
+        *shared, "quoted-semantic", {".qsemantic"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("semantic-accent.qsemantic"),
+      "quoted-semantic", "entry \"Café\"");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  TestQuotedSemanticTokenProvider provider(*services);
+
+  ::lsp::SemanticTokensParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+
+  const auto tokens =
+      provider.semanticHighlight(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(tokens.has_value());
+
+  const auto decoded = decode_semantic_tokens(tokens->data);
+  const auto tokenTypes = provider.tokenTypes();
+  const auto it = std::ranges::find_if(decoded, [&tokenTypes](const auto &token) {
+    return token.type == tokenTypes.at("string");
+  });
+  ASSERT_NE(it, decoded.end());
+  EXPECT_EQ(it->length, 6u);
+}
+
+TEST(AbstractSemanticTokenProviderTest, EncodesEmojiTokenLengthInUtf16Units) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_services<QuotedSemanticParser>(
+        *shared, "quoted-semantic", {".qsemantic"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("semantic-emoji.qsemantic"),
+      "quoted-semantic", "entry \"😀\"");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  TestQuotedSemanticTokenProvider provider(*services);
+
+  ::lsp::SemanticTokensParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+
+  const auto tokens =
+      provider.semanticHighlight(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(tokens.has_value());
+
+  const auto decoded = decode_semantic_tokens(tokens->data);
+  const auto tokenTypes = provider.tokenTypes();
+  const auto it = std::ranges::find_if(decoded, [&tokenTypes](const auto &token) {
+    return token.type == tokenTypes.at("string");
+  });
+  ASSERT_NE(it, decoded.end());
+  EXPECT_EQ(it->length, 4u);
+}
+
+TEST(AbstractSemanticTokenProviderTest,
+     KeepsMultilineTokenWholeWhenClientSupportsIt) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_services<QuotedSemanticParser>(
+        *shared, "quoted-semantic", {".qsemantic"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("semantic-multiline.qsemantic"),
+      "quoted-semantic", "entry \"ab\ncd\"");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  TestQuotedSemanticTokenProvider provider(*services);
+  initialize_multiline_semantic_tokens(*shared, true);
+
+  ::lsp::SemanticTokensParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+
+  const auto tokens =
+      provider.semanticHighlight(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(tokens.has_value());
+
+  const auto decoded = decode_semantic_tokens(tokens->data);
+  ASSERT_EQ(decoded.size(), 1u);
+  EXPECT_EQ(decoded[0].line, 0u);
+  EXPECT_EQ(decoded[0].character, 6u);
+  EXPECT_EQ(decoded[0].length, 7u);
+}
+
+TEST(AbstractSemanticTokenProviderTest,
+     SplitsMultilineTokenWhenClientDoesNotSupportIt) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_services<QuotedSemanticParser>(
+        *shared, "quoted-semantic", {".qsemantic"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("semantic-multiline-split.qsemantic"),
+      "quoted-semantic", "entry \"ab\ncd\"");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  TestQuotedSemanticTokenProvider provider(*services);
+  initialize_multiline_semantic_tokens(*shared, false);
+
+  ::lsp::SemanticTokensParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+
+  const auto tokens =
+      provider.semanticHighlight(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(tokens.has_value());
+
+  const auto decoded = decode_semantic_tokens(tokens->data);
+  ASSERT_EQ(decoded.size(), 2u);
+  EXPECT_EQ(decoded[0].line, 0u);
+  EXPECT_EQ(decoded[0].character, 6u);
+  EXPECT_EQ(decoded[0].length, 3u);
+  EXPECT_EQ(decoded[1].line, 1u);
+  EXPECT_EQ(decoded[1].character, 0u);
+  EXPECT_EQ(decoded[1].length, 3u);
+}
+
 TEST(AbstractSemanticTokenProviderTest, RangeHighlightFiltersTokens) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<SemanticParser>(*shared, "semantic", {".semantic"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<SemanticParser>(*shared, "semantic", {".semantic"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("semantic-range.semantic"), "semantic",
       "entry Foo");
   ASSERT_NE(document, nullptr);
 
-  const auto *coreServices =
-      shared->serviceRegistry->getServicesByLanguageId("semantic");
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services = dynamic_cast<const services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestSemanticTokenProvider provider(*services);
@@ -121,19 +426,25 @@ TEST(AbstractSemanticTokenProviderTest, RangeHighlightFiltersTokens) {
 }
 
 TEST(AbstractSemanticTokenProviderTest, DeltaFallsBackToFullForUnknownSnapshot) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<SemanticParser>(*shared, "semantic", {".semantic"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<SemanticParser>(*shared, "semantic", {".semantic"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("semantic-delta-full.semantic"), "semantic",
       "entry Foo");
   ASSERT_NE(document, nullptr);
 
-  const auto *coreServices =
-      shared->serviceRegistry->getServicesByLanguageId("semantic");
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services = dynamic_cast<const services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestSemanticTokenProvider provider(*services);
@@ -153,19 +464,25 @@ TEST(AbstractSemanticTokenProviderTest, DeltaFallsBackToFullForUnknownSnapshot) 
 
 TEST(AbstractSemanticTokenProviderTest,
      DeltaReturnsEditsForKnownSnapshotAndClearsCacheOnClose) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<SemanticParser>(*shared, "semantic", {".semantic"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<SemanticParser>(*shared, "semantic", {".semantic"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   const auto uri = test::make_file_uri("semantic-delta.semantic");
   auto document =
       test::open_and_build_document(*shared, uri, "semantic", "entry Foo");
   ASSERT_NE(document, nullptr);
 
-  const auto *coreServices =
-      shared->serviceRegistry->getServicesByLanguageId("semantic");
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services = dynamic_cast<const services::Services *>(coreServices);
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestSemanticTokenProvider provider(*services);
@@ -190,8 +507,9 @@ TEST(AbstractSemanticTokenProviderTest,
   EXPECT_TRUE(edits.resultId.has_value());
   EXPECT_TRUE(edits.edits.empty());
 
-  ASSERT_TRUE(shared->workspace.textDocuments != nullptr);
-  EXPECT_TRUE(shared->workspace.textDocuments->close(document->uri));
+  auto documents = test::text_documents(*shared);
+  ASSERT_TRUE(documents != nullptr);
+  documents->remove(document->uri);
 
   const auto afterClose = provider.semanticHighlightDelta(
       *document, deltaParams, utils::default_cancel_token);
@@ -200,4 +518,4 @@ TEST(AbstractSemanticTokenProviderTest,
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

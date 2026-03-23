@@ -48,27 +48,3 @@ std::string decode_quoted_string(std::string_view text) {
 }
 
 } // namespace requirements
-
-namespace requirements::parser {
-
-std::unique_ptr<pegium::services::Services>
-make_requirements_language_services(
-    const pegium::services::SharedServices &sharedServices,
-    std::string languageId) {
-  auto services =
-      pegium::services::makeDefaultServices(sharedServices, std::move(languageId));
-  services->parser = std::make_unique<const RequirementsParser>(*services);
-  return services;
-}
-
-std::unique_ptr<pegium::services::Services>
-make_tests_language_services(
-    const pegium::services::SharedServices &sharedServices,
-    std::string languageId) {
-  auto services =
-      pegium::services::makeDefaultServices(sharedServices, std::move(languageId));
-  services->parser = std::make_unique<const TestsParser>(*services);
-  return services;
-}
-
-} // namespace requirements::parser

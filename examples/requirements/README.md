@@ -34,10 +34,7 @@ cmake --build build -j
 
 ```sh
 ./build/examples/requirements/pegium-example-requirements-cli \
-  examples/requirements/example/requirements.req
-
-./build/examples/requirements/pegium-example-requirements-cli \
-  examples/requirements/example/tests_part1.tst
+  generate examples/requirements/example/requirements.req
 ```
 
 ## Run the LSP server

@@ -12,36 +12,46 @@
 #include "references/QualifiedNameProvider.hpp"
 #include "validation/DomainModelValidator.hpp"
 
+#include <pegium/lsp/services/DefaultLspModule.hpp>
+
 namespace domainmodel::services {
 
-std::unique_ptr<pegium::services::Services>
-create_language_services(const pegium::services::SharedServices &sharedServices,
+DomainModelServices::DomainModelServices(
+    const pegium::SharedServices &sharedServices)
+    : pegium::Services(sharedServices) {}
+
+DomainModelServices::DomainModelServices(DomainModelServices &&) noexcept = default;
+
+DomainModelServices::~DomainModelServices() noexcept = default;
+
+std::unique_ptr<DomainModelServices>
+create_language_services(const pegium::SharedServices &sharedServices,
                          std::string languageId) {
-  auto services =
-      pegium::services::makeDefaultServices(sharedServices, std::move(languageId));
+  auto services = pegium::services::makeDefaultServices<DomainModelServices>(
+      sharedServices, std::move(languageId));
   services->parser =
       std::make_unique<const domainmodel::parser::DomainModelParser>(*services);
   services->languageMetaData.fileExtensions = {".dmodel"};
 
-  auto qualifiedNameProvider =
+  services->domainModel.references.qualifiedNameProvider =
       std::make_shared<const references::QualifiedNameProvider>();
   services->references.scopeComputation =
-      std::make_unique<references::DomainModelScopeComputation>(
-          *services, qualifiedNameProvider);
-  services->lsp.renameProvider = std::make_unique<lsp::DomainModelRenameProvider>(
-      *services, *sharedServices.workspace.indexManager,
-      *sharedServices.workspace.documents, qualifiedNameProvider);
+      std::make_unique<references::DomainModelScopeComputation>(*services);
+  services->domainModel.validation.domainModelValidator =
+      std::make_unique<validation::DomainModelValidator>();
+  services->lsp.renameProvider =
+      std::make_unique<lsp::DomainModelRenameProvider>(*services);
   services->lsp.formatter =
       std::make_unique<lsp::DomainModelFormatter>(*services);
 
-  validation::DomainModelValidator::registerValidationChecks(
-      *services->validation.validationRegistry, *services);
+  validation::registerValidationChecks(*services);
   return services;
 }
 
-bool register_language_services(pegium::services::SharedServices &sharedServices) {
-  return sharedServices.serviceRegistry->registerServices(
+bool register_language_services(pegium::SharedServices &sharedServices) {
+  sharedServices.serviceRegistry->registerServices(
       create_language_services(sharedServices, "domain-model"));
+  return true;
 }
 
 } // namespace domainmodel::services

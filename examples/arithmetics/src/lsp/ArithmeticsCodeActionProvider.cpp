@@ -1,5 +1,7 @@
 #include "lsp/ArithmeticsCodeActionProvider.hpp"
 
+#include "validation/ArithmeticsValidator.hpp"
+
 #include <format>
 #include <string>
 #include <string_view>
@@ -13,14 +15,15 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
     const pegium::utils::CancellationToken &cancelToken) const {
   pegium::utils::throw_if_cancelled(cancelToken);
 
-  const auto begin = document.positionToOffset(params.range.start);
-  const auto end = document.positionToOffset(params.range.end);
+  const auto &textDocument = document.textDocument();
+  const auto begin = textDocument.offsetAt(params.range.start);
+  const auto end = textDocument.offsetAt(params.range.end);
 
   for (const auto &diagnostic : params.context.diagnostics) {
     if (!diagnostic.code.has_value() ||
         !std::holds_alternative<::lsp::String>(*diagnostic.code) ||
         std::get<::lsp::String>(*diagnostic.code) !=
-            "arithmetics.expression-normalizable" ||
+            std::string(validation::IssueCodes::ExpressionNormalizable) ||
         !diagnostic.data.has_value() || !diagnostic.data->isObject()) {
       continue;
     }
@@ -33,8 +36,7 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
     const auto replaceBegin = begin;
     const auto replaceEnd = end > begin ? end : begin;
     if (replaceEnd <= replaceBegin ||
-        replaceEnd >
-            static_cast<pegium::TextOffset>(document.text().size())) {
+        replaceEnd > static_cast<pegium::TextOffset>(textDocument.getText().size())) {
       continue;
     }
 
@@ -46,8 +48,8 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
     ::lsp::WorkspaceEdit edit{};
     ::lsp::Map<::lsp::DocumentUri, ::lsp::Array<::lsp::TextEdit>> changes;
     ::lsp::TextEdit textEdit{};
-    textEdit.range.start = document.offsetToPosition(replaceBegin);
-    textEdit.range.end = document.offsetToPosition(replaceEnd);
+    textEdit.range.start = textDocument.positionAt(replaceBegin);
+    textEdit.range.end = textDocument.positionAt(replaceEnd);
     textEdit.newText = std::format("{}", constant->number());
     auto &documentChanges = changes[::lsp::Uri::parse(document.uri)];
     documentChanges.push_back(std::move(textEdit));

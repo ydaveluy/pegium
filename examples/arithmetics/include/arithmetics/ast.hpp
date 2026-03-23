@@ -1,19 +1,16 @@
 #pragma once
 
-#include <pegium/syntax-tree/AstNode.hpp>
+#include <pegium/core/syntax-tree/AstNode.hpp>
 
 namespace arithmetics::ast {
 
 struct Module;
 struct Expression : pegium::AstNode {};
-struct AbstractDefinition : pegium::AstNode {};
+struct AbstractDefinition : pegium::NamedAstNode {};
 
-struct DeclaredParameter : AbstractDefinition {
-  string name;
-};
+struct DeclaredParameter : AbstractDefinition {};
 
 struct Definition : AbstractDefinition {
-  string name;
   vector<pointer<DeclaredParameter>> args;
   pointer<Expression> expr;
 };
@@ -22,8 +19,7 @@ struct Evaluation : pegium::AstNode {
   pointer<Expression> expression;
 };
 
-struct Module : pegium::AstNode {
-  string name;
+struct Module : pegium::NamedAstNode {
   vector<pointer<pegium::AstNode>> statements;
 };
 

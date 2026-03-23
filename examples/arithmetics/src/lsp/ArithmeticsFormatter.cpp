@@ -1,7 +1,7 @@
 #include "lsp/ArithmeticsFormatter.hpp"
 
 namespace arithmetics::services::lsp {
-void ArithmeticsFormatter::formatModule(pegium::lsp::FormattingBuilder &builder,
+void ArithmeticsFormatter::formatModule(pegium::FormattingBuilder &builder,
                                         const ast::Module *module) const {
   auto formatter = builder.getNodeFormatter(module);
   formatter.keyword("module").prepend(noIndent).append(oneSpace);
@@ -9,7 +9,7 @@ void ArithmeticsFormatter::formatModule(pegium::lsp::FormattingBuilder &builder,
 }
 
 void ArithmeticsFormatter::formatDefinition(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::Definition *definition) const {
   auto formatter = builder.getNodeFormatter(definition);
   formatter.keyword("def").append(oneSpace);
@@ -27,14 +27,14 @@ void ArithmeticsFormatter::formatDefinition(
 }
 
 void ArithmeticsFormatter::formatEvaluation(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::Evaluation *evaluation) const {
   auto formatter = builder.getNodeFormatter(evaluation);
   formatter.keyword(";").prepend(noSpace);
 }
 
 void ArithmeticsFormatter::formatBinaryExpression(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::BinaryExpression *binary) const {
   if (!binary->left || !binary->right) {
     return;
@@ -45,7 +45,7 @@ void ArithmeticsFormatter::formatBinaryExpression(
 }
 
 void ArithmeticsFormatter::formatGroupedExpression(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::GroupedExpression *grouped) const {
   if (!grouped->expression) {
     return;
@@ -59,7 +59,7 @@ void ArithmeticsFormatter::formatGroupedExpression(
 }
 
 void ArithmeticsFormatter::formatFunctionCall(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::FunctionCall *call) const {
   if (call->args.empty()) {
     return;
@@ -78,7 +78,7 @@ void ArithmeticsFormatter::formatComment(HiddenNodeFormatter &comment) const {
 }
 
 ArithmeticsFormatter::ArithmeticsFormatter(
-    const pegium::services::Services &services)
+    const pegium::Services &services)
     : AbstractFormatter(services) {
   on<ast::Module>(&ArithmeticsFormatter::formatModule);
   on<ast::Definition>(&ArithmeticsFormatter::formatDefinition);

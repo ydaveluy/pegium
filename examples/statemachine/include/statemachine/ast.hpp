@@ -1,16 +1,12 @@
 #pragma once
 
-#include <pegium/syntax-tree/AstNode.hpp>
+#include <pegium/core/syntax-tree/AstNode.hpp>
 
 namespace statemachine::ast {
 
-struct Event : pegium::AstNode {
-  string name;
-};
+struct Event : pegium::NamedAstNode {};
 
-struct Command : pegium::AstNode {
-  string name;
-};
+struct Command : pegium::NamedAstNode {};
 
 struct State;
 
@@ -19,14 +15,12 @@ struct Transition : pegium::AstNode {
   reference<State> state;
 };
 
-struct State : pegium::AstNode {
-  string name;
+struct State : pegium::NamedAstNode {
   vector<reference<Command>> actions;
   vector<pointer<Transition>> transitions;
 };
 
-struct Statemachine : pegium::AstNode {
-  string name;
+struct Statemachine : pegium::NamedAstNode {
   vector<pointer<Event>> events;
   vector<pointer<Command>> commands;
   reference<State> init;

@@ -7,7 +7,8 @@
 namespace pegium::converter {
 namespace {
 TEST(AstJsonConverterTest, ConvertsBuiltAstToReferenceJson) {
-  auto shared = test::make_shared_core_services();
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
   ASSERT_TRUE(test_support::register_language(*shared));
 
   const auto document = test_support::open_reference_document(*shared);

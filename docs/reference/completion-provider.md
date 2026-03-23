@@ -1,6 +1,6 @@
 # Completion Provider
 
-`pegium::lsp::DefaultCompletionProvider` is the generic content assist base in
+`pegium::DefaultCompletionProvider` is the generic content assist base in
 Pegium. It consumes parser completion traces, builds a small semantic context
 around the cursor, then lets you override narrowly-scoped hooks instead of
 rewriting the whole provider.
@@ -8,8 +8,19 @@ rewriting the whole provider.
 This keeps the default implementation language-agnostic while still making it
 easy to customize references, keywords, rule-level proposals, and snippets.
 
-Use this page when you already know that completion is the feature you want to
-customize and you need the main extension hooks.
+Pegium produces completion items directly from the completion request and does
+not expose a separate `completionItem/resolve` dispatch path. Completion
+options are therefore only used for fields that affect completion triggering or
+client-side behavior such as trigger characters and commit characters.
+
+At the provider boundary, this is represented by `CompletionProviderOptions`,
+which currently supports only:
+
+- `triggerCharacters`
+- `allCommitCharacters`
+
+Fields such as `resolveProvider` or `completionItem` are intentionally not part
+of the provider options contract because the runtime does not honor them.
 
 ## Default flow
 
@@ -30,7 +41,12 @@ customize and you need the main extension hooks.
 - `prefix`: text from token start to the cursor
 - `node`: best AST node found near the completion anchor
 - `reference`: concrete reference under the cursor when one already exists
-- `feature`: current parser completion feature
+- `feature`: current parser completion feature, always present for the active
+  completion alternative
+
+`tokenText` and `prefix` are borrowed views into the current document text for
+the duration of the completion request. Provider hooks should treat them as
+read-only slices, not as owned strings.
 
 The `feature` can describe a `Keyword`, a `Reference`, or a `Rule`.
 
@@ -57,7 +73,12 @@ If you omit `textEdit`, the default provider computes it from
 
 ## Reference completion
 
-Reference completion is driven by `references::ScopeQueryContext`.
+Reference completion is driven by `ReferenceInfo`.
+
+`ReferenceInfo` carries the container node, current reference text, and the
+originating grammar `Assignment`. Feature name and expected target type are
+derived from that assignment. When a concrete `AbstractReference` already
+exists in the AST, the default provider reuses its stored assignment directly.
 
 This context works both:
 
@@ -65,7 +86,7 @@ This context works both:
 - when the cursor is on an unfinished reference and only the grammar assignment
   metadata is available
 
-The default provider uses `ScopeProvider::getScopeEntries(...)`, so custom
+The default provider uses `ScopeProvider::visitScopeEntries(...)`, so custom
 scoping logic stays reusable for linking and completion.
 
 ## Hooks
@@ -85,8 +106,8 @@ Called for reference features. The default implementation iterates over
 
 The best low-risk extension point for filtering reference proposals.
 
-The default implementation asks the scope provider for all visible entries and
-lets the fuzzy matcher filter them against `context.prefix`.
+The default implementation enumerates all visible entries through the scope
+provider and lets the fuzzy matcher filter them against `context.prefix`.
 
 ### `createReferenceCompletionItem`
 
@@ -125,19 +146,19 @@ Controls whether later parser features should still be processed. Return
 ### Filter reference candidates
 
 ```cpp
-class MyCompletionProvider final : public pegium::lsp::DefaultCompletionProvider {
+class MyCompletionProvider final : public pegium::DefaultCompletionProvider {
 public:
   using DefaultCompletionProvider::DefaultCompletionProvider;
 
 protected:
   std::vector<const pegium::workspace::AstNodeDescription *>
   getReferenceCandidates(
-      const pegium::lsp::CompletionContext &context,
-      const pegium::references::ScopeQueryContext &scopeContext) const override {
+      const pegium::CompletionContext &context,
+      const pegium::ReferenceInfo &reference) const override {
     auto candidates =
-        DefaultCompletionProvider::getReferenceCandidates(context, scopeContext);
+        DefaultCompletionProvider::getReferenceCandidates(context, reference);
     std::erase_if(candidates, [](const auto *candidate) {
-      return candidate == nullptr || candidate->name.starts_with("_");
+      return candidate->name.starts_with("_");
     });
     return candidates;
   }
@@ -147,11 +168,11 @@ protected:
 ### Add a keyword hook
 
 ```cpp
-void completionForKeyword(const pegium::lsp::CompletionContext &context,
+void completionForKeyword(const pegium::CompletionContext &context,
                           const pegium::grammar::Literal &keyword,
-                          const pegium::lsp::CompletionAcceptor &acceptor) const override {
+                          const pegium::CompletionAcceptor &acceptor) const override {
   if (keyword.getValue() == "entity" && context.prefix.empty()) {
-    acceptor(pegium::lsp::CompletionValue{
+    acceptor(pegium::CompletionValue{
         .label = "entity",
         .detail = "Top-level declaration",
     });
@@ -164,14 +185,14 @@ void completionForKeyword(const pegium::lsp::CompletionContext &context,
 ### Add a rule snippet
 
 ```cpp
-void completionForRule(const pegium::lsp::CompletionContext &context,
+void completionForRule(const pegium::CompletionContext &context,
                        const pegium::grammar::AbstractRule &rule,
-                       const pegium::lsp::CompletionAcceptor &acceptor) const override {
+                       const pegium::CompletionAcceptor &acceptor) const override {
   if (rule.getName() != "Entity") {
     return;
   }
 
-  acceptor(pegium::lsp::CompletionValue{
+  acceptor(pegium::CompletionValue{
       .label = "entity",
       .newText = "entity ${1:Name} {\\n\\t$0\\n}",
       .detail = "Snippet",
@@ -192,6 +213,6 @@ Start from the narrowest hook that solves the problem:
 
 ## Related pages
 
-- [Default LSP Services](lsp-services.md)
+- [LSP Services](../build-a-language/lsp-services.md)
 - [Custom LSP Features](../recipes/custom-lsp-features.md)
 - [Scoping](../recipes/scoping/index.md)

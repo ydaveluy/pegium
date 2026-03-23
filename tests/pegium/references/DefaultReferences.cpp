@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <pegium/CoreTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/syntax-tree/CstUtils.hpp>
 
 namespace pegium::references {
 namespace {
@@ -68,44 +69,91 @@ protected:
 };
 
 TEST(DefaultReferencesTest, FindsDeclarationAtEndOfFileIdentifierOffset) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services<ReferenceParser>(*shared, "ref", {".ref"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services<ReferenceParser>(*shared, "ref", {".ref"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("reference.ref"), "ref", "entry Alpha");
   ASSERT_NE(document, nullptr);
 
-  const auto *services = shared->serviceRegistry->getServices(document->uri);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->references.references, nullptr);
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.references.references, nullptr);
+  ASSERT_NE(document->parseResult.cst, nullptr);
 
-  const auto declaration = services->references.references->findDeclarationAt(
-      *document, static_cast<TextOffset>(document->text().size()));
-  ASSERT_TRUE(declaration.has_value());
-  EXPECT_EQ(declaration->name, "Alpha");
+  const auto selectedNode = find_declaration_node_at_offset(
+      *document->parseResult.cst,
+      static_cast<TextOffset>(document->textDocument().getText().size()));
+  ASSERT_TRUE(selectedNode.has_value());
+  const auto declarations =
+      services.references.references->findDeclarations(*selectedNode);
+  ASSERT_EQ(declarations.size(), 1u);
+  const auto *entry = dynamic_cast<const ReferenceEntry *>(declarations.front());
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->name, "Alpha");
 }
 
 TEST(DefaultReferencesTest,
      FindsDeclarationAtDeclarationSiteEvenWhenStoredNameIsCanonicalized) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services<CanonicalReferenceParser>(*shared, "ref",
-                                                         {".ref"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services<CanonicalReferenceParser>(*shared, "ref",
+                                                         {".ref"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("canonical-reference.ref"), "ref",
       "entry BasicMath");
   ASSERT_NE(document, nullptr);
 
-  const auto *services = shared->serviceRegistry->getServices(document->uri);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->references.references, nullptr);
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.references.references, nullptr);
+  ASSERT_NE(document->parseResult.cst, nullptr);
 
-  const auto declaration = services->references.references->findDeclarationAt(
-      *document, static_cast<TextOffset>(document->text().find("BasicMath") + 1));
-  ASSERT_TRUE(declaration.has_value());
-  EXPECT_EQ(declaration->name, "basicmath");
+  const auto selectedNode = find_declaration_node_at_offset(
+      *document->parseResult.cst,
+      static_cast<TextOffset>(document->textDocument().getText().find("BasicMath") +
+                              1));
+  ASSERT_TRUE(selectedNode.has_value());
+  const auto declarations =
+      services.references.references->findDeclarations(*selectedNode);
+  ASSERT_EQ(declarations.size(), 1u);
+  const auto *entry = dynamic_cast<const ReferenceEntry *>(declarations.front());
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->name, "basicmath");
+}
+
+TEST(DefaultReferencesTest, DoesNotTreatKeywordAsDeclarationSite) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices =
+        test::make_uninstalled_core_services<ReferenceParser>(*shared, "ref", {".ref"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("keyword-site.ref"), "ref", "entry Alpha");
+  ASSERT_NE(document, nullptr);
+
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.references.references, nullptr);
+  ASSERT_NE(document->parseResult.cst, nullptr);
+
+  const auto selectedNode =
+      find_declaration_node_at_offset(*document->parseResult.cst, 1u);
+  ASSERT_TRUE(selectedNode.has_value());
+  EXPECT_TRUE(services.references.references->findDeclarations(*selectedNode).empty());
 }
 
 } // namespace

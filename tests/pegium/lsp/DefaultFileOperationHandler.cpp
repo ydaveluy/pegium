@@ -1,13 +1,16 @@
 #include <gtest/gtest.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/DefaultFileOperationHandler.hpp>
+#include <pegium/lsp/workspace/DefaultFileOperationHandler.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 TEST(DefaultFileOperationHandlerTest, DidRenameFilesForwardsDeleteAndCreateEvents) {
-  auto shared = test::make_shared_services();
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto *updates = new test::RecordingDocumentUpdateHandler();
   shared->lsp.documentUpdateHandler.reset(updates);
 
@@ -31,21 +34,20 @@ TEST(DefaultFileOperationHandlerTest, DidRenameFilesForwardsDeleteAndCreateEvent
 }
 
 TEST(DefaultFileOperationHandlerTest, ExposesDidFileOperationRegistrations) {
-  auto shared = test::make_shared_services();
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   DefaultFileOperationHandler handler(*shared);
-
-  EXPECT_TRUE(handler.supportsDidCreateFiles());
-  EXPECT_TRUE(handler.supportsDidRenameFiles());
-  EXPECT_TRUE(handler.supportsDidDeleteFiles());
-  EXPECT_FALSE(handler.supportsWillCreateFiles());
-  EXPECT_FALSE(handler.supportsWillRenameFiles());
-  EXPECT_FALSE(handler.supportsWillDeleteFiles());
 
   const auto &options = handler.fileOperationOptions();
   EXPECT_TRUE(options.didCreate.has_value());
   EXPECT_TRUE(options.didRename.has_value());
   EXPECT_TRUE(options.didDelete.has_value());
+  EXPECT_FALSE(options.willCreate.has_value());
+  EXPECT_FALSE(options.willRename.has_value());
+  EXPECT_FALSE(options.willDelete.has_value());
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

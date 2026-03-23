@@ -1,19 +1,22 @@
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <charconv>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <optional>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/services/CoreServices.hpp>
-#include <pegium/services/SharedCoreServices.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/workspace/Document.hpp>
+#include <pegium/core/workspace/TextDocumentProvider.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -73,28 +76,82 @@ struct DocumentSnapshot {
   bool operator==(const DocumentSnapshot &) const = default;
 };
 
+class FuzzTextDocuments final : public pegium::workspace::TextDocumentProvider {
+public:
+  [[nodiscard]] std::shared_ptr<pegium::workspace::TextDocument>
+  get(std::string_view uri) const override {
+    const auto normalizedUri = pegium::utils::normalize_uri(uri);
+    if (normalizedUri.empty()) {
+      return nullptr;
+    }
+    const auto it = _documents.find(normalizedUri);
+    return it == _documents.end() ? nullptr : it->second;
+  }
+
+  [[nodiscard]] bool
+  set(std::shared_ptr<pegium::workspace::TextDocument> document) {
+    document = normalize(std::move(document));
+    if (document == nullptr) {
+      return false;
+    }
+    const bool inserted = !_documents.contains(document->uri());
+    _documents.insert_or_assign(document->uri(), std::move(document));
+    return inserted;
+  }
+
+  void remove(std::string_view uri) {
+    const auto normalizedUri = pegium::utils::normalize_uri(uri);
+    if (!normalizedUri.empty()) {
+      _documents.erase(normalizedUri);
+    }
+  }
+
+private:
+  [[nodiscard]] static std::shared_ptr<pegium::workspace::TextDocument>
+  normalize(std::shared_ptr<pegium::workspace::TextDocument> document) {
+    if (document == nullptr) {
+      return nullptr;
+    }
+    const auto normalizedUri = pegium::utils::normalize_uri(document->uri());
+    if (normalizedUri.empty()) {
+      return nullptr;
+    }
+    if (normalizedUri == document->uri()) {
+      return document;
+    }
+    return std::make_shared<pegium::workspace::TextDocument>(
+        pegium::workspace::TextDocument::create(
+            normalizedUri, document->languageId(), document->version(),
+            document->getText()));
+  }
+
+  std::unordered_map<std::string,
+                     std::shared_ptr<pegium::workspace::TextDocument>>
+      _documents;
+};
+
 struct FuzzParser final : PegiumParser {
-  using PegiumParser::PegiumParser;
   using PegiumParser::parse;
+  using PegiumParser::PegiumParser;
 
   Terminal<> WS{"WS", some(s)};
   Terminal<int> Number{
       "Number", some(d),
       opt::with_converter(
           [](std::string_view text) noexcept -> opt::ConversionResult<int> {
-        if (text == "13") {
-          return opt::conversion_error<int>("fuzz conversion failure");
-        }
-        int value = 0;
-        const auto [ptr, ec] =
-            std::from_chars(text.data(), text.data() + text.size(), value);
-        if (ec != std::errc() || ptr != text.data() + text.size()) {
-          return opt::conversion_error<int>("invalid integer");
-        }
-        return opt::conversion_value<int>(value);
-      })};
-  Rule<Expr> Primary{
-      "Primary", create<NumberExpr>() + assign<&NumberExpr::value>(Number)};
+            if (text == "13") {
+              return opt::conversion_error<int>("fuzz conversion failure");
+            }
+            int value = 0;
+            const auto [ptr, ec] =
+                std::from_chars(text.data(), text.data() + text.size(), value);
+            if (ec != std::errc() || ptr != text.data() + text.size()) {
+              return opt::conversion_error<int>("invalid integer");
+            }
+            return opt::conversion_value<int>(value);
+          })};
+  Rule<Expr> Primary{"Primary",
+                     create<NumberExpr>() + assign<&NumberExpr::value>(Number)};
   Infix<BinaryExpr, &BinaryExpr::left, &BinaryExpr::op, &BinaryExpr::right>
       Expression{"Expression", Primary, LeftAssociation("+"_kw | "-"_kw)};
   Rule<Expr> Root{"Root", Expression};
@@ -106,12 +163,13 @@ struct FuzzParser final : PegiumParser {
 
   const Skipper &getSkipper() const noexcept override { return skipper; }
 
-  void parse(pegium::workspace::Document &document,
-             const pegium::utils::CancellationToken &cancelToken) const override {
-    if (coreServices.references.linker == nullptr) {
+  [[nodiscard]] pegium::parser::ParseResult
+  parse(pegium::text::TextSnapshot text,
+        const pegium::utils::CancellationToken &cancelToken) const override {
+    if (services.references.linker == nullptr) {
       throw std::runtime_error("Parser linker service is not available.");
     }
-    PegiumParser::parse(document, cancelToken);
+    return PegiumParser::parse(std::move(text), cancelToken);
   }
 };
 
@@ -119,30 +177,25 @@ class WorkspaceHarness {
 public:
   WorkspaceHarness() {
     pegium::services::installDefaultSharedCoreServices(_shared);
+    _shared.workspace.textDocuments = std::make_shared<FuzzTextDocuments>();
 
     auto services = std::make_unique<pegium::services::CoreServices>(_shared);
-    services->languageId = std::string(kFuzzLanguageId);
-    services->languageMetaData.languageId = services->languageId;
+    services->languageMetaData.languageId = std::string(kFuzzLanguageId);
     services->languageMetaData.fileExtensions = {".expr"};
     pegium::services::installDefaultCoreServices(*services);
     services->parser = std::make_unique<const FuzzParser>(*services);
 
-    if (!_shared.serviceRegistry->registerServices(std::move(services))) {
-      throw std::runtime_error("Failed to register fuzz language services.");
-    }
-    if (_shared.serviceRegistry->getServices(std::string(kFuzzUri)) == nullptr) {
-      throw std::runtime_error(
-          "Fuzz language services are not discoverable from the URI.");
-    }
+    _shared.serviceRegistry->registerServices(std::move(services));
+    (void)_shared.serviceRegistry->getServices(std::string(kFuzzUri));
   }
 
   const pegium::parser::Parser &parser() const {
-    const auto *services =
-        _shared.serviceRegistry->getServicesByLanguageId(kFuzzLanguageId);
-    if (services == nullptr || services->parser == nullptr) {
+    const auto &services =
+        _shared.serviceRegistry->getServices(std::string(kFuzzUri));
+    if (services.parser == nullptr) {
       throw std::runtime_error("Registered fuzz parser service is missing.");
     }
-    return *services->parser;
+    return *services.parser;
   }
 
   const pegium::workspace::Document &
@@ -150,94 +203,98 @@ public:
     if (_opened) {
       throw std::runtime_error("Fuzz workspace document is already open.");
     }
-    ++_clientVersion;
-    const auto textDocument =
-        _shared.workspace.textDocuments->open(std::string(kFuzzUri),
-                                              std::string(kFuzzLanguageId),
-                                              std::move(source), _clientVersion);
-    if (textDocument == nullptr) {
+    ++_version;
+    auto textDocument = std::make_shared<pegium::workspace::TextDocument>(
+        pegium::workspace::TextDocument::create(std::string(kFuzzUri),
+                                                std::string(kFuzzLanguageId),
+                                                _version,
+                                                std::move(source)));
+    auto *documents = dynamic_cast<FuzzTextDocuments *>(
+        _shared.workspace.textDocuments.get());
+    if (documents == nullptr) {
+      throw std::runtime_error("Missing fuzz text document store.");
+    }
+    (void)documents->set(textDocument);
+    const auto storedTextDocument = documents->get(kFuzzUri);
+    if (storedTextDocument == nullptr) {
       throw std::runtime_error("Failed to open fuzz text document.");
     }
     _documentId =
-        _shared.workspace.documents->getOrCreateDocumentId(textDocument->uri);
+        _shared.workspace.documents->getOrCreateDocumentId(storedTextDocument->uri);
     if (_documentId == pegium::workspace::InvalidDocumentId) {
       throw std::runtime_error("Failed to allocate a fuzz document id.");
     }
     _opened = true;
     return buildChangedDocument(expectedSource.empty()
-                                    ? std::string_view{textDocument->textView()}
+                                    ? std::string_view{storedTextDocument->getText()}
                                     : expectedSource);
   }
 
   const pegium::workspace::Document &
   replaceAndBuild(std::string source, std::string_view expectedSource = {}) {
     ensure_open();
-    ++_clientVersion;
-    const std::array<pegium::workspace::TextDocumentContentChange, 1> changes{
-        pegium::workspace::TextDocumentContentChange{
-            .range = std::nullopt,
-            .text = std::move(source),
-        }};
-    const auto textDocument = _shared.workspace.textDocuments->applyContentChanges(
-        std::string(kFuzzUri), changes, _clientVersion);
-    if (textDocument == nullptr) {
-      throw std::runtime_error("Failed to replace fuzz text document content.");
+    auto *documents = dynamic_cast<FuzzTextDocuments *>(
+        _shared.workspace.textDocuments.get());
+    if (documents == nullptr) {
+      throw std::runtime_error("Missing fuzz text document store.");
     }
+    auto textDocument = documents->get(kFuzzUri);
+    if (textDocument == nullptr) {
+      throw std::runtime_error("Missing open fuzz text document.");
+    }
+
+    ++_version;
+    const pegium::workspace::TextDocumentContentChangeEvent change{
+        .text = std::move(source)};
+    (void)pegium::workspace::TextDocument::update(
+        *textDocument, std::span(&change, std::size_t{1}), _version);
     return buildChangedDocument(expectedSource.empty()
-                                    ? std::string_view{textDocument->textView()}
+                                    ? std::string_view{textDocument->getText()}
                                     : expectedSource);
   }
 
   const pegium::workspace::Document &
   appendAndBuild(std::string suffix, std::string_view expectedSource) {
     ensure_open();
-    auto textDocument = _shared.workspace.textDocuments->get(kFuzzUri);
+    auto *documents = dynamic_cast<FuzzTextDocuments *>(
+        _shared.workspace.textDocuments.get());
+    if (documents == nullptr) {
+      throw std::runtime_error("Missing fuzz text document store.");
+    }
+    auto textDocument = documents->get(kFuzzUri);
     if (textDocument == nullptr) {
       throw std::runtime_error("Missing open fuzz text document.");
     }
 
-    ++_clientVersion;
-    const auto end = textDocument->offsetToPosition(
-        static_cast<pegium::TextOffset>(textDocument->textView().size()));
-    const std::array<pegium::workspace::TextDocumentContentChange, 1> changes{
-        pegium::workspace::TextDocumentContentChange{
-            .range = pegium::text::Range{end, end},
-            .text = std::move(suffix),
-        }};
-    textDocument = _shared.workspace.textDocuments->applyContentChanges(
-        std::string(kFuzzUri), changes, _clientVersion);
-    if (textDocument == nullptr) {
-      throw std::runtime_error("Failed to append fuzz text document content.");
-    }
+    ++_version;
+    const pegium::workspace::TextDocumentContentChangeEvent change{
+        .text = std::string(textDocument->getText()) + suffix};
+    (void)pegium::workspace::TextDocument::update(
+        *textDocument, std::span(&change, std::size_t{1}), _version);
 
     return buildChangedDocument(expectedSource);
   }
 
   void closeAndDelete() {
     ensure_open();
-    if (!_shared.workspace.textDocuments->close(kFuzzUri)) {
-      throw std::runtime_error("Failed to close fuzz text document.");
+    auto *documents = dynamic_cast<FuzzTextDocuments *>(
+        _shared.workspace.textDocuments.get());
+    if (documents == nullptr) {
+      throw std::runtime_error("Missing fuzz text document store.");
     }
+    documents->remove(kFuzzUri);
 
     const std::array<pegium::workspace::DocumentId, 1> deletedDocumentIds{
         _documentId};
-    const auto result =
-        _shared.workspace.documentBuilder->update({}, deletedDocumentIds);
-    if (result.deletedDocumentIds !=
-        std::vector<pegium::workspace::DocumentId>{_documentId}) {
-      throw std::runtime_error(
-          "Fuzz document deletion did not report the expected document id.");
-    }
+    _shared.workspace.documentBuilder->update({}, deletedDocumentIds);
     if (_shared.workspace.documents->getDocument(_documentId) != nullptr) {
-      throw std::runtime_error("Fuzz document was not removed from the workspace.");
+      throw std::runtime_error(
+          "Fuzz document was not removed from the workspace.");
     }
-    if (_shared.workspace.textDocuments->get(kFuzzUri) != nullptr) {
+    if (documents->get(kFuzzUri) != nullptr) {
       throw std::runtime_error("Closed fuzz text document is still visible.");
     }
-    if (_shared.serviceRegistry->getServices(std::string(kFuzzUri)) == nullptr) {
-      throw std::runtime_error(
-          "Fuzz services should stay discoverable by extension after close.");
-    }
+    (void)_shared.serviceRegistry->getServices(std::string(kFuzzUri));
     _opened = false;
   }
 
@@ -252,40 +309,31 @@ private:
   buildChangedDocument(std::string_view expectedSource) const {
     const std::array<pegium::workspace::DocumentId, 1> changedDocumentIds{
         _documentId};
-    const auto result =
-        _shared.workspace.documentBuilder->update(changedDocumentIds, {});
-    if (result.rebuiltDocuments.empty()) {
-      throw std::runtime_error("Fuzz document builder did not rebuild anything.");
-    }
+    _shared.workspace.documentBuilder->update(changedDocumentIds, {});
 
     const auto document = _shared.workspace.documents->getDocument(_documentId);
     if (document == nullptr) {
       throw std::runtime_error("Failed to materialize the fuzz document.");
     }
-    if (document->textView() != expectedSource) {
-      throw std::runtime_error(
-          "Workspace document content diverged from the text document content.");
+    const auto &textDocument = document->textDocument();
+    if (textDocument.getText() != expectedSource) {
+      throw std::runtime_error("Workspace document content diverged from the "
+                               "text document content.");
     }
-    if (document->clientVersion() != _clientVersion) {
-      throw std::runtime_error("Workspace document client version is stale.");
+    if (textDocument.version() != _version) {
+      throw std::runtime_error("Workspace document version is stale.");
     }
 
-    const auto conversionDiagnostics =
-        std::count_if(document->parseResult.parseDiagnostics.begin(),
-                      document->parseResult.parseDiagnostics.end(),
-                      [](const auto &diagnostic) {
-                        return diagnostic.kind ==
-                               ParseDiagnosticKind::ConversionError;
-                      });
+    const auto conversionDiagnostics = std::ranges::count_if(
+        document->parseResult.parseDiagnostics, [](const auto &diagnostic) {
+          return diagnostic.kind == ParseDiagnosticKind::ConversionError;
+        });
     const auto extractedConversionDiagnostics =
-        std::count_if(document->diagnostics.begin(), document->diagnostics.end(),
-                      [](const auto &diagnostic) {
-                        return diagnostic.code.has_value() &&
-                               std::holds_alternative<std::string>(
-                                   *diagnostic.code) &&
-                               std::get<std::string>(*diagnostic.code) ==
-                                   "parse.conversion";
-                      });
+        std::ranges::count_if(document->diagnostics, [](const auto &diagnostic) {
+          return diagnostic.code.has_value() &&
+                 std::holds_alternative<std::string>(*diagnostic.code) &&
+                 std::get<std::string>(*diagnostic.code) == "parse.conversion";
+        });
     if (conversionDiagnostics != extractedConversionDiagnostics) {
       throw std::runtime_error(
           "Workspace diagnostics diverged from parse conversion diagnostics.");
@@ -297,7 +345,7 @@ private:
   pegium::services::SharedCoreServices _shared;
   pegium::workspace::DocumentId _documentId =
       pegium::workspace::InvalidDocumentId;
-  std::int64_t _clientVersion = 0;
+  std::int64_t _version = 0;
   bool _opened = false;
 };
 
@@ -307,17 +355,16 @@ std::string describe_expect_path(const ExpectPath &path) {
     if (!result.empty()) {
       result += ">";
     }
-    if (element == nullptr) {
-      result += "<null>";
-      continue;
-    }
+    assert(element != nullptr);
     switch (element->getKind()) {
     case grammar::ElementKind::Literal:
       result += "keyword:" +
-                std::string(static_cast<const grammar::Literal *>(element)->getValue());
+                std::string(
+                    static_cast<const grammar::Literal *>(element)->getValue());
       break;
     case grammar::ElementKind::Assignment: {
-      const auto *assignment = static_cast<const grammar::Assignment *>(element);
+      const auto *assignment =
+          static_cast<const grammar::Assignment *>(element);
       result += "assignment:" + std::string(assignment->getFeature());
       break;
     }
@@ -325,8 +372,10 @@ std::string describe_expect_path(const ExpectPath &path) {
     case grammar::ElementKind::ParserRule:
     case grammar::ElementKind::TerminalRule:
     case grammar::ElementKind::InfixRule:
-      result += "rule:" +
-                std::string(static_cast<const grammar::AbstractRule *>(element)->getName());
+      result +=
+          "rule:" +
+          std::string(
+              static_cast<const grammar::AbstractRule *>(element)->getName());
       break;
     default:
       result += "kind:" + std::to_string(static_cast<int>(element->getKind()));
@@ -341,7 +390,8 @@ std::string describe_expect_path(const ExpectPath &path) {
   }
   if (const auto *assignment = path.expectedReferenceAssignment();
       assignment != nullptr) {
-    return "reference:" + std::string(assignment->getReferenceType().name()) +
+    return "reference:" +
+           std::string(assignment->getType().name()) +
            (assignment->isMultiReference() ? ":multi" : ":single");
   }
   if (const auto *rule = path.expectedRule(); rule != nullptr) {
@@ -352,8 +402,8 @@ std::string describe_expect_path(const ExpectPath &path) {
 
 std::string snapshot_to_string(const DocumentSnapshot &snapshot) {
   std::ostringstream stream;
-  stream << "{fullMatch=" << snapshot.fullMatch << ", hasAst=" << snapshot.hasAst
-         << ", hasCst=" << snapshot.hasCst
+  stream << "{fullMatch=" << snapshot.fullMatch
+         << ", hasAst=" << snapshot.hasAst << ", hasCst=" << snapshot.hasCst
          << ", referenceCount=" << snapshot.referenceCount
          << ", parsedLength=" << snapshot.parsedLength
          << ", lastVisibleCursorOffset=" << snapshot.lastVisibleCursorOffset
@@ -367,8 +417,7 @@ std::string snapshot_to_string(const DocumentSnapshot &snapshot) {
     if (index != 0) {
       stream << ", ";
     }
-    stream << "{kind=" << diagnostic.kind
-           << ", offset=" << diagnostic.offset
+    stream << "{kind=" << diagnostic.kind << ", offset=" << diagnostic.offset
            << ", begin=" << diagnostic.beginOffset
            << ", end=" << diagnostic.endOffset
            << ", message=" << diagnostic.message << "}";
@@ -382,8 +431,8 @@ std::string snapshot_to_string(const DocumentSnapshot &snapshot) {
     stream << "{probe=" << expectation.probeOffset
            << ", offset=" << expectation.expectOffset
            << ", reachedAnchor=" << expectation.reachedAnchor << ", frontier=[";
-    for (std::size_t frontierIndex = 0; frontierIndex < expectation.frontier.size();
-         ++frontierIndex) {
+    for (std::size_t frontierIndex = 0;
+         frontierIndex < expectation.frontier.size(); ++frontierIndex) {
       if (frontierIndex != 0) {
         stream << ", ";
       }
@@ -414,7 +463,8 @@ std::string read_file(const std::filesystem::path &path) {
   if (!stream) {
     throw std::runtime_error("Failed to open input file: " + path.string());
   }
-  return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+  return {std::istreambuf_iterator<char>(stream),
+          std::istreambuf_iterator<char>()};
 }
 
 std::vector<std::filesystem::path> collect_inputs(int argc, char **argv) {
@@ -427,7 +477,8 @@ std::vector<std::filesystem::path> collect_inputs(int argc, char **argv) {
       }
       const auto root = std::filesystem::path(argv[++index]);
       if (!std::filesystem::exists(root)) {
-        throw std::runtime_error("Corpus path does not exist: " + root.string());
+        throw std::runtime_error("Corpus path does not exist: " +
+                                 root.string());
       }
       for (const auto &entry :
            std::filesystem::recursive_directory_iterator(root)) {
@@ -441,15 +492,16 @@ std::vector<std::filesystem::path> collect_inputs(int argc, char **argv) {
     paths.emplace_back(arg);
   }
 
-  std::sort(paths.begin(), paths.end());
-  paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+  std::ranges::sort(paths);
+  const auto [uniqueBegin, uniqueEnd] = std::ranges::unique(paths);
+  paths.erase(uniqueBegin, uniqueEnd);
   return paths;
 }
 
 std::vector<pegium::TextOffset>
 collect_probe_offsets(const pegium::workspace::Document &document) {
   const auto textSize =
-      static_cast<pegium::TextOffset>(document.textView().size());
+      static_cast<pegium::TextOffset>(document.textDocument().getText().size());
   std::vector<pegium::TextOffset> offsets{
       0,
       static_cast<pegium::TextOffset>(textSize / 4),
@@ -468,8 +520,9 @@ collect_probe_offsets(const pegium::workspace::Document &document) {
     offsets.push_back(std::min(diagnostic.endOffset, textSize));
   }
 
-  std::sort(offsets.begin(), offsets.end());
-  offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
+  std::ranges::sort(offsets);
+  const auto [uniqueBegin, uniqueEnd] = std::ranges::unique(offsets);
+  offsets.erase(uniqueBegin, uniqueEnd);
   return offsets;
 }
 
@@ -481,7 +534,7 @@ DocumentSnapshot snapshot_document(const pegium::workspace::Document &document,
   }
 
   const auto textSize =
-      static_cast<pegium::TextOffset>(document.textView().size());
+      static_cast<pegium::TextOffset>(document.textDocument().getText().size());
   if (document.parseResult.parsedLength > textSize ||
       document.parseResult.lastVisibleCursorOffset > textSize ||
       document.parseResult.failureVisibleCursorOffset > textSize ||
@@ -511,7 +564,8 @@ DocumentSnapshot snapshot_document(const pegium::workspace::Document &document,
     }
     if (diagnostic.beginOffset > diagnostic.endOffset ||
         diagnostic.endOffset > textSize) {
-      throw std::runtime_error("Parse diagnostic span escaped the source document.");
+      throw std::runtime_error(
+          "Parse diagnostic span escaped the source document.");
     }
 
     snapshot.diagnostics.push_back({.kind = diagnostic.kind,
@@ -524,7 +578,8 @@ DocumentSnapshot snapshot_document(const pegium::workspace::Document &document,
   const auto probeOffsets = collect_probe_offsets(document);
   snapshot.expectations.reserve(probeOffsets.size());
   for (const auto probeOffset : probeOffsets) {
-    const auto expect = parser.expect(document.textView(), probeOffset);
+    const auto expect =
+        parser.expect(document.textDocument().getText(), probeOffset);
     if (expect.offset > textSize) {
       throw std::runtime_error("Expect offset escaped the source document.");
     }
@@ -538,7 +593,7 @@ DocumentSnapshot snapshot_document(const pegium::workspace::Document &document,
     for (const auto &item : expect.frontier) {
       expectSnapshot.frontier.push_back(describe_expect_path(item));
     }
-    std::sort(expectSnapshot.frontier.begin(), expectSnapshot.frontier.end());
+    std::ranges::sort(expectSnapshot.frontier);
     snapshot.expectations.push_back(std::move(expectSnapshot));
   }
 
@@ -547,13 +602,21 @@ DocumentSnapshot snapshot_document(const pegium::workspace::Document &document,
 
 DocumentSnapshot parse_direct(std::string source) {
   FuzzParser parser;
-  pegium::workspace::Document document;
-  document.setText(std::move(source));
-  parser.parse(document, {});
+  auto textDocument = std::make_shared<pegium::workspace::TextDocument>(
+      pegium::workspace::TextDocument::create(std::string(kFuzzUri),
+                                              std::string(kFuzzLanguageId), 1,
+                                              std::move(source)));
+  pegium::workspace::Document document(std::move(textDocument));
+  document.parseResult = parser.parse(text::TextSnapshot::copy(document.textDocument().getText()), {});
+  document.references = document.parseResult.references;
+  if (document.parseResult.cst != nullptr) {
+    document.parseResult.cst->attachDocument(document);
+  }
   return snapshot_document(document, parser);
 }
 
-void append_unique_case(std::vector<std::string> &cases, std::string candidate) {
+void append_unique_case(std::vector<std::string> &cases,
+                        std::string candidate) {
   if (std::ranges::find(cases, candidate) == cases.end()) {
     cases.push_back(std::move(candidate));
   }
@@ -561,7 +624,8 @@ void append_unique_case(std::vector<std::string> &cases, std::string candidate) 
 
 std::vector<std::string> build_cases(std::string_view seed) {
   if (seed.size() > kMaxSmokeInputBytes) {
-    throw std::runtime_error("Smoke fuzz input exceeds the configured size cap.");
+    throw std::runtime_error(
+        "Smoke fuzz input exceeds the configured size cap.");
   }
 
   std::vector<std::string> cases;
@@ -591,7 +655,8 @@ void exercise_single_parse_case(std::string source, std::string_view context) {
 
   WorkspaceHarness workspace;
   const auto &document = workspace.openAndBuild(std::move(source));
-  const auto workspaceSnapshot = snapshot_document(document, workspace.parser());
+  const auto workspaceSnapshot =
+      snapshot_document(document, workspace.parser());
   ensure_matching_snapshot(context, direct, workspaceSnapshot);
   workspace.closeAndDelete();
 }
@@ -615,17 +680,17 @@ void exercise_workspace_lifecycle() {
 
   const std::string replaced = "1 + + 2 - 4 + 5";
   const auto replacedDirect = parse_direct(replaced);
-  currentSnapshot = snapshot_document(
-      workspace.replaceAndBuild(replaced), workspace.parser());
-  ensure_matching_snapshot("workspace lifecycle full replacement", replacedDirect,
-                           currentSnapshot);
+  currentSnapshot = snapshot_document(workspace.replaceAndBuild(replaced),
+                                      workspace.parser());
+  ensure_matching_snapshot("workspace lifecycle full replacement",
+                           replacedDirect, currentSnapshot);
 
   workspace.closeAndDelete();
 
   const std::string reopened = "13 + 21 - 13 + 8";
   const auto reopenedDirect = parse_direct(reopened);
-  currentSnapshot = snapshot_document(
-      workspace.openAndBuild(reopened), workspace.parser());
+  currentSnapshot =
+      snapshot_document(workspace.openAndBuild(reopened), workspace.parser());
   ensure_matching_snapshot("workspace lifecycle reopen", reopenedDirect,
                            currentSnapshot);
 
@@ -635,8 +700,8 @@ void exercise_workspace_lifecycle() {
 void exercise_input(std::string_view text) {
   const auto cases = build_cases(text);
   for (std::size_t index = 0; index < cases.size(); ++index) {
-    exercise_single_parse_case(
-        cases[index], "case[" + std::to_string(index) + "]");
+    exercise_single_parse_case(cases[index],
+                               "case[" + std::to_string(index) + "]");
   }
   exercise_workspace_lifecycle();
 }

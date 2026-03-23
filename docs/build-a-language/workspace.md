@@ -35,6 +35,22 @@ Internally, documents move through states such as:
 That staged lifecycle is what allows language features to depend on stable
 intermediate results instead of reparsing or relinking ad hoc.
 
+## `Document` versus `TextDocument`
+
+Pegium deliberately separates source text from derived analysis.
+
+- `Document` owns the parse result, AST/CST, references, diagnostics, and
+  analysis state
+- `TextDocument` owns the current source text, language id, version, and
+  offset/position helpers
+
+When you need source text or text-coordinate conversions, use
+`document.textDocument()`. The managed workspace keeps the canonical URI on the
+`Document` stable while refreshing the authoritative `TextDocument` snapshot as
+files change.
+`TextDocument::getText()` exposes that current text as a borrowed
+`std::string_view`, so consumers that need ownership should copy explicitly.
+
 ## Why this matters
 
 Once a language grows beyond a single file, editor behavior depends on stable
@@ -49,6 +65,18 @@ services can observe.
 
 In practice, this is the part that makes “document changed, now update parse,
 index, linking, diagnostics, and editor state” coherent.
+
+The builder operates on managed documents only: non-null documents with a
+normalized non-empty URI.
+
+## Readiness versus stable phases
+
+`WorkspaceManager::ready()` only means startup documents have been discovered
+and materialized.
+
+If a feature needs a real analysis milestone such as `Linked` or `Validated`,
+wait explicitly with `DocumentBuilder::waitUntil(...)` instead of treating
+workspace readiness as a stronger guarantee.
 
 ## Practical guidance
 

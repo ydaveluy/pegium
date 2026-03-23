@@ -4,11 +4,11 @@
 
 #include <algorithm>
 #include <cctype>
-#include <optional>
 #include <string_view>
 #include <utility>
 
-#include <pegium/validation/DiagnosticRanges.hpp>
+#include <pegium/core/validation/DiagnosticRanges.hpp>
+#include <pegium/core/validation/ValidationRegistry.hpp>
 
 namespace requirements::services::validation {
 namespace {
@@ -23,23 +23,32 @@ bool has_digit(std::string_view value) {
 
 } // namespace
 
-void TestsValidator::registerValidationChecks(
-    pegium::validation::ValidationRegistry &registry,
-    const pegium::services::Services & /*services*/) {
-  const TestsValidator validator;
+void registerTestsValidationChecks(
+    requirements::services::TestsLangServices &services) {
+  auto &registry = *services.validation.validationRegistry;
+  auto &validator = *services.testsLang.validation.testsValidator;
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
-          &TestsValidator::checkTest>(validator)});
+           &TestsValidator::checkTestNameContainsANumber>(validator),
+       pegium::validation::ValidationRegistry::makeValidationCheck<
+           &TestsValidator::
+               checkTestReferencesOnlyEnvironmentsAlsoReferencedInSomeRequirement>(
+           validator)});
 }
 
-void TestsValidator::checkTest(
+void TestsValidator::checkTestNameContainsANumber(
     const Test &test,
     const pegium::validation::ValidationAcceptor &accept) const {
   if (!has_digit(test.name)) {
     accept.warning(test, "Test name " + test.name + " should contain a number.")
         .property<&Test::name>();
   }
+}
 
+void TestsValidator::
+    checkTestReferencesOnlyEnvironmentsAlsoReferencedInSomeRequirement(
+        const Test &test,
+        const pegium::validation::ValidationAcceptor &accept) const {
   for (std::size_t environmentIndex = 0;
        environmentIndex < test.environments.size(); ++environmentIndex) {
     const auto &environment = test.environments[environmentIndex];

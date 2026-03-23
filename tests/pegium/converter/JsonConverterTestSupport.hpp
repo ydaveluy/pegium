@@ -5,7 +5,7 @@
 #include <string_view>
 
 #include <pegium/CoreTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 
 namespace pegium::converter::test_support {
 
@@ -59,9 +59,12 @@ inline constexpr std::string_view kReferenceCstInput =
     "person John /* comment */ hello John";
 
 inline bool register_language(services::SharedCoreServices &sharedServices) {
-  return sharedServices.serviceRegistry->registerServices(
-      pegium::test::make_core_services<JsonConverterParser>(
-          sharedServices, "json-converter", {".json-converter"}));
+  auto services = pegium::test::make_uninstalled_core_services<JsonConverterParser>(
+      sharedServices, "json-converter", {".json-converter"});
+  pegium::services::installDefaultCoreServices(*services);
+  installDefaultCoreServices(*services);
+  sharedServices.serviceRegistry->registerServices(std::move(services));
+  return true;
 }
 
 inline std::shared_ptr<workspace::Document>

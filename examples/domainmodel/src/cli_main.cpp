@@ -1,61 +1,108 @@
-#include <domainmodel/parser/Parser.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <domainmodel/cli/CliUtils.hpp>
+#include <domainmodel/cli/Generator.hpp>
+#include <domainmodel/services/Module.hpp>
 
-#include <fstream>
+#include <pegium/cli/CliUtils.hpp>
+#include <pegium/core/workspace/Documents.hpp>
+
+#include <filesystem>
 #include <iostream>
-#include <iterator>
-#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace {
 
-std::string read_text_file(const std::string &path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in.is_open()) {
-    throw std::runtime_error("Unable to open file: " + path);
+struct GenerateOptions {
+  std::string fileName;
+  std::optional<std::string> destination;
+  std::optional<std::string> root;
+  bool quiet = false;
+};
+
+std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
+  if (argc < 3 || std::string_view(argv[1]) != "generate") {
+    return std::nullopt;
   }
-  return std::string(std::istreambuf_iterator<char>(in),
-                     std::istreambuf_iterator<char>());
+
+  GenerateOptions options{.fileName = argv[2]};
+  for (int index = 3; index < argc; ++index) {
+    const std::string_view arg(argv[index]);
+    if ((arg == "-d" || arg == "--destination") && index + 1 < argc) {
+      options.destination = std::string(argv[++index]);
+      continue;
+    }
+    if ((arg == "-r" || arg == "--root") && index + 1 < argc) {
+      options.root = std::string(argv[++index]);
+      continue;
+    }
+    if (arg == "-q" || arg == "--quiet") {
+      options.quiet = true;
+      continue;
+    }
+    return std::nullopt;
+  }
+  return options;
 }
 
-void print_parse_diagnostics(
-    const std::vector<pegium::parser::ParseDiagnostic> &diagnostics) {
-  for (const auto &diagnostic : diagnostics) {
-    std::cerr << diagnostic << '\n';
+int generate_cli(const GenerateOptions &options) {
+  auto shared = pegium::cli::make_shared_services();
+  auto services = domainmodel::services::create_language_services(shared);
+  auto &domainmodelServices = *services;
+  shared.serviceRegistry->registerServices(std::move(services));
+
+  const auto absoluteInputPath = std::filesystem::absolute(options.fileName);
+  domainmodel::cli::set_root_folder(
+      absoluteInputPath.string(), domainmodelServices,
+      options.root.has_value() ? std::optional<std::string_view>(*options.root)
+                               : std::nullopt);
+  auto document = pegium::cli::build_document_from_path(
+      absoluteInputPath.string(), domainmodelServices);
+
+  for (const auto &candidate : shared.workspace.documents->all()) {
+    if (pegium::cli::has_error_diagnostics(*candidate)) {
+      if (!options.quiet) {
+        std::cerr << "There are validation errors:\n";
+        pegium::cli::print_error_diagnostics(*candidate, std::cerr);
+      }
+      return 2;
+    }
   }
+
+  const auto &model = domainmodel::cli::extract_ast_node(*document);
+  const auto generatedDir = domainmodel::cli::generate_java(
+      model, absoluteInputPath.string(),
+      options.destination.has_value()
+          ? std::optional<std::string_view>(*options.destination)
+          : std::nullopt);
+  if (!options.quiet) {
+    std::cout << "Java classes generated successfully: " << generatedDir << '\n';
+  }
+  return 0;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 2) {
-    std::cerr << "Usage: pegium-example-domainmodel-cli <file.dmodel>\n";
+  const auto options = parse_generate_args(argc, argv);
+  if (!options.has_value()) {
+    std::cerr
+        << "Usage: pegium-example-domainmodel-cli generate <file.dmodel> [-d dir] [-r root] [-q]\n";
     return 1;
   }
 
   try {
-    const auto input = read_text_file(argv[1]);
-
-    auto parser = std::make_unique<domainmodel::parser::DomainModelParser>();
-    pegium::workspace::Document document;
-    document.setText(input);
-    parser->parse(document);
-    const auto &result = document.parseResult;
-
-    auto *model =
-        pegium::ast_ptr_cast<domainmodel::ast::DomainModel>(result.value);
-    if (!result.value || !model) {
-      std::cerr << "Parse failed.\n";
-      print_parse_diagnostics(result.parseDiagnostics);
-      return 2;
+    return generate_cli(*options);
+  } catch (const std::invalid_argument &error) {
+    if (!options->quiet) {
+      std::cerr << error.what() << '\n';
     }
-
-    std::cout << "Parsed domain model with " << model->elements.size()
-              << " top-level elements.\n";
-    return 0;
+    return 1;
   } catch (const std::exception &error) {
-    std::cerr << "Fatal error: " << error.what() << '\n';
+    if (!options->quiet) {
+      std::cerr << "Fatal error: " << error.what() << '\n';
+    }
     return 3;
   }
 }

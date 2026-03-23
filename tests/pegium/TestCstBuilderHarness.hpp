@@ -4,37 +4,25 @@
 #include <string>
 #include <string_view>
 
-#include <pegium/syntax-tree/CstBuilder.hpp>
-#include <pegium/TestCstBuilderHarness.hpp>
-#include <pegium/syntax-tree/RootCstNode.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <pegium/core/syntax-tree/CstBuilder.hpp>
+#include <pegium/core/syntax-tree/RootCstNode.hpp>
+#include <pegium/core/text/TextSnapshot.hpp>
+#include <pegium/core/workspace/Document.hpp>
 
 namespace pegium::test {
 
 struct CstBuilderHarness {
   explicit CstBuilderHarness(workspace::Document &document)
-      : CstBuilderHarness(nullptr, document) {}
+      : root(text::TextSnapshot::copy(document.textDocument().getText())),
+        builder(root) {
+    root.attachDocument(document);
+  }
 
   explicit CstBuilderHarness(std::string_view text)
-      : CstBuilderHarness([text] {
-          auto document = std::make_shared<workspace::Document>();
-          document->setText(std::string{text});
-          return document;
-        }()) {}
+      : root(text::TextSnapshot::copy(text)), builder(root) {}
 
   RootCstNode root;
   CstBuilder builder;
-
-private:
-  explicit CstBuilderHarness(std::shared_ptr<workspace::Document> ownedDocument)
-      : CstBuilderHarness(ownedDocument, *ownedDocument) {}
-
-  CstBuilderHarness(std::shared_ptr<workspace::Document> ownedDocument,
-                    workspace::Document &document)
-      : _ownedDocument(std::move(ownedDocument)), root(document), builder(root) {
-  }
-
-  std::shared_ptr<workspace::Document> _ownedDocument = nullptr;
 };
 
 inline CstBuilderHarness makeCstBuilderHarness(workspace::Document &document) {

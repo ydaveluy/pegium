@@ -1,15 +1,13 @@
 #include <gtest/gtest.h>
 
-#include <limits>
-
 #include <lsp/connection.h>
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/Diagnostics.hpp>
+#include <pegium/lsp/support/Diagnostics.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 TEST(DiagnosticsTest, PublishDiagnosticsSerializesExtendedDiagnosticFields) {
@@ -19,7 +17,6 @@ TEST(DiagnosticsTest, PublishDiagnosticsSerializesExtendedDiagnosticFields) {
 
   workspace::DocumentDiagnosticsSnapshot snapshot{
       .uri = test::make_file_uri("diagnostics.test"),
-      .version = std::numeric_limits<std::int64_t>::max(),
       .text = "alpha\nbeta\n",
       .diagnostics =
           {{
@@ -56,8 +53,7 @@ TEST(DiagnosticsTest, PublishDiagnosticsSerializesExtendedDiagnosticFields) {
 
   const auto &params = message.get("params").object();
   EXPECT_EQ(params.get("uri").string(), snapshot.uri);
-  EXPECT_EQ(params.get("version").integer(),
-            std::numeric_limits<::lsp::json::Integer>::max());
+  EXPECT_FALSE(params.contains("version"));
 
   const auto &diagnostics = params.get("diagnostics").array();
   ASSERT_EQ(diagnostics.size(), 1u);
@@ -121,4 +117,4 @@ TEST(DiagnosticsTest, PublishDiagnosticsSkipsInvalidCodeDescriptionUri) {
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

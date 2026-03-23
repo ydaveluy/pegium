@@ -1,13 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/AbstractSignatureHelpProvider.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/services/Services.hpp>
+#include <pegium/lsp/semantic/AbstractSignatureHelpProvider.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
+using pegium::as_services;
 using namespace pegium::parser;
 
 struct SignatureNode : AstNode {
@@ -38,7 +40,7 @@ protected:
 
 class TestSignatureHelpProvider final : public AbstractSignatureHelpProvider {
 public:
-  explicit TestSignatureHelpProvider(const services::Services &services)
+  explicit TestSignatureHelpProvider(const pegium::Services &services)
       : AbstractSignatureHelpProvider(services) {}
 
 protected:
@@ -64,19 +66,25 @@ protected:
 };
 
 TEST(AbstractSignatureHelpProviderTest, ExposesTriggerCharactersAndDelegatesToAstElement) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<SignatureParser>(*shared, "test", {".test"})));
-
-  const auto *coreServices =
-      shared->serviceRegistry->getServicesByLanguageId("test");
-  ASSERT_NE(coreServices, nullptr);
-  const auto *services = dynamic_cast<const services::Services *>(coreServices);
-  ASSERT_NE(services, nullptr);
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<SignatureParser>(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("signature.test"), "test", "call");
   ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
 
   TestSignatureHelpProvider provider(*services);
 
@@ -97,4 +105,4 @@ TEST(AbstractSignatureHelpProviderTest, ExposesTriggerCharactersAndDelegatesToAs
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

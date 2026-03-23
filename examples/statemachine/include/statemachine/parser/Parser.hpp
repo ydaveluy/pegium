@@ -7,13 +7,8 @@
 
 #include <statemachine/ast.hpp>
 
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/services/Services.hpp>
-#include <pegium/workspace/Document.hpp>
-
-namespace pegium::services {
-struct SharedServices;
-}
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/workspace/Document.hpp>
 
 namespace statemachine::parser {
 
@@ -72,9 +67,5 @@ protected:
           many(append<&ast::Statemachine::states>(StateRule))};
 #pragma clang diagnostic pop
 };
-
-std::unique_ptr<pegium::services::Services>
-make_language_services(const pegium::services::SharedServices &sharedServices,
-                       std::string languageId = "statemachine");
 
 } // namespace statemachine::parser

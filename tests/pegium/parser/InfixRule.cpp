@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include <pegium/ParseJsonTestSupport.hpp>
 #include <pegium/TestCstBuilderHarness.hpp>
-#include <pegium/parser/ParseAttempt.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/ParseAttempt.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 
 using namespace pegium::parser;
 
@@ -69,9 +69,9 @@ struct EnumInfixParser final : PegiumParser {
 
 TEST(InfixRuleTest, BuildsTypedBinaryExpressionAndSetsContainers) {
   InfixParser parser;
-  auto document = pegium::test::ParseDocument(parser, "a+b");
+  auto result = pegium::test::Parse(parser, "a+b");
 
-  auto *binary = pegium::ast_ptr_cast<BinaryExpr>(document->parseResult.value);
+  auto *binary = pegium::ast_ptr_cast<BinaryExpr>(result.value);
   ASSERT_TRUE(binary != nullptr);
   ASSERT_TRUE(binary->left != nullptr);
   ASSERT_TRUE(binary->right != nullptr);
@@ -91,9 +91,9 @@ TEST(InfixRuleTest, BuildsTypedBinaryExpressionAndSetsContainers) {
 
 TEST(InfixRuleTest, OrderedChoiceOperatorKeepsCompileTimeTypedRecursion) {
   InfixParser parser;
-  auto document = pegium::test::ParseDocument(parser, "a-b-c");
+  auto result = pegium::test::Parse(parser, "a-b-c");
 
-  auto *binary = pegium::ast_ptr_cast<BinaryExpr>(document->parseResult.value);
+  auto *binary = pegium::ast_ptr_cast<BinaryExpr>(result.value);
   ASSERT_TRUE(binary != nullptr);
   EXPECT_EQ(binary->op, "-");
 
@@ -117,10 +117,9 @@ TEST(InfixRuleTest, OrderedChoiceOperatorKeepsCompileTimeTypedRecursion) {
 
 TEST(InfixRuleTest, EnumOperatorIsAssignedFromTypedTerminalRawValue) {
   EnumInfixParser parser;
-  auto document = pegium::test::ParseDocument(parser, "a-b");
+  auto result = pegium::test::Parse(parser, "a-b");
 
-  auto *binary =
-      pegium::ast_ptr_cast<EnumBinaryExpr>(document->parseResult.value);
+  auto *binary = pegium::ast_ptr_cast<EnumBinaryExpr>(result.value);
   ASSERT_TRUE(binary != nullptr);
   EXPECT_EQ(binary->op, BinaryOp::Minus);
   ASSERT_TRUE(binary->left != nullptr);

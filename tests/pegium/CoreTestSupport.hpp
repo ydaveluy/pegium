@@ -1,47 +1,54 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
-#include <filesystem>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <thread>
 
-#include <pegium/parser/Parser.hpp>
-#include <pegium/services/CoreServices.hpp>
-#include <pegium/services/DefaultServiceRegistry.hpp>
-#include <pegium/services/Diagnostic.hpp>
-#include <pegium/services/SharedCoreServices.hpp>
-#include <pegium/utils/UriUtils.hpp>
-#include <pegium/validation/DocumentValidator.hpp>
-#include <pegium/workspace/DefaultDocumentFactory.hpp>
-#include <pegium/workspace/DefaultDocuments.hpp>
-#include <pegium/workspace/DefaultTextDocuments.hpp>
-#include <pegium/workspace/DefaultWorkspaceLock.hpp>
-#include <pegium/workspace/DocumentFactory.hpp>
-#include <pegium/workspace/FileSystemProvider.hpp>
+#include <pegium/ParseSupport.hpp>
+#include <pegium/core/observability/ObservabilitySink.hpp>
+#include <pegium/core/parser/Create.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/parser/Parser.hpp>
+#include <pegium/core/parser/ParserRule.hpp>
+#include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/DefaultServiceRegistry.hpp>
+#include <pegium/core/services/Diagnostic.hpp>
+#include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/utils/UriUtils.hpp>
+#include <pegium/core/validation/DocumentValidator.hpp>
+#include <pegium/core/workspace/DefaultDocumentFactory.hpp>
+#include <pegium/core/workspace/DefaultDocuments.hpp>
+#include <pegium/core/workspace/DefaultWorkspaceLock.hpp>
+#include <pegium/core/workspace/DocumentFactory.hpp>
+#include <pegium/core/workspace/FileSystemProvider.hpp>
 
 namespace pegium::test {
+
+using namespace pegium::parser;
 
 inline std::string make_file_uri(std::string_view fileName) {
   return utils::path_to_file_uri("/tmp/pegium-tests/" + std::string(fileName));
 }
 
-inline bool wait_until(std::function<bool()> predicate,
-                       std::chrono::milliseconds timeout =
-                           std::chrono::milliseconds(1000),
-                       std::chrono::milliseconds step =
-                           std::chrono::milliseconds(10)) {
+inline bool
+wait_until(std::function<bool()> predicate,
+           std::chrono::milliseconds timeout = std::chrono::milliseconds(1000),
+           std::chrono::milliseconds step = std::chrono::milliseconds(10)) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (std::chrono::steady_clock::now() < deadline) {
     if (predicate()) {
@@ -52,9 +59,52 @@ inline bool wait_until(std::function<bool()> predicate,
   return predicate();
 }
 
+class RecordingObservabilitySink final
+    : public observability::ObservabilitySink {
+public:
+  void publish(const observability::Observation &observation) noexcept override {
+    {
+      std::scoped_lock lock(_mutex);
+      _observations.push_back(observation);
+    }
+    _cv.notify_all();
+  }
+
+  [[nodiscard]] std::vector<observability::Observation> observations() const {
+    std::scoped_lock lock(_mutex);
+    return _observations;
+  }
+
+  [[nodiscard]] std::optional<observability::Observation>
+  lastObservation() const {
+    std::scoped_lock lock(_mutex);
+    if (_observations.empty()) {
+      return std::nullopt;
+    }
+    return _observations.back();
+  }
+
+  [[nodiscard]] bool
+  waitForCount(std::size_t count,
+               std::chrono::milliseconds timeout =
+                   std::chrono::milliseconds(1000)) const {
+    std::unique_lock lock(_mutex);
+    return _cv.wait_for(lock, timeout,
+                        [this, count]() { return _observations.size() >= count; });
+  }
+
+private:
+  mutable std::mutex _mutex;
+  mutable std::condition_variable _cv;
+  std::vector<observability::Observation> _observations;
+};
+
 class FakeParser final : public parser::Parser {
 public:
-  using ParseCallback = std::function<void(workspace::Document &)>;
+  using ParseCallback =
+      std::function<void(parser::ParseResult &, std::string_view)>;
+
+  FakeParser() : _entryRule("FakeParserEntry", "fake"_kw) {}
 
   bool fullMatch = true;
   std::vector<parser::ParseDiagnostic> parseDiagnostics;
@@ -64,31 +114,40 @@ public:
   mutable std::vector<std::string> parsedTexts;
   mutable std::mutex mutex;
 
-  void parse(workspace::Document &document,
-             const utils::CancellationToken &cancelToken) const override {
+  [[nodiscard]] parser::ParseResult
+  parse(text::TextSnapshot text,
+        const utils::CancellationToken &cancelToken) const override {
     utils::throw_if_cancelled(cancelToken);
     {
       std::scoped_lock lock(mutex);
       ++parseCalls;
-      parsedTexts.push_back(document.text());
+      parsedTexts.emplace_back(text.view());
     }
-    document.parseResult = {};
-    document.parseResult.fullMatch = fullMatch;
-    document.parseResult.parsedLength =
-        static_cast<TextOffset>(document.text().size());
-    document.parseResult.maxCursorOffset = document.parseResult.parsedLength;
-    document.parseResult.parseDiagnostics = parseDiagnostics;
+    parser::ParseResult result;
+    result.fullMatch = fullMatch;
+    result.parsedLength = static_cast<TextOffset>(text.size());
+    result.maxCursorOffset = result.parsedLength;
+    result.parseDiagnostics = parseDiagnostics;
     if (callback) {
-      callback(document);
+      callback(result, text.view());
     }
+    return result;
   }
 
-  [[nodiscard]] parser::ExpectResult expect(
-      std::string_view, TextOffset,
-      const utils::CancellationToken &cancelToken) const override {
+  [[nodiscard]] parser::ExpectResult
+  expect(std::string_view, TextOffset,
+         const utils::CancellationToken &cancelToken) const override {
     utils::throw_if_cancelled(cancelToken);
     return expectations;
   }
+
+  [[nodiscard]] const grammar::ParserRule &
+  getEntryRule() const noexcept override {
+    return _entryRule;
+  }
+
+private:
+  parser::ParserRule<AstNode> _entryRule;
 };
 
 class FakeFileSystemProvider final : public workspace::FileSystemProvider {
@@ -99,10 +158,12 @@ public:
   [[nodiscard]] workspace::FileSystemNode
   stat(std::string_view uri) const override {
     const auto key = normalizeKey(uri);
-    return workspace::FileSystemNode{
-        .isFile = files.contains(key),
-        .isDirectory = directories.contains(key),
-        .uri = toFileUri(key)};
+    if (!files.contains(key) && !directories.contains(key)) {
+      throw std::runtime_error("Missing file system node: " + key);
+    }
+    return workspace::FileSystemNode{.isFile = files.contains(key),
+                                     .isDirectory = directories.contains(key),
+                                     .uri = toFileUri(key)};
   }
 
   [[nodiscard]] bool exists(std::string_view uri) const override {
@@ -113,17 +174,13 @@ public:
   [[nodiscard]] std::vector<std::uint8_t>
   readBinary(std::string_view uri) const override {
     const auto content = readFile(uri);
-    if (!content.has_value()) {
-      return {};
-    }
-    return std::vector<std::uint8_t>(content->begin(), content->end());
+    return std::vector<std::uint8_t>(content.begin(), content.end());
   }
 
-  [[nodiscard]] std::optional<std::string>
-  readFile(std::string_view uri) const override {
+  [[nodiscard]] std::string readFile(std::string_view uri) const override {
     const auto it = files.find(normalizeKey(uri));
     if (it == files.end()) {
-      return std::nullopt;
+      throw std::runtime_error("Missing file: " + normalizeKey(uri));
     }
     return it->second;
   }
@@ -132,7 +189,7 @@ public:
   readDirectory(std::string_view uri) const override {
     const auto it = directories.find(normalizeKey(uri));
     if (it == directories.end()) {
-      return {};
+      throw std::runtime_error("Missing directory: " + normalizeKey(uri));
     }
     std::vector<workspace::FileSystemNode> nodes;
     nodes.reserve(it->second.size());
@@ -164,15 +221,18 @@ public:
   mutable std::size_t diagnosticIndex = 0;
   mutable std::mutex mutex;
 
-  [[nodiscard]] std::vector<services::Diagnostic>
-  validateDocument(const workspace::Document &document,
-                   const validation::ValidationOptions &options) const override {
+  [[nodiscard]] std::vector<services::Diagnostic> validateDocument(
+      const workspace::Document &document,
+      const validation::ValidationOptions &options,
+      const utils::CancellationToken &cancelToken) const override {
     (void)document;
+    utils::throw_if_cancelled(cancelToken);
     std::scoped_lock lock(mutex);
     ++validateCalls;
     seenOptions.push_back(options);
     if (!diagnosticsByCall.empty()) {
-      const auto index = std::min(diagnosticIndex, diagnosticsByCall.size() - 1);
+      const auto index =
+          std::min(diagnosticIndex, diagnosticsByCall.size() - 1);
       ++diagnosticIndex;
       return {diagnosticsByCall[index]};
     }
@@ -180,40 +240,35 @@ public:
   }
 };
 
+inline std::shared_ptr<workspace::TextDocument>
+make_text_document(std::string uri, std::string languageId, std::string_view text,
+                   std::optional<std::int64_t> version = std::nullopt);
+
 class FakeDocumentFactory final : public workspace::DocumentFactory {
 public:
   std::unordered_map<std::string, std::string> contentsByUri;
   std::vector<std::string> fromUriCalls;
   std::vector<std::string> fromStringCalls;
-  std::size_t updateCalls = 0;
+  mutable std::size_t updateCalls = 0;
   mutable std::mutex mutex;
 
   [[nodiscard]] std::shared_ptr<workspace::Document> fromTextDocument(
-      std::shared_ptr<const workspace::TextDocument> textDocument,
+      std::shared_ptr<workspace::TextDocument> textDocument,
       const utils::CancellationToken &cancelToken = {}) const override {
     utils::throw_if_cancelled(cancelToken);
-    if (textDocument == nullptr) {
-      return nullptr;
-    }
-    auto document = std::make_shared<workspace::Document>();
-    document->setTextDocument(std::move(textDocument));
+    assert(textDocument != nullptr);
+    auto document =
+        std::make_shared<workspace::Document>(std::move(textDocument));
     document->state = workspace::DocumentState::Parsed;
     return document;
   }
 
   [[nodiscard]] std::shared_ptr<workspace::Document>
-  fromString(std::string text, std::string uri, std::string languageId = {},
-             std::optional<std::int64_t> clientVersion = std::nullopt,
+  fromString(std::string text, std::string uri,
              const utils::CancellationToken &cancelToken = {}) const override {
     utils::throw_if_cancelled(cancelToken);
-    auto textDocument = std::make_shared<workspace::TextDocument>();
-    textDocument->uri = std::move(uri);
-    textDocument->languageId = std::move(languageId);
-    textDocument->replaceText(std::move(text));
-    textDocument->setClientVersion(clientVersion);
-
-    auto document = std::make_shared<workspace::Document>();
-    document->setTextDocument(std::move(textDocument));
+    auto document = std::make_shared<workspace::Document>(
+        make_text_document(std::move(uri), {}, std::move(text)));
     document->state = workspace::DocumentState::Parsed;
     return document;
   }
@@ -224,13 +279,11 @@ public:
     utils::throw_if_cancelled(cancelToken);
     const auto it = contentsByUri.find(std::string(uri));
     if (it == contentsByUri.end()) {
-      return nullptr;
+      throw std::runtime_error("No content registered for URI: " +
+                               std::string(uri));
     }
-    auto textDocument = std::make_shared<workspace::TextDocument>();
-    textDocument->uri = std::string(uri);
-    textDocument->replaceText(it->second);
-    auto document = std::make_shared<workspace::Document>();
-    document->setTextDocument(std::move(textDocument));
+    auto document = std::make_shared<workspace::Document>(
+        make_text_document(std::string(uri), {}, it->second));
     document->state = workspace::DocumentState::Parsed;
     return document;
   }
@@ -241,7 +294,7 @@ public:
     utils::throw_if_cancelled(cancelToken);
     {
       std::scoped_lock lock(mutex);
-      ++const_cast<FakeDocumentFactory *>(this)->updateCalls;
+      ++updateCalls;
     }
     if (document.state < workspace::DocumentState::Parsed) {
       document.state = workspace::DocumentState::Parsed;
@@ -250,9 +303,71 @@ public:
   }
 };
 
+class InMemoryTextDocuments final : public workspace::TextDocumentProvider {
+public:
+  [[nodiscard]] std::shared_ptr<workspace::TextDocument>
+  get(std::string_view uri) const override {
+    const auto normalizedUri = utils::normalize_uri(uri);
+    if (normalizedUri.empty()) {
+      return nullptr;
+    }
+
+    std::scoped_lock lock(_mutex);
+    const auto it = _documents.find(normalizedUri);
+    return it == _documents.end() ? nullptr : it->second;
+  }
+
+  [[nodiscard]] bool
+  set(std::shared_ptr<workspace::TextDocument> document) {
+    assert(document != nullptr);
+    document = normalizeDocument(std::move(document));
+    if (document == nullptr) {
+      return false;
+    }
+
+    std::scoped_lock lock(_mutex);
+    const bool inserted = !_documents.contains(document->uri());
+    _documents.insert_or_assign(document->uri(), std::move(document));
+    return inserted;
+  }
+
+  void remove(std::string_view uri) {
+    const auto normalizedUri = utils::normalize_uri(uri);
+    if (normalizedUri.empty()) {
+      return;
+    }
+
+    std::scoped_lock lock(_mutex);
+    _documents.erase(normalizedUri);
+  }
+
+private:
+  [[nodiscard]] static std::shared_ptr<workspace::TextDocument>
+  normalizeDocument(std::shared_ptr<workspace::TextDocument> document) {
+    assert(document != nullptr);
+
+    const auto normalizedUri = utils::normalize_uri(document->uri());
+    if (normalizedUri.empty()) {
+      return nullptr;
+    }
+    if (normalizedUri == document->uri()) {
+      return document;
+    }
+
+    return std::make_shared<workspace::TextDocument>(workspace::TextDocument::create(
+        normalizedUri, document->languageId(), document->version(),
+        std::string(document->getText())));
+  }
+
+  mutable std::mutex _mutex;
+  std::unordered_map<std::string, std::shared_ptr<workspace::TextDocument>>
+      _documents;
+};
+
 class RecordingEventDocumentBuilder final : public workspace::DocumentBuilder {
 public:
-  [[nodiscard]] workspace::BuildOptions &updateBuildOptions() noexcept override {
+  [[nodiscard]] workspace::BuildOptions &
+  updateBuildOptions() noexcept override {
     return _options;
   }
 
@@ -261,34 +376,25 @@ public:
     return _options;
   }
 
-  [[nodiscard]] bool build(
-      std::span<const std::shared_ptr<workspace::Document>>,
-      const workspace::BuildOptions & = {},
-      utils::CancellationToken cancelToken = {}) const override {
+  void build(std::span<const std::shared_ptr<workspace::Document>>,
+             const workspace::BuildOptions & = {},
+             utils::CancellationToken cancelToken = {}) const override {
     utils::throw_if_cancelled(cancelToken);
-    return true;
   }
 
-  [[nodiscard]] workspace::DocumentUpdateResult
-  update(std::span<const workspace::DocumentId> changedDocumentIds,
-         std::span<const workspace::DocumentId> deletedDocumentIds,
-         utils::CancellationToken cancelToken = {},
-         bool rebuildDocuments = true) const override {
-    (void)rebuildDocuments;
+  void update(std::span<const workspace::DocumentId> changedDocumentIds,
+              std::span<const workspace::DocumentId> deletedDocumentIds,
+              utils::CancellationToken cancelToken = {}) const override {
     (void)changedDocumentIds;
     utils::throw_if_cancelled(cancelToken);
-    workspace::DocumentUpdateResult result;
-    result.rebuiltDocuments = _updatedDocuments;
-    result.deletedDocumentIds.assign(deletedDocumentIds.begin(),
-                                     deletedDocumentIds.end());
     emitUpdate({}, {});
-    return result;
+    (void)deletedDocumentIds;
   }
 
-  utils::ScopedDisposable onUpdate(
-      std::function<void(std::span<const workspace::DocumentId>,
-                         std::span<const workspace::DocumentId>)>
-          listener) override {
+  utils::ScopedDisposable
+  onUpdate(std::function<void(std::span<const workspace::DocumentId>,
+                              std::span<const workspace::DocumentId>)>
+               listener) const override {
     return _onUpdate.on([listener = std::move(listener)](
                             const workspace::DocumentUpdateEvent &event) {
       if (listener) {
@@ -299,28 +405,29 @@ public:
 
   utils::ScopedDisposable onBuildPhase(
       workspace::DocumentState targetState,
-      std::function<void(
-          std::span<const std::shared_ptr<workspace::Document>>)> listener) override {
-    return _onBuildPhase.on([targetState, listener = std::move(listener)](
-                                const workspace::DocumentBuildPhaseEvent &event) {
-      if (listener && event.targetState == targetState) {
-        listener(event.builtDocuments);
-      }
-    });
+      std::function<void(std::span<const std::shared_ptr<workspace::Document>>,
+                         utils::CancellationToken)>
+          listener) const override {
+    return _onBuildPhase.on(
+        [targetState, listener = std::move(listener)](
+            const workspace::DocumentBuildPhaseEvent &event) {
+          if (listener && event.targetState == targetState) {
+            listener(event.builtDocuments, event.cancelToken);
+          }
+        });
   }
 
   utils::ScopedDisposable onDocumentPhase(
       workspace::DocumentState targetState,
-      std::function<void(const std::shared_ptr<workspace::Document> &)>
-          listener) override {
-    return _onDocumentPhase.on(
-        [targetState, listener = std::move(listener)](
-            const workspace::DocumentPhaseEvent &event) {
-          if (listener && event.targetState == targetState &&
-              event.builtDocument != nullptr) {
-            listener(event.builtDocument);
-          }
-        });
+      std::function<void(const std::shared_ptr<workspace::Document> &,
+                         utils::CancellationToken)>
+          listener) const override {
+    return _onDocumentPhase.on([targetState, listener = std::move(listener)](
+                                   const workspace::DocumentPhaseEvent &event) {
+      if (listener && event.targetState == targetState) {
+        listener(event.builtDocument, event.cancelToken);
+      }
+    });
   }
 
   void waitUntil(workspace::DocumentState state,
@@ -329,11 +436,12 @@ public:
     utils::throw_if_cancelled(cancelToken);
   }
 
-  void waitUntil(workspace::DocumentState state, workspace::DocumentId documentId,
-                 utils::CancellationToken cancelToken = {}) const override {
+  [[nodiscard]] workspace::DocumentId
+  waitUntil(workspace::DocumentState state, workspace::DocumentId documentId,
+            utils::CancellationToken cancelToken = {}) const override {
     (void)state;
-    (void)documentId;
     utils::throw_if_cancelled(cancelToken);
+    return documentId;
   }
 
   void resetToState(workspace::Document &document,
@@ -349,16 +457,20 @@ public:
 
   void emitBuildPhase(
       workspace::DocumentState state,
-      std::vector<std::shared_ptr<workspace::Document>> documents = {}) const {
-    _onBuildPhase.emit(
-        {.targetState = state, .builtDocuments = std::move(documents)});
+      std::vector<std::shared_ptr<workspace::Document>> documents = {},
+      utils::CancellationToken cancelToken = {}) const {
+    _onBuildPhase.emit({.targetState = state,
+                        .builtDocuments = std::move(documents),
+                        .cancelToken = cancelToken});
   }
 
-  void emitDocumentPhase(
-      workspace::DocumentState state,
-      std::shared_ptr<workspace::Document> document) const {
-    _onDocumentPhase.emit(
-        {.targetState = state, .builtDocument = std::move(document)});
+  void emitDocumentPhase(workspace::DocumentState state,
+                         std::shared_ptr<workspace::Document> document,
+                         utils::CancellationToken cancelToken = {}) const {
+    assert(document != nullptr);
+    _onDocumentPhase.emit({.targetState = state,
+                           .builtDocument = std::move(document),
+                           .cancelToken = cancelToken});
   }
 
   [[nodiscard]] std::size_t updateListenerCount() const {
@@ -391,39 +503,64 @@ struct TestCoreServices final : services::CoreServices {
       : services::CoreServices(sharedServices) {}
 };
 
-inline std::unique_ptr<services::SharedCoreServices> make_shared_core_services() {
+inline std::unique_ptr<services::SharedCoreServices>
+make_empty_shared_core_services() {
   auto shared = std::make_unique<services::SharedCoreServices>();
-  services::installDefaultSharedCoreServices(*shared);
+  shared->workspace.textDocuments = std::make_shared<InMemoryTextDocuments>();
   return shared;
 }
 
-inline std::unique_ptr<TestCoreServices> make_core_services(
+inline std::shared_ptr<InMemoryTextDocuments>
+text_documents(services::SharedCoreServices &sharedServices) {
+  return std::static_pointer_cast<InMemoryTextDocuments>(
+      sharedServices.workspace.textDocuments);
+}
+
+inline std::shared_ptr<workspace::TextDocument>
+make_text_document(std::string uri, std::string languageId, std::string_view text,
+                   std::optional<std::int64_t> version) {
+  return std::make_shared<workspace::TextDocument>(workspace::TextDocument::create(
+      utils::normalize_uri(uri), std::move(languageId), version.value_or(0),
+      std::string(text)));
+}
+
+template <typename DocumentsLike>
+inline std::shared_ptr<workspace::TextDocument>
+set_text_document(DocumentsLike &documents, std::string uri,
+                  std::string languageId, std::string text,
+                  std::optional<std::int64_t> version = std::nullopt) {
+  const auto normalizedUri = utils::normalize_uri(uri);
+  auto textDocument = make_text_document(std::move(uri), std::move(languageId),
+                                         std::move(text), version);
+  (void)documents.set(textDocument);
+  return documents.get(normalizedUri);
+}
+
+inline std::unique_ptr<TestCoreServices>
+make_uninstalled_core_services(
     const services::SharedCoreServices &sharedServices, std::string languageId,
     std::vector<std::string> fileExtensions = {},
     std::vector<std::string> fileNames = {},
     std::unique_ptr<const parser::Parser> parser =
         std::make_unique<FakeParser>()) {
   auto services = std::make_unique<TestCoreServices>(sharedServices);
-  services->languageId = std::move(languageId);
-  services->languageMetaData.languageId = services->languageId;
+  services->languageMetaData.languageId = std::move(languageId);
   services->languageMetaData.fileExtensions = std::move(fileExtensions);
   services->languageMetaData.fileNames = std::move(fileNames);
   services->parser = std::move(parser);
-  installDefaultCoreServices(*services);
   return services;
 }
 
 template <typename ParserType>
-inline std::unique_ptr<TestCoreServices> make_core_services(
+inline std::unique_ptr<TestCoreServices>
+make_uninstalled_core_services(
     const services::SharedCoreServices &sharedServices, std::string languageId,
     std::vector<std::string> fileExtensions = {},
     std::vector<std::string> fileNames = {}) {
   auto services = std::make_unique<TestCoreServices>(sharedServices);
-  services->languageId = std::move(languageId);
-  services->languageMetaData.languageId = services->languageId;
+  services->languageMetaData.languageId = std::move(languageId);
   services->languageMetaData.fileExtensions = std::move(fileExtensions);
   services->languageMetaData.fileNames = std::move(fileNames);
-  installDefaultCoreServices(*services);
   services->parser = std::make_unique<const ParserType>(*services);
   return services;
 }
@@ -432,13 +569,19 @@ inline std::shared_ptr<workspace::Document>
 open_and_build_document(services::SharedCoreServices &sharedServices,
                         std::string uri, std::string languageId,
                         std::string text) {
-  auto textDocument = sharedServices.workspace.textDocuments->open(
-      std::move(uri), std::move(languageId), std::move(text), 1);
+  auto documents = text_documents(sharedServices);
+  if (documents == nullptr) {
+    return nullptr;
+  }
+  auto textDocument = set_text_document(*documents, std::move(uri),
+                                        std::move(languageId), std::move(text), 1);
   const auto documentId =
-      sharedServices.workspace.documents->getOrCreateDocumentId(textDocument->uri);
+      sharedServices.workspace.documents->getOrCreateDocumentId(
+          textDocument->uri());
   const std::array<workspace::DocumentId, 1> changedDocumentIds{documentId};
-  (void)sharedServices.workspace.documentBuilder->update(changedDocumentIds, {});
-  return sharedServices.workspace.documents->getDocument(textDocument->uri);
+  (void)sharedServices.workspace.documentBuilder->update(changedDocumentIds,
+                                                         {});
+  return sharedServices.workspace.documents->getDocument(textDocument->uri());
 }
 
 } // namespace pegium::test

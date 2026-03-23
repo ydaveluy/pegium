@@ -1,4 +1,4 @@
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 
 #include <cstdint>
 #include <string>
@@ -23,6 +23,23 @@ struct ListNode : pegium::AstNode {
 
 struct ParentNode : pegium::AstNode {
   pointer<RuleNode> child;
+};
+
+struct NonDefaultNode : pegium::AstNode {
+  explicit NonDefaultNode(int value) : value(value) {}
+  int value;
+};
+
+struct OptionalReferenceNode : pegium::AstNode {
+  optional<reference<RuleNode>> target;
+};
+
+struct OptionalMultiReferenceNode : pegium::AstNode {
+  optional<multi_reference<RuleNode>> targets;
+};
+
+struct VectorReferenceNode : pegium::AstNode {
+  vector<reference<RuleNode>> targets;
 };
 
 struct TypedRawValueExpr final : pegium::grammar::AbstractElement {
@@ -189,6 +206,14 @@ concept CanCreateParserRule = requires {
   ParserRule<RuleNode>{std::string_view{"R"}, std::declval<Expr>()};
 };
 
+template <typename NodeType>
+concept CanCreateConcreteParserRule = requires {
+  ParserRule<NodeType>{std::string_view{"R"}, "a"_kw};
+};
+
+template <typename NodeType>
+concept CanCreateNodeAction = requires { create<NodeType>(); };
+
 template <typename Expr>
 concept CanHide = requires { hidden(std::declval<Expr>()); };
 
@@ -198,6 +223,16 @@ concept CanIgnore = requires { ignored(std::declval<Expr>()); };
 template <typename Expr>
 concept CanCreateAssign = requires {
   assign<&RuleNode::text>(std::declval<Expr>());
+};
+
+template <typename Expr>
+concept CanCreateOptionalReferenceAssign = requires {
+  assign<&OptionalReferenceNode::target>(std::declval<Expr>());
+};
+
+template <typename Expr>
+concept CanCreateOptionalMultiReferenceAssign = requires {
+  assign<&OptionalMultiReferenceNode::targets>(std::declval<Expr>());
 };
 
 template <typename Expr>
@@ -217,6 +252,11 @@ concept HasSpecificAssignmentRawValue =
 template <typename Expr>
 concept CanCreateAppend = requires {
   append<&ListNode::values>(std::declval<Expr>());
+};
+
+template <typename Expr>
+concept CanCreateVectorReferenceAppend = requires {
+  append<&VectorReferenceNode::targets>(std::declval<Expr>());
 };
 
 template <typename Expr>
@@ -332,10 +372,16 @@ static_assert(CanIgnore<NonNullableExpr>);
 static_assert(CanCreateDataTypeRule<NonNullableExpr>);
 static_assert(CanCreateParserRule<NonNullableExpr>);
 static_assert(CanCreateAssign<NonNullableExpr>);
+static_assert(CanCreateOptionalReferenceAssign<DataTypeExpr>);
+static_assert(CanCreateOptionalMultiReferenceAssign<DataTypeExpr>);
+static_assert(!pegium::DefaultConstructibleAstNode<NonDefaultNode>);
+static_assert(!CanCreateNodeAction<NonDefaultNode>);
+static_assert(!CanCreateConcreteParserRule<NonDefaultNode>);
 static_assert(CanCreateAssign<TypedRawValueExpr>);
 static_assert(HasSpecificAssignmentRawValue<TypedRawValueExpr>);
 static_assert(!HasSpecificAssignmentRawValue<VariantRawValueExpr>);
 static_assert(CanCreateAppend<NonNullableExpr>);
+static_assert(CanCreateVectorReferenceAppend<DataTypeExpr>);
 static_assert(CanCreateEnableIf<NonNullableExpr>);
 static_assert(CanCreateMany<NonNullableExpr>);
 static_assert(CanCreateRepeat<NonNullableExpr>);
