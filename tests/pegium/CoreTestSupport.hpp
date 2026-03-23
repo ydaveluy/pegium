@@ -241,7 +241,8 @@ public:
 };
 
 inline std::shared_ptr<workspace::TextDocument>
-make_text_document(std::string uri, std::string languageId, std::string_view text,
+make_text_document(std::string_view uri, std::string languageId,
+                   std::string_view text,
                    std::optional<std::int64_t> version = std::nullopt);
 
 class FakeDocumentFactory final : public workspace::DocumentFactory {
@@ -264,11 +265,11 @@ public:
   }
 
   [[nodiscard]] std::shared_ptr<workspace::Document>
-  fromString(std::string text, std::string uri,
+  fromString(std::string text, std::string_view uri,
              const utils::CancellationToken &cancelToken = {}) const override {
     utils::throw_if_cancelled(cancelToken);
     auto document = std::make_shared<workspace::Document>(
-        make_text_document(std::move(uri), {}, std::move(text)));
+        make_text_document(uri, {}, std::move(text)));
     document->state = workspace::DocumentState::Parsed;
     return document;
   }
@@ -517,7 +518,8 @@ text_documents(services::SharedCoreServices &sharedServices) {
 }
 
 inline std::shared_ptr<workspace::TextDocument>
-make_text_document(std::string uri, std::string languageId, std::string_view text,
+make_text_document(std::string_view uri, std::string languageId,
+                   std::string_view text,
                    std::optional<std::int64_t> version) {
   return std::make_shared<workspace::TextDocument>(workspace::TextDocument::create(
       utils::normalize_uri(uri), std::move(languageId), version.value_or(0),

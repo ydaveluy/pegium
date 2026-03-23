@@ -60,8 +60,8 @@ public:
   };
   /// Subscribes to configuration section updates.
   [[nodiscard]] virtual utils::ScopedDisposable onConfigurationSectionUpdate(
-      typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
-          listener) = 0;
+      const typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
+          &listener) = 0;
 
   /// Returns the effective configuration for a language identifier.
   [[nodiscard]] virtual WorkspaceConfiguration
@@ -75,7 +75,7 @@ public:
 class StaticConfigurationProvider final : public ConfigurationProvider {
 public:
   explicit StaticConfigurationProvider(
-      WorkspaceConfiguration configuration = {});
+      const WorkspaceConfiguration &configuration = {});
 
   void initialize(const InitializeParams &params) override;
   [[nodiscard]] std::future<void>
@@ -88,8 +88,8 @@ public:
                    std::string_view key) const override;
 
   [[nodiscard]] utils::ScopedDisposable onConfigurationSectionUpdate(
-      typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
-          listener) override;
+      const typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
+          &listener) override;
 
   WorkspaceConfiguration getWorkspaceConfigurationForLanguage(
       std::string_view languageId) const override;

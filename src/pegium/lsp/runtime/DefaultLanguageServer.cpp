@@ -17,6 +17,7 @@
 #include <variant>
 
 #include <pegium/core/utils/Disposable.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 
 namespace pegium {
@@ -44,7 +45,7 @@ void merge_indexed_strings(std::vector<std::string> &merged,
     if (merged[index].empty()) {
       merged[index] = value;
     } else if (merged[index] != value) {
-      throw std::runtime_error(std::format(
+      throw utils::LanguageServerError(std::format(
           "Cannot merge '{}' and '{}' {}. They use the same index {}.",
           merged[index], std::string(value), label, index));
     }
@@ -67,6 +68,7 @@ struct LanguageServerCapabilities {
   bool hasDocumentSymbolProvider = false;
   bool hasCodeActionProvider = false;
   bool hasCodeLensProvider = false;
+  bool hasCodeLensResolveProvider = false;
   bool hasDocumentLinkProvider = false;
   bool hasFormattingProvider = false;
   bool hasFoldingRangeProvider = false;
@@ -189,9 +191,13 @@ LanguageServerCapabilities collect_language_server_capabilities(
     capabilities.hasCodeActionProvider =
         capabilities.hasCodeActionProvider ||
         services->lsp.codeActionProvider != nullptr;
-    capabilities.hasCodeLensProvider =
-        capabilities.hasCodeLensProvider ||
-        services->lsp.codeLensProvider != nullptr;
+    if (const auto *provider = services->lsp.codeLensProvider.get();
+        provider != nullptr) {
+      capabilities.hasCodeLensProvider = true;
+      capabilities.hasCodeLensResolveProvider =
+          capabilities.hasCodeLensResolveProvider ||
+          provider->supportsResolveCodeLens();
+    }
     capabilities.hasDocumentLinkProvider =
         capabilities.hasDocumentLinkProvider ||
         services->lsp.documentLinkProvider != nullptr;
@@ -329,7 +335,7 @@ DefaultLanguageServer::initialize(const ::lsp::InitializeParams &params) {
   }
   if (capabilities.hasCodeLensProvider) {
     ::lsp::CodeLensOptions options{};
-    options.resolveProvider = false;
+    options.resolveProvider = capabilities.hasCodeLensResolveProvider;
     result.capabilities.codeLensProvider = std::move(options);
   }
   if (capabilities.hasFoldingRangeProvider) {

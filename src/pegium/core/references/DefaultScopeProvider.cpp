@@ -1,5 +1,6 @@
 #include <pegium/core/references/DefaultScopeProvider.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <typeindex>
@@ -23,12 +24,9 @@ using DescriptionVisitor =
 [[nodiscard]] bool visit_entry_pointers(
     const std::vector<const AstNodeDescription *> &entries,
     DescriptionVisitor visitor) {
-  for (const auto *entry : entries) {
-    if (!visitor(*entry)) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(entries, [&visitor](const auto *entry) {
+    return visitor(*entry);
+  });
 }
 
 [[nodiscard]] bool visit_named_entries(
@@ -130,8 +128,7 @@ const workspace::AstNodeDescription *DefaultScopeProvider::getScopeEntry(
   }
 
   const auto referenceType = context.getReferenceType();
-  const auto *container = context.container;
-  if (container != nullptr) {
+  if (const auto *container = context.container; container != nullptr) {
     const auto localScopes = getLocalScopeLevels(getDocument(*container));
     const AstNodeDescription *entry = nullptr;
     (void)visit_local_scope_levels(
@@ -161,8 +158,7 @@ bool DefaultScopeProvider::visitScopeEntries(
     utils::function_ref<bool(const workspace::AstNodeDescription &)> visitor)
     const {
   const auto referenceType = context.getReferenceType();
-  const auto *container = context.container;
-  if (container != nullptr) {
+  if (const auto *container = context.container; container != nullptr) {
     const auto localScopes = getLocalScopeLevels(getDocument(*container));
     if (!visit_local_scope_levels(
             *localScopes, container,

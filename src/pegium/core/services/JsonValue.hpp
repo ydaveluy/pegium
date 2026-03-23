@@ -28,15 +28,15 @@ public:
                    Array, Object>;
 
   JsonValue() noexcept;
-  JsonValue(std::nullptr_t) noexcept;
-  JsonValue(bool value) noexcept;
-  JsonValue(int value) noexcept;
-  JsonValue(std::int64_t value) noexcept;
-  JsonValue(double value) noexcept;
-  JsonValue(std::string value) noexcept;
-  JsonValue(const char *value);
-  JsonValue(Array value) noexcept;
-  JsonValue(Object value) noexcept;
+  explicit(false) JsonValue(std::nullptr_t) noexcept;
+  explicit(false) JsonValue(bool value) noexcept;
+  explicit(false) JsonValue(int value) noexcept;
+  explicit(false) JsonValue(std::int64_t value) noexcept;
+  explicit(false) JsonValue(double value) noexcept;
+  explicit(false) JsonValue(std::string value) noexcept;
+  explicit(false) JsonValue(const char *value);
+  explicit(false) JsonValue(Array value) noexcept;
+  explicit(false) JsonValue(Object value) noexcept;
 
   /// Returns whether the value stores `null`.
   [[nodiscard]] bool isNull() const noexcept;

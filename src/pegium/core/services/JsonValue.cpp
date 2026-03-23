@@ -1,8 +1,10 @@
 #include <pegium/core/services/JsonValue.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <limits>
 #include <ostream>
+#include <span>
 #include <sstream>
 #include <string_view>
 #include <vector>
@@ -15,7 +17,9 @@ void append_indent(std::string &out, std::size_t count) { out.append(count, ' ')
 void append_escaped_json_string(std::string &out, std::string_view text) {
   static constexpr char hex[] = "0123456789ABCDEF";
   out.push_back('"');
-  for (const unsigned char c : text) {
+  for (const auto byte :
+       std::as_bytes(std::span(text.data(), text.size()))) {
+    const auto c = std::to_integer<unsigned char>(byte);
     switch (c) {
     case '\"':
       out += R"(\")";

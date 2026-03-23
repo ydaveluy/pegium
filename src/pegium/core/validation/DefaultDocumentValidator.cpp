@@ -39,12 +39,13 @@ struct FoundToken {
 ValidationAcceptor
 make_collecting_acceptor(std::vector<services::Diagnostic> &diagnostics,
                          const std::string &source) {
-  return [&diagnostics, &source](services::Diagnostic diagnostic) {
+  return ValidationAcceptor{
+      [&diagnostics, &source](services::Diagnostic diagnostic) {
     if (diagnostic.source.empty()) {
       diagnostic.source = source;
     }
     diagnostics.push_back(std::move(diagnostic));
-  };
+  }};
 }
 
 [[nodiscard]] std::string quote_keyword(std::string_view value) {
@@ -321,9 +322,9 @@ select_expect_frontier_for_diagnostic(
     }
   }
 
-  const bool zeroWidthGap =
-      foundToken.image.empty() || foundToken.begin > parseDiagnostic.offset;
-  if ((parseDiagnostic.kind == parser::ParseDiagnosticKind::Inserted ||
+  if (const bool zeroWidthGap =
+          foundToken.image.empty() || foundToken.begin > parseDiagnostic.offset;
+      (parseDiagnostic.kind == parser::ParseDiagnosticKind::Inserted ||
        parseDiagnostic.kind == parser::ParseDiagnosticKind::Incomplete) &&
       zeroWidthGap) {
     scratch = prefer_word_like_frontier(frontier);
@@ -607,9 +608,9 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
   }
 
   const auto previousFound = find_found_token(document, previous.offset);
-  const auto anchoredCurrentOffset =
-      skip_trivia_forward(document, previousFound.end);
-  if (!is_word_token(previousFound.image) ||
+  if (const auto anchoredCurrentOffset =
+          skip_trivia_forward(document, previousFound.end);
+      !is_word_token(previousFound.image) ||
       current.offset != anchoredCurrentOffset) {
     return false;
   }
@@ -690,8 +691,8 @@ from_inserted_run(const workspace::Document &document,
 
     std::size_t runEnd = index + 1;
     while (runEnd < parseDiagnostics.size()) {
-      const auto run = parseDiagnostics.subspan(index, runEnd - index + 1);
-      if (should_merge_inserted(run) || should_merge_deleted(run)) {
+      if (const auto run = parseDiagnostics.subspan(index, runEnd - index + 1);
+          should_merge_inserted(run) || should_merge_deleted(run)) {
         ++runEnd;
         continue;
       }
@@ -773,7 +774,7 @@ void DefaultDocumentValidator::processLinkingErrors(
       continue;
     }
 
-    const auto refText = reference.getRefText();
+    const auto &refText = reference.getRefText();
     if (refText.empty()) {
       continue;
     }
@@ -801,8 +802,8 @@ void DefaultDocumentValidator::validateAst(
     const AstNode &rootNode, std::vector<services::Diagnostic> &diagnostics,
     const ValidationOptions &options, const std::string &source,
     const utils::CancellationToken &cancelToken) const {
-  const ValidationAcceptor acceptor =
-      make_collecting_acceptor(diagnostics, source);
+  const ValidationAcceptor acceptor{
+      make_collecting_acceptor(diagnostics, source)};
   validateAstBefore(rootNode, acceptor, options.categories, cancelToken);
   validateAstNodes(rootNode, acceptor, options.categories, cancelToken);
   validateAstAfter(rootNode, acceptor, options.categories, cancelToken);

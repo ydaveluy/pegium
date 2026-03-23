@@ -136,14 +136,18 @@ DefaultLinker::getCandidates(const ReferenceInfo &reference) const {
   const auto *scopeProvider = services.references.scopeProvider.get();
   std::vector<workspace::AstNodeDescription> descriptions;
   std::unordered_set<workspace::NodeKey, workspace::NodeKeyHash> seen;
-  (void)scopeProvider->visitScopeEntries(
-      reference, [&descriptions, &seen](const workspace::AstNodeDescription &candidate) {
+  const auto collectDescription =
+      [&descriptions, &seen](const workspace::AstNodeDescription &candidate) {
         if (!seen.insert(make_node_key(candidate)).second) {
           return true;
         }
         descriptions.push_back(candidate);
         return true;
-      });
+      };
+  (void)scopeProvider->visitScopeEntries(
+      reference,
+      utils::function_ref<bool(const workspace::AstNodeDescription &)>(
+          collectDescription));
   if (descriptions.empty()) {
     return createLinkingError(reference);
   }
@@ -158,7 +162,7 @@ DefaultLinker::createCycleLinkingError(const ReferenceInfo &reference) const {
     try {
       target = locator->getAstNodePath(*reference.container) + "/" +
                std::string(reference.getFeature());
-    } catch (...) {
+    } catch (const std::exception &) {
       if (target.empty()) {
         target = "<unknown>";
       }
@@ -176,7 +180,7 @@ DefaultLinker::createCycleLinkingError(const ReferenceInfo &reference) const {
 }
 
 workspace::LinkingError DefaultLinker::createExceptionLinkingError(
-    const ReferenceInfo &reference, std::string message) const {
+    const ReferenceInfo &reference, const std::string &message) const {
   auto fullMessage = "An error occurred while resolving reference to '" +
                      std::string(reference.referenceText) + "': " + message;
   log_reference_resolution_problem(
@@ -214,9 +218,9 @@ DefaultLinker::getLinkedNodes(const ReferenceInfo &reference,
   std::optional<workspace::AstNodeDescription> firstCandidate;
   std::unordered_set<workspace::NodeKey, workspace::NodeKeyHash> seen;
   const auto *scopeProvider = services.references.scopeProvider.get();
-  (void)scopeProvider->visitScopeEntries(
-      reference, [this, &currentDocument, &resolved, &firstCandidate, &seen](
-                     const workspace::AstNodeDescription &candidate) {
+  const auto resolveCandidate =
+      [this, &currentDocument, &resolved, &firstCandidate,
+       &seen](const workspace::AstNodeDescription &candidate) {
         if (!seen.insert(make_node_key(candidate)).second) {
           return true;
         }
@@ -229,7 +233,11 @@ DefaultLinker::getLinkedNodes(const ReferenceInfo &reference,
                  currentDocument)),
              .description = candidate});
         return true;
-      });
+      };
+  (void)scopeProvider->visitScopeEntries(
+      reference,
+      utils::function_ref<bool(const workspace::AstNodeDescription &)>(
+          resolveCandidate));
   if (!resolved.empty()) {
     return resolved;
   }
@@ -245,12 +253,8 @@ DefaultLinker::resolve(const AbstractSingleReference &reference) const {
     return getLinkedNode(info, currentDocument);
   } catch (const CyclicReferenceResolution &cycle) {
     return createCycleLinkingError(makeReferenceInfo(cycle.reference()));
-  } catch (const utils::OperationCancelled &) {
-    throw;
   } catch (const std::exception &error) {
     return createExceptionLinkingError(info, error.what());
-  } catch (...) {
-    return createExceptionLinkingError(info, "unknown error");
   }
 }
 
@@ -263,12 +267,8 @@ DefaultLinker::resolveAll(const AbstractMultiReference &reference) const {
     return getLinkedNodes(info, currentDocument);
   } catch (const CyclicReferenceResolution &cycle) {
     return createCycleLinkingError(makeReferenceInfo(cycle.reference()));
-  } catch (const utils::OperationCancelled &) {
-    throw;
   } catch (const std::exception &error) {
     return createExceptionLinkingError(info, error.what());
-  } catch (...) {
-    return createExceptionLinkingError(info, "unknown error");
   }
 }
 

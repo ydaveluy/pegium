@@ -53,15 +53,16 @@ struct ExpectContext {
 
   private:
     friend struct ExpectContext;
-    using RestoreFn = void (*)(ExpectContext &, const void *) noexcept;
+    using RestoreFn =
+        void (*)(ExpectContext &, const grammar::AbstractElement *) noexcept;
 
     ScopeGuard(ExpectContext &ctx, RestoreFn restore,
-               const void *previous) noexcept
+               const grammar::AbstractElement *previous) noexcept
         : _ctx(ctx), _restore(restore), _previous(previous) {}
 
     ExpectContext &_ctx;
     RestoreFn _restore = nullptr;
-    const void *_previous = nullptr;
+    const grammar::AbstractElement *_previous = nullptr;
     bool _active = true;
   };
 
@@ -166,7 +167,7 @@ struct ExpectContext {
   [[nodiscard]] constexpr NodeCount node_count() const noexcept { return 0; }
 
   void override_grammar_element(NodeId,
-                                const grammar::AbstractElement *) noexcept {}
+                                const grammar::AbstractElement *) const noexcept {}
 
   [[nodiscard]] constexpr const char *cursor() const noexcept { return _cursor; }
   [[nodiscard]] constexpr const char *maxCursor() const noexcept {
@@ -384,13 +385,14 @@ struct ExpectContext {
   std::uint32_t editCount = 0;
 
 private:
-  static void restore_rule(ExpectContext &ctx, const void *previous) noexcept {
+  static void restore_rule(ExpectContext &ctx,
+                           const grammar::AbstractElement *previous) noexcept {
     ctx._currentRule = static_cast<const grammar::AbstractRule *>(previous);
     ctx.popContextElement();
   }
 
   static void restore_assignment(ExpectContext &ctx,
-                                 const void *previous) noexcept {
+                                 const grammar::AbstractElement *previous) noexcept {
     ctx._currentAssignment =
         static_cast<const grammar::Assignment *>(previous);
     ctx.popContextElement();

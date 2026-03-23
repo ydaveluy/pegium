@@ -20,7 +20,7 @@ public:
   /// Registers a listener.
   ///
   /// Active listeners are notified in registration order.
-  ScopedDisposable on(Listener listener) {
+  ScopedDisposable on(Listener listener) const {
     const auto state = _state;
     std::size_t id = 0;
     {

@@ -2,6 +2,7 @@
 
 /// Assignment implementation machinery used by parser-side assignment expressions.
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <optional>
@@ -459,15 +460,10 @@ private:
 
   [[nodiscard]] static bool
   ordered_choice_contains_recovery(const CstNodeView &node) {
-    if (node.isRecovered()) {
-      return true;
-    }
-    for (const auto child : node) {
-      if (child.isRecovered()) {
-        return true;
-      }
-    }
-    return false;
+    return node.isRecovered() ||
+           std::ranges::any_of(node, [](const CstNodeView &child) {
+             return child.isRecovered();
+           });
   }
 
   template <typename ClassType, typename AttrType>

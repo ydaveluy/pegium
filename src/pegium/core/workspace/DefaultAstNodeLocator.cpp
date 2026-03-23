@@ -25,10 +25,10 @@ std::optional<PathSegment> parse_segment(std::string_view part) {
     propertyName = part.substr(0, at);
     std::size_t parsedIndex = 0;
     const auto indexPart = part.substr(at + 1);
-    const auto parseResult = std::from_chars(indexPart.data(),
-                                             indexPart.data() + indexPart.size(),
-                                             parsedIndex);
-    if (parseResult.ec != std::errc{} ||
+    if (const auto parseResult =
+            std::from_chars(indexPart.data(),
+                            indexPart.data() + indexPart.size(), parsedIndex);
+        parseResult.ec != std::errc{} ||
         parseResult.ptr != indexPart.data() + indexPart.size()) {
       return std::nullopt;
     }
@@ -121,16 +121,16 @@ std::string DefaultAstNodeLocator::getAstNodePath(const AstNode &node) const {
         index.has_value()) {
       const auto indexText = std::to_string(*index);
       cursor -= indexText.size();
-      std::copy(indexText.begin(), indexText.end(),
-                path.begin() + static_cast<std::ptrdiff_t>(cursor));
-      path[--cursor] = '@';
+      std::ranges::copy(indexText, path.begin() + cursor);
+      --cursor;
+      path[cursor] = '@';
     }
 
     const auto propertyName = require_property_name(*current);
     cursor -= propertyName.size();
-    std::copy(propertyName.begin(), propertyName.end(),
-              path.begin() + static_cast<std::ptrdiff_t>(cursor));
-    path[--cursor] = '/';
+    std::ranges::copy(propertyName, path.begin() + cursor);
+    --cursor;
+    path[cursor] = '/';
   }
   return path;
 }

@@ -29,7 +29,7 @@ public:
   /// Registers LSP text-document notifications on `messageHandler`.
   utils::ScopedDisposable
   listen(::lsp::MessageHandler &messageHandler,
-         std::function<void()> ensureInitialized = {}) override;
+         const std::function<void()> &ensureInitialized = {}) override;
 
   /// Subscribes to open-document events.
   utils::ScopedDisposable
@@ -63,12 +63,12 @@ public:
 private:
   void emitWillSave(
       const std::shared_ptr<workspace::TextDocument> &document,
-      workspace::TextDocumentSaveReason reason);
-  void emitDidOpen(const std::shared_ptr<workspace::TextDocument> &document);
+      workspace::TextDocumentSaveReason reason) const;
+  void emitDidOpen(const std::shared_ptr<workspace::TextDocument> &document) const;
   void emitDidChangeContent(
-      const std::shared_ptr<workspace::TextDocument> &document);
-  void emitDidSave(const std::shared_ptr<workspace::TextDocument> &document);
-  void emitDidClose(const std::shared_ptr<workspace::TextDocument> &document);
+      const std::shared_ptr<workspace::TextDocument> &document) const;
+  void emitDidSave(const std::shared_ptr<workspace::TextDocument> &document) const;
+  void emitDidClose(const std::shared_ptr<workspace::TextDocument> &document) const;
   [[nodiscard]] std::vector<workspace::TextEdit>
   emitWillSaveWaitUntil(
       const std::shared_ptr<workspace::TextDocument> &document,

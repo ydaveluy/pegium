@@ -32,11 +32,14 @@ concept LocalRecoveryProbeCapableExpression =
       { expression.probeRecoverable(ctx) } -> std::same_as<bool>;
     };
 
+template <typename Expr, typename Context>
+concept HasFastProbeImpl = requires(const Expr &expression, Context &ctx) {
+  { expression.fast_probe_impl(ctx) } -> std::same_as<bool>;
+};
+
 struct FastProbeAccess {
   template <typename Expr, typename Context>
-    requires requires(const Expr &expression, Context &ctx) {
-      { expression.fast_probe_impl(ctx) } -> std::same_as<bool>;
-    }
+    requires HasFastProbeImpl<Expr, Context>
   static bool probe(const Expr &expression, Context &ctx) {
     return expression.fast_probe_impl(ctx);
   }

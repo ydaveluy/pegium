@@ -27,8 +27,8 @@ public:
 
   [[nodiscard]] utils::ScopedDisposable
   onConfigurationSectionUpdate(
-      typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
-          listener) override;
+      const typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
+          &listener) override;
 
   WorkspaceConfiguration
   getWorkspaceConfigurationForLanguage(

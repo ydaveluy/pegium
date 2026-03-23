@@ -1,5 +1,6 @@
 #include <pegium/cli/CliUtils.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <span>
 #include <stdexcept>
@@ -10,6 +11,7 @@
 #include <pegium/core/services/Diagnostic.hpp>
 #include <pegium/core/services/ServiceRegistry.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 #include <pegium/core/workspace/Document.hpp>
 #include <pegium/core/workspace/DocumentBuilder.hpp>
@@ -55,13 +57,10 @@ bool matches_language_path(
   }
 
   const auto extension = normalize_extension(path.extension().string());
-  for (const auto &candidate : languageMetaData.fileExtensions) {
-    if (normalize_extension(candidate) == extension) {
-      return true;
-    }
-  }
-
-  return false;
+  return std::ranges::any_of(
+      languageMetaData.fileExtensions, [&extension](const auto &candidate) {
+        return normalize_extension(candidate) == extension;
+      });
 }
 
 void validate_language_path(
@@ -73,7 +72,7 @@ void validate_language_path(
 
   if (!languageMetaData.fileNames.empty() &&
       !languageMetaData.fileExtensions.empty()) {
-    throw std::invalid_argument(
+    throw pegium::utils::CliUsageError(
         "Please choose a file with one of these names: " +
         join_values(languageMetaData.fileNames) +
         " or one of these extensions: " +
@@ -81,12 +80,12 @@ void validate_language_path(
   }
 
   if (!languageMetaData.fileNames.empty()) {
-    throw std::invalid_argument(
+    throw pegium::utils::CliUsageError(
         "Please choose a file with one of these names: " +
         join_values(languageMetaData.fileNames) + ".");
   }
 
-  throw std::invalid_argument(
+  throw pegium::utils::CliUsageError(
       "Please choose a file with one of these extensions: " +
       join_values(languageMetaData.fileExtensions) + ".");
 }
@@ -116,21 +115,21 @@ build_document_from_path(std::string_view path,
   const auto uri = utils::path_to_file_uri(absolutePathString);
 
   if (!services.shared.workspace.fileSystemProvider->exists(uri)) {
-    throw std::invalid_argument("File " + absolutePathString +
-                                " does not exist.");
+    throw utils::CliUsageError("File " + absolutePathString +
+                               " does not exist.");
   }
 
   validate_language_path(absolutePath, services.languageMetaData);
 
   const auto *registeredServices = services.shared.serviceRegistry->findServices(uri);
   if (registeredServices == nullptr) {
-    throw std::runtime_error(
+    throw utils::CliError(
         "Language services for '" + services.languageMetaData.languageId +
         "' must be registered before loading CLI documents.");
   }
 
   if (registeredServices != &services) {
-    throw std::runtime_error(
+    throw utils::CliError(
         "Language services for '" + services.languageMetaData.languageId +
         "' are not registered for '" + absolutePathString + "'.");
   }
@@ -146,12 +145,10 @@ build_document_from_path(std::string_view path,
 }
 
 bool has_error_diagnostics(const workspace::Document &document) noexcept {
-  for (const auto &diagnostic : document.diagnostics) {
-    if (diagnostic.severity == services::DiagnosticSeverity::Error) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::any_of(
+      document.diagnostics, [](const auto &diagnostic) {
+        return diagnostic.severity == services::DiagnosticSeverity::Error;
+      });
 }
 
 void print_error_diagnostics(const workspace::Document &document,

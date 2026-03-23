@@ -56,7 +56,7 @@ public:
   }
 
   [[nodiscard]] std::shared_ptr<Document>
-  fromString(std::string, std::string,
+  fromString(std::string, std::string_view,
              const utils::CancellationToken & = {}) const override {
     throw std::logic_error("Not used in this test helper.");
   }

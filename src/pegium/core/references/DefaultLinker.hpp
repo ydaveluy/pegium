@@ -54,7 +54,7 @@ private:
   createCycleLinkingError(const ReferenceInfo &reference) const;
   [[nodiscard]] workspace::LinkingError
   createExceptionLinkingError(const ReferenceInfo &reference,
-                              std::string message) const;
+                              const std::string &message) const;
   [[nodiscard]] workspace::ResolvedAstNodeDescriptionOrError
   getLinkedNode(const ReferenceInfo &reference,
                 const workspace::Document &currentDocument) const;

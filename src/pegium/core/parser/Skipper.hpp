@@ -21,9 +21,16 @@ concept ParseContextType =
   } noexcept -> std::same_as<const char *>;
 };
 
+template <typename ContextT>
+concept SkipWithoutBuilderContextType =
+    requires(const ContextT &ctx, const char *begin) {
+      { ctx.skip(begin) } noexcept -> std::same_as<const char *>;
+    };
+
 using SkipHiddenNodesFn =
     const char *(*)(const void *, const char *, CstBuilder &) noexcept;
-using SkipWithoutBuilderFn = const char *(*)(const void *, const char *) noexcept;
+using SkipWithoutBuilderFn =
+    const char *(*)(const void *, const char *) noexcept;
 
 template <typename ContextT>
   requires ParseContextType<ContextT>
@@ -32,10 +39,7 @@ template <typename ContextT>
   return static_cast<const ContextT *>(contextPtr)->skip(begin, builder);
 }
 
-template <typename ContextT>
-  requires requires(const ContextT &ctx, const char *begin) {
-    { ctx.skip(begin) } noexcept -> std::same_as<const char *>;
-  }
+template <SkipWithoutBuilderContextType ContextT>
 [[nodiscard]] const char *
 skip_without_builder_for_context(const void *contextPtr,
                                  const char *begin) noexcept {
@@ -48,7 +52,8 @@ struct Skipper {
   SkipWithoutBuilderFn skipWithoutBuilderFn = &default_skip_without_builder;
   std::shared_ptr<const void> owner;
 
-  [[nodiscard]] static const char *default_skip(const void *, const char *begin,
+  [[nodiscard]] static const char *default_skip(const void *,
+                                                const char *begin,
                                                 CstBuilder &) noexcept {
     return begin;
   }
@@ -60,7 +65,7 @@ struct Skipper {
   template <typename ContextT>
     requires ParseContextType<ContextT>
   [[nodiscard]] static Skipper from(const ContextT &contextInstance) noexcept {
-    return {&contextInstance,
+    return {std::addressof(contextInstance),
             &skip_hidden_nodes_for_context<ContextT>,
             &skip_without_builder_for_context<ContextT>,
             {}};
@@ -98,9 +103,12 @@ struct Skipper {
 
 };
 
+namespace detail {
+inline const Skipper noOpSkipper{};
+} // namespace detail
+
 [[nodiscard]] inline const Skipper &NoOpSkipper() noexcept {
-  static const Skipper skipper{};
-  return skipper;
+  return detail::noOpSkipper;
 }
 
 } // namespace pegium::parser

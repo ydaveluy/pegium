@@ -34,31 +34,40 @@ concept EditableParseModeContext =
 
 namespace detail {
 
+template <typename Expr, typename Context>
+concept HasParseImpl = requires(const Expr &expression, Context &ctx) {
+  { expression.parse_impl(ctx) } -> std::same_as<bool>;
+};
+
 struct ParseAccess {
   template <typename Expr, ParseModeContext Context>
-    requires requires(const Expr &expression, Context &ctx) {
-      { expression.parse_impl(ctx) } -> std::same_as<bool>;
-    }
+    requires HasParseImpl<Expr, Context>
   static bool parse(const Expr &expression, Context &ctx) {
     return expression.parse_impl(ctx);
   }
 };
 
+template <typename Expr, typename Context>
+concept ParseAccessAvailable =
+    requires(const Expr &expression, Context &ctx) {
+      { ParseAccess::parse(expression, ctx) } -> std::same_as<bool>;
+    };
+
+template <typename Expr, typename Context>
+concept HasProbeImpl = requires(const Expr &expression, Context &ctx) {
+  { expression.probe_impl(ctx) } -> std::same_as<bool>;
+};
+
 struct ProbeAccess {
   template <typename Expr, StrictParseModeContext Context>
-    requires requires(const Expr &expression, Context &ctx) {
-      { expression.probe_impl(ctx) } -> std::same_as<bool>;
-    }
+    requires HasProbeImpl<Expr, Context>
   static bool probe(const Expr &expression, Context &ctx) {
     return expression.probe_impl(ctx);
   }
 
   template <typename Expr, StrictParseModeContext Context>
-    requires(!requires(const Expr &expression, Context &ctx) {
-      { expression.probe_impl(ctx) } -> std::same_as<bool>;
-    }) && requires(const Expr &expression, Context &ctx) {
-      { ParseAccess::parse(expression, ctx) } -> std::same_as<bool>;
-    }
+    requires(!HasProbeImpl<Expr, Context> &&
+             ParseAccessAvailable<Expr, Context>)
   static bool probe(const Expr &expression, Context &ctx) {
     const auto checkpoint = ctx.mark();
     const auto maxCursor = ctx.maxCursor();
@@ -69,20 +78,22 @@ struct ProbeAccess {
   }
 };
 
+template <typename Expr, typename Context>
+concept ProbeAccessAvailable =
+    requires(const Expr &expression, Context &ctx) {
+      { ProbeAccess::probe(expression, ctx) } -> std::same_as<bool>;
+    };
+
 } // namespace detail
 
 template <typename Expr, ParseModeContext Context>
-  requires requires(const Expr &expression, Context &ctx) {
-    { detail::ParseAccess::parse(expression, ctx) } -> std::same_as<bool>;
-  }
+  requires detail::ParseAccessAvailable<Expr, Context>
 inline bool parse(const Expr &expression, Context &ctx) {
   return detail::ParseAccess::parse(expression, ctx);
 }
 
 template <typename Expr, StrictParseModeContext Context>
-  requires requires(const Expr &expression, Context &ctx) {
-    { detail::ProbeAccess::probe(expression, ctx) } -> std::same_as<bool>;
-  }
+  requires detail::ProbeAccessAvailable<Expr, Context>
 inline bool probe(const Expr &expression, Context &ctx) {
   return detail::ProbeAccess::probe(expression, ctx);
 }

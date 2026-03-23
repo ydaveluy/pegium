@@ -2,6 +2,7 @@
 
 #include <exception>
 #include <shared_mutex>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -20,7 +21,7 @@ DefaultWorkspaceLock::~DefaultWorkspaceLock() {
       entry.cancellation.request_stop();
     }
   }
-  cancelWrite();
+  this->cancelWrite();
   _queueCv.notify_all();
 }
 
@@ -107,8 +108,8 @@ void DefaultWorkspaceLock::run(std::stop_token stopToken) {
       }
     }
 
-    std::vector<std::future<void>> readFutures;
-    readFutures.reserve(entries.size());
+    std::vector<std::jthread> readWorkers;
+    readWorkers.reserve(entries.size());
     for (auto &entry : entries) {
       const bool shuttingDown = _stopping || stopToken.stop_requested();
       if (shuttingDown) {
@@ -124,27 +125,21 @@ void DefaultWorkspaceLock::run(std::stop_token stopToken) {
           entry.completion.set_value();
         } catch (const utils::OperationCancelled &) {
           entry.completion.set_value();
-        } catch (...) {
+        } catch (const std::exception &) {
           entry.completion.set_exception(std::current_exception());
         }
       } else {
         auto *entryPtr = &entry;
-        readFutures.push_back(std::async(std::launch::async,
-                                         [this, entryPtr]() {
-                                           try {
-                                             std::shared_lock lock(_mutex);
-                                             entryPtr->readAction();
-                                             entryPtr->completion.set_value();
-                                           } catch (...) {
-                                             entryPtr->completion.set_exception(
-                                                 std::current_exception());
-                                           }
-                                         }));
+        readWorkers.emplace_back([this, entryPtr]() {
+          try {
+            std::shared_lock lock(_mutex);
+            entryPtr->readAction();
+            entryPtr->completion.set_value();
+          } catch (const std::exception &) {
+            entryPtr->completion.set_exception(std::current_exception());
+          }
+        });
       }
-    }
-
-    for (auto &future : readFutures) {
-      future.wait();
     }
   }
 }

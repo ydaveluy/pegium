@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 
 namespace pegium {
@@ -162,7 +163,7 @@ void wait_until_phase(pegium::SharedServices &sharedServices,
     if (uri.has_value() &&
         requiredState.type == ServiceRequirement::Type::Document) {
       if (document == nullptr) {
-        throw std::runtime_error(
+        throw utils::LanguageServerError(
             std::format("No document found for URI: {}", *uri));
       }
       (void)sharedServices.workspace.documentBuilder->waitUntil(
@@ -172,11 +173,12 @@ void wait_until_phase(pegium::SharedServices &sharedServices,
 
     sharedServices.workspace.documentBuilder->waitUntil(requiredState.state,
                                                         cancelToken);
-  } catch (const utils::OperationCancelled &) {
-    throw;
   } catch (const ::lsp::RequestError &) {
     throw;
   } catch (const std::exception &error) {
+    if (dynamic_cast<const utils::OperationCancelled *>(&error) != nullptr) {
+      throw;
+    }
     throw ::lsp::RequestError(::lsp::MessageError::RequestFailed, error.what());
   }
 }

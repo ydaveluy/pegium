@@ -7,15 +7,15 @@ namespace pegium::workspace {
 namespace {
 
 std::string resolve_document_uri(
-    const std::shared_ptr<TextDocument> &textDocument, std::string uri) {
+    const std::shared_ptr<TextDocument> &textDocument, const std::string &uri) {
   assert(textDocument != nullptr);
-  return uri.empty() ? textDocument->uri() : std::move(uri);
+  return uri.empty() ? textDocument->uri() : uri;
 }
 
 } // namespace
 
 Document::Document(std::shared_ptr<TextDocument> textDocument, std::string uri)
-    : uri(resolve_document_uri(textDocument, std::move(uri))),
+    : uri(resolve_document_uri(textDocument, uri)),
       _textDocument(std::move(textDocument)) {
   assert(_textDocument != nullptr);
 }
@@ -45,7 +45,7 @@ void Document::attachTextDocument(std::shared_ptr<TextDocument> textDocument) {
 
 SymbolId Document::makeSymbolId(const AstNode &node) const noexcept {
   assert(node.hasCstNode() && "AST nodes should always carry a CST node");
-  return static_cast<SymbolId>(node.getCstNode().id());
+  return node.getCstNode().id();
 }
 
 const AstNode &Document::getAstNode(SymbolId symbolId) const noexcept {

@@ -165,7 +165,10 @@ std::vector<std::shared_ptr<Document>> DefaultWorkspaceManager::performStartup(
   };
 
   try {
-    loadAdditionalDocuments(workspaceFolders, collector, cancelToken);
+    loadAdditionalDocuments(
+        workspaceFolders,
+        utils::function_ref<void(std::shared_ptr<Document>)>(collector),
+        cancelToken);
 
     std::vector<std::string> workspaceFileUris;
     for (const auto &workspaceFolder : workspaceFolders) {
@@ -189,7 +192,10 @@ std::vector<std::shared_ptr<Document>> DefaultWorkspaceManager::performStartup(
       uniqueWorkspaceFileUris.push_back(fileUri);
     }
 
-    loadWorkspaceDocuments(uniqueWorkspaceFileUris, collector, cancelToken);
+    loadWorkspaceDocuments(
+        uniqueWorkspaceFileUris,
+        utils::function_ref<void(std::shared_ptr<Document>)>(collector),
+        cancelToken);
 
     // `ready()` intentionally means startup documents are now discoverable
     // through the workspace, not that the initial build already finished.

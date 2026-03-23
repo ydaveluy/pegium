@@ -32,7 +32,7 @@ public:
   /// not resolve to registered services. The returned document always carries
   /// a normalized non-empty URI.
   [[nodiscard]] virtual std::shared_ptr<Document>
-  fromString(std::string text, std::string uri,
+  fromString(std::string text, std::string_view uri,
              const utils::CancellationToken &cancelToken = {}) const = 0;
 
   /// Creates a managed document from the latest text available for a URI.

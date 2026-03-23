@@ -8,6 +8,7 @@
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/ServiceRegistry.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 
 namespace pegium::workspace {
@@ -34,7 +35,7 @@ std::shared_ptr<Document> DefaultDocumentFactory::fromTextDocument(
 }
 
 std::shared_ptr<Document> DefaultDocumentFactory::fromString(
-    std::string text, std::string uri,
+    std::string text, std::string_view uri,
     const utils::CancellationToken &cancelToken) const {
   utils::throw_if_cancelled(cancelToken);
 
@@ -72,7 +73,7 @@ Document &DefaultDocumentFactory::update(
 
   const auto previousParsedText = previous_analyzed_text(document);
   if (document.uri.empty()) {
-    throw std::runtime_error("Cannot update a document without URI.");
+    throw utils::DocumentFactoryError("Cannot update a document without URI.");
   }
 
   const auto &services = shared.serviceRegistry->getServices(document.uri);

@@ -160,17 +160,11 @@ bool DefaultIndexManager::isAffected(
     return false;
   }
 
-  for (const auto &reference : referencesIt->second) {
-    if (reference.local) {
-      continue;
-    }
-    if (reference.targetDocumentId.has_value() &&
-        changedDocumentIds.contains(*reference.targetDocumentId)) {
-      return true;
-    }
-  }
-
-  return false;
+  return std::ranges::any_of(referencesIt->second, [&changedDocumentIds](
+                                                      const auto &reference) {
+    return !reference.local && reference.targetDocumentId.has_value() &&
+           changedDocumentIds.contains(*reference.targetDocumentId);
+  });
 }
 
 std::vector<AstNodeDescription> DefaultIndexManager::getFileDescriptionsLocked(

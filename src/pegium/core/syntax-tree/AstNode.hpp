@@ -21,6 +21,12 @@
 
 namespace pegium {
 
+struct AstNode;
+
+template <typename Node, auto Feature>
+concept AstFeatureMember =
+    std::derived_from<Node, AstNode> && requires(Node &node) { node.*Feature; };
+
 /// Base type for every AST node produced by pegium parsers.
 ///
 /// `AstNode` stores the structural links of the tree:
@@ -220,8 +226,7 @@ struct AstNode {
 
   /// Sets the container relationship for this node using a compile-time AST feature.
   template <typename Node, auto Feature>
-    requires std::derived_from<Node, AstNode> &&
-             requires(Node &node) { node.*Feature; }
+    requires AstFeatureMember<Node, Feature>
   void setContainer(
       Node &container,
       std::size_t index = std::numeric_limits<std::size_t>::max()) {
@@ -230,8 +235,7 @@ struct AstNode {
 
   /// Attaches this node to a container using a compile-time AST feature.
   template <typename Node, auto Feature>
-    requires std::derived_from<Node, AstNode> &&
-             requires(Node &node) { node.*Feature; }
+    requires AstFeatureMember<Node, Feature>
   void attachToContainer(
       Node &container,
       std::size_t index = std::numeric_limits<std::size_t>::max()) noexcept {

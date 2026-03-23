@@ -10,6 +10,7 @@
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/utils/UriUtils.hpp>
 #include <pegium/core/workspace/Document.hpp>
 #include <pegium/core/workspace/TextDocumentProvider.hpp>
 #include <sstream>
@@ -122,7 +123,7 @@ private:
     return std::make_shared<pegium::workspace::TextDocument>(
         pegium::workspace::TextDocument::create(
             normalizedUri, document->languageId(), document->version(),
-            document->getText()));
+            std::string(document->getText())));
   }
 
   std::unordered_map<std::string,
@@ -220,7 +221,8 @@ public:
       throw std::runtime_error("Failed to open fuzz text document.");
     }
     _documentId =
-        _shared.workspace.documents->getOrCreateDocumentId(storedTextDocument->uri);
+        _shared.workspace.documents->getOrCreateDocumentId(
+            storedTextDocument->uri());
     if (_documentId == pegium::workspace::InvalidDocumentId) {
       throw std::runtime_error("Failed to allocate a fuzz document id.");
     }
@@ -607,7 +609,8 @@ DocumentSnapshot parse_direct(std::string source) {
                                               std::string(kFuzzLanguageId), 1,
                                               std::move(source)));
   pegium::workspace::Document document(std::move(textDocument));
-  document.parseResult = parser.parse(text::TextSnapshot::copy(document.textDocument().getText()), {});
+  document.parseResult = parser.parse(
+      pegium::text::TextSnapshot::copy(document.textDocument().getText()), {});
   document.references = document.parseResult.references;
   if (document.parseResult.cst != nullptr) {
     document.parseResult.cst->attachDocument(document);

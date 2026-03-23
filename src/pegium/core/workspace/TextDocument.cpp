@@ -20,7 +20,7 @@ constexpr std::uint32_t kLineIndexChunkSize = 64 * 1024;
 TextOffset line_end_offset(std::span<const TextOffset> lineStart, TextOffset size,
                            std::uint32_t line) {
   if (line + 1 < lineStart.size()) {
-    return static_cast<TextOffset>(lineStart[line + 1] - 1);
+    return lineStart[line + 1] - 1;
   }
   return size;
 }
@@ -28,13 +28,14 @@ TextOffset line_end_offset(std::span<const TextOffset> lineStart, TextOffset siz
 std::uint32_t utf16_column(std::string_view text, TextOffset lineStart,
                            TextOffset clampedInLine) {
   const auto *bytes =
-      reinterpret_cast<const std::uint8_t *>(text.data()) + lineStart;
+      reinterpret_cast<const std::byte *>(text.data()) + lineStart;
   const auto *bytesEnd =
-      reinterpret_cast<const std::uint8_t *>(text.data()) + clampedInLine;
+      reinterpret_cast<const std::byte *>(text.data()) + clampedInLine;
   std::uint32_t units = 0;
 
   while (bytes < bytesEnd) {
-    while (bytes < bytesEnd && *bytes < 0x80u) {
+    while (bytes < bytesEnd &&
+           std::to_integer<unsigned char>(*bytes) < 0x80u) {
       ++bytes;
       ++units;
     }
@@ -142,8 +143,7 @@ TextDocument &TextDocument::update(
     const auto begin = document.offsetAt(change.range->start);
     const auto end = document.offsetAt(change.range->end);
     auto updated = std::string(document.getText());
-    updated.replace(static_cast<std::size_t>(begin),
-                    static_cast<std::size_t>(end >= begin ? end - begin : 0),
+    updated.replace(begin, end >= begin ? end - begin : 0U,
                     change.text);
     document.setText(std::move(updated));
   }
@@ -173,8 +173,7 @@ std::string TextDocument::applyEdits(const TextDocument &document,
     const auto &edit = entry.get();
     const auto begin = document.offsetAt(edit.range.start);
     const auto end = document.offsetAt(edit.range.end);
-    updated.replace(static_cast<std::size_t>(begin),
-                    static_cast<std::size_t>(end >= begin ? end - begin : 0),
+    updated.replace(begin, end >= begin ? end - begin : 0U,
                     edit.newText);
   }
   return updated;
@@ -199,8 +198,7 @@ std::string TextDocument::getText(const text::Range &range) const {
   if (begin > end) {
     std::swap(begin, end);
   }
-  return std::string(getText().substr(static_cast<std::size_t>(begin),
-                                      static_cast<std::size_t>(end - begin)));
+  return std::string(getText().substr(begin, end - begin));
 }
 
 TextOffset TextDocument::offsetAt(const text::Position &position) const {
@@ -227,8 +225,7 @@ TextOffset TextDocument::offsetAt(std::uint32_t line,
   std::uint32_t remainingUnits = character;
   while (index < end && remainingUnits > 0) {
     while (index < end && remainingUnits > 0 &&
-           static_cast<unsigned char>(
-               getText()[static_cast<std::size_t>(index)]) < 0x80u) {
+           static_cast<unsigned char>(getText()[index]) < 0x80u) {
       ++index;
       --remainingUnits;
     }
@@ -239,9 +236,9 @@ TextOffset TextDocument::offsetAt(std::uint32_t line,
     std::uint32_t advance = 0;
     std::uint32_t utf16Units = 0;
     text::decodeOneUtf8ToUtf16Units(
-        reinterpret_cast<const std::uint8_t *>(getText().data()) + index,
-        static_cast<std::uint32_t>(end - index), advance, utf16Units);
-    index = static_cast<TextOffset>(index + advance);
+        reinterpret_cast<const std::byte *>(getText().data()) + index,
+        end - index, advance, utf16Units);
+    index = index + advance;
     remainingUnits =
         remainingUnits > utf16Units ? remainingUnits - utf16Units : 0u;
   }
@@ -266,11 +263,11 @@ text::Position TextDocument::positionAt(TextOffset offset) const {
   const auto chunk =
       std::min<std::uint32_t>(clamped / kLineIndexChunkSize, impl.numChunks - 1);
   const auto lo = impl.chunkLineLowerBound[chunk];
-  auto hi = static_cast<std::uint32_t>(impl.chunkLineLowerBound[chunk + 1] + 1);
+  auto hi = impl.chunkLineLowerBound[chunk + 1] + 1;
   hi = std::min(hi, static_cast<std::uint32_t>(impl.lineStart.size()));
 
-  const auto beginIt = impl.lineStart.begin() + static_cast<std::ptrdiff_t>(lo);
-  const auto endIt = impl.lineStart.begin() + static_cast<std::ptrdiff_t>(hi);
+  const auto beginIt = impl.lineStart.begin() + lo;
+  const auto endIt = impl.lineStart.begin() + hi;
   const auto it = std::ranges::upper_bound(beginIt, endIt, clamped);
   const auto line = static_cast<std::uint32_t>((it - impl.lineStart.begin()) - 1);
   const auto lineStart = impl.lineStart[line];
@@ -313,21 +310,20 @@ void TextDocument::ensureLineIndex() const {
 
   const auto clampedSize = static_cast<TextOffset>(
       std::min<std::size_t>(size, std::numeric_limits<TextOffset>::max()));
-  impl.numChunks = static_cast<std::uint32_t>(
-      (clampedSize + kLineIndexChunkSize - 1) / kLineIndexChunkSize);
+  impl.numChunks =
+      (clampedSize + kLineIndexChunkSize - 1) / kLineIndexChunkSize;
   impl.chunkLineLowerBound.assign(static_cast<std::size_t>(impl.numChunks) + 1u,
                                   0u);
 
   for (std::uint32_t chunk = 0; chunk < impl.numChunks; ++chunk) {
-    const auto chunkStart = static_cast<TextOffset>(chunk * kLineIndexChunkSize);
+    const auto chunkStart = chunk * kLineIndexChunkSize;
     const auto chunkEnd =
         std::min<TextOffset>(clampedSize, chunkStart + kLineIndexChunkSize);
     impl.chunkLineLowerBound[chunk] =
         static_cast<std::uint32_t>(impl.lineStart.size() - 1);
 
     for (auto offset = chunkStart; offset < chunkEnd; ++offset) {
-      if (getText()[static_cast<std::size_t>(offset)] == '\n' &&
-          offset + 1 <= clampedSize) {
+      if (getText()[offset] == '\n' && offset + 1 <= clampedSize) {
         impl.lineStart.push_back(offset + 1);
       }
     }

@@ -57,9 +57,7 @@ public:
       return *this;
     }
 
-    if (_pending) {
-      emit();
-    }
+    emitNoexcept();
 
     _acceptor = other._acceptor;
     _node = other._node;
@@ -79,11 +77,7 @@ public:
     return *this;
   }
 
-  ~ValidationDiagnosticBuilderBase() {
-    if (_pending) {
-      emit();
-    }
-  }
+  ~ValidationDiagnosticBuilderBase() noexcept { emitNoexcept(); }
 
   Derived &range(TextOffset begin, TextOffset end) noexcept {
     const auto baseBegin = _begin;
@@ -149,6 +143,7 @@ public:
 
 protected:
   void emit();
+  void emitNoexcept() noexcept;
 
   [[nodiscard]] const AstNode *node() const noexcept { return _node; }
 
@@ -207,8 +202,10 @@ public:
   ValidationAcceptor() = default;
 
   template <typename CallbackType>
-    requires std::constructible_from<Callback, CallbackType>
-  ValidationAcceptor(CallbackType &&callback)
+    requires (!std::same_as<std::remove_cvref_t<CallbackType>,
+                            ValidationAcceptor> &&
+              std::constructible_from<Callback, CallbackType>)
+  explicit ValidationAcceptor(CallbackType &&callback)
       : _callback(std::forward<CallbackType>(callback)) {}
 
   void operator()(services::Diagnostic diagnostic) const {
@@ -278,8 +275,17 @@ inline void ValidationDiagnosticBuilderBase<Derived>::emit() {
   diagnostic.data = _data;
   diagnostic.begin = _begin;
   diagnostic.end = _end >= _begin ? _end : _begin;
-  _acceptor->operator()(std::move(diagnostic));
   _pending = false;
+  _acceptor->operator()(std::move(diagnostic));
+}
+
+template <typename Derived>
+inline void ValidationDiagnosticBuilderBase<Derived>::emitNoexcept() noexcept {
+  try {
+    emit();
+  } catch (...) {
+    _pending = false;
+  }
 }
 
 } // namespace pegium::validation

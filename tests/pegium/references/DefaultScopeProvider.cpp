@@ -319,11 +319,14 @@ make_attached_reference_holder(services::SharedCoreServices &shared,
 std::vector<std::string>
 collect_names(const ScopeProvider &scopeProvider, const ReferenceInfo &info) {
   std::vector<std::string> names;
+  const auto collectEntry = [&names](const workspace::AstNodeDescription &entry) {
+    names.push_back(entry.name);
+    return true;
+  };
   const auto completed = scopeProvider.visitScopeEntries(
-      info, [&names](const workspace::AstNodeDescription &entry) {
-        names.push_back(entry.name);
-        return true;
-      });
+      info,
+      utils::function_ref<bool(const workspace::AstNodeDescription &)>(
+          collectEntry));
   EXPECT_TRUE(completed);
   return names;
 }
@@ -588,11 +591,15 @@ TEST(DefaultScopeProviderTest, StopsVisitingAsSoonAsVisitorReturnsFalse) {
   info.referenceText = {};
 
   std::vector<std::string> visited;
-  const auto completed = scopeProvider->visitScopeEntries(
-      info, [&visited](const workspace::AstNodeDescription &entry) {
+  const auto collectEntry =
+      [&visited](const workspace::AstNodeDescription &entry) {
         visited.push_back(entry.name);
         return false;
-      });
+      };
+  const auto completed = scopeProvider->visitScopeEntries(
+      info,
+      utils::function_ref<bool(const workspace::AstNodeDescription &)>(
+          collectEntry));
   EXPECT_FALSE(completed);
   EXPECT_EQ(visited, (std::vector<std::string>{"first"}));
 }

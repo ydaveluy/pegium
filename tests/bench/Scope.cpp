@@ -191,11 +191,15 @@ void register_scope_benchmarks(BenchmarkRegistry &registry) {
     return measure_scope_operation(fixture, [&] {
       std::size_t total = 0;
       for (int iteration = 0; iteration < iterations; ++iteration) {
-        const auto completed = scopeProvider->visitScopeEntries(
-            allInfo, [&total](const workspace::AstNodeDescription &entry) {
+        const auto collectEntry =
+            [&total](const workspace::AstNodeDescription &entry) {
               total += entry.name.size();
               return true;
-            });
+            };
+        const auto completed = scopeProvider->visitScopeEntries(
+            allInfo,
+            utils::function_ref<bool(const workspace::AstNodeDescription &)>(
+                collectEntry));
         (void)completed;
       }
       return total;

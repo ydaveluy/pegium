@@ -68,7 +68,7 @@ struct SkipperContext<std::tuple<Hidden...>, std::tuple<Ignored...>> final {
     return skip(text.c_str());
   }
 
-  [[nodiscard]] operator Skipper() const noexcept {
+  [[nodiscard]] explicit(false) operator Skipper() const noexcept {
     return Skipper::from(*this);
   }
 

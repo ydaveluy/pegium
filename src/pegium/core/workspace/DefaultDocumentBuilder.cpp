@@ -15,6 +15,7 @@
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/ServiceRegistry.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/Cancellation.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
 #include <pegium/core/workspace/DocumentFactory.hpp>
@@ -607,12 +608,12 @@ DocumentId DefaultDocumentBuilder::awaitDocumentState(
     DocumentState state, DocumentId documentId,
     utils::CancellationToken cancelToken) const {
   if (documentId == InvalidDocumentId) {
-    throw std::runtime_error("No document id provided.");
+    throw utils::DocumentBuilderError("No document id provided.");
   }
 
   const auto make_failure = [&](DocumentState documentState,
                                 DocumentState workspaceState) {
-    return std::make_exception_ptr(std::runtime_error(std::format(
+    return std::make_exception_ptr(utils::DocumentBuilderError(std::format(
         "Document state of #{} is {}, requiring {}, but workspace state "
         "is already {}.",
         documentId, document_state_name(documentState), document_state_name(state),
@@ -623,7 +624,7 @@ DocumentId DefaultDocumentBuilder::awaitDocumentState(
     const auto document =
         shared.workspace.documents->getDocument(documentId);
     if (document == nullptr) {
-      error = std::make_exception_ptr(std::runtime_error(
+      error = std::make_exception_ptr(utils::DocumentBuilderError(
           std::format("No document found for id: {}", documentId)));
       return true;
     }

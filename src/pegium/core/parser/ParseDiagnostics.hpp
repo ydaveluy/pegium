@@ -12,12 +12,9 @@ namespace pegium::parser::detail {
 
 inline bool has_syntax_diagnostic(
     const std::vector<ParseDiagnostic> &diagnostics) {
-  for (const auto &diagnostic : diagnostics) {
-    if (diagnostic.isSyntax()) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::any_of(diagnostics, [](const auto &diagnostic) {
+    return diagnostic.isSyntax();
+  });
 }
 
 inline CstNodeView first_recovered_node(const RootCstNode &cst) {
