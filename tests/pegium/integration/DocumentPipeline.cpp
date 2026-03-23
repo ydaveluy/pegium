@@ -1,23 +1,115 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <memory>
+#include <thread>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 #include <arithmetics/ast.hpp>
 #include <arithmetics/services/Module.hpp>
 
 #include <pegium/ExampleTestSupport.hpp>
+#include <pegium/core/utils/UriUtils.hpp>
+#include <pegium/core/validation/ValidationRegistry.hpp>
 
 namespace pegium::integration {
 namespace {
 
+bool is_parse_diagnostic(const services::Diagnostic &diagnostic) {
+  if (diagnostic.source == "parse") {
+    return true;
+  }
+  if (!diagnostic.code.has_value()) {
+    return false;
+  }
+  const auto *code = std::get_if<std::string>(&*diagnostic.code);
+  return code != nullptr && code->starts_with("parse.");
+}
+
+class BlockingBootstrapValidation final {
+public:
+  void operator()(const AstNode &, const validation::ValidationAcceptor &,
+                  const utils::CancellationToken &cancelToken) const {
+    bool expected = false;
+    if (!_started.compare_exchange_strong(expected, true)) {
+      return;
+    }
+
+    while (!cancelToken.stop_requested()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    _observedCancellation = true;
+    utils::throw_if_cancelled(cancelToken);
+  }
+
+  [[nodiscard]] bool
+  waitUntilStarted(std::chrono::milliseconds timeout =
+                       std::chrono::milliseconds(1000)) const {
+    return test::wait_until([this]() { return _started.load(); }, timeout);
+  }
+
+  [[nodiscard]] bool observedCancellation() const noexcept {
+    return _observedCancellation.load();
+  }
+
+private:
+  mutable std::atomic<bool> _started = false;
+  mutable std::atomic<bool> _observedCancellation = false;
+};
+
+class BootstrapResumeIntegrationTest : public ::testing::Test {
+protected:
+  std::unique_ptr<pegium::SharedServices> shared =
+      test::make_empty_shared_services();
+  std::shared_ptr<test::FakeFileSystemProvider> fileSystem =
+      std::make_shared<test::FakeFileSystemProvider>();
+  BlockingBootstrapValidation blockingValidation;
+
+  BootstrapResumeIntegrationTest() {
+    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedLspServices(*shared);
+    shared->workspace.fileSystemProvider = fileSystem;
+  }
+
+  void SetUp() override {
+    auto services =
+        arithmetics::services::create_language_services(*shared, "arithmetics");
+    services->validation.validationRegistry->registerCheck<AstNode>(
+        [this](const AstNode &node,
+               const validation::ValidationAcceptor &acceptor,
+               const utils::CancellationToken &cancelToken) {
+          blockingValidation(node, acceptor, cancelToken);
+        },
+        validation::kFastValidationCategory);
+    shared->serviceRegistry->registerServices(std::move(services));
+  }
+
+  void installWorkspaceFile(std::string_view rootPath, std::string_view fileName,
+                            std::string text) {
+    const auto root = std::string(rootPath);
+    const auto file = root + "/" + std::string(fileName);
+    fileSystem->directories[root] = {file};
+    fileSystem->files[file] = std::move(text);
+  }
+};
+
 class DocumentPipelineIntegrationTest : public ::testing::Test {
 protected:
-  std::unique_ptr<services::SharedServices> shared = test::make_shared_services();
+  std::unique_ptr<pegium::SharedServices> shared = test::make_empty_shared_services();
+
+  DocumentPipelineIntegrationTest() {
+    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedLspServices(*shared);
+    pegium::test::initialize_shared_workspace_for_tests(*shared);
+  }
 
   void SetUp() override {
     ASSERT_TRUE(arithmetics::services::register_language_services(*shared));
@@ -26,8 +118,9 @@ protected:
   std::shared_ptr<workspace::Document> updateDocument(std::string_view fileName,
                                                       std::string text) {
     const auto uri = test::make_file_uri(fileName);
-    auto textDocument =
-        shared->workspace.textDocuments->open(uri, "arithmetics", std::move(text), 1);
+    auto documents = test::text_documents(*shared);
+    auto textDocument = test::set_text_document(
+        *documents, uri, "arithmetics", std::move(text), 1);
 
     shared->lsp.documentUpdateHandler->didChangeContent({.document = textDocument});
 
@@ -52,7 +145,7 @@ protected:
   parseDiagnostics(const workspace::Document &document) {
     std::vector<const services::Diagnostic *> diagnostics;
     for (const auto &diagnostic : document.diagnostics) {
-      if (diagnostic.source == "parse") {
+      if (is_parse_diagnostic(diagnostic)) {
         diagnostics.push_back(std::addressof(diagnostic));
       }
     }
@@ -61,7 +154,7 @@ protected:
 
   static std::size_t parseDiagnosticCount(const workspace::Document &document) {
     return std::ranges::count_if(document.diagnostics, [](const auto &diagnostic) {
-      return diagnostic.source == "parse";
+      return is_parse_diagnostic(diagnostic);
     });
   }
 
@@ -78,6 +171,71 @@ protected:
     return dump;
   }
 };
+
+TEST_F(BootstrapResumeIntegrationTest,
+       UpdateSupersedesBootstrapBuildAndWaitUntilValidatedResumesOnLatestText) {
+  const auto rootPath = std::string("/tmp/pegium-tests/bootstrap-resume");
+  const auto rootUri = utils::path_to_file_uri(rootPath);
+  const auto filePath = rootPath + "/bootstrap.calc";
+  const auto fileUri = utils::path_to_file_uri(filePath);
+  const auto initialText =
+      std::string("module Demo\n"
+                  "def value: 1;\n"
+                  "value;\n");
+  const auto updatedText =
+      std::string("module Demo\n"
+                  "def value: 1 / 0;\n"
+                  "value;\n");
+
+  installWorkspaceFile(rootPath, "bootstrap.calc", initialText);
+
+  workspace::InitializeParams initializeParams{};
+  initializeParams.workspaceFolders.push_back(
+      workspace::WorkspaceFolder{.uri = rootUri, .name = "workspace"});
+  shared->workspace.workspaceManager->initialize(initializeParams);
+
+  auto initializedFuture =
+      shared->workspace.workspaceManager->initialized(workspace::InitializedParams{});
+
+  ASSERT_TRUE(blockingValidation.waitUntilStarted());
+  EXPECT_EQ(shared->workspace.workspaceManager->ready().wait_for(
+                std::chrono::milliseconds(0)),
+            std::future_status::ready);
+  EXPECT_EQ(initializedFuture.wait_for(std::chrono::milliseconds(0)),
+            std::future_status::timeout);
+
+  const auto documentId = shared->workspace.documents->getDocumentId(fileUri);
+  ASSERT_NE(documentId, workspace::InvalidDocumentId);
+
+  auto bootstrapDocument = shared->workspace.documents->getDocument(documentId);
+  ASSERT_NE(bootstrapDocument, nullptr);
+  EXPECT_LT(bootstrapDocument->state, workspace::DocumentState::Validated);
+  EXPECT_EQ(bootstrapDocument->textDocument().getText(), initialText);
+
+  auto documents = test::text_documents(*shared);
+  auto textDocument =
+      test::set_text_document(*documents, fileUri, "arithmetics", updatedText, 1);
+  ASSERT_NE(textDocument, nullptr);
+
+  shared->lsp.documentUpdateHandler->didChangeContent({.document = textDocument});
+
+  auto waitUntilValidated = std::async(std::launch::async, [&]() {
+    return shared->workspace.documentBuilder->waitUntil(
+        workspace::DocumentState::Validated, documentId);
+  });
+
+  ASSERT_EQ(waitUntilValidated.wait_for(std::chrono::seconds(3)),
+            std::future_status::ready);
+  EXPECT_EQ(waitUntilValidated.get(), documentId);
+
+  auto document = shared->workspace.documents->getDocument(documentId);
+  ASSERT_NE(document, nullptr);
+  EXPECT_EQ(document->state, workspace::DocumentState::Validated);
+  EXPECT_EQ(document->textDocument().getText(), updatedText);
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Division by zero"));
+  EXPECT_TRUE(blockingValidation.observedCancellation());
+  EXPECT_NO_THROW(initializedFuture.get());
+}
 
 TEST_F(DocumentPipelineIntegrationTest,
        DocumentUpdateHandlerBuildsAndValidatesOpenDocument) {
@@ -151,7 +309,7 @@ TEST_F(DocumentPipelineIntegrationTest,
   const auto diagnostics = parseDiagnostics(*document);
   ASSERT_EQ(diagnostics.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(diagnostics, [](const auto *diagnostic) {
-    return diagnostic->source == "parse";
+    return is_parse_diagnostic(*diagnostic);
   }));
   EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto *diagnostic) {
     return diagnostic->begin >= 11u && diagnostic->begin <= 13u;

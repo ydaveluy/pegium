@@ -4,11 +4,12 @@
 
 #include <algorithm>
 #include <cctype>
-#include <optional>
 #include <string_view>
 
-#include <pegium/services/SharedServices.hpp>
-#include <pegium/validation/DiagnosticRanges.hpp>
+#include <pegium/core/workspace/Documents.hpp>
+#include <pegium/lsp/services/SharedServices.hpp>
+#include <pegium/core/validation/ValidationRegistry.hpp>
+#include <pegium/core/validation/DiagnosticRanges.hpp>
 
 namespace requirements::services::validation {
 namespace {
@@ -23,16 +24,26 @@ bool has_digit(std::string_view value) {
 
 } // namespace
 
-void RequirementsValidator::registerValidationChecks(
-    pegium::validation::ValidationRegistry &registry,
-    const pegium::services::Services &services) {
-  const RequirementsValidator validator(services);
+void registerRequirementsValidationChecks(
+    requirements::services::RequirementsLangServices &services) {
+  auto &registry = *services.validation.validationRegistry;
+  auto &validator = *services.requirementsLang.validation.requirementsValidator;
+  auto *documents = services.shared.workspace.documents.get();
+
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
-          &RequirementsValidator::checkRequirement>(validator)});
+          &RequirementsValidator::checkRequirementNameContainsANumber>(
+          validator)});
+  registry.registerCheck<Requirement>(
+      [validator = &validator, documents](
+          const Requirement &requirement,
+          const pegium::validation::ValidationAcceptor &accept) {
+        validator->checkRequirementIsCoveredByATest(requirement, accept,
+                                                    *documents);
+      });
 }
 
-void RequirementsValidator::checkRequirement(
+void RequirementsValidator::checkRequirementNameContainsANumber(
     const Requirement &requirement,
     const pegium::validation::ValidationAcceptor &accept) const {
   if (!has_digit(requirement.name)) {
@@ -40,9 +51,14 @@ void RequirementsValidator::checkRequirement(
                                     " should contain a number.")
         .property<&Requirement::name>();
   }
+}
 
+void RequirementsValidator::checkRequirementIsCoveredByATest(
+    const Requirement &requirement,
+    const pegium::validation::ValidationAcceptor &accept,
+    const pegium::workspace::Documents &documents) const {
   bool covered = false;
-  for (const auto &document : _services->sharedServices.workspace.documents->all()) {
+  for (const auto &document : documents.all()) {
     const auto *model = pegium::ast_ptr_cast<TestModel>(document->parseResult.value);
     if (model == nullptr) {
       continue;
@@ -68,8 +84,7 @@ void RequirementsValidator::checkRequirement(
 
   if (!covered) {
     accept.warning(requirement,
-                   "Requirement " + requirement.name + " not covered by a test.")
-        .property<&Requirement::name>();
+                   "Requirement " + requirement.name + " not covered by a test.");
   }
 }
 

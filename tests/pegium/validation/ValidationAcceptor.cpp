@@ -6,11 +6,12 @@
 #include <span>
 #include <utility>
 
+#include <pegium/CoreTestSupport.hpp>
 #include <pegium/TestRuleParser.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/services/Diagnostic.hpp>
-#include <pegium/validation/ValidationAcceptor.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/services/Diagnostic.hpp>
+#include <pegium/core/validation/ValidationAcceptor.hpp>
+#include <pegium/core/workspace/Document.hpp>
 
 namespace pegium::validation {
 namespace {
@@ -59,9 +60,6 @@ ValidationAcceptNode &parse_validation_accept_node(workspace::Document &document
                   append<&ValidationAcceptNode::tags>("one"_kw) + ","_kw +
                   append<&ValidationAcceptNode::tags>("two"_kw)};
 
-  document.uri = "file:///validation-acceptor.pg";
-  document.languageId = "mini";
-  document.setText("alpha:one,two");
   pegium::test::parse_rule(root, document, SkipperBuilder().build());
   auto *node = dynamic_cast<ValidationAcceptNode *>(document.parseResult.value.get());
   EXPECT_NE(node, nullptr);
@@ -69,7 +67,9 @@ ValidationAcceptNode &parse_validation_accept_node(workspace::Document &document
 }
 
 TEST(ValidationAcceptorTest, EmitsDiagnosticForSelectedPropertySubrange) {
-  workspace::Document document;
+  workspace::Document document(
+      test::make_text_document("file:///validation-acceptor.pg", "mini",
+                               "alpha:one,two"));
   auto &node = parse_validation_accept_node(document);
 
   services::Diagnostic diagnostic;
@@ -110,7 +110,9 @@ TEST(ValidationAcceptorTest, EmitsDiagnosticForSelectedPropertySubrange) {
 }
 
 TEST(ValidationAcceptorTest, SelectsIndexedVectorPropertyAssignment) {
-  workspace::Document document;
+  workspace::Document document(
+      test::make_text_document("file:///validation-acceptor.pg", "mini",
+                               "alpha:one,two"));
   auto &node = parse_validation_accept_node(document);
 
   services::Diagnostic diagnostic;
@@ -129,7 +131,9 @@ TEST(ValidationAcceptorTest, SelectsIndexedVectorPropertyAssignment) {
 }
 
 TEST(ValidationAcceptorTest, AppendsRelatedInformationFromListAndSpan) {
-  workspace::Document document;
+  workspace::Document document(
+      test::make_text_document("file:///validation-acceptor.pg", "mini",
+                               "alpha:one,two"));
   auto &node = parse_validation_accept_node(document);
 
   services::Diagnostic diagnostic;

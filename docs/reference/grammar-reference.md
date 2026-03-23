@@ -2,14 +2,13 @@
 
 This page is the canonical grammar reference for Pegium.
 
-Use this page when you need the exact parser DSL surface. If you want the
-recommended learning order first, go back to
+If you want the recommended learning order first, go back to
 [Write the Grammar](../learn/workflow/write_grammar.md).
 
 All snippets assume:
 
 ```cpp
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 using namespace pegium::parser;
 ```
 
@@ -587,5 +586,5 @@ Several APIs intentionally reject nullable expressions:
 ## Related pages
 
 - [Write the Grammar](../learn/workflow/write_grammar.md)
-- [Parser Contracts](parser-contracts.md)
+- [Build a Language: Grammar](../build-a-language/grammar.md)
 - [Glossary](glossary.md)

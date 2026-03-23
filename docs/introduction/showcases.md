@@ -1,13 +1,7 @@
 # Showcases
 
-Pegium ships several end-to-end examples that act as both showcases and
-starting points for real projects.
-
-## Read this page if
-
-- you want to inspect complete Pegium languages before reading APIs
-- you are choosing which example to clone or adapt
-- you want to see which advanced feature each example emphasizes
+Pegium ships several end-to-end examples. They are both showcases of the
+framework and practical starting points for real projects.
 
 ## Arithmetics
 
@@ -52,9 +46,11 @@ If you only want to inspect one showcase before learning Pegium, start with
 [arithmetics](../examples/arithmetics.md). It is the most compact example that
 still exercises the full parser-to-editor path.
 
-## Continue with
+## Where to go from here?
 
-- [Examples Overview](../examples/index.md)
-- [Learn Pegium](../learn/index.md)
-- [Recipes](../recipes/index.md) once you know which subsystem you want to
-  customize
+- Continue with the [examples overview](../examples/index.md) if you want to
+  compare the examples side by side.
+- Continue with the [workflow](../learn/workflow/index.md) if you want to
+  build your own language next.
+- Continue with [recipes](../recipes/index.md) once you know which subsystem
+  you want to customize.

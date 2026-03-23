@@ -1,269 +1,211 @@
 #include "lsp/DomainModelRenameProvider.hpp"
 
+#include <domainmodel/ast.hpp>
+
 #include <algorithm>
-#include <format>
+#include <cassert>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <typeindex>
+#include <utility>
+
+#include "references/QualifiedNameProvider.hpp"
+
+#include <pegium/lsp/support/LspProviderUtils.hpp>
+#include <pegium/lsp/services/SharedServices.hpp>
+#include <pegium/core/references/NameProvider.hpp>
+#include <pegium/core/references/References.hpp>
+#include <pegium/core/syntax-tree/AstUtils.hpp>
+#include <pegium/core/syntax-tree/CstUtils.hpp>
+#include <pegium/core/utils/TransparentStringHash.hpp>
+#include <pegium/core/workspace/Documents.hpp>
 
 namespace domainmodel::services::lsp {
 namespace {
 
-std::string last_segment(std::string_view name) {
-  const auto pos = name.rfind('.');
-  if (pos == std::string_view::npos) {
-    return std::string(name);
+using namespace domainmodel::ast;
+using namespace pegium::provider_detail;
+
+const references::QualifiedNameProvider *qualified_name_provider(
+    const pegium::Services &services) {
+  const auto *domainModelServices =
+      domainmodel::services::as_domain_model_services(services);
+  if (domainModelServices == nullptr) {
+    return nullptr;
   }
-  return std::string(name.substr(pos + 1));
+  return domainModelServices->domainModel.references.qualifiedNameProvider.get();
 }
 
-std::string reference_text(const pegium::workspace::Documents *documentStore,
-                           const pegium::workspace::ReferenceDescription &reference) {
-  if (documentStore == nullptr) {
-    return {};
-  }
-  const auto document = documentStore->getDocument(reference.sourceDocumentId);
-  if (document == nullptr) {
-    return {};
-  }
-  return std::string(reference.sourceText(document->textView()));
+const ast::PackageDeclaration *parent_package(const pegium::AstNode &node) {
+  return dynamic_cast<const ast::PackageDeclaration *>(node.getContainer());
 }
 
-std::string edit_key(std::string_view uri, pegium::TextOffset begin,
-                     pegium::TextOffset end) {
-  return std::format("{}:{}:{}", uri, begin, end);
+std::string package_qualified_name(
+    const ast::PackageDeclaration &package, const pegium::AstNode &renamedRoot,
+    std::string_view replacementName,
+    const references::QualifiedNameProvider *qualifiedNameProvider) {
+  const auto currentName =
+      &package == &renamedRoot ? std::string(replacementName) : package.name;
+  const auto *parent = parent_package(package);
+  if (parent == nullptr) {
+    return currentName;
+  }
+
+  const auto qualifier = package_qualified_name(*parent, renamedRoot, replacementName,
+                                                qualifiedNameProvider);
+  if (qualifiedNameProvider != nullptr) {
+    return qualifiedNameProvider->getQualifiedName(qualifier, currentName);
+  }
+  return qualifier.empty() ? currentName : qualifier + "." + currentName;
 }
 
-std::optional<pegium::workspace::AstNodeDescription>
-find_target_symbol(const pegium::workspace::IndexManager &indexManager,
-                   pegium::workspace::DocumentId documentId,
-                   pegium::TextOffset offset) {
-  for (const auto &symbol : indexManager.elementsForDocument(documentId)) {
-    const auto end =
-        static_cast<pegium::TextOffset>(symbol.offset + symbol.nameLength);
-    if (symbol.nameLength != 0 && offset >= symbol.offset && offset <= end) {
-      return symbol;
-    }
-  }
-  return std::nullopt;
+bool has_qualified_name_text(const pegium::workspace::Documents &documents,
+                             const pegium::workspace::ReferenceDescription &reference) {
+  const auto document = documents.getDocument(reference.sourceDocumentId);
+  assert(document != nullptr);
+  return reference.sourceText(document->textDocument().getText()).find('.') !=
+         std::string_view::npos;
 }
 
-bool matches_target(const pegium::workspace::Documents *documentStore,
-                    const pegium::workspace::ReferenceDescription &reference,
-                    const pegium::workspace::AstNodeDescription &target,
-                    std::string_view oldSimpleName,
-                    std::string_view oldQualifiedName) {
-  const auto refText = reference_text(documentStore, reference);
-  if (reference.isResolved()) {
-    if (!reference.targetDocumentId.has_value() ||
-        *reference.targetDocumentId != target.documentId) {
-      return false;
-    }
-    if (reference.targetSymbolId.has_value() &&
-        *reference.targetSymbolId == target.symbolId) {
-      return true;
-    }
-    return refText == oldSimpleName || refText == oldQualifiedName;
+void add_edit(WorkspaceEditData &editData,
+              pegium::utils::TransparentStringSet &seen,
+              pegium::workspace::DocumentId documentId, pegium::TextOffset begin,
+              pegium::TextOffset end, std::string newText) {
+  const auto key = location_key(
+      {.documentId = documentId, .begin = begin, .end = end});
+  if (!seen.insert(key).second) {
+    return;
   }
-  return refText == oldSimpleName || refText == oldQualifiedName;
+  editData.changes[documentId].push_back(
+      {.begin = begin, .end = end, .newText = std::move(newText)});
+}
+
+void sort_edits(WorkspaceEditData &editData) {
+  for (auto &[documentId, edits] : editData.changes) {
+    (void)documentId;
+    std::ranges::sort(edits, [](const WorkspaceTextEdit &left,
+                                const WorkspaceTextEdit &right) {
+      return left.begin > right.begin;
+    });
+  }
+}
+
+std::optional<pegium::CstNodeView>
+declaration_name_node(const pegium::AstNode &node,
+                      const pegium::references::NameProvider &nameProvider) {
+  return nameProvider.getNameNode(node);
+}
+
+template <typename F>
+void visit_subtree(const pegium::AstNode &root, F &&visitor) {
+  visitor(root);
+  for (const auto *node : root.getAllContent()) {
+    visitor(*node);
+  }
 }
 
 } // namespace
 
-DomainModelRenameProvider::DomainModelRenameProvider(
-    const pegium::services::Services &services,
-    const pegium::workspace::IndexManager &indexManager,
-    const pegium::workspace::Documents &documentStore,
-    std::shared_ptr<const references::QualifiedNameProvider>
-        qualifiedNameProvider)
-    : pegium::lsp::DefaultRenameProvider(services),
-      _indexManager(&indexManager), _documentStore(&documentStore),
-      _qualifiedNameProvider(std::move(qualifiedNameProvider)) {}
-
 std::optional<::lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
     const pegium::workspace::Document &document, const ::lsp::RenameParams &params,
     const pegium::utils::CancellationToken &cancelToken) const {
+  pegium::utils::throw_if_cancelled(cancelToken);
   const auto newName = std::string_view(params.newName);
-  auto baseEdit =
-      pegium::lsp::DefaultRenameProvider::rename(document, params, cancelToken);
-  if (_indexManager == nullptr || _documentStore == nullptr || newName.empty()) {
-    return baseEdit;
+  const auto &referencesService = *services.references.references;
+  const auto &nameProvider = *services.references.nameProvider;
+  const auto &documents = *services.shared.workspace.documents;
+  if (newName.empty()) {
+    return std::nullopt;
+  }
+  assert(document.parseResult.cst != nullptr);
+
+  const auto offset = document.textDocument().offsetAt(params.position);
+  const auto selectedNode =
+      find_declaration_node_at_offset(*document.parseResult.cst, offset);
+  if (!selectedNode.has_value()) {
+    return std::nullopt;
   }
 
-  const auto offset = document.positionToOffset(params.position);
-  const auto target = find_target_symbol(*_indexManager, document.id, offset);
-  if (!target.has_value()) {
-    return baseEdit;
+  const auto targetNodes = referencesService.findDeclarations(*selectedNode);
+  if (targetNodes.empty()) {
+    return std::nullopt;
   }
 
-  const auto oldQualifiedName = target->name;
-  const auto oldSimpleName = last_segment(target->name);
-  std::string qualifier;
-  if (oldQualifiedName.size() > oldSimpleName.size()) {
-    qualifier = std::string(oldQualifiedName.substr(
-        0, oldQualifiedName.size() - oldSimpleName.size() - 1));
-  }
-  const auto newQualifiedName =
-      _qualifiedNameProvider != nullptr
-          ? _qualifiedNameProvider->getQualifiedName(qualifier, newName)
-          : qualifier.empty() ? std::string(newName)
-                              : qualifier + "." + std::string(newName);
-  const auto document_for_id =
-      [&](pegium::workspace::DocumentId documentId)
-          -> const pegium::workspace::Document * {
-    if (documentId == document.id) {
-      return &document;
+  WorkspaceEditData editData;
+  pegium::utils::TransparentStringSet seen;
+  const auto *qualifiedNameProvider = qualified_name_provider(services);
+
+  for (const auto *target : targetNodes) {
+    pegium::utils::throw_if_cancelled(cancelToken);
+    const auto &targetDocument = pegium::getDocument(*target);
+    if (auto nameNode = declaration_name_node(*target, nameProvider);
+        nameNode.has_value()) {
+      add_edit(editData, seen, targetDocument.id, nameNode->getBegin(),
+               nameNode->getEnd(), std::string(newName));
     }
-    if (_documentStore == nullptr) {
-      return nullptr;
-    }
-    const auto targetDocument = _documentStore->getDocument(documentId);
-    return targetDocument != nullptr ? targetDocument.get() : nullptr;
-  };
-
-  if (!baseEdit.has_value()) {
-    ::lsp::Map<::lsp::DocumentUri, ::lsp::Array<::lsp::TextEdit>> changes;
-    std::unordered_set<std::string> seenEdits;
-    auto add_edit = [&](pegium::workspace::DocumentId documentId,
-                        pegium::TextOffset begin, pegium::TextOffset end,
-                        std::string text) {
-      const auto *targetDocument = document_for_id(documentId);
-      if (targetDocument == nullptr) {
-        return;
-      }
-      const auto key = edit_key(targetDocument->uri, begin, end);
-      if (!seenEdits.insert(key).second) {
-        return;
-      }
-
-      ::lsp::TextEdit edit{};
-      edit.range.start = targetDocument->offsetToPosition(begin);
-      edit.range.end = targetDocument->offsetToPosition(end);
-      edit.newText = std::move(text);
-      changes[::lsp::Uri::parse(targetDocument->uri)].push_back(std::move(edit));
-    };
-
-    add_edit(target->documentId, target->offset,
-             static_cast<pegium::TextOffset>(target->offset + oldSimpleName.size()),
-             std::string(newName));
-
-    for (const auto &indexedDocument : _documentStore->all()) {
-      if (indexedDocument == nullptr) {
-        continue;
-      }
-      for (const auto &reference :
-           _indexManager->referenceDescriptionsForDocument(indexedDocument->id)) {
-        if (!matches_target(_documentStore, reference, *target, oldSimpleName,
-                            oldQualifiedName)) {
-          continue;
-        }
-        const auto replacementLength = reference.sourceLength;
-        const auto refText = reference_text(_documentStore, reference);
-        const bool qualified =
-            isQualifiedReference(reference) || refText == oldQualifiedName ||
-            replacementLength >
-                static_cast<pegium::TextOffset>(oldSimpleName.size());
-        add_edit(reference.sourceDocumentId, reference.sourceOffset,
-                 static_cast<pegium::TextOffset>(reference.sourceOffset +
-                                                replacementLength),
-                 qualified ? newQualifiedName : std::string(newName));
-      }
-    }
-
-    for (auto &[uri, edits] : changes) {
-      const auto *targetDocument =
-          _documentStore != nullptr ? _documentStore->getDocument(uri.toString()).get()
-                                    : nullptr;
-      if (targetDocument == nullptr) {
-        continue;
-      }
-
-      std::ranges::sort(edits, [&](const ::lsp::TextEdit &left,
-                                   const ::lsp::TextEdit &right) {
-        return targetDocument->positionToOffset(left.range.start) >
-               targetDocument->positionToOffset(right.range.start);
-      });
-    }
-    if (changes.empty()) {
-      return std::nullopt;
-    }
-    ::lsp::WorkspaceEdit fallbackEdit{};
-    fallbackEdit.changes = std::move(changes);
-    return fallbackEdit;
   }
 
-  if (newQualifiedName == params.newName || !baseEdit->changes.has_value()) {
-    return baseEdit;
-  }
-
-  std::unordered_set<std::string> qualifiedEditKeys;
-  for (const auto &indexedDocument : _documentStore->all()) {
-    if (indexedDocument == nullptr) {
-      continue;
+  const auto &renamedRoot = *targetNodes.front();
+  visit_subtree(renamedRoot, [&](const pegium::AstNode &node) {
+    pegium::utils::throw_if_cancelled(cancelToken);
+    const auto qualifiedName =
+        buildQualifiedName(node, renamedRoot, newName, qualifiedNameProvider);
+    if (!qualifiedName.has_value()) {
+      return;
     }
     for (const auto &reference :
-         _indexManager->referenceDescriptionsForDocument(indexedDocument->id)) {
-      if (!matches_target(_documentStore, reference, *target, oldSimpleName,
-                          oldQualifiedName)) {
-        continue;
-      }
-      const auto replacementLength = reference.sourceLength;
-      const auto refText = reference_text(_documentStore, reference);
-      const bool qualified =
-          isQualifiedReference(reference) || refText == oldQualifiedName ||
-          replacementLength >
-              static_cast<pegium::TextOffset>(oldSimpleName.size());
-      if (!qualified) {
-        continue;
-      }
-      qualifiedEditKeys.insert(edit_key(
-          indexedDocument->uri, reference.sourceOffset,
-          static_cast<pegium::TextOffset>(reference.sourceOffset +
-                                          replacementLength)));
+         referencesService.findReferences(node, {.includeDeclaration = false})) {
+      pegium::utils::throw_if_cancelled(cancelToken);
+      const auto replacement =
+          has_qualified_name_text(documents, reference)
+              ? *qualifiedName
+              : std::string(newName);
+      add_edit(editData, seen, reference.sourceDocumentId,
+               reference.sourceOffset,
+               static_cast<pegium::TextOffset>(reference.sourceOffset +
+                                               reference.sourceLength),
+               replacement);
     }
+  });
+
+  if (editData.empty()) {
+    return std::nullopt;
   }
 
-  for (auto &[uri, edits] : *baseEdit->changes) {
-    const auto *targetDocument =
-        _documentStore != nullptr ? _documentStore->getDocument(uri.toString()).get()
-                                  : nullptr;
-    if (targetDocument == nullptr) {
-      continue;
-    }
-    for (auto &edit : edits) {
-      const auto key = edit_key(
-          uri.toString(), targetDocument->positionToOffset(edit.range.start),
-          targetDocument->positionToOffset(edit.range.end));
-      if (qualifiedEditKeys.contains(key)) {
-        edit.newText = newQualifiedName;
-      }
-    }
-  }
-
-  return baseEdit;
+  sort_edits(editData);
+  return to_lsp_workspace_edit(editData, services.shared, cancelToken);
 }
 
-bool DomainModelRenameProvider::isQualifiedReference(
-    const pegium::workspace::ReferenceDescription &reference) const {
-  if (_documentStore == nullptr || reference.sourceLength == 0) {
-    return false;
+std::optional<std::string> DomainModelRenameProvider::buildQualifiedName(
+    const pegium::AstNode &node, const pegium::AstNode &renamedRoot,
+    std::string_view replacementName,
+    const references::QualifiedNameProvider *qualifiedNameProvider) const {
+  if (services.shared.astReflection->isInstance(
+          node, std::type_index(typeid(Feature)))) {
+    return std::nullopt;
   }
-  const auto document = _documentStore->getDocument(reference.sourceDocumentId);
-  if (document == nullptr) {
-    return false;
+
+  const auto &nameProvider = *services.references.nameProvider;
+
+  auto name = nameProvider.getName(node);
+  if (!name.has_value()) {
+    return std::nullopt;
   }
-  const auto begin = static_cast<std::size_t>(reference.sourceOffset);
-  const auto length = static_cast<std::size_t>(reference.sourceLength);
-  if (begin >= document->text().size()) {
-    return false;
+
+  auto resolvedName = &node == &renamedRoot ? std::string(replacementName)
+                                            : std::move(*name);
+  const auto *container = parent_package(node);
+  if (container == nullptr) {
+    return resolvedName;
   }
-  if (begin > 0 && document->text()[begin - 1] == '.') {
-    return true;
+
+  const auto qualifier = package_qualified_name(*container, renamedRoot,
+                                                replacementName, qualifiedNameProvider);
+  if (qualifiedNameProvider != nullptr) {
+    return qualifiedNameProvider->getQualifiedName(qualifier, resolvedName);
   }
-  const auto cappedLength = std::min(length, document->text().size() - begin);
-  const auto slice = document->textView().substr(begin, cappedLength);
-  return slice.find('.') != std::string_view::npos;
+  return qualifier.empty() ? resolvedName : qualifier + "." + resolvedName;
 }
 
 } // namespace domainmodel::services::lsp

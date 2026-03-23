@@ -1,14 +1,14 @@
 #include "lsp/RequirementsFormatter.hpp"
 
 namespace requirements::services::lsp {
-void RequirementsFormatter::formatContact(pegium::lsp::FormattingBuilder &builder,
+void RequirementsFormatter::formatContact(pegium::FormattingBuilder &builder,
                                           const ast::Contact *contact) const {
   auto formatter = builder.getNodeFormatter(contact);
   formatter.keyword(":").prepend(noSpace).append(oneSpace);
 }
 
 void RequirementsFormatter::formatRequirementModel(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::RequirementModel *model) const {
   auto formatter = builder.getNodeFormatter(model);
   formatter.properties<&ast::RequirementModel::contact,
@@ -19,7 +19,7 @@ void RequirementsFormatter::formatRequirementModel(
 }
 
 void RequirementsFormatter::formatEnvironment(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::Environment *environment) const {
   auto formatter = builder.getNodeFormatter(environment);
   formatter.keyword("environment").append(oneSpace);
@@ -27,7 +27,7 @@ void RequirementsFormatter::formatEnvironment(
 }
 
 void RequirementsFormatter::formatRequirement(
-    pegium::lsp::FormattingBuilder &builder,
+    pegium::FormattingBuilder &builder,
     const ast::Requirement *requirement) const {
   auto formatter = builder.getNodeFormatter(requirement);
   formatter.keyword("req").append(oneSpace);
@@ -38,13 +38,13 @@ void RequirementsFormatter::formatRequirement(
   }
 }
 
-void TestsFormatter::formatContact(pegium::lsp::FormattingBuilder &builder,
+void TestsFormatter::formatContact(pegium::FormattingBuilder &builder,
                                    const ast::Contact *contact) const {
   auto formatter = builder.getNodeFormatter(contact);
   formatter.keyword(":").prepend(noSpace).append(oneSpace);
 }
 
-void TestsFormatter::formatTestModel(pegium::lsp::FormattingBuilder &builder,
+void TestsFormatter::formatTestModel(pegium::FormattingBuilder &builder,
                                      const ast::TestModel *model) const {
   auto formatter = builder.getNodeFormatter(model);
   formatter.properties<&ast::TestModel::contact, &ast::TestModel::tests>()
@@ -52,7 +52,7 @@ void TestsFormatter::formatTestModel(pegium::lsp::FormattingBuilder &builder,
       .prepend(newLine);
 }
 
-void TestsFormatter::formatTest(pegium::lsp::FormattingBuilder &builder,
+void TestsFormatter::formatTest(pegium::FormattingBuilder &builder,
                                 const ast::Test *test) const {
   auto formatter = builder.getNodeFormatter(test);
   formatter.keyword("tst").append(oneSpace);
@@ -72,7 +72,7 @@ void TestsFormatter::formatTest(pegium::lsp::FormattingBuilder &builder,
 }
 
 RequirementsFormatter::RequirementsFormatter(
-    const pegium::services::Services &services)
+    const pegium::Services &services)
     : AbstractFormatter(services) {
   on<ast::RequirementModel>(&RequirementsFormatter::formatRequirementModel);
   on<ast::Contact>(&RequirementsFormatter::formatContact);
@@ -80,7 +80,7 @@ RequirementsFormatter::RequirementsFormatter(
   on<ast::Requirement>(&RequirementsFormatter::formatRequirement);
 }
 
-TestsFormatter::TestsFormatter(const pegium::services::Services &services)
+TestsFormatter::TestsFormatter(const pegium::Services &services)
     : AbstractFormatter(services) {
   on<ast::TestModel>(&TestsFormatter::formatTestModel);
   on<ast::Contact>(&TestsFormatter::formatContact);

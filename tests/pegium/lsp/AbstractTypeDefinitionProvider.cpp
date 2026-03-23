@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
-#include <pegium/lsp/AbstractTypeDefinitionProvider.hpp>
+#include <pegium/lsp/navigation/AbstractTypeDefinitionProvider.hpp>
 
 #include "AbstractNavigationProviderTestUtils.hpp"
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 using namespace test_navigation;
@@ -31,9 +31,17 @@ protected:
 };
 
 TEST(AbstractTypeDefinitionProviderTest, DelegatesResolvedDeclarationNode) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services<NavigationParser>(*shared, "nav", {".nav"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services<NavigationParser>(*shared, "nav", {".nav"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("type-definition.nav"), "nav",
@@ -47,7 +55,8 @@ TEST(AbstractTypeDefinitionProviderTest, DelegatesResolvedDeclarationNode) {
   TestTypeDefinitionProvider provider(*services);
 
   ::lsp::TypeDefinitionParams params{};
-  params.position = document->offsetToPosition(use_name_offset(*document) + 1);
+  params.position =
+      document->textDocument().positionAt(use_name_offset(*document) + 1);
 
   const auto links =
       provider.getTypeDefinition(*document, params, utils::default_cancel_token);
@@ -58,4 +67,4 @@ TEST(AbstractTypeDefinitionProviderTest, DelegatesResolvedDeclarationNode) {
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

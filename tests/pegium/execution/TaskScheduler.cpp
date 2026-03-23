@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <thread>
 
-#include <pegium/execution/TaskScheduler.hpp>
+#include <pegium/core/execution/TaskScheduler.hpp>
 
 namespace pegium::execution {
 namespace {

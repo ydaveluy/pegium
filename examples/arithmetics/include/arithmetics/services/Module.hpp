@@ -2,16 +2,15 @@
 
 #include <memory>
 
-#include <pegium/services/Services.hpp>
-#include <pegium/services/SharedServices.hpp>
+#include <arithmetics/services/Services.hpp>
+#include <pegium/lsp/services/SharedServices.hpp>
 
 namespace arithmetics::services {
 
-std::unique_ptr<pegium::services::Services>
-create_language_services(const pegium::services::SharedServices &sharedServices,
-                         std::string languageId);
+std::unique_ptr<ArithmeticsServices>
+create_language_services(const pegium::SharedServices &sharedServices,
+                         std::string languageId = "arithmetics");
 
-bool register_language_services(pegium::services::SharedServices &sharedServices);
+bool register_language_services(pegium::SharedServices &sharedServices);
 
 } // namespace arithmetics::services
-

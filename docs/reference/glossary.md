@@ -57,6 +57,6 @@ linked, indexed, and validated state.
 
 ## Continue with
 
-- [Start Here](start-here.md)
+- [Reference](index.md)
 - [Document Lifecycle](document-lifecycle.md)
 - [Semantic Model](semantic-model.md)

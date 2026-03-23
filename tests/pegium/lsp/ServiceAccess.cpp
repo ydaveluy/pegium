@@ -2,46 +2,68 @@
 
 #include <pegium/CoreTestSupport.hpp>
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/ServiceAccess.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 TEST(ServiceAccessTest, CastsConcreteLanguageServices) {
-  auto shared = test::make_shared_services();
-  auto services = test::make_services(*shared, "calc", {".calc"});
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  auto services = test::make_uninstalled_services(*shared, "calc", {".calc"});
+  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultLspServices(*services);
 
   const auto *raw = services.get();
   ASSERT_NE(as_services(raw), nullptr);
-  EXPECT_EQ(as_services(raw)->languageId, "calc");
+  EXPECT_EQ(as_services(raw)->languageMetaData.languageId, "calc");
 }
 
 TEST(ServiceAccessTest, RejectsCoreOnlyServices) {
-  auto shared = test::make_shared_core_services();
-  auto services = test::make_core_services(*shared, "calc", {".calc"});
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  auto services = test::make_uninstalled_core_services(*shared, "calc", {".calc"});
+  pegium::services::installDefaultCoreServices(*services);
 
   EXPECT_EQ(as_services(services.get()), nullptr);
 }
 
 TEST(ServiceAccessTest, ResolvesServicesFromRegistryHelpers) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services(*shared, "calc", {".calc"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services(*shared, "calc", {".calc"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   const auto uri = test::make_file_uri("feature.calc");
-  ASSERT_NE(get_services(shared->serviceRegistry.get(), "calc"), nullptr);
-  ASSERT_NE(get_services_for_uri(shared->serviceRegistry.get(), uri), nullptr);
-  ASSERT_NE(get_services_for_file_name(shared->serviceRegistry.get(),
-                                       "feature.calc"),
-            nullptr);
+  ASSERT_NE(get_services(*shared->serviceRegistry, uri), nullptr);
 }
 
-TEST(ServiceAccessTest, HandlesNullRegistry) {
-  EXPECT_EQ(get_services(nullptr, "calc"), nullptr);
-  EXPECT_EQ(get_services_for_uri(nullptr, test::make_file_uri("feature.calc")),
+TEST(ServiceAccessTest, ReturnsNullWhenRegistryCannotResolveUri) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices =
+        test::make_uninstalled_services(*shared, "calc", {".calc"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  EXPECT_EQ(get_services(*shared->serviceRegistry,
+                         test::make_file_uri("feature.unknown")),
             nullptr);
-  EXPECT_EQ(get_services_for_file_name(nullptr, "feature.calc"), nullptr);
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

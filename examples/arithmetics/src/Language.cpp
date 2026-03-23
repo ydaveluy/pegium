@@ -1,7 +1,7 @@
 #include <arithmetics/parser/Parser.hpp>
+#include <arithmetics/Operator.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cctype>
 #include <stdexcept>
 #include <string>
@@ -26,71 +26,23 @@ std::string get_definition_name(const AbstractDefinition *definition) {
 
 pegium::AstNode *resolve_definition(Module &module,
                                     const std::string &identifier) {
-  for (const auto &statement : module.statements) {
-    const auto *definition = dynamic_cast<const Definition *>(statement.get());
+  for (auto &statement : module.statements) {
+    auto *definition = dynamic_cast<Definition *>(statement.get());
     if (!definition) {
       continue;
     }
 
     if (definition->name == identifier) {
-      return const_cast<Definition *>(definition);
+      return definition;
     }
 
-    for (const auto &arg : definition->args) {
+    for (auto &arg : definition->args) {
       if (arg && arg->name == identifier) {
-        return const_cast<DeclaredParameter *>(arg.get());
+        return arg.get();
       }
     }
   }
   return nullptr;
-}
-
-void resolve_references(Module &module) {
-  for (auto *node : module.getAllContent()) {
-    auto *call = dynamic_cast<FunctionCall *>(node);
-    if (call == nullptr) {
-      continue;
-    }
-
-    if (auto *target =
-            resolve_definition(module, canonical_identifier(call->func.getRefText()));
-        target != nullptr) {
-      call->func.setResolution(
-          pegium::ReferenceResolution{.node = target, .description = nullptr});
-      continue;
-    }
-
-    call->func.setResolution(pegium::ReferenceResolution{
-        .node = nullptr,
-        .description = nullptr,
-        .errorMessage = "Unknown reference in function call.",
-    });
-  }
-}
-
-double apply_operator(std::string_view op, double x, double y) {
-  if (op == "+") {
-    return x + y;
-  }
-  if (op == "-") {
-    return x - y;
-  }
-  if (op == "*") {
-    return x * y;
-  }
-  if (op == "^") {
-    return std::pow(x, y);
-  }
-  if (op == "%") {
-    return std::fmod(x, y);
-  }
-  if (op == "/") {
-    if (y == 0.0) {
-      throw std::runtime_error("Division by zero.");
-    }
-    return x / y;
-  }
-  throw std::runtime_error("Unknown operator: " + std::string(op));
 }
 
 struct InterpreterContext {
@@ -150,7 +102,7 @@ double evaluate_expression(const Expression &expression, InterpreterContext &ctx
     }
     const auto left = evaluate_expression(*binary->left, ctx);
     const auto right = evaluate_expression(*binary->right, ctx);
-    return apply_operator(binary->op, left, right);
+    return apply_operator(binary->op)(left, right);
   }
 
   if (const auto *grouped = dynamic_cast<const GroupedExpression *>(&expression)) {
@@ -165,7 +117,8 @@ double evaluate_expression(const Expression &expression, InterpreterContext &ctx
   }
 
   if (const auto *call = dynamic_cast<const FunctionCall *>(&expression)) {
-    const auto *resolved = call->func.get();
+    const auto *resolved = dynamic_cast<const AbstractDefinition *>(
+        resolve_definition(*ctx.module, canonical_identifier(call->func.getRefText())));
     if (!resolved) {
       throw std::runtime_error("Unknown reference in function call.");
     }
@@ -226,7 +179,6 @@ std::string canonical_identifier(std::string_view text) {
 }
 
 EvaluationResult interpret_evaluations(ast::Module &module) {
-  resolve_references(module);
   InterpreterContext ctx{
       .module = &module,
       .symbols = {},
@@ -250,16 +202,3 @@ std::vector<double> evaluate_module(ast::Module &module) {
 }
 
 } // namespace arithmetics
-
-namespace arithmetics::parser {
-
-std::unique_ptr<pegium::services::Services>
-make_language_services(const pegium::services::SharedServices &sharedServices,
-                       std::string languageId) {
-  auto services =
-      pegium::services::makeDefaultServices(sharedServices, std::move(languageId));
-  services->parser = std::make_unique<const ArithmeticParser>(*services);
-  return services;
-}
-
-} // namespace arithmetics::parser

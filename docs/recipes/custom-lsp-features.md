@@ -41,7 +41,7 @@ available extension points.
 - hover content needs custom documentation rendering
 - rename or definition behavior depends on domain-specific semantics
 
-## Recommended order
+## A practical order
 
 Replace the most visible or most language-specific feature first:
 

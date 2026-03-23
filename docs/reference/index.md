@@ -1,17 +1,8 @@
 # Reference
 
-This section contains the canonical concept and API-oriented documentation for
-Pegium.
+This section contains the canonical concept documentation for Pegium.
 
-## Start here if
-
-- you already know what subsystem you are looking for
-- you want exact terminology instead of a tutorial
-- you need the stable mental model behind services, documents, and the AST
-
-## Where to go next?
-
-If you are not sure which page to read first, open [Start Here](start-here.md).
+## Where to go from here?
 
 ### Glossary
 
@@ -21,7 +12,7 @@ If you are looking for a specific Pegium term or concept, start with the
 ### Grammar
 
 If you are looking for a specific grammar feature, continue with the
-[grammar reference](grammar-reference.md) and [parser contracts](parser-contracts.md).
+[grammar reference](grammar-reference.md).
 
 ### Architecture
 
@@ -32,12 +23,13 @@ are:
 - [Document Lifecycle](document-lifecycle.md)
 - [Semantic Model](semantic-model.md)
 
-### API-oriented pages
+### Pegium-specific DSLs
 
-Use these when you need more precise subsystem details:
+Use these when you need the exact user-facing surface of a Pegium subsystem:
 
-- [Services and Modules](services-and-modules.md)
 - [Formatter DSL](formatter-dsl.md)
-- [Default LSP services](lsp-services.md)
-- [Completion provider](completion-provider.md)
-- [Workspace concepts](workspace.md)
+
+For LSP, completion, workspace, and other advanced customization, prefer the
+task-oriented guides in [Build a Language](../build-a-language/index.md) and
+[Recipes](../recipes/index.md). The deeper pages are still linked from those
+guides when they add real user value.

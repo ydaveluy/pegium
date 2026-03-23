@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <pegium/CoreTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 
 namespace pegium::documentation {
 namespace {
@@ -50,10 +50,15 @@ protected:
 };
 
 TEST(DefaultCommentProviderTest, ReturnsLeadingHiddenMultilineComment) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services<DocumentationParser>(*shared, "docs",
-                                                    {".docs"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services<DocumentationParser>(*shared, "docs",
+                                                    {".docs"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("comment.docs"), "docs",
@@ -67,23 +72,27 @@ TEST(DefaultCommentProviderTest, ReturnsLeadingHiddenMultilineComment) {
   ASSERT_NE(model, nullptr);
   ASSERT_EQ(model->entries.size(), 2u);
 
-  const auto *services = shared->serviceRegistry->getServicesByLanguageId("docs");
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->documentation.commentProvider, nullptr);
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.documentation.commentProvider, nullptr);
 
-  EXPECT_EQ(services->documentation.commentProvider->getComment(
+  EXPECT_EQ(services.documentation.commentProvider->getComment(
                 *model->entries.front()),
             "/** First entry */");
-  EXPECT_TRUE(services->documentation.commentProvider->getComment(
+  EXPECT_TRUE(services.documentation.commentProvider->getComment(
                   *model->entries.back())
                   .empty());
 }
 
 TEST(DefaultCommentProviderTest, ReturnsLeadingHiddenMultilineCommentForRootNode) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services<DocumentationParser>(*shared, "docs",
-                                                    {".docs"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services<DocumentationParser>(*shared, "docs",
+                                                    {".docs"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("root-comment.docs"), "docs",
@@ -96,11 +105,10 @@ TEST(DefaultCommentProviderTest, ReturnsLeadingHiddenMultilineCommentForRootNode
       dynamic_cast<DocumentationModel *>(document->parseResult.value.get());
   ASSERT_NE(model, nullptr);
 
-  const auto *services = shared->serviceRegistry->getServicesByLanguageId("docs");
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->documentation.commentProvider, nullptr);
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.documentation.commentProvider, nullptr);
 
-  EXPECT_EQ(services->documentation.commentProvider->getComment(*model),
+  EXPECT_EQ(services.documentation.commentProvider->getComment(*model),
             "/** Root model */");
 }
 

@@ -5,36 +5,33 @@
 #include <lsp/messages.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/FileOperationHandler.hpp>
-#include <pegium/lsp/LanguageServerRuntime.hpp>
+#include <pegium/lsp/workspace/FileOperationHandler.hpp>
+#include <pegium/lsp/runtime/LanguageServerRuntime.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 class RecordingRuntimeDocumentUpdateHandler final : public DocumentUpdateHandler {
 public:
-  bool supportsDidOpenDocument() const noexcept override { return true; }
-
-  bool supportsDidChangeContent() const noexcept override { return true; }
-
-  bool supportsDidSaveDocument() const noexcept override { return true; }
-
-  bool supportsDidCloseDocument() const noexcept override { return true; }
-
-  bool supportsWillSaveDocument() const noexcept override { return true; }
-
-  bool supportsWillSaveDocumentWaitUntil() const noexcept override {
+  [[nodiscard]] bool supportsDidSaveDocument() const noexcept override {
     return true;
   }
 
-  bool supportsDidChangeWatchedFiles() const noexcept override { return true; }
+  [[nodiscard]] bool supportsWillSaveDocument() const noexcept override {
+    return true;
+  }
+
+  [[nodiscard]] bool
+  supportsWillSaveDocumentWaitUntil() const noexcept override {
+    return true;
+  }
 
   void didOpenDocument(const TextDocumentChangeEvent &event) override {
-    openedUris.push_back(event.document->uri);
+    openedUris.push_back(event.document->uri());
   }
 
   void didChangeContent(const TextDocumentChangeEvent &event) override {
-    changedUris.push_back(event.document->uri);
+    changedUris.push_back(event.document->uri());
   }
 
   void willSaveDocument(const TextDocumentWillSaveEvent &event) override {
@@ -52,11 +49,11 @@ public:
   }
 
   void didSaveDocument(const TextDocumentChangeEvent &event) override {
-    savedUris.push_back(event.document->uri);
+    savedUris.push_back(event.document->uri());
   }
 
   void didCloseDocument(const TextDocumentChangeEvent &event) override {
-    closedUris.push_back(event.document->uri);
+    closedUris.push_back(event.document->uri());
   }
 
   std::vector<std::string> openedUris;
@@ -69,46 +66,36 @@ public:
 
 class PassiveRuntimeDocumentUpdateHandler final : public DocumentUpdateHandler {
 public:
-  bool supportsDidChangeWatchedFiles() const noexcept override { return true; }
-
-  void didOpenDocument(const TextDocumentChangeEvent &event) override {
-    openedUris.push_back(event.document->uri);
-  }
-
-  void didChangeContent(const TextDocumentChangeEvent &event) override {
-    changedUris.push_back(event.document->uri);
-  }
-
-  void didSaveDocument(const TextDocumentChangeEvent &event) override {
-    savedUris.push_back(event.document->uri);
-  }
-
-  void didCloseDocument(const TextDocumentChangeEvent &event) override {
-    closedUris.push_back(event.document->uri);
-  }
-
   void
   didChangeWatchedFiles(const ::lsp::DidChangeWatchedFilesParams &params) override {
     watchedChangeCounts.push_back(params.changes.size());
   }
 
-  std::vector<std::string> openedUris;
-  std::vector<std::string> changedUris;
-  std::vector<std::string> savedUris;
-  std::vector<std::string> closedUris;
   std::vector<std::size_t> watchedChangeCounts;
 };
 
+::lsp::FileOperationOptions make_test_file_operation_options(
+    bool includeDidRename = true, bool includeWillDelete = true) {
+  ::lsp::FileOperationFilter fileFilter{};
+  fileFilter.pattern.glob = "**/*";
+  fileFilter.scheme = "file";
+
+  ::lsp::FileOperationRegistrationOptions registration{};
+  registration.filters.push_back(std::move(fileFilter));
+
+  ::lsp::FileOperationOptions options{};
+  options.didCreate = registration;
+  if (includeDidRename) {
+    options.didRename = registration;
+  }
+  if (includeWillDelete) {
+    options.willDelete = registration;
+  }
+  return options;
+}
+
 class RecordingRuntimeFileOperationHandler final : public FileOperationHandler {
 public:
-  [[nodiscard]] bool supportsDidCreateFiles() const noexcept override {
-    return true;
-  }
-
-  [[nodiscard]] bool supportsWillDeleteFiles() const noexcept override {
-    return true;
-  }
-
   [[nodiscard]] const ::lsp::FileOperationOptions &
   fileOperationOptions() const noexcept override {
     return options;
@@ -133,25 +120,18 @@ public:
   std::vector<std::size_t> willDeleteCalls;
 
 private:
-  ::lsp::FileOperationOptions options = [] {
-    ::lsp::FileOperationFilter fileFilter{};
-    fileFilter.pattern.glob = "**/*";
-    fileFilter.scheme = "file";
-
-    ::lsp::FileOperationRegistrationOptions registration{};
-    registration.filters.push_back(std::move(fileFilter));
-
-    ::lsp::FileOperationOptions out{};
-    out.didCreate = registration;
-    out.didRename = registration;
-    out.willDelete = registration;
-    return out;
-  }();
+  ::lsp::FileOperationOptions options = make_test_file_operation_options();
 };
 
 class LanguageServerRuntimeTest : public ::testing::Test {
 protected:
-  std::unique_ptr<services::SharedServices> shared = test::make_shared_services();
+  std::unique_ptr<pegium::SharedServices> shared = test::make_empty_shared_services();
+
+  LanguageServerRuntimeTest() {
+    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedLspServices(*shared);
+    pegium::test::initialize_shared_workspace_for_tests(*shared);
+  }
 
   struct MessageHarness {
     test::MemoryStream stream;
@@ -190,39 +170,63 @@ TEST_F(LanguageServerRuntimeTest,
   auto harness = makeHarnessWithDocumentHandler();
 
   const auto uri = fileUri("runtime-subscriptions.test");
-  ASSERT_NE(shared->workspace.textDocuments->open(uri, "test", "alpha", 1),
-            nullptr);
+  ::lsp::DidOpenTextDocumentParams openParams{};
+  openParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  openParams.textDocument.languageId = "test";
+  openParams.textDocument.version = 1;
+  openParams.textDocument.text = "alpha";
+  harness->stream.pushInput(test::make_notification_message(
+      ::lsp::notifications::TextDocument_DidOpen::Method, std::move(openParams)));
+  harness->handler.processIncomingMessages();
   ASSERT_EQ(recording->openedUris.size(), 1u);
   ASSERT_EQ(recording->changedUris.size(), 1u);
   EXPECT_EQ(recording->openedUris.front(), uri);
   EXPECT_EQ(recording->changedUris.front(), uri);
 
-  EXPECT_TRUE(shared->workspace.textDocuments->willSave(
-      uri, workspace::TextDocumentSaveReason::FocusOut));
+  ::lsp::WillSaveTextDocumentParams willSaveParams{};
+  willSaveParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  willSaveParams.reason = ::lsp::TextDocumentSaveReason::FocusOut;
+  harness->stream.pushInput(test::make_notification_message(
+      ::lsp::notifications::TextDocument_WillSave::Method,
+      std::move(willSaveParams)));
+  harness->handler.processIncomingMessages();
   ASSERT_EQ(recording->willSaveReasons.size(), 1u);
   EXPECT_EQ(recording->willSaveReasons.front(),
             ::lsp::TextDocumentSaveReason::FocusOut);
 
-  const auto edits = shared->workspace.textDocuments->willSaveWaitUntil(
-      uri, workspace::TextDocumentSaveReason::AfterDelay);
-  ASSERT_EQ(edits.size(), 1u);
-  EXPECT_EQ(edits.front().newText, "runtime ");
+  ::lsp::WillSaveTextDocumentParams waitUntilParams{};
+  waitUntilParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  waitUntilParams.reason = ::lsp::TextDocumentSaveReason::AfterDelay;
+  harness->stream.pushInput(test::make_request_message(
+      1, ::lsp::requests::TextDocument_WillSaveWaitUntil::Method,
+      std::move(waitUntilParams)));
+  harness->handler.processIncomingMessages();
+  EXPECT_NE(harness->stream.written().find("runtime "), std::string::npos);
   ASSERT_EQ(recording->waitUntilReasons.size(), 1u);
   EXPECT_EQ(recording->waitUntilReasons.front(),
             ::lsp::TextDocumentSaveReason::AfterDelay);
 
-  ASSERT_NE(shared->workspace.textDocuments->save(uri, std::string("beta")),
-            nullptr);
+  ::lsp::DidSaveTextDocumentParams saveParams{};
+  saveParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  saveParams.text = std::string("beta");
+  harness->stream.pushInput(test::make_notification_message(
+      ::lsp::notifications::TextDocument_DidSave::Method, std::move(saveParams)));
+  harness->handler.processIncomingMessages();
   ASSERT_EQ(recording->savedUris.size(), 1u);
   EXPECT_EQ(recording->savedUris.front(), uri);
 
-  EXPECT_TRUE(shared->workspace.textDocuments->close(uri));
+  ::lsp::DidCloseTextDocumentParams closeParams{};
+  closeParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  harness->stream.pushInput(test::make_notification_message(
+      ::lsp::notifications::TextDocument_DidClose::Method,
+      std::move(closeParams)));
+  harness->handler.processIncomingMessages();
   ASSERT_EQ(recording->closedUris.size(), 1u);
   EXPECT_EQ(recording->closedUris.front(), uri);
 }
 
 TEST_F(LanguageServerRuntimeTest,
-       AddFileOperationHandlerRegistersOnlySupportedOperations) {
+       AddFileOperationHandlerRegistersDeclaredOperations) {
   RecordingRuntimeFileOperationHandler fileOperationHandler;
 
   auto harness = makeHarnessWithFileHandler(fileOperationHandler);
@@ -254,13 +258,14 @@ TEST_F(LanguageServerRuntimeTest,
 
   EXPECT_EQ(fileOperationHandler.didCreateCalls,
             std::vector<std::size_t>{1u});
-  EXPECT_TRUE(fileOperationHandler.didRenameCalls.empty());
+  EXPECT_EQ(fileOperationHandler.didRenameCalls,
+            std::vector<std::size_t>{1u});
   EXPECT_EQ(fileOperationHandler.willDeleteCalls,
             std::vector<std::size_t>{1u});
 }
 
 TEST_F(LanguageServerRuntimeTest,
-       AddDocumentUpdateHandlerOnlyWiresSupportedCallbacks) {
+       AddDocumentUpdateHandlerUsesNoOpDefaultsForUnimplementedCallbacks) {
   auto handlerImpl = std::make_unique<PassiveRuntimeDocumentUpdateHandler>();
   auto *recording = handlerImpl.get();
   shared->lsp.documentUpdateHandler = std::move(handlerImpl);
@@ -268,11 +273,28 @@ TEST_F(LanguageServerRuntimeTest,
   auto harness = makeHarnessWithDocumentHandler();
 
   const auto uri = fileUri("runtime-passive.test");
-  ASSERT_NE(shared->workspace.textDocuments->open(uri, "test", "alpha", 1),
-            nullptr);
-  ASSERT_NE(shared->workspace.textDocuments->save(uri, std::string("beta")),
-            nullptr);
-  EXPECT_TRUE(shared->workspace.textDocuments->close(uri));
+  ::lsp::DidOpenTextDocumentParams openParams{};
+  openParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  openParams.textDocument.languageId = "test";
+  openParams.textDocument.version = 1;
+  openParams.textDocument.text = "alpha";
+  harness->stream.pushInput(test::make_notification_message(
+      ::lsp::notifications::TextDocument_DidOpen::Method, std::move(openParams)));
+
+  ::lsp::DidSaveTextDocumentParams saveParams{};
+  saveParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  saveParams.text = std::string("beta");
+  harness->stream.pushInput(test::make_notification_message(
+      ::lsp::notifications::TextDocument_DidSave::Method, std::move(saveParams)));
+
+  ::lsp::DidCloseTextDocumentParams closeParams{};
+  closeParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  harness->stream.pushInput(test::make_notification_message(
+      ::lsp::notifications::TextDocument_DidClose::Method,
+      std::move(closeParams)));
+  harness->handler.processIncomingMessages();
+  harness->handler.processIncomingMessages();
+  harness->handler.processIncomingMessages();
 
   ::lsp::DidChangeWatchedFilesParams params{};
   params.changes.push_back(::lsp::FileEvent{
@@ -283,12 +305,41 @@ TEST_F(LanguageServerRuntimeTest,
       ::lsp::notifications::Workspace_DidChangeWatchedFiles::Method, params));
   harness->handler.processIncomingMessages();
 
-  EXPECT_TRUE(recording->openedUris.empty());
-  EXPECT_TRUE(recording->changedUris.empty());
-  EXPECT_TRUE(recording->savedUris.empty());
-  EXPECT_TRUE(recording->closedUris.empty());
   EXPECT_EQ(recording->watchedChangeCounts, std::vector<std::size_t>{1u});
 }
 
+TEST_F(LanguageServerRuntimeTest,
+       StartLanguageServerReturnsFailureWhenLanguageServerIsMissing) {
+  test::MemoryStream stream;
+  ::lsp::Connection connection(stream);
+
+  shared->lsp.languageServer.reset();
+
+  EXPECT_EQ(startLanguageServer(*shared, connection), 1);
+}
+
+TEST_F(LanguageServerRuntimeTest,
+       StartLanguageServerProcessesInitializeShutdownAndExitWithExplicitConnection) {
+  test::MemoryStream stream;
+  ::lsp::Connection connection(stream);
+
+  stream.pushInput(test::with_content_length(
+      R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})"));
+  stream.pushInput(test::with_content_length(
+      R"({"jsonrpc":"2.0","method":"initialized","params":{}})"));
+  stream.pushInput(
+      test::with_content_length(R"({"jsonrpc":"2.0","id":2,"method":"shutdown"})"));
+  stream.pushInput(
+      test::with_content_length(R"({"jsonrpc":"2.0","method":"exit"})"));
+
+  EXPECT_EQ(startLanguageServer(*shared, connection), 0);
+  EXPECT_EQ(shared->lsp.languageClient.get(), nullptr);
+
+  const auto messages = test::parse_written_messages(stream.written());
+  ASSERT_GE(messages.size(), 2u);
+  EXPECT_EQ(messages[0].object().get("id").integer(), 1);
+  EXPECT_EQ(messages[1].object().get("id").integer(), 2);
+}
+
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

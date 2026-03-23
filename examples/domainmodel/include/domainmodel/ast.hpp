@@ -1,30 +1,25 @@
 #pragma once
 
-#include <pegium/syntax-tree/AstNode.hpp>
+#include <pegium/core/syntax-tree/AstNode.hpp>
 
 namespace domainmodel::ast {
 
-struct AbstractElement : pegium::AstNode {};
+struct AbstractElement : pegium::NamedAstNode {};
 struct Type : AbstractElement {};
 
-struct Feature : pegium::AstNode {
+struct Feature : pegium::NamedAstNode {
   bool many = false;
-  string name;
   reference<Type> type;
 };
 
-struct DataType : Type {
-  string name;
-};
+struct DataType : Type {};
 
 struct Entity : Type {
-  string name;
   optional<reference<Entity>> superType;
   vector<pointer<Feature>> features;
 };
 
 struct PackageDeclaration : AbstractElement {
-  string name;
   vector<pointer<AbstractElement>> elements;
 };
 

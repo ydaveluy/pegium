@@ -8,9 +8,10 @@
 #include <lsp/messages.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/WorkspaceAdapters.hpp>
+#include <pegium/lsp/runtime/internal/LanguageClientFactory.hpp>
+#include <pegium/lsp/workspace/WorkspaceAdapters.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 TEST(WorkspaceAdaptersTest, ConvertsInitializeParamsToWorkspaceProtocolParams) {
@@ -59,7 +60,7 @@ TEST(WorkspaceAdaptersTest,
   EXPECT_FALSE(result.capabilities.implementationLinkSupport);
 }
 
-TEST(WorkspaceAdaptersTest, InitializedParamsWithNullMessageHandlerStayEmpty) {
+TEST(WorkspaceAdaptersTest, InitializedParamsWithNullLanguageClientStayEmpty) {
   const auto params = make_workspace_initialized_params(nullptr);
   EXPECT_FALSE(params.registerDidChangeConfiguration);
   EXPECT_FALSE(params.fetchConfiguration);
@@ -70,8 +71,11 @@ TEST(WorkspaceAdaptersTest,
   test::MemoryStream stream;
   ::lsp::Connection connection(stream);
   ::lsp::MessageHandler handler(connection);
+  auto sink = std::make_shared<test::RecordingObservabilitySink>();
+  auto languageClient =
+      make_message_handler_language_client(handler, *sink);
 
-  const auto params = make_workspace_initialized_params(&handler);
+  const auto params = make_workspace_initialized_params(languageClient.get());
   ASSERT_TRUE(params.registerDidChangeConfiguration);
 
   auto future =
@@ -110,8 +114,11 @@ TEST(WorkspaceAdaptersTest,
   test::MemoryStream stream;
   ::lsp::Connection connection(stream);
   ::lsp::MessageHandler handler(connection);
+  auto sink = std::make_shared<test::RecordingObservabilitySink>();
+  auto languageClient =
+      make_message_handler_language_client(handler, *sink);
 
-  const auto params = make_workspace_initialized_params(&handler);
+  const auto params = make_workspace_initialized_params(languageClient.get());
   ASSERT_TRUE(params.fetchConfiguration);
 
   auto future = params.fetchConfiguration({"pegium.validation", "arithmetics"});
@@ -158,4 +165,4 @@ TEST(WorkspaceAdaptersTest, ConvertsConfigurationChangeParamsToJsonValue) {
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

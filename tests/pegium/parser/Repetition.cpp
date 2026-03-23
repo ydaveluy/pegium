@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <pegium/TestCstBuilderHarness.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 #include <limits>
 
 using namespace pegium::parser;

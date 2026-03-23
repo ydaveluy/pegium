@@ -1,22 +1,37 @@
 # 1. Build the Repository
 
-Start by building Pegium itself and running at least one example locally.
+Before designing your own language, make sure Pegium itself builds on your
+machine and that you can run at least one shipped example.
 
-## Why this comes first
+## What you need
 
-Before designing your own language, you want to know that:
+- a C++20-capable compiler
+- CMake
+- Ninja or another generator supported by your setup
+- Node.js only if you want to run the VS Code clients shipped in the examples
 
-- your compiler and CMake setup work
-- the examples build on your machine
-- the repository layout makes sense to you
+## Build the repository
 
-## Recommended steps
+```bash
+cmake -S . -B build
+cmake --build build -j32
+```
 
-1. Configure and build the repository with CMake.
-2. Run at least one shipped example locally.
-3. Keep the repository structure in mind:
-   `src/pegium/` for the framework, `examples/` for working languages,
-   `tests/` for usage patterns.
+If you also want to validate the test suite:
+
+```bash
+cd build
+ctest -j32 --output-on-failure
+```
+
+## Repository layout at a glance
+
+The main directories to keep in mind are:
+
+- `src/pegium/` for the framework
+- `examples/` for end-to-end languages
+- `tests/` for usage patterns and regression coverage
+- `docs/` for this documentation
 
 ## Outcome
 

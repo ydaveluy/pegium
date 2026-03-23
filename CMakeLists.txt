@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.14)
 
 project(pegium LANGUAGES CXX)
 
+if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
+    set(PEGIUM_MASTER_PROJECT ON)
+else ()
+    set(PEGIUM_MASTER_PROJECT OFF)
+endif ()
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 include(FetchContent)
@@ -106,7 +112,7 @@ endif(PEGIUM_ENABLE_CODECOVERAGE)
 
 
 add_subdirectory(src/pegium)
-option(PEGIUM_BUILD_EXAMPLES "Build pegium examples" ON)
+option(PEGIUM_BUILD_EXAMPLES "Build pegium examples" ${PEGIUM_MASTER_PROJECT})
 if(PEGIUM_BUILD_EXAMPLES)
     add_subdirectory(examples/arithmetics)
     add_subdirectory(examples/domainmodel)
@@ -114,6 +120,7 @@ if(PEGIUM_BUILD_EXAMPLES)
     add_subdirectory(examples/statemachine)
 endif()
 
+option(BUILD_TESTING "Build the test suite" ${PEGIUM_MASTER_PROJECT})
 include(CTest)
 
 
@@ -168,14 +175,9 @@ if(BUILD_TESTING)
         )
     endif()
 
-    file(GLOB_RECURSE PEGIUM_LEGACY_LANGUAGE_TEST_SOURCES CONFIGURE_DEPENDS
-        tests-legacy/pegium-legacy-20260307/languages/*.cpp
-    )
-
     add_executable(PegiumCoreUnitTest ${PEGIUM_CORE_UNIT_TEST_SOURCES})
     add_executable(PegiumLspUnitTest ${PEGIUM_LSP_UNIT_TEST_SOURCES})
     add_executable(PegiumIntegrationTest ${PEGIUM_INTEGRATION_TEST_SOURCES})
-    add_executable(PegiumLegacyLanguagesTest ${PEGIUM_LEGACY_LANGUAGE_TEST_SOURCES})
     if(PEGIUM_BUILD_EXAMPLES)
         add_executable(PegiumBench ${PEGIUM_BENCH_SOURCES})
         add_executable(PegiumExamplesTest ${PEGIUM_EXAMPLE_TEST_SOURCES})
@@ -187,10 +189,6 @@ if(BUILD_TESTING)
     target_include_directories(PegiumCoreUnitTest PRIVATE tests)
     target_include_directories(PegiumLspUnitTest PRIVATE tests)
     target_include_directories(PegiumIntegrationTest PRIVATE tests)
-    target_include_directories(PegiumLegacyLanguagesTest PRIVATE
-        tests-legacy/include
-        tests-legacy/pegium-legacy-20260307
-    )
     if(PEGIUM_BUILD_EXAMPLES)
         target_include_directories(PegiumBench PRIVATE tests)
         target_include_directories(PegiumExamplesTest PRIVATE tests)
@@ -201,31 +199,17 @@ if(BUILD_TESTING)
 
     target_link_libraries(PegiumCoreUnitTest PUBLIC
         PegiumCore
+        PegiumConverters
         GTest::gtest_main
     )
     target_link_libraries(PegiumLspUnitTest PUBLIC
         pegium
+        PegiumCli
         GTest::gtest_main
     )
     target_link_libraries(PegiumIntegrationTest PUBLIC
         pegium
         GTest::gtest_main
-    )
-    target_link_libraries(PegiumLegacyLanguagesTest PUBLIC
-        PegiumCore
-        GTest::gtest_main
-    )
-    add_custom_target(PegiumParserPerfCheck
-        COMMAND ${CMAKE_COMMAND} -E env
-            PEGIUM_BENCH_ITERATIONS=1
-            PEGIUM_BENCH_WARMUP=0
-            PEGIUM_BENCH_SAMPLES=1
-            bash ${CMAKE_SOURCE_DIR}/tools/check_parser_perf.sh
-                $<TARGET_FILE:PegiumLegacyLanguagesTest>
-        DEPENDS PegiumLegacyLanguagesTest
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        USES_TERMINAL
-        COMMENT "Running parser callgrind perf baselines"
     )
     if(PEGIUM_BUILD_FUZZ_TARGETS)
         target_link_libraries(PegiumParserFuzzTarget PUBLIC PegiumCore)
@@ -250,7 +234,20 @@ if(BUILD_TESTING)
             pegium_example_domainmodel
             pegium_example_requirements
             pegium_example_statemachine
+            PegiumCli
             GTest::gtest_main
+        )
+        add_dependencies(PegiumExamplesTest
+            pegium-example-arithmetics-cli
+            pegium-example-domainmodel-cli
+            pegium-example-requirements-cli
+            pegium-example-statemachine-cli
+        )
+        target_compile_definitions(PegiumExamplesTest PRIVATE
+            PEGIUM_EXAMPLE_ARITHMETICS_CLI_PATH="$<TARGET_FILE:pegium-example-arithmetics-cli>"
+            PEGIUM_EXAMPLE_DOMAINMODEL_CLI_PATH="$<TARGET_FILE:pegium-example-domainmodel-cli>"
+            PEGIUM_EXAMPLE_REQUIREMENTS_CLI_PATH="$<TARGET_FILE:pegium-example-requirements-cli>"
+            PEGIUM_EXAMPLE_STATEMACHINE_CLI_PATH="$<TARGET_FILE:pegium-example-statemachine-cli>"
         )
     endif()
 
@@ -258,7 +255,6 @@ if(BUILD_TESTING)
     gtest_discover_tests(PegiumCoreUnitTest DISCOVERY_MODE PRE_TEST)
     gtest_discover_tests(PegiumLspUnitTest DISCOVERY_MODE PRE_TEST)
     gtest_discover_tests(PegiumIntegrationTest DISCOVERY_MODE PRE_TEST)
-    gtest_discover_tests(PegiumLegacyLanguagesTest DISCOVERY_MODE PRE_TEST)
     if(PEGIUM_BUILD_EXAMPLES)
         gtest_discover_tests(PegiumExamplesTest DISCOVERY_MODE PRE_TEST)
     endif()
@@ -292,7 +288,7 @@ if(BUILD_TESTING)
                 ${GCOVR_OPTIONS}
                 ${CMAKE_BINARY_DIR}
             COMMAND echo Generated report: ${CMAKE_BINARY_DIR}/report/index.html
-            DEPENDS PegiumCoreUnitTest PegiumLspUnitTest PegiumIntegrationTest PegiumLegacyLanguagesTest
+            DEPENDS PegiumCoreUnitTest PegiumLspUnitTest PegiumIntegrationTest
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         )
         if(PEGIUM_BUILD_EXAMPLES)

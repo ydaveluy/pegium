@@ -56,6 +56,8 @@ This is a good illustration of the Pegium style:
 - checks are typed
 - registration is explicit
 - diagnostics can be attached to a whole node or a specific property
+- validator registration usually happens during bootstrap, while still allowing
+  rare additions between validation passes
 
 ## Recommended first validations
 

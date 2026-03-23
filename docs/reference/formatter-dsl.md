@@ -1,10 +1,10 @@
 # Formatter DSL
 
 This page documents the user-facing formatting DSL built around
-`pegium::lsp::AbstractFormatter`.
+`pegium::AbstractFormatter`.
 
-Use this page when you need the canonical formatter API surface rather than the
-shorter task-oriented recipe.
+It complements the task-oriented formatting guide with the canonical API
+surface.
 
 ## Creating a formatter
 
@@ -18,16 +18,16 @@ The minimal pattern is:
 Example:
 
 ```cpp
-class MyFormatter : public pegium::lsp::AbstractFormatter {
+class MyFormatter : public pegium::AbstractFormatter {
 public:
-  explicit MyFormatter(const pegium::services::Services &services)
+  explicit MyFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<ast::Entity>(&MyFormatter::formatEntity);
     onHidden("ML_COMMENT", &MyFormatter::formatComment);
   }
 
 protected:
-  virtual void formatEntity(pegium::lsp::FormattingBuilder &builder,
+  virtual void formatEntity(pegium::FormattingBuilder &builder,
                             const ast::Entity *entity) const;
   virtual void formatComment(HiddenNodeFormatter &comment) const;
 };
@@ -136,12 +136,21 @@ Useful operations:
 - `formatLineComment(text, options)`
 - `formatLineComment(hiddenNode, options)`
 - `formatMultilineComment(text, options)`
+- `formatMultilineComment(hiddenNode, options)`
 
 These helpers are designed to cover common patterns such as brace blocks,
 comma-separated lists, and comment normalization.
 
+`formatMultilineComment(...)` does not hardcode a continuation marker. It
+emits continuation lines from `newLineStart`, so `newLineStart = " *"` covers
+doc comments while `newLineStart = ""` keeps plain block comments. In
+multiline comments, this prefix is stripped only from lines after the opening
+line. Tag handling uses `tagStart` and `tagContinuation`; by default
+`tagStart = "@"`, and setting `tagStart = nullopt` disables tag-specific
+formatting entirely.
+
 ## Related pages
 
 - [Formatting](../recipes/custom-formatter.md)
-- [Default LSP Services](lsp-services.md)
+- [LSP Services](../build-a-language/lsp-services.md)
 - [Semantic Model](semantic-model.md)

@@ -1,12 +1,12 @@
 # Build a Language
 
-This is a legacy section name kept for readers arriving from older links.
+This section groups the main subsystem guides for designing and wiring a
+language with Pegium.
 
-The current end-to-end path now lives under [Learn](../learn/index.md), while
-targeted customization lives under [Recipes](../recipes/index.md).
-
-If you want the current guided path, start with
-[Pegium's Workflow](../learn/workflow/index.md).
+If you want the guided end-to-end path, start with
+[Pegium's Workflow](../learn/workflow/index.md). If you already know the common
+workflow and want focused reading on one subsystem at a time, use the pages
+below.
 
 ## Topics
 
@@ -18,8 +18,9 @@ If you want the current guided path, start with
 - [LSP services](lsp-services.md)
 - [Workspace lifecycle](workspace.md)
 
-## Recommended usage
+## Where to go from here?
 
-- Prefer the [Learn](../learn/index.md) section for the primary reading path.
-- Use these legacy pages only when you reached them from an older bookmark or
-  link.
+- Use [Learn](../learn/index.md) for the recommended order of implementation.
+- Use these pages when you want a topic-by-topic explanation of one subsystem.
+- Use [Reference](../reference/index.md) when you need the exact framework
+  concepts behind a subsystem.

@@ -3,55 +3,47 @@
 #include <domainmodel/ast.hpp>
 
 #include <cctype>
-#include <optional>
-
-#include <pegium/validation/DiagnosticRanges.hpp>
 
 namespace domainmodel::services::validation {
-namespace {
-
 using namespace domainmodel::ast;
 
-std::string type_name(const Type &type) {
-  if (const auto *entity = dynamic_cast<const Entity *>(&type)) {
-    return entity->name;
-  }
-  if (const auto *dataType = dynamic_cast<const DataType *>(&type)) {
-    return dataType->name;
-  }
-  return {};
-}
-
-} // namespace
-
-void DomainModelValidator::registerValidationChecks(
-    pegium::validation::ValidationRegistry &registry,
-    const pegium::services::Services & /*services*/) {
-  const DomainModelValidator validator;
+void registerValidationChecks(
+    domainmodel::services::DomainModelServices &services) {
+  auto &registry = *services.validation.validationRegistry;
+  auto &validator = *services.domainModel.validation.domainModelValidator;
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
-          &DomainModelValidator::checkTypeNameStartsWithCapital>(validator)});
+           &DomainModelValidator::checkEntityNameStartsWithCapital>(validator),
+       pegium::validation::ValidationRegistry::makeValidationCheck<
+           &DomainModelValidator::checkDataTypeNameStartsWithCapital>(validator)});
 }
 
-void DomainModelValidator::checkTypeNameStartsWithCapital(
-    const Type &type, const pegium::validation::ValidationAcceptor &accept) const {
-  const auto name = type_name(type);
-  if (name.empty()) {
+void DomainModelValidator::checkEntityNameStartsWithCapital(
+    const Entity &entity,
+    const pegium::validation::ValidationAcceptor &accept) const {
+  if (entity.name.empty()) {
     return;
   }
-  const auto first = name.front();
+  const auto first = entity.name.front();
   if (std::toupper(static_cast<unsigned char>(first)) == first) {
     return;
   }
-  if (const auto *entity = dynamic_cast<const Entity *>(&type)) {
-    accept.warning(*entity, "Type name should start with a capital.")
-        .property<&Entity::name>();
+  accept.warning(entity, "Type name should start with a capital.")
+      .property<&Entity::name>();
+}
+
+void DomainModelValidator::checkDataTypeNameStartsWithCapital(
+    const DataType &dataType,
+    const pegium::validation::ValidationAcceptor &accept) const {
+  if (dataType.name.empty()) {
     return;
   }
-  if (const auto *dataType = dynamic_cast<const DataType *>(&type)) {
-    accept.warning(*dataType, "Type name should start with a capital.")
-        .property<&DataType::name>();
+  const auto first = dataType.name.front();
+  if (std::toupper(static_cast<unsigned char>(first)) == first) {
+    return;
   }
+  accept.warning(dataType, "Type name should start with a capital.")
+      .property<&DataType::name>();
 }
 
 } // namespace domainmodel::services::validation

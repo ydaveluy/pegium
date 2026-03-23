@@ -5,7 +5,6 @@ add_library(pegium_example_arithmetics
     src/lsp/ArithmeticsCodeActionProvider.cpp
     src/lsp/ArithmeticsFormatter.cpp
     src/Language.cpp
-    src/references/ArithmeticsScopeProvider.cpp
     src/validation/ArithmeticsValidator.cpp
 )
 
@@ -23,7 +22,10 @@ add_executable(pegium-example-arithmetics-cli
     src/cli_main.cpp
 )
 target_compile_features(pegium-example-arithmetics-cli PRIVATE cxx_std_20)
-target_link_libraries(pegium-example-arithmetics-cli PRIVATE pegium_example_arithmetics)
+target_link_libraries(pegium-example-arithmetics-cli PRIVATE
+    PegiumCli
+    pegium_example_arithmetics
+)
 
 add_executable(pegium-example-arithmetics-lsp
     src/lsp_main.cpp

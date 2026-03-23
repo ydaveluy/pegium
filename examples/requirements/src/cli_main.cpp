@@ -1,96 +1,85 @@
-#include <requirements/parser/Parser.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <requirements/cli/CliUtils.hpp>
+#include <requirements/cli/Generator.hpp>
+#include <requirements/services/Module.hpp>
 
-#include <algorithm>
+#include <pegium/cli/CliUtils.hpp>
+
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <iterator>
-#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace {
 
-std::string read_text_file(const std::string &path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in.is_open()) {
-    throw std::runtime_error("Unable to open file: " + path);
+struct GenerateOptions {
+  std::string fileName;
+  std::optional<std::string> destination;
+};
+
+std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
+  if (argc < 3 || std::string_view(argv[1]) != "generate") {
+    return std::nullopt;
   }
-  return std::string(std::istreambuf_iterator<char>(in),
-                     std::istreambuf_iterator<char>());
+
+  GenerateOptions options{.fileName = argv[2]};
+  for (int index = 3; index < argc; ++index) {
+    const std::string_view arg(argv[index]);
+    if ((arg == "-d" || arg == "--destination") && index + 1 < argc) {
+      options.destination = std::string(argv[++index]);
+      continue;
+    }
+    return std::nullopt;
+  }
+  return options;
 }
 
-void print_parse_diagnostics(
-    const std::vector<pegium::parser::ParseDiagnostic> &diagnostics) {
-  for (const auto &diagnostic : diagnostics) {
-    std::cerr << diagnostic << '\n';
-  }
-}
+int generate_cli(const GenerateOptions &options) {
+  auto shared = pegium::cli::make_shared_services();
+  auto services =
+      requirements::services::create_requirements_and_tests_language_services(
+          shared);
+  auto &requirementsServices = *services.requirements;
+  shared.serviceRegistry->registerServices(std::move(services.requirements));
+  shared.serviceRegistry->registerServices(std::move(services.tests));
 
-std::string normalized_extension(const std::string &path) {
-  std::string ext = std::filesystem::path(path).extension().string();
-  std::ranges::transform(ext, ext.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  return ext;
+  const auto absoluteInputPath = std::filesystem::absolute(options.fileName);
+  const auto extracted = requirements::cli::extract_requirement_model_with_test_models(
+      absoluteInputPath.string(), requirementsServices);
+
+  for (const auto &document : extracted.documents) {
+    if (pegium::cli::has_error_diagnostics(*document)) {
+      std::cerr << "There are validation errors:\n";
+      pegium::cli::print_error_diagnostics(*document, std::cerr);
+      return 2;
+    }
+  }
+
+  const auto outputPath = requirements::cli::generate_summary(
+      *extracted.requirementModel, extracted.testModels, absoluteInputPath.string(),
+      options.destination.has_value()
+          ? std::optional<std::string_view>(*options.destination)
+          : std::nullopt);
+  std::cout << "Requirement coverage generated successfully: " << outputPath
+            << '\n';
+  return 0;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 2) {
-    std::cerr << "Usage: pegium-example-requirements-cli <file.req|file.tst>\n";
+  const auto options = parse_generate_args(argc, argv);
+  if (!options.has_value()) {
+    std::cerr
+        << "Usage: pegium-example-requirements-cli generate <file.req> [-d dir]\n";
     return 1;
   }
 
   try {
-    const std::string path = argv[1];
-    const auto input = read_text_file(path);
-    const auto ext = normalized_extension(path);
-
-    if (ext == ".req") {
-      auto parser = std::make_unique<requirements::parser::RequirementsParser>();
-      pegium::workspace::Document document;
-      document.setText(input);
-      parser->parse(document);
-      const auto &result = document.parseResult;
-      auto *model =
-          pegium::ast_ptr_cast<requirements::ast::RequirementModel>(
-              result.value);
-
-      if (!result.value || !model) {
-        std::cerr << "Parse failed.\n";
-        print_parse_diagnostics(result.parseDiagnostics);
-        return 2;
-      }
-
-      std::cout << "Parsed requirement model with "
-                << model->requirements.size() << " requirements.\n";
-      return 0;
-    }
-
-    if (ext == ".tst") {
-      auto parser = std::make_unique<requirements::parser::TestsParser>();
-      pegium::workspace::Document document;
-      document.setText(input);
-      parser->parse(document);
-      const auto &result = document.parseResult;
-      auto *model =
-          pegium::ast_ptr_cast<requirements::ast::TestModel>(result.value);
-
-      if (!result.value || !model) {
-        std::cerr << "Parse failed.\n";
-        print_parse_diagnostics(result.parseDiagnostics);
-        return 2;
-      }
-
-      std::cout << "Parsed test model with " << model->tests.size()
-                << " tests.\n";
-      return 0;
-    }
-
-    std::cerr << "Unsupported file extension. Expected .req or .tst\n";
+    return generate_cli(*options);
+  } catch (const std::invalid_argument &error) {
+    std::cerr << error.what() << '\n';
     return 1;
   } catch (const std::exception &error) {
     std::cerr << "Fatal error: " << error.what() << '\n';

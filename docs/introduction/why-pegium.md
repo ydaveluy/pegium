@@ -3,15 +3,9 @@
 Pegium focuses on a simple idea: language tooling should feel like framework
 work, not like wiring dozens of unrelated utilities by hand.
 
-It aims to give C++ projects the same kind of “language workbench” feeling that
-Langium gives to TypeScript projects, while staying honest about the fact that
-the implementation model is different.
-
-## Read this page if
-
-- you are evaluating Pegium for a project
-- you want the design goals, not just the feature list
-- you need to explain what Pegium is trying to optimize for
+It aims to give C++ projects a coherent language workbench experience while
+staying honest about the fact that the implementation model is different from
+parser generators or external grammar systems.
 
 ## Design goals
 
@@ -26,7 +20,7 @@ the implementation model is different.
 - internal DSLs backed by a C++ codebase
 - language servers for configuration or modeling languages
 - parser-heavy tools that still need AST, linking, validation, or formatting
-- teams that want Langium-like concepts without leaving C++
+- teams that want a single toolkit for parser, semantics, and editor services
 
 ## What makes it practical
 
@@ -63,6 +57,5 @@ how far you want to push the surrounding tooling.
 ## Continue with
 
 - [Features](features.md) for the concrete capability list
-- [Choose Your Path](choose-your-path.md) for the best next documentation
-  section
+- [Showcases](showcases.md) if you want to inspect complete example languages
 - [Learn Pegium](../learn/index.md) if you already want to start building

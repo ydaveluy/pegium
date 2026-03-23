@@ -6,8 +6,9 @@ languages together?" or "Where should I cache this computation?".
 
 ## Where to go from here?
 
-Study the recipe sections in the navigation on the left once you already know
-which subsystem you want to customize.
+Study the recipe sections in the navigation once you already know which
+subsystem you want to customize. They are designed to help with the common
+tasks that appear after the basic workflow is already in place.
 
 Typical examples:
 
@@ -26,11 +27,6 @@ Typical examples:
 - [Performance](performance/index.md)
 - [Custom LSP features](custom-lsp-features.md)
 
-## Suggested reading order
-
-- Start with [Learn](../learn/index.md) if you are still building your first
-  Pegium language.
-- Use [Reference](../reference/index.md) when you need precise framework
-  concepts or API-oriented explanations.
-- Jump into a specific recipe only after you can already identify which layer
-  you want to customize.
+If you are still building your first language, start with
+[Learn](../learn/index.md). If you need exact subsystem terminology while
+working through a recipe, keep [Reference](../reference/index.md) nearby.

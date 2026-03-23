@@ -5,6 +5,7 @@ void register_arithmetics_benchmarks(BenchmarkRegistry &registry);
 void register_domainmodel_benchmarks(BenchmarkRegistry &registry);
 void register_parser_benchmarks(BenchmarkRegistry &registry);
 void register_requirements_benchmarks(BenchmarkRegistry &registry);
+void register_scope_benchmarks(BenchmarkRegistry &registry);
 void register_statemachine_benchmarks(BenchmarkRegistry &registry);
 } // namespace pegium::bench
 
@@ -14,6 +15,7 @@ int main(int argc, char **argv) {
   pegium::bench::register_domainmodel_benchmarks(registry);
   pegium::bench::register_parser_benchmarks(registry);
   pegium::bench::register_requirements_benchmarks(registry);
+  pegium::bench::register_scope_benchmarks(registry);
   pegium::bench::register_statemachine_benchmarks(registry);
 
   std::string filter;

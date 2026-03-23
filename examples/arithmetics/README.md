@@ -11,7 +11,7 @@ model.
 - a parser for the `.calc` language
 - an evaluator for arithmetic expressions
 - validation and formatting
-- a stdio LSP server for `arithmetics` / `calc`
+- a stdio LSP server for `arithmetics`
 - a VS Code client for interactive testing
 
 ## Use this example when
@@ -34,7 +34,7 @@ cmake --build build -j
 
 ```sh
 ./build/examples/arithmetics/pegium-example-arithmetics-cli \
-  examples/arithmetics/example/example.calc
+  eval examples/arithmetics/example/example.calc
 ```
 
 ## Run the LSP server

@@ -1,22 +1,26 @@
 #include <gtest/gtest.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/DefaultSelectionRangeProvider.hpp>
-#include <pegium/services/Services.hpp>
+#include <pegium/lsp/ranges/DefaultSelectionRangeProvider.hpp>
+#include <pegium/lsp/services/Services.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 TEST(DefaultSelectionRangeProviderTest, RemainsAvailableAsPegiumOnlyOptInService) {
-  auto shared = test::make_shared_services();
-  auto services = test::make_services(*shared, "test", {".test"});
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  auto services = test::make_uninstalled_services(*shared, "test", {".test"});
+  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultLspServices(*services);
 
   DefaultSelectionRangeProvider provider(*services);
 
-  workspace::Document document;
-  document.uri = test::make_file_uri("selection.test");
-  document.languageId = "test";
-  document.setText("alpha beta");
+  workspace::Document document(
+      test::make_text_document(test::make_file_uri("selection.test"), "test",
+                               "alpha beta"));
 
   ::lsp::SelectionRangeParams params{};
   params.positions.push_back(text::Position{0, 1});
@@ -31,4 +35,4 @@ TEST(DefaultSelectionRangeProviderTest, RemainsAvailableAsPegiumOnlyOptInService
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

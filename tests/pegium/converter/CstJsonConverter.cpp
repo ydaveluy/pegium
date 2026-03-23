@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <pegium/ParseJsonTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 
 #include "JsonConverterTestSupport.hpp"
 
@@ -41,7 +41,8 @@ protected:
 };
 
 TEST(CstJsonConverterTest, ConvertsBuiltCstToReferenceJson) {
-  auto shared = test::make_shared_core_services();
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
   ASSERT_TRUE(test_support::register_language(*shared));
 
   const auto document = test_support::open_reference_cst_document(*shared);
@@ -109,10 +110,7 @@ TEST(CstJsonConverterTest, ConvertsBuiltCstToReferenceJson) {
 
 TEST(CstJsonConverterTest, FormatsAssignmentsWithFeatureOperatorAndElement) {
   AssignmentFormattingParser parser;
-  auto document = std::make_unique<pegium::workspace::Document>();
-  document->setText("Thing : abstract : public , private");
-  const pegium::parser::Parser &baseParser = parser;
-  baseParser.parse(*document);
+  const auto result = parser.parse("Thing : abstract : public , private");
 
   const auto expected = R"json({
   "content": [
@@ -182,7 +180,7 @@ TEST(CstJsonConverterTest, FormatsAssignmentsWithFeatureOperatorAndElement) {
   ]
 })json";
 
-  pegium::test::ExpectCst(*document, expected);
+  pegium::test::ExpectCst(result, expected);
 }
 
 } // namespace

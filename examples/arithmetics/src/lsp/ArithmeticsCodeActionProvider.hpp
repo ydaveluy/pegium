@@ -1,11 +1,11 @@
 #pragma once
 
-#include <pegium/lsp/DefaultCodeActionProvider.hpp>
+#include <pegium/lsp/code-actions/DefaultCodeActionProvider.hpp>
 
 namespace arithmetics::services::lsp {
 
 class ArithmeticsCodeActionProvider final
-    : public pegium::services::DefaultCodeActionProvider {
+    : public pegium::DefaultCodeActionProvider {
 protected:
   void appendCodeActions(
       const pegium::workspace::Document &document,

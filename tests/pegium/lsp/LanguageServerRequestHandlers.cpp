@@ -4,15 +4,18 @@
 #include <lsp/messagehandler.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/DefaultLanguageServer.hpp>
-#include <pegium/lsp/LanguageServerHandlerContext.hpp>
-#include <pegium/lsp/LanguageServerRequestHandlers.hpp>
+#include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
+#include <pegium/lsp/runtime/LanguageServerHandlerContext.hpp>
+#include <pegium/lsp/runtime/LanguageServerRequestHandlers.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 TEST(LanguageServerRequestHandlersTest, RegistersHandlersOnlyOncePerContext) {
-  auto shared = test::make_shared_services();
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   DefaultLanguageServer server(*shared);
   LanguageServerRuntimeState runtimeState;
   LanguageServerHandlerContext context(server, *shared, runtimeState);
@@ -30,4 +33,4 @@ TEST(LanguageServerRequestHandlersTest, RegistersHandlersOnlyOncePerContext) {
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

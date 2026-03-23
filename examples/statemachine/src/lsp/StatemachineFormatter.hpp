@@ -2,20 +2,20 @@
 
 #include <statemachine/ast.hpp>
 
-#include <pegium/lsp/AbstractFormatter.hpp>
+#include <pegium/lsp/formatting/AbstractFormatter.hpp>
 
 namespace statemachine::services::lsp {
 
-class StatemachineFormatter : public pegium::lsp::AbstractFormatter {
+class StatemachineFormatter : public pegium::AbstractFormatter {
 public:
-  explicit StatemachineFormatter(const pegium::services::Services &services);
+  explicit StatemachineFormatter(const pegium::Services &services);
 
 protected:
-  virtual void formatStatemachine(pegium::lsp::FormattingBuilder &builder,
+  virtual void formatStatemachine(pegium::FormattingBuilder &builder,
                                   const ast::Statemachine *model) const;
-  virtual void formatState(pegium::lsp::FormattingBuilder &builder,
+  virtual void formatState(pegium::FormattingBuilder &builder,
                            const ast::State *state) const;
-  virtual void formatTransition(pegium::lsp::FormattingBuilder &builder,
+  virtual void formatTransition(pegium::FormattingBuilder &builder,
                                 const ast::Transition *transition) const;
 };
 

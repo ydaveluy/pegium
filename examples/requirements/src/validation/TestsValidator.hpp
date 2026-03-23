@@ -1,21 +1,24 @@
 #pragma once
 
 #include <requirements/ast.hpp>
+#include <requirements/services/Services.hpp>
 
-#include <pegium/services/Services.hpp>
-#include <pegium/validation/ValidationRegistry.hpp>
+#include <pegium/core/validation/ValidationAcceptor.hpp>
 
 namespace requirements::services::validation {
 
 class TestsValidator final {
 public:
-  static void registerValidationChecks(
-      pegium::validation::ValidationRegistry &registry,
-      const pegium::services::Services &services);
+  void checkTestNameContainsANumber(
+      const requirements::ast::Test &test,
+      const pegium::validation::ValidationAcceptor &accept) const;
 
-private:
-  void checkTest(const requirements::ast::Test &test,
-                 const pegium::validation::ValidationAcceptor &accept) const;
+  void checkTestReferencesOnlyEnvironmentsAlsoReferencedInSomeRequirement(
+      const requirements::ast::Test &test,
+      const pegium::validation::ValidationAcceptor &accept) const;
 };
+
+void registerTestsValidationChecks(
+    requirements::services::TestsLangServices &services);
 
 } // namespace requirements::services::validation

@@ -1,7 +1,11 @@
 # Scoping
 
-Use the scoping recipes when name visibility is no longer a simple matter of
-"look in the current container, then in the workspace".
+You already know scopes from programming: some names are visible only in
+certain parts of a program, while others are exported for wider lookup.
+
+The same happens in Pegium. Once your language has names and references,
+scoping determines what can be seen from a given reference site and what stays
+hidden.
 
 In Pegium, scoping customization usually lives in one of three layers:
 
@@ -9,6 +13,12 @@ In Pegium, scoping customization usually lives in one of three layers:
 - scope computation, which decides which symbols exist locally or globally
 - scope lookup, which decides which of those symbols are visible at a reference
   site
+
+In terms of the document lifecycle, that breaks down into three phases:
+
+- symbol indexing for globally exported names
+- scope computation for local symbol availability
+- linking for final reference resolution
 
 ## Where to start
 
@@ -28,5 +38,5 @@ Most scoping problems are easier to debug in this order:
 ## Related pages
 
 - [Semantic Model](../../reference/semantic-model.md)
-- [Workspace Concepts](../../reference/workspace.md)
-- [Default LSP Services](../../reference/lsp-services.md)
+- [Document Lifecycle](../../reference/document-lifecycle.md)
+- [LSP Services](../../build-a-language/lsp-services.md)

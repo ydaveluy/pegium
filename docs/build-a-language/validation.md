@@ -8,6 +8,8 @@ Validation is driven by `pegium::validation::ValidationRegistry`.
 - group checks by category such as `fast` and `slow`
 - report diagnostics through `ValidationAcceptor`
 - run document-level preparation before or after per-node checks when needed
+- usually register checks during service bootstrap, while keeping the option to
+  add rare late registrations between validation passes
 
 Validation is where you express semantic rules that go beyond syntax:
 
@@ -69,6 +71,11 @@ The built-in category names include:
 
 Use categories when some checks traverse a lot of the model or require
 cross-document work.
+
+At runtime, Pegium prepares an immutable snapshot of the selected categories
+once per validation pass, then reuses that prepared set for all visited nodes.
+Late registrations invalidate future snapshots, without changing a pass that is
+already running.
 
 ## Practical advice
 

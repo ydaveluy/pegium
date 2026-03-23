@@ -1,9 +1,8 @@
 #include <gtest/gtest.h>
 
-#include <pegium/parser/CstSearch.hpp>
-#include <pegium/syntax-tree/CstBuilder.hpp>
+#include <pegium/core/parser/CstSearch.hpp>
+#include <pegium/core/syntax-tree/CstBuilder.hpp>
 #include <pegium/TestCstBuilderHarness.hpp>
-#include <pegium/workspace/Document.hpp>
 
 #include <ostream>
 
@@ -26,9 +25,7 @@ TEST(CstSearchTest, FindFirstMatchingNodeSkipsHiddenAndSearchesDepthFirst) {
   DummyElement other{pegium::grammar::ElementKind::CharacterRange};
   DummyElement group{pegium::grammar::ElementKind::Group};
 
-  pegium::workspace::Document document;
-  document.setText("abcd");
-  auto builderHarness = pegium::test::makeCstBuilderHarness(document);
+  auto builderHarness = pegium::test::makeCstBuilderHarness("abcd");
   auto &builder = builderHarness.builder;
 
   builder.leaf(0, 1, &target, true);
@@ -55,9 +52,7 @@ TEST(CstSearchTest, FirstVisibleChildReturnsFirstVisibleOrNullopt) {
   DummyElement group{pegium::grammar::ElementKind::Group};
   DummyElement missing{pegium::grammar::ElementKind::AnyCharacter};
 
-  pegium::workspace::Document document;
-  document.setText("xy");
-  auto builderHarness = pegium::test::makeCstBuilderHarness(document);
+  auto builderHarness = pegium::test::makeCstBuilderHarness("xy");
   auto &builder = builderHarness.builder;
   builder.enter();
   builder.leaf(0, 1, &target, true);
@@ -81,9 +76,7 @@ TEST(CstSearchTest, FirstVisibleChildReturnsFirstVisibleOrNullopt) {
   auto notFound = pegium::parser::detail::findFirstMatchingNode(parent, &missing);
   EXPECT_FALSE(notFound.has_value());
 
-  pegium::workspace::Document hiddenOnlyDocument;
-  hiddenOnlyDocument.setText("z");
-  auto hiddenOnlyBuilderHarness = pegium::test::makeCstBuilderHarness(hiddenOnlyDocument);
+  auto hiddenOnlyBuilderHarness = pegium::test::makeCstBuilderHarness("z");
   auto &hiddenOnlyBuilder = hiddenOnlyBuilderHarness.builder;
   hiddenOnlyBuilder.enter();
   hiddenOnlyBuilder.leaf(0, 1, &target, true);
@@ -99,9 +92,7 @@ TEST(CstSearchTest, RootLevelSearchReturnsNulloptWhenNoVisibleMatchExists) {
   DummyElement target{pegium::grammar::ElementKind::Literal};
   DummyElement other{pegium::grammar::ElementKind::CharacterRange};
 
-  pegium::workspace::Document document;
-  document.setText("ab");
-  auto builderHarness = pegium::test::makeCstBuilderHarness(document);
+  auto builderHarness = pegium::test::makeCstBuilderHarness("ab");
   auto &builder = builderHarness.builder;
   builder.leaf(0, 1, &other, false);
   builder.leaf(1, 2, &target, true);

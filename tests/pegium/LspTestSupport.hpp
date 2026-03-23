@@ -19,12 +19,13 @@
 #include <lsp/types.h>
 
 #include <pegium/CoreTestSupport.hpp>
-#include <pegium/lsp/DefaultLspModule.hpp>
-#include <pegium/lsp/DocumentUpdateHandler.hpp>
-#include <pegium/services/Services.hpp>
-#include <pegium/services/SharedServices.hpp>
-#include <pegium/utils/Disposable.hpp>
-#include <pegium/workspace/DocumentBuilder.hpp>
+#include <pegium/lsp/services/DefaultLspModule.hpp>
+#include <pegium/lsp/workspace/DocumentUpdateHandler.hpp>
+#include <pegium/lsp/workspace/TextDocuments.hpp>
+#include <pegium/lsp/services/Services.hpp>
+#include <pegium/lsp/services/SharedServices.hpp>
+#include <pegium/core/utils/Disposable.hpp>
+#include <pegium/core/workspace/DocumentBuilder.hpp>
 
 namespace pegium::test {
 
@@ -109,48 +110,107 @@ inline ::lsp::json::Value parse_last_written_message(std::string_view written) {
   return ::lsp::json::parse(extract_last_message_content(written));
 }
 
-inline std::unique_ptr<services::SharedServices> make_shared_services() {
-  auto shared =
-      std::make_unique<services::SharedServices>(services::SharedServices::NoDefaultsTag{});
-  services::installDefaultSharedCoreServices(*shared);
-  lsp::installDefaultSharedLspServices(*shared);
-  return shared;
+inline std::vector<std::string>
+extract_written_message_contents(std::string_view written) {
+  std::vector<std::string> contents;
+  std::size_t offset = 0;
+  while (offset < written.size()) {
+    const auto headerEnd = written.find("\r\n\r\n", offset);
+    if (headerEnd == std::string_view::npos) {
+      break;
+    }
+    const auto header = written.substr(offset, headerEnd - offset);
+    const auto marker = header.find("Content-Length:");
+    if (marker == std::string_view::npos) {
+      break;
+    }
+    const auto valueBegin = marker + std::string_view("Content-Length:").size();
+    const auto valueEnd = header.find("\r\n", valueBegin);
+    const auto lengthText = header.substr(
+        valueBegin, valueEnd == std::string_view::npos ? header.size() - valueBegin
+                                                       : valueEnd - valueBegin);
+    const auto contentLength =
+        static_cast<std::size_t>(std::stoul(std::string(lengthText)));
+    const auto contentBegin = headerEnd + 4;
+    if (contentBegin + contentLength > written.size()) {
+      break;
+    }
+    contents.emplace_back(written.substr(contentBegin, contentLength));
+    offset = contentBegin + contentLength;
+  }
+  return contents;
 }
 
-inline std::unique_ptr<services::Services> make_services(
-    const services::SharedServices &sharedServices, std::string languageId,
+inline std::vector<::lsp::json::Value>
+parse_written_messages(std::string_view written) {
+  std::vector<::lsp::json::Value> messages;
+  for (auto &content : extract_written_message_contents(written)) {
+    messages.push_back(::lsp::json::parse(content));
+  }
+  return messages;
+}
+
+inline std::unique_ptr<pegium::SharedServices> make_empty_shared_services() {
+  return std::make_unique<pegium::SharedServices>();
+}
+
+inline void
+initialize_shared_workspace_for_tests(pegium::SharedServices &shared) {
+  shared.workspace.workspaceManager->initialize(workspace::InitializeParams{});
+  auto future =
+      shared.workspace.workspaceManager->initialized(
+          workspace::InitializedParams{});
+  if (future.valid()) {
+    future.get();
+  }
+  shared.workspace.workspaceManager->ready().get();
+}
+
+inline std::unique_ptr<pegium::Services>
+make_uninstalled_services(
+    const pegium::SharedServices &sharedServices, std::string languageId,
     std::vector<std::string> fileExtensions = {},
     std::unique_ptr<const parser::Parser> parser =
         std::make_unique<FakeParser>()) {
-  auto services =
-      services::makeDefaultServices(sharedServices, std::move(languageId));
+  auto services = std::make_unique<pegium::Services>(sharedServices);
+  services->languageMetaData.languageId = std::move(languageId);
   services->parser = std::move(parser);
   services->languageMetaData.fileExtensions = std::move(fileExtensions);
   return services;
 }
 
 template <typename ParserType>
-inline std::unique_ptr<services::Services> make_services(
-    const services::SharedServices &sharedServices, std::string languageId,
-    std::vector<std::string> fileExtensions = {}) {
-  auto services =
-      services::makeDefaultServices(sharedServices, std::move(languageId));
+inline std::unique_ptr<pegium::Services>
+make_uninstalled_services(const pegium::SharedServices &sharedServices,
+                          std::string languageId,
+                          std::vector<std::string> fileExtensions = {}) {
+  auto services = std::make_unique<pegium::Services>(sharedServices);
+  services->languageMetaData.languageId = std::move(languageId);
   services->parser = std::make_unique<const ParserType>(*services);
   services->languageMetaData.fileExtensions = std::move(fileExtensions);
   return services;
 }
 
+inline std::shared_ptr<pegium::TextDocuments>
+text_documents(pegium::SharedServices &sharedServices) {
+  return sharedServices.lsp.textDocuments;
+}
+
 inline std::shared_ptr<workspace::Document>
-open_and_build_document(services::SharedServices &sharedServices,
+open_and_build_document(pegium::SharedServices &sharedServices,
                         std::string uri, std::string languageId,
                         std::string text) {
-  auto textDocument = sharedServices.workspace.textDocuments->open(
-      std::move(uri), std::move(languageId), std::move(text), 1);
+  auto documents = text_documents(sharedServices);
+  auto textDocument = test::set_text_document(
+      *documents, std::move(uri), std::move(languageId),
+      std::move(text), 1);
   const auto documentId =
-      sharedServices.workspace.documents->getOrCreateDocumentId(textDocument->uri);
+      sharedServices.workspace.documents->getOrCreateDocumentId(
+          textDocument->uri());
   const std::array<workspace::DocumentId, 1> changedDocumentIds{documentId};
-  (void)sharedServices.workspace.documentBuilder->update(changedDocumentIds, {});
-  return sharedServices.workspace.documents->getDocument(textDocument->uri);
+  (void)sharedServices.workspace.documentBuilder->update(changedDocumentIds,
+                                                         {});
+  return sharedServices.workspace.documents->getDocument(textDocument->uri());
 }
 
 class RecordingDocumentBuilder final : public workspace::DocumentBuilder {
@@ -166,7 +226,8 @@ public:
     workspace::BuildOptions options;
   };
 
-  [[nodiscard]] workspace::BuildOptions &updateBuildOptions() noexcept override {
+  [[nodiscard]] workspace::BuildOptions &
+  updateBuildOptions() noexcept override {
     return _options;
   }
 
@@ -175,10 +236,9 @@ public:
     return _options;
   }
 
-  [[nodiscard]] bool build(
-      std::span<const std::shared_ptr<workspace::Document>> documents,
-      const workspace::BuildOptions &options = {},
-      utils::CancellationToken cancelToken = {}) const override {
+  void build(std::span<const std::shared_ptr<workspace::Document>> documents,
+             const workspace::BuildOptions &options = {},
+             utils::CancellationToken cancelToken = {}) const override {
     utils::throw_if_cancelled(cancelToken);
 
     BuildCall call;
@@ -194,24 +254,18 @@ public:
       _buildCalls.push_back(std::move(call));
     }
     _cv.notify_all();
-    return true;
   }
 
-  [[nodiscard]] workspace::DocumentUpdateResult
-  update(std::span<const workspace::DocumentId> changedDocumentIds,
-         std::span<const workspace::DocumentId> deletedDocumentIds,
-         utils::CancellationToken cancelToken = {},
-         bool rebuildDocuments = true) const override {
-    (void)rebuildDocuments;
+  void update(std::span<const workspace::DocumentId> changedDocumentIds,
+              std::span<const workspace::DocumentId> deletedDocumentIds,
+              utils::CancellationToken cancelToken = {}) const override {
     utils::throw_if_cancelled(cancelToken);
 
     UpdateCall call{
-        .changedDocumentIds =
-            std::vector<workspace::DocumentId>(changedDocumentIds.begin(),
-                                              changedDocumentIds.end()),
-        .deletedDocumentIds =
-            std::vector<workspace::DocumentId>(deletedDocumentIds.begin(),
-                                              deletedDocumentIds.end()),
+        .changedDocumentIds = std::vector<workspace::DocumentId>(
+            changedDocumentIds.begin(), changedDocumentIds.end()),
+        .deletedDocumentIds = std::vector<workspace::DocumentId>(
+            deletedDocumentIds.begin(), deletedDocumentIds.end()),
         .options = _options,
     };
     {
@@ -219,21 +273,21 @@ public:
       _calls.push_back(call);
     }
     _cv.notify_all();
-    return _result;
   }
 
-  utils::ScopedDisposable onUpdate(
-      std::function<void(std::span<const workspace::DocumentId>,
-                         std::span<const workspace::DocumentId>)>
-          listener) override {
+  utils::ScopedDisposable
+  onUpdate(std::function<void(std::span<const workspace::DocumentId>,
+                              std::span<const workspace::DocumentId>)>
+               listener) const override {
     (void)listener;
     return {};
   }
 
   utils::ScopedDisposable onBuildPhase(
       workspace::DocumentState targetState,
-      std::function<void(
-          std::span<const std::shared_ptr<workspace::Document>>)> listener) override {
+      std::function<void(std::span<const std::shared_ptr<workspace::Document>>,
+                         utils::CancellationToken)>
+          listener) const override {
     (void)targetState;
     (void)listener;
     return {};
@@ -241,8 +295,9 @@ public:
 
   utils::ScopedDisposable onDocumentPhase(
       workspace::DocumentState targetState,
-      std::function<void(const std::shared_ptr<workspace::Document> &)>
-          listener) override {
+      std::function<void(const std::shared_ptr<workspace::Document> &,
+                         utils::CancellationToken)>
+          listener) const override {
     (void)targetState;
     (void)listener;
     return {};
@@ -254,11 +309,12 @@ public:
     utils::throw_if_cancelled(cancelToken);
   }
 
-  void waitUntil(workspace::DocumentState state, workspace::DocumentId documentId,
-                 utils::CancellationToken cancelToken = {}) const override {
+  [[nodiscard]] workspace::DocumentId
+  waitUntil(workspace::DocumentState state, workspace::DocumentId documentId,
+            utils::CancellationToken cancelToken = {}) const override {
     (void)state;
-    (void)documentId;
     utils::throw_if_cancelled(cancelToken);
+    return documentId;
   }
 
   void resetToState(workspace::Document &document,
@@ -292,20 +348,15 @@ public:
     return _buildCalls.empty() ? BuildCall{} : _buildCalls.back();
   }
 
-  void setResult(workspace::DocumentUpdateResult result) {
-    _result = std::move(result);
-  }
-
 private:
   mutable std::mutex _mutex;
   mutable std::condition_variable _cv;
   mutable std::vector<BuildCall> _buildCalls;
   mutable std::vector<UpdateCall> _calls;
   workspace::BuildOptions _options{};
-  workspace::DocumentUpdateResult _result{};
 };
 
-class RecordingDocumentUpdateHandler final : public lsp::DocumentUpdateHandler {
+class RecordingDocumentUpdateHandler final : public pegium::DocumentUpdateHandler {
 public:
   void didChangeWatchedFiles(
       const ::lsp::DidChangeWatchedFilesParams &params) override {
@@ -320,7 +371,8 @@ public:
 
   [[nodiscard]] ::lsp::DidChangeWatchedFilesParams lastCall() const {
     std::scoped_lock lock(_mutex);
-    return _calls.empty() ? ::lsp::DidChangeWatchedFilesParams{} : _calls.back();
+    return _calls.empty() ? ::lsp::DidChangeWatchedFilesParams{}
+                          : _calls.back();
   }
 
 private:

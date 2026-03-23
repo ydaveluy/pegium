@@ -1,14 +1,24 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <future>
+#include <mutex>
+
 #include <pegium/CoreTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/services/Diagnostic.hpp>
 #include <pegium/TestRuleParser.hpp>
-#include <pegium/validation/DefaultValidationRegistry.hpp>
-#include <pegium/workspace/DefaultDocumentBuilder.hpp>
+#include <pegium/core/grammar/Assignment.hpp>
+#include <pegium/core/grammar/FeatureValue.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/references/DefaultLinker.hpp>
+#include <pegium/core/references/ScopeProvider.hpp>
+#include <pegium/core/services/Diagnostic.hpp>
+#include <pegium/core/validation/DefaultValidationRegistry.hpp>
+#include <pegium/core/workspace/DefaultDocumentBuilder.hpp>
 
 namespace pegium::workspace {
 namespace {
+
+using namespace std::chrono_literals;
 
 constexpr std::string_view kDefaultCodeActionsKey = "pegiumDefaultCodeActions";
 
@@ -24,12 +34,124 @@ parser::ExpectPath rule_expectation(const grammar::AbstractRule &rule) {
   };
 }
 
-parser::ExpectResult expectation_result(
-    std::initializer_list<parser::ExpectPath> items) {
+parser::ExpectResult
+expectation_result(std::initializer_list<parser::ExpectPath> items) {
   parser::ExpectResult expect;
   expect.frontier.assign(items.begin(), items.end());
   expect.reachedAnchor = !expect.frontier.empty();
   return expect;
+}
+
+struct RelinkNode : AstNode {
+  std::string name;
+};
+
+struct RelinkReferrer : AstNode {
+  reference<RelinkNode> node;
+};
+
+struct RelinkRoot : AstNode {
+  std::vector<pointer<RelinkReferrer>> referrers;
+};
+
+struct DummyLiteral final : grammar::Literal {
+  [[nodiscard]] bool isNullable() const noexcept override { return false; }
+  [[nodiscard]] std::string_view getValue() const noexcept override {
+    return "x";
+  }
+  [[nodiscard]] bool isCaseSensitive() const noexcept override { return true; }
+};
+
+const grammar::Literal &dummy_literal() noexcept {
+  static const DummyLiteral literal;
+  return literal;
+}
+
+template <typename TargetType>
+struct TestReferenceAssignment final : grammar::Assignment {
+  explicit TestReferenceAssignment(std::string_view feature) noexcept
+      : feature(feature) {}
+
+  [[nodiscard]] constexpr bool isNullable() const noexcept override {
+    return false;
+  }
+  void execute(AstNode *, const CstNodeView &,
+               const parser::ValueBuildContext &) const override {}
+  [[nodiscard]] grammar::FeatureValue
+  getValue(const AstNode *) const override {
+    return {};
+  }
+  [[nodiscard]] const grammar::AbstractElement *getElement() const noexcept override {
+    return nullptr;
+  }
+  [[nodiscard]] std::string_view getFeature() const noexcept override {
+    return feature;
+  }
+  [[nodiscard]] bool isReference() const noexcept override { return true; }
+  [[nodiscard]] bool isMultiReference() const noexcept override {
+    return false;
+  }
+  [[nodiscard]] std::type_index getType() const noexcept override {
+    return std::type_index(typeid(TargetType));
+  }
+
+  std::string_view feature;
+};
+
+class EmptyScopeProvider final : public references::ScopeProvider {
+public:
+  const workspace::AstNodeDescription *
+  getScopeEntry(const ReferenceInfo &) const override {
+    return nullptr;
+  }
+
+  bool visitScopeEntries(
+      const ReferenceInfo &,
+      utils::function_ref<bool(const workspace::AstNodeDescription &)>) const override {
+    return true;
+  }
+};
+
+class CountingLinker final : public references::DefaultLinker {
+public:
+  using references::DefaultLinker::DefaultLinker;
+
+  void link(Document &document,
+            const utils::CancellationToken &cancelToken) const override {
+    ++linkCalls;
+    references::DefaultLinker::link(document, cancelToken);
+  }
+
+  mutable std::size_t linkCalls = 0;
+};
+
+std::unique_ptr<const parser::Parser>
+make_unresolved_reference_parser(const references::Linker *&linkerRef) {
+  auto parser = std::make_unique<test::FakeParser>();
+  parser->callback =
+      [&linkerRef](parser::ParseResult &result, std::string_view text) {
+    static const TestReferenceAssignment<RelinkNode> assignment("node");
+    static const grammar::Literal &literal = dummy_literal();
+    assert(linkerRef != nullptr);
+
+    auto root = std::make_unique<RelinkRoot>();
+    auto cst = std::make_unique<RootCstNode>(text::TextSnapshot::copy(text));
+    CstBuilder builder(*cst);
+    builder.leaf(0, static_cast<TextOffset>(text.size()), &literal);
+    root->setCstNode(cst->get(0));
+    auto referrer = std::make_unique<RelinkReferrer>();
+    auto *referrerPtr = referrer.get();
+    referrerPtr->setCstNode(cst->get(0));
+    referrerPtr->node.initialize(*referrerPtr, "missing", cst->get(0), assignment,
+                                 *linkerRef);
+    root->referrers.push_back(std::move(referrer));
+    referrerPtr->setContainer<RelinkRoot, &RelinkRoot::referrers>(*root, 0);
+
+    result.value = std::move(root);
+    result.cst = std::move(cst);
+    result.references.push_back(ReferenceHandle::direct(&referrerPtr->node));
+  };
+  return parser;
 }
 
 const services::JsonValue::Array &
@@ -44,9 +166,14 @@ default_code_actions(const services::Diagnostic &diagnostic) {
 }
 
 TEST(DefaultDocumentBuilderTest, UpdateBuildsChangedDocumentToValidatedState) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services(*shared, "test")));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test");
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("builder.test"), "test", "content");
@@ -57,9 +184,42 @@ TEST(DefaultDocumentBuilderTest, UpdateBuildsChangedDocumentToValidatedState) {
   EXPECT_TRUE(document->parseSucceeded());
 }
 
-TEST(DefaultDocumentBuilderTest, ValidationDiagnosticsArePublishedOnValidatedPhase) {
-  auto shared = test::make_shared_core_services();
-  auto services = test::make_core_services(*shared, "test");
+TEST(DefaultDocumentBuilderTest,
+     UpdateRelinksDocumentsWithExistingLinkingErrors) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  const references::Linker *linkerRef = nullptr;
+  auto services = test::make_uninstalled_core_services(
+      *shared, "relink", {".relink"}, {}, make_unresolved_reference_parser(linkerRef));
+  pegium::services::installDefaultCoreServices(*services);
+  services->references.scopeProvider = std::make_unique<EmptyScopeProvider>();
+  auto linker = std::make_unique<CountingLinker>(*services);
+  auto *linkerPtr = linker.get();
+  services->references.linker = std::move(linker);
+  linkerRef = linkerPtr;
+  shared->serviceRegistry->registerServices(std::move(services));
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("relink.relink"), "relink", "content");
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_EQ(document->state, DocumentState::Validated);
+  ASSERT_EQ(linkerPtr->linkCalls, 1u);
+  ASSERT_FALSE(document->references.empty());
+  ASSERT_TRUE(document->references.front().getConst()->hasError());
+
+  shared->workspace.documentBuilder->update({}, {});
+
+  EXPECT_EQ(linkerPtr->linkCalls, 2u);
+  EXPECT_EQ(document->state, DocumentState::Validated);
+}
+
+TEST(DefaultDocumentBuilderTest,
+     ValidationDiagnosticsArePublishedOnValidatedPhase) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  auto services = test::make_uninstalled_core_services(*shared, "test");
+  pegium::services::installDefaultCoreServices(*services);
 
   auto validator = std::make_unique<test::FakeDocumentValidator>();
   services::Diagnostic diagnostic;
@@ -69,12 +229,13 @@ TEST(DefaultDocumentBuilderTest, ValidationDiagnosticsArePublishedOnValidatedPha
   validator->diagnostics.push_back(diagnostic);
   services->validation.documentValidator = std::move(validator);
 
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+  shared->serviceRegistry->registerServices(std::move(services));
 
   std::vector<std::string> validatedUris;
   auto disposable = shared->workspace.documentBuilder->onDocumentPhase(
       DocumentState::Validated,
-      [&validatedUris](const std::shared_ptr<Document> &document) {
+      [&validatedUris](const std::shared_ptr<Document> &document,
+                       utils::CancellationToken) {
         validatedUris.push_back(document->uri);
       });
 
@@ -89,7 +250,7 @@ TEST(DefaultDocumentBuilderTest, ValidationDiagnosticsArePublishedOnValidatedPha
 }
 
 TEST(DefaultDocumentBuilderTest,
-     ParseInsertedDiagnosticUsesLangiumStyleForTokenTypes) {
+     ParseInsertedDiagnosticUsesTokenTypeNameForTokenTypes) {
   using namespace pegium::parser;
 
   auto parser = std::make_unique<test::FakeParser>();
@@ -102,9 +263,14 @@ TEST(DefaultDocumentBuilderTest,
   parser->parseDiagnostics.push_back(insertedDiagnostic);
   parser->expectations = expectation_result({rule_expectation(id)});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("builder-parse-inserted.test"), "test", "");
@@ -119,7 +285,7 @@ TEST(DefaultDocumentBuilderTest,
 }
 
 TEST(DefaultDocumentBuilderTest,
-     ParseKeywordDiagnosticUsesLangiumStyleForKeywords) {
+     ParseKeywordDiagnosticUsesLiteralValueForKeywords) {
   using namespace pegium::parser;
 
   auto parser = std::make_unique<test::FakeParser>();
@@ -130,14 +296,21 @@ TEST(DefaultDocumentBuilderTest,
   insertedDiagnostic.offset = 0;
   insertedDiagnostic.element = std::addressof(moduleKeyword);
   parser->parseDiagnostics.push_back(insertedDiagnostic);
-  parser->expectations = expectation_result({keyword_expectation(moduleKeyword)});
+  parser->expectations =
+      expectation_result({keyword_expectation(moduleKeyword)});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-keyword.test"), "test", "foo");
+      *shared, test::make_file_uri("builder-parse-keyword.test"), "test",
+      "foo");
 
   ASSERT_NE(document, nullptr);
   ASSERT_FALSE(document->diagnostics.empty());
@@ -163,9 +336,14 @@ TEST(DefaultDocumentBuilderTest,
   parser->parseDiagnostics.push_back(incompleteDiagnostic);
   parser->expectations = expectation_result({rule_expectation(id)});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("builder-parse-incomplete-eof.test"), "test",
@@ -186,9 +364,14 @@ TEST(DefaultDocumentBuilderTest,
   parser->parseDiagnostics.push_back(
       {.kind = ParseDiagnosticKind::Deleted, .offset = 0, .element = nullptr});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("builder-parse-deleted-action.test"), "test",
@@ -212,17 +395,23 @@ TEST(DefaultDocumentBuilderTest,
   auto parser = std::make_unique<test::FakeParser>();
   parser->fullMatch = true;
   static constexpr auto moduleKeyword = "module"_kw;
-  parser->parseDiagnostics.push_back({.kind = ParseDiagnosticKind::Replaced,
-                                      .offset = 0,
-                                      .element = std::addressof(moduleKeyword)});
+  parser->parseDiagnostics.push_back(
+      {.kind = ParseDiagnosticKind::Replaced,
+       .offset = 0,
+       .element = std::addressof(moduleKeyword)});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-replaced-action.test"), "test",
-      "modulx");
+      *shared, test::make_file_uri("builder-parse-replaced-action.test"),
+      "test", "modulx");
 
   ASSERT_NE(document, nullptr);
   ASSERT_EQ(document->diagnostics.size(), 1u);
@@ -247,9 +436,14 @@ TEST(DefaultDocumentBuilderTest,
                                       .element = std::addressof(id)});
   parser->expectations = expectation_result({rule_expectation(id)});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("builder-parse-inserted-rule.test"), "test",
@@ -269,9 +463,14 @@ TEST(DefaultDocumentBuilderTest,
   parser->parseDiagnostics.push_back(
       {.kind = ParseDiagnosticKind::Recovered, .offset = 0});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("builder-parse-recovered.test"), "test",
@@ -296,9 +495,14 @@ TEST(DefaultDocumentBuilderTest,
        .element = nullptr,
        .message = "bad value"});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("builder-parse-conversion.test"), "test",
@@ -321,13 +525,19 @@ TEST(DefaultDocumentBuilderTest,
   auto parser = std::make_unique<test::FakeParser>();
   parser->fullMatch = false;
   DataTypeRule<int> expression{"Expression", some(d)};
-  parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::Incomplete, .offset = 12, .element = nullptr});
+  parser->parseDiagnostics.push_back({.kind = ParseDiagnosticKind::Incomplete,
+                                      .offset = 12,
+                                      .element = nullptr});
   parser->expectations = expectation_result({rule_expectation(expression)});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("builder-parse-incomplete-trailing.test"),
@@ -351,15 +561,21 @@ TEST(DefaultDocumentBuilderTest,
       {.kind = ParseDiagnosticKind::Inserted,
        .offset = 0,
        .element = std::addressof(moduleKeyword)});
-  parser->expectations = expectation_result({keyword_expectation(moduleKeyword)});
+  parser->expectations =
+      expectation_result({keyword_expectation(moduleKeyword)});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-empty-grammar-sequence.test"), "test",
-      "");
+      *shared, test::make_file_uri("builder-empty-grammar-sequence.test"),
+      "test", "");
 
   ASSERT_NE(document, nullptr);
   ASSERT_FALSE(document->diagnostics.empty());
@@ -379,14 +595,19 @@ TEST(DefaultDocumentBuilderTest,
   TerminalRule<std::string> moduleId{"MODULE_ID", "A-Z"_cr + many(w)};
   TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
   ParserRule<EntryNode> entry{
-      "Entry", "module"_kw + assign<&EntryNode::moduleName>(moduleId) + "def"_kw +
-                   assign<&EntryNode::definitionName>(id)};
+      "Entry", "module"_kw + assign<&EntryNode::moduleName>(moduleId) +
+                   "def"_kw + assign<&EntryNode::definitionName>(id)};
   const auto skipper = SkipperBuilder().ignore(whitespace).build();
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {},
-      std::make_unique<test::RuleParser>(entry, skipper))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {},
+        std::make_unique<test::RuleParser>(entry, skipper));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("builder-parse-inserted-gap.test"), "test",
@@ -410,29 +631,31 @@ TEST(DefaultDocumentBuilderTest,
   TerminalRule<int> number{"NUMBER", some(d)};
   static constexpr auto colon = ":"_kw;
   static constexpr auto semicolon = ";"_kw;
-  const auto offset = static_cast<TextOffset>(std::string_view{"module aa\ndef "}.size());
+  const auto offset =
+      static_cast<TextOffset>(std::string_view{"module aa\ndef "}.size());
 
-  parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::Inserted,
-       .offset = offset,
-       .element = std::addressof(id)});
-  parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::Inserted,
-       .offset = offset,
-       .element = std::addressof(colon)});
-  parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::Inserted,
-       .offset = offset,
-       .element = std::addressof(number)});
-  parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::Inserted,
-       .offset = offset,
-       .element = std::addressof(semicolon)});
+  parser->parseDiagnostics.push_back({.kind = ParseDiagnosticKind::Inserted,
+                                      .offset = offset,
+                                      .element = std::addressof(id)});
+  parser->parseDiagnostics.push_back({.kind = ParseDiagnosticKind::Inserted,
+                                      .offset = offset,
+                                      .element = std::addressof(colon)});
+  parser->parseDiagnostics.push_back({.kind = ParseDiagnosticKind::Inserted,
+                                      .offset = offset,
+                                      .element = std::addressof(number)});
+  parser->parseDiagnostics.push_back({.kind = ParseDiagnosticKind::Inserted,
+                                      .offset = offset,
+                                      .element = std::addressof(semicolon)});
   parser->expectations = expectation_result({rule_expectation(id)});
 
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(test::make_core_services(
-      *shared, "test", {".test"}, {}, std::move(parser))));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("builder-parse-inserted-eof-sequence.test"),
@@ -448,14 +671,16 @@ TEST(DefaultDocumentBuilderTest,
 
 TEST(DefaultDocumentBuilderTest,
      UpdateUsesBuiltInAndFastValidationCategoriesByDefault) {
-  auto shared = test::make_shared_core_services();
-  auto services = test::make_core_services(*shared, "test");
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  auto services = test::make_uninstalled_core_services(*shared, "test");
+  pegium::services::installDefaultCoreServices(*services);
 
   auto validator = std::make_unique<test::FakeDocumentValidator>();
   auto *validatorPtr = validator.get();
   services->validation.documentValidator = std::move(validator);
 
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+  shared->serviceRegistry->registerServices(std::move(services));
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("default-update-validation.test"), "test",
@@ -464,20 +689,23 @@ TEST(DefaultDocumentBuilderTest,
   ASSERT_NE(document, nullptr);
   ASSERT_EQ(validatorPtr->validateCalls, 1u);
   ASSERT_EQ(validatorPtr->seenOptions.size(), 1u);
-  EXPECT_TRUE(validatorPtr->seenOptions.front().enabled);
   EXPECT_EQ(validatorPtr->seenOptions.front().categories,
             (std::vector<std::string>{"built-in", "fast"}));
 }
 
 TEST(DefaultDocumentBuilderTest, UpdateEmitsChangedAndDeletedDocumentIds) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services(*shared, "test", {".test"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
-  auto existing = std::make_shared<Document>();
-  existing->uri = test::make_file_uri("deleted.test");
-  existing->languageId = "test";
-  existing->setText("obsolete");
+  auto existing = std::make_shared<Document>(
+      test::make_text_document(test::make_file_uri("deleted.test"), "test",
+                               "obsolete"));
   shared->workspace.documents->addDocument(existing);
 
   std::vector<DocumentId> changed;
@@ -490,8 +718,11 @@ TEST(DefaultDocumentBuilderTest, UpdateEmitsChangedAndDeletedDocumentIds) {
       });
 
   const auto changedUri = test::make_file_uri("changed.test");
-  ASSERT_NE(shared->workspace.textDocuments->open(changedUri, "test", "content", 1),
-            nullptr);
+  auto textDocuments = test::text_documents(*shared);
+  ASSERT_NE(textDocuments, nullptr);
+  ASSERT_NE(
+      test::set_text_document(*textDocuments, changedUri, "test", "content", 1),
+      nullptr);
 
   const auto changedDocumentId =
       shared->workspace.documents->getOrCreateDocumentId(changedUri);
@@ -506,51 +737,66 @@ TEST(DefaultDocumentBuilderTest, UpdateEmitsChangedAndDeletedDocumentIds) {
 
 TEST(DefaultDocumentBuilderTest,
      UpdateMaterializesChangedDocumentFromOpenTextDocument) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services(*shared, "test", {".test"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   const auto uri = test::make_file_uri("materialized.test");
+  auto textDocuments = test::text_documents(*shared);
+  ASSERT_NE(textDocuments, nullptr);
   auto textDocument =
-      shared->workspace.textDocuments->open(uri, "test", "content", 1);
+      test::set_text_document(*textDocuments, uri, "test", "content", 1);
   ASSERT_NE(textDocument, nullptr);
 
   const auto documentId =
-      shared->workspace.documents->getOrCreateDocumentId(textDocument->uri);
+      shared->workspace.documents->getOrCreateDocumentId(textDocument->uri());
   const std::array<DocumentId, 1> changedDocumentIds{documentId};
   (void)shared->workspace.documentBuilder->update(changedDocumentIds, {});
 
   auto document = shared->workspace.documents->getDocument(documentId);
   ASSERT_NE(document, nullptr);
   EXPECT_EQ(document->uri, uri);
-  EXPECT_EQ(document->languageId, "test");
-  EXPECT_EQ(document->text(), "content");
+  EXPECT_EQ(document->textDocument().languageId(), "test");
+  EXPECT_EQ(document->textDocument().getText(), "content");
   EXPECT_EQ(document->state, DocumentState::Validated);
 }
 
 TEST(DefaultDocumentBuilderTest, UpdatePrioritizesOpenTextDocuments) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services(*shared, "test", {".test"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   const auto closedUri = test::make_file_uri("closed-priority.test");
-  auto closedDocument = shared->workspace.documentFactory->fromString(
-      "closed", closedUri, "test", 1);
+  auto closedDocument =
+      shared->workspace.documentFactory->fromString("closed", closedUri);
   ASSERT_NE(closedDocument, nullptr);
   shared->workspace.documents->addDocument(closedDocument);
 
   const auto openUri = test::make_file_uri("open-priority.test");
-  auto openDocument = shared->workspace.documentFactory->fromString(
-      "open", openUri, "test", 1);
+  auto openDocument =
+      shared->workspace.documentFactory->fromString("open", openUri);
   ASSERT_NE(openDocument, nullptr);
   shared->workspace.documents->addDocument(openDocument);
-  ASSERT_NE(shared->workspace.textDocuments->open(openUri, "test", "open", 2),
+  auto textDocuments = test::text_documents(*shared);
+  ASSERT_NE(textDocuments, nullptr);
+  ASSERT_NE(test::set_text_document(*textDocuments, openUri, "test", "open", 2),
             nullptr);
 
   std::vector<std::string> validatedUris;
   auto disposable = shared->workspace.documentBuilder->onDocumentPhase(
       DocumentState::Validated,
-      [&validatedUris](const std::shared_ptr<Document> &document) {
+      [&validatedUris](const std::shared_ptr<Document> &document,
+                       utils::CancellationToken) {
         validatedUris.push_back(document->uri);
       });
 
@@ -562,30 +808,33 @@ TEST(DefaultDocumentBuilderTest, UpdatePrioritizesOpenTextDocuments) {
 }
 
 TEST(DefaultDocumentBuilderTest, BuildDoesNotValidateByDefault) {
-  auto shared = test::make_shared_core_services();
-  auto services = test::make_core_services(*shared, "test", {".test"});
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  auto services = test::make_uninstalled_core_services(*shared, "test", {".test"});
+  pegium::services::installDefaultCoreServices(*services);
 
   auto validator = std::make_unique<test::FakeDocumentValidator>();
   auto *validatorPtr = validator.get();
   services->validation.documentValidator = std::move(validator);
 
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+  shared->serviceRegistry->registerServices(std::move(services));
 
   const auto uri = test::make_file_uri("build-no-validation.test");
-  auto document = shared->workspace.documentFactory->fromString(
-      "content", uri, "test", 1);
+  auto document =
+      shared->workspace.documentFactory->fromString("content", uri);
   ASSERT_NE(document, nullptr);
   shared->workspace.documents->addDocument(document);
 
   bool validatedPhaseReached = false;
   auto validatedDisposable = shared->workspace.documentBuilder->onBuildPhase(
       DocumentState::Validated,
-      [&validatedPhaseReached](std::span<const std::shared_ptr<Document>>) {
+      [&validatedPhaseReached](std::span<const std::shared_ptr<Document>>,
+                               utils::CancellationToken) {
         validatedPhaseReached = true;
       });
 
   const std::array<std::shared_ptr<Document>, 1> documents{document};
-  ASSERT_TRUE(shared->workspace.documentBuilder->build(documents));
+  shared->workspace.documentBuilder->build(documents);
 
   EXPECT_EQ(validatorPtr->validateCalls, 0u);
   EXPECT_FALSE(validatedPhaseReached);
@@ -593,13 +842,18 @@ TEST(DefaultDocumentBuilderTest, BuildDoesNotValidateByDefault) {
 }
 
 TEST(DefaultDocumentBuilderTest, BuildEmitsUpdateAndAllBuildPhasesInOrder) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services(*shared, "test", {".test"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   const auto uri = test::make_file_uri("phases.test");
-  auto document = shared->workspace.documentFactory->fromString(
-      "content", uri, "test", 1);
+  auto document =
+      shared->workspace.documentFactory->fromString("content", uri);
   ASSERT_NE(document, nullptr);
   shared->workspace.documents->addDocument(document);
 
@@ -613,113 +867,134 @@ TEST(DefaultDocumentBuilderTest, BuildEmitsUpdateAndAllBuildPhasesInOrder) {
       });
   auto parsedDisposable = shared->workspace.documentBuilder->onBuildPhase(
       DocumentState::Parsed,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
+      [&phases](std::span<const std::shared_ptr<Document>>,
+                utils::CancellationToken) {
         phases.push_back(DocumentState::Parsed);
       });
-  auto indexedContentDisposable = shared->workspace.documentBuilder->onBuildPhase(
-      DocumentState::IndexedContent,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
-        phases.push_back(DocumentState::IndexedContent);
-      });
-  auto computedScopesDisposable = shared->workspace.documentBuilder->onBuildPhase(
-      DocumentState::ComputedScopes,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
-        phases.push_back(DocumentState::ComputedScopes);
-      });
+  auto indexedContentDisposable =
+      shared->workspace.documentBuilder->onBuildPhase(
+          DocumentState::IndexedContent,
+          [&phases](std::span<const std::shared_ptr<Document>>,
+                    utils::CancellationToken) {
+            phases.push_back(DocumentState::IndexedContent);
+          });
+  auto computedScopesDisposable =
+      shared->workspace.documentBuilder->onBuildPhase(
+          DocumentState::ComputedScopes,
+          [&phases](std::span<const std::shared_ptr<Document>>,
+                    utils::CancellationToken) {
+            phases.push_back(DocumentState::ComputedScopes);
+          });
   auto linkedDisposable = shared->workspace.documentBuilder->onBuildPhase(
       DocumentState::Linked,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
+      [&phases](std::span<const std::shared_ptr<Document>>,
+                utils::CancellationToken) {
         phases.push_back(DocumentState::Linked);
       });
-  auto indexedReferencesDisposable = shared->workspace.documentBuilder->onBuildPhase(
-      DocumentState::IndexedReferences,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
-        phases.push_back(DocumentState::IndexedReferences);
-      });
+  auto indexedReferencesDisposable =
+      shared->workspace.documentBuilder->onBuildPhase(
+          DocumentState::IndexedReferences,
+          [&phases](std::span<const std::shared_ptr<Document>>,
+                    utils::CancellationToken) {
+            phases.push_back(DocumentState::IndexedReferences);
+          });
   auto validatedDisposable = shared->workspace.documentBuilder->onBuildPhase(
       DocumentState::Validated,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
+      [&phases](std::span<const std::shared_ptr<Document>>,
+                utils::CancellationToken) {
         phases.push_back(DocumentState::Validated);
       });
 
   BuildOptions options;
-  options.validation.enabled = true;
+  options.validation = true;
   const std::array<std::shared_ptr<Document>, 1> documents{document};
-  ASSERT_TRUE(shared->workspace.documentBuilder->build(documents, options));
+  shared->workspace.documentBuilder->build(documents, options);
   EXPECT_EQ(updatedDocumentIds, std::vector<DocumentId>{document->id});
-  EXPECT_EQ(
-      phases,
-      (std::vector<DocumentState>{DocumentState::Parsed,
-                                  DocumentState::IndexedContent,
-                                  DocumentState::ComputedScopes,
-                                  DocumentState::Linked,
-                                  DocumentState::IndexedReferences,
-                                  DocumentState::Validated}));
+  EXPECT_EQ(phases,
+            (std::vector<DocumentState>{
+                DocumentState::Parsed, DocumentState::IndexedContent,
+                DocumentState::ComputedScopes, DocumentState::Linked,
+                DocumentState::IndexedReferences, DocumentState::Validated}));
   EXPECT_EQ(document->state, DocumentState::Validated);
 }
 
-TEST(DefaultDocumentBuilderTest, BuildSkipsLinkingPhasesWhenEagerLinkingIsDisabled) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services(*shared, "test", {".test"})));
+TEST(DefaultDocumentBuilderTest,
+     BuildSkipsLinkingPhasesWhenEagerLinkingIsDisabled) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   const auto uri = test::make_file_uri("phases-no-link.test");
-  auto document = shared->workspace.documentFactory->fromString(
-      "content", uri, "test", 1);
+  auto document =
+      shared->workspace.documentFactory->fromString("content", uri);
   ASSERT_NE(document, nullptr);
   shared->workspace.documents->addDocument(document);
 
   std::vector<DocumentState> phases;
   auto parsedDisposable = shared->workspace.documentBuilder->onBuildPhase(
       DocumentState::Parsed,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
+      [&phases](std::span<const std::shared_ptr<Document>>,
+                utils::CancellationToken) {
         phases.push_back(DocumentState::Parsed);
       });
-  auto indexedContentDisposable = shared->workspace.documentBuilder->onBuildPhase(
-      DocumentState::IndexedContent,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
-        phases.push_back(DocumentState::IndexedContent);
-      });
-  auto computedScopesDisposable = shared->workspace.documentBuilder->onBuildPhase(
-      DocumentState::ComputedScopes,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
-        phases.push_back(DocumentState::ComputedScopes);
-      });
+  auto indexedContentDisposable =
+      shared->workspace.documentBuilder->onBuildPhase(
+          DocumentState::IndexedContent,
+          [&phases](std::span<const std::shared_ptr<Document>>,
+                    utils::CancellationToken) {
+            phases.push_back(DocumentState::IndexedContent);
+          });
+  auto computedScopesDisposable =
+      shared->workspace.documentBuilder->onBuildPhase(
+          DocumentState::ComputedScopes,
+          [&phases](std::span<const std::shared_ptr<Document>>,
+                    utils::CancellationToken) {
+            phases.push_back(DocumentState::ComputedScopes);
+          });
   auto linkedDisposable = shared->workspace.documentBuilder->onBuildPhase(
       DocumentState::Linked,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
+      [&phases](std::span<const std::shared_ptr<Document>>,
+                utils::CancellationToken) {
         phases.push_back(DocumentState::Linked);
       });
-  auto indexedReferencesDisposable = shared->workspace.documentBuilder->onBuildPhase(
-      DocumentState::IndexedReferences,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
-        phases.push_back(DocumentState::IndexedReferences);
-      });
+  auto indexedReferencesDisposable =
+      shared->workspace.documentBuilder->onBuildPhase(
+          DocumentState::IndexedReferences,
+          [&phases](std::span<const std::shared_ptr<Document>>,
+                    utils::CancellationToken) {
+            phases.push_back(DocumentState::IndexedReferences);
+          });
   auto validatedDisposable = shared->workspace.documentBuilder->onBuildPhase(
       DocumentState::Validated,
-      [&phases](std::span<const std::shared_ptr<Document>>) {
+      [&phases](std::span<const std::shared_ptr<Document>>,
+                utils::CancellationToken) {
         phases.push_back(DocumentState::Validated);
       });
 
   BuildOptions options;
   options.eagerLinking = false;
-  options.validation.enabled = true;
+  options.validation = true;
   const std::array<std::shared_ptr<Document>, 1> documents{document};
-  ASSERT_TRUE(shared->workspace.documentBuilder->build(documents, options));
+  shared->workspace.documentBuilder->build(documents, options);
 
-  EXPECT_EQ(
-      phases,
-      (std::vector<DocumentState>{DocumentState::Parsed,
-                                  DocumentState::IndexedContent,
-                                  DocumentState::ComputedScopes,
-                                  DocumentState::Validated}));
+  EXPECT_EQ(phases, (std::vector<DocumentState>{DocumentState::Parsed,
+                                                DocumentState::IndexedContent,
+                                                DocumentState::ComputedScopes,
+                                                DocumentState::Validated}));
   EXPECT_EQ(document->state, DocumentState::Validated);
 }
 
 TEST(DefaultDocumentBuilderTest,
      BuildRevalidatesOnlyMissingValidationCategoriesAndAppendsDiagnostics) {
-  auto shared = test::make_shared_core_services();
-  auto services = test::make_core_services(*shared, "test", {".test"});
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  auto services = test::make_uninstalled_core_services(*shared, "test", {".test"});
+  pegium::services::installDefaultCoreServices(*services);
 
   auto validator = std::make_unique<test::FakeDocumentValidator>();
   auto *validatorPtr = validator.get();
@@ -729,36 +1004,36 @@ TEST(DefaultDocumentBuilderTest,
   };
   services->validation.documentValidator = std::move(validator);
 
-  auto registry = std::make_unique<validation::DefaultValidationRegistry>();
+  auto registry =
+      std::make_unique<validation::DefaultValidationRegistry>(*services);
   registry->registerCheck<AstNode>(
       [](const AstNode &, const validation::ValidationAcceptor &) {}, "fast");
   registry->registerCheck<AstNode>(
       [](const AstNode &, const validation::ValidationAcceptor &) {}, "slow");
   services->validation.validationRegistry = std::move(registry);
 
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+  shared->serviceRegistry->registerServices(std::move(services));
 
   const auto uri = test::make_file_uri("partial-validation.test");
-  auto document = shared->workspace.documentFactory->fromString(
-      "content", uri, "test", 1);
+  auto document =
+      shared->workspace.documentFactory->fromString("content", uri);
   ASSERT_NE(document, nullptr);
   shared->workspace.documents->addDocument(document);
 
   BuildOptions fastOnly;
-  fastOnly.validation.enabled = true;
-  fastOnly.validation.categories = {"fast"};
-  ASSERT_TRUE(shared->workspace.documentBuilder->build(
-      std::array<std::shared_ptr<Document>, 1>{document}, fastOnly));
+  fastOnly.validation = validation::ValidationOptions{.categories = {"fast"}};
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, fastOnly);
 
   ASSERT_EQ(validatorPtr->validateCalls, 1u);
   ASSERT_EQ(document->diagnostics.size(), 1u);
   EXPECT_EQ(document->diagnostics.front().message, "fast-diagnostic");
 
   BuildOptions fastAndSlow;
-  fastAndSlow.validation.enabled = true;
-  fastAndSlow.validation.categories = {"fast", "slow"};
-  ASSERT_TRUE(shared->workspace.documentBuilder->build(
-      std::array<std::shared_ptr<Document>, 1>{document}, fastAndSlow));
+  fastAndSlow.validation =
+      validation::ValidationOptions{.categories = {"fast", "slow"}};
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, fastAndSlow);
 
   ASSERT_EQ(validatorPtr->validateCalls, 2u);
   ASSERT_EQ(validatorPtr->seenOptions.size(), 2u);
@@ -773,69 +1048,108 @@ TEST(DefaultDocumentBuilderTest,
 
 TEST(DefaultDocumentBuilderTest,
      ResetToStateClearsBuildStateBelowIndexedReferences) {
-  auto shared = test::make_shared_core_services();
-  auto services = test::make_core_services(*shared, "test", {".test"});
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  auto services = test::make_uninstalled_core_services(*shared, "test", {".test"});
+  pegium::services::installDefaultCoreServices(*services);
 
   auto validator = std::make_unique<test::FakeDocumentValidator>();
   auto *validatorPtr = validator.get();
   services->validation.documentValidator = std::move(validator);
 
-  auto registry = std::make_unique<validation::DefaultValidationRegistry>();
+  auto registry =
+      std::make_unique<validation::DefaultValidationRegistry>(*services);
   registry->registerCheck<AstNode>(
       [](const AstNode &, const validation::ValidationAcceptor &) {}, "fast");
   services->validation.validationRegistry = std::move(registry);
 
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+  shared->serviceRegistry->registerServices(std::move(services));
 
   const auto uri = test::make_file_uri("reset-build-state.test");
-  auto document = shared->workspace.documentFactory->fromString(
-      "content", uri, "test", 1);
+  auto document =
+      shared->workspace.documentFactory->fromString("content", uri);
   ASSERT_NE(document, nullptr);
   shared->workspace.documents->addDocument(document);
 
   BuildOptions options;
-  options.validation.enabled = true;
-  options.validation.categories = {"fast"};
-  ASSERT_TRUE(shared->workspace.documentBuilder->build(
-      std::array<std::shared_ptr<Document>, 1>{document}, options));
+  options.validation = validation::ValidationOptions{.categories = {"fast"}};
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, options);
   ASSERT_EQ(validatorPtr->validateCalls, 1u);
 
-  shared->workspace.documentBuilder->resetToState(*document,
-                                                  DocumentState::ComputedScopes);
+  shared->workspace.documentBuilder->resetToState(
+      *document, DocumentState::ComputedScopes);
 
-  ASSERT_TRUE(shared->workspace.documentBuilder->build(
-      std::array<std::shared_ptr<Document>, 1>{document}, options));
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, options);
   EXPECT_EQ(validatorPtr->validateCalls, 2u);
+}
+
+TEST(DefaultDocumentBuilderTest, ResetToStateChangedClearsDiagnostics) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  auto services = test::make_uninstalled_core_services(*shared, "test", {".test"});
+  pegium::services::installDefaultCoreServices(*services);
+
+  auto validator = std::make_unique<test::FakeDocumentValidator>();
+  validator->diagnostics.push_back(services::Diagnostic{.message = "validation"});
+  services->validation.documentValidator = std::move(validator);
+
+  shared->serviceRegistry->registerServices(std::move(services));
+
+  const auto uri = test::make_file_uri("reset-changed.test");
+  auto document =
+      shared->workspace.documentFactory->fromString("content", uri);
+  ASSERT_NE(document, nullptr);
+  shared->workspace.documents->addDocument(document);
+
+  BuildOptions options;
+  options.validation = true;
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, options);
+  ASSERT_EQ(document->state, DocumentState::Validated);
+  ASSERT_FALSE(document->diagnostics.empty());
+
+  shared->workspace.documentBuilder->resetToState(*document,
+                                                  DocumentState::Changed);
+  EXPECT_EQ(document->state, DocumentState::Changed);
+  EXPECT_TRUE(document->diagnostics.empty());
 }
 
 TEST(DefaultDocumentBuilderTest,
      UpdateKeepsIncompleteBuildOptionsUntilPreviousBuildCompletes) {
-  auto shared = test::make_shared_core_services();
-  auto services = test::make_core_services(*shared, "test", {".test"});
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  auto services = test::make_uninstalled_core_services(*shared, "test", {".test"});
+  pegium::services::installDefaultCoreServices(*services);
 
   auto validator = std::make_unique<test::FakeDocumentValidator>();
   auto *validatorPtr = validator.get();
   services->validation.documentValidator = std::move(validator);
 
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+  shared->serviceRegistry->registerServices(std::move(services));
 
   const auto uri = test::make_file_uri("resume-incomplete-build.test");
-  auto document = shared->workspace.documentFactory->fromString(
-      "content", uri, "test", 1);
+  auto fileSystem = std::make_shared<test::FakeFileSystemProvider>();
+  fileSystem->files["/tmp/pegium-tests/resume-incomplete-build.test"] =
+      "content";
+  shared->workspace.fileSystemProvider = fileSystem;
+  auto document =
+      shared->workspace.documentFactory->fromString("content", uri);
   ASSERT_NE(document, nullptr);
   document->state = DocumentState::Changed;
   shared->workspace.documents->addDocument(document);
 
   auto &updateOptions = shared->workspace.documentBuilder->updateBuildOptions();
   updateOptions.eagerLinking = false;
-  updateOptions.validation.enabled = false;
+  updateOptions.validation = false;
 
   utils::CancellationTokenSource cancellationSource;
   bool cancelled = false;
   auto disposable = shared->workspace.documentBuilder->onBuildPhase(
-      DocumentState::Parsed,
-      [&cancellationSource, &cancelled](
-          std::span<const std::shared_ptr<Document>>) {
+      DocumentState::Parsed, [&cancellationSource, &cancelled](
+                                 std::span<const std::shared_ptr<Document>>,
+                                 utils::CancellationToken) {
         if (!cancelled) {
           cancelled = true;
           cancellationSource.request_stop();
@@ -848,7 +1162,7 @@ TEST(DefaultDocumentBuilderTest,
   ASSERT_EQ(document->state, DocumentState::Parsed);
 
   updateOptions.eagerLinking = true;
-  updateOptions.validation.enabled = true;
+  updateOptions.validation = true;
 
   ASSERT_NO_THROW((void)shared->workspace.documentBuilder->update({}, {}));
   EXPECT_EQ(document->state, DocumentState::ComputedScopes);
@@ -857,6 +1171,338 @@ TEST(DefaultDocumentBuilderTest,
   ASSERT_NO_THROW((void)shared->workspace.documentBuilder->update({}, {}));
   EXPECT_EQ(document->state, DocumentState::Validated);
   EXPECT_EQ(validatorPtr->validateCalls, 1u);
+}
+
+TEST(DefaultDocumentBuilderTest,
+     WaitUntilThrowsWhenWorkspaceAlreadyValidatedExcludedDocument) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto excludedDocument = shared->workspace.documentFactory->fromString(
+      "excluded", test::make_file_uri("wait-excluded.test"));
+  auto validatedDocument = shared->workspace.documentFactory->fromString(
+      "validated", test::make_file_uri("wait-validated.test"));
+  ASSERT_NE(excludedDocument, nullptr);
+  ASSERT_NE(validatedDocument, nullptr);
+  shared->workspace.documents->addDocument(excludedDocument);
+  shared->workspace.documents->addDocument(validatedDocument);
+
+  BuildOptions parseOnlyOptions;
+  parseOnlyOptions.validation = false;
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{excludedDocument},
+      parseOnlyOptions);
+  ASSERT_EQ(excludedDocument->state, DocumentState::IndexedReferences);
+
+  BuildOptions validatedOptions;
+  validatedOptions.validation = true;
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{validatedDocument},
+      validatedOptions);
+  ASSERT_EQ(validatedDocument->state, DocumentState::Validated);
+
+  try {
+    (void)shared->workspace.documentBuilder->waitUntil(
+        DocumentState::Validated, excludedDocument->id);
+    FAIL() << "waitUntil should fail for a document excluded from validation.";
+  } catch (const std::runtime_error &error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("requiring Validated"), std::string::npos);
+    EXPECT_NE(message.find("workspace state is already Validated"),
+              std::string::npos);
+  }
+}
+
+TEST(DefaultDocumentBuilderTest, WaitUntilDocumentReturnsBuiltDocumentId) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = shared->workspace.documentFactory->fromString(
+      "content", test::make_file_uri("wait-success.test"));
+  ASSERT_NE(document, nullptr);
+  shared->workspace.documents->addDocument(document);
+
+  auto waiter = std::async(std::launch::async, [&shared, document]() {
+    return shared->workspace.documentBuilder->waitUntil(
+        DocumentState::Validated, document->id);
+  });
+
+  BuildOptions options;
+  options.validation = true;
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, options);
+
+  EXPECT_EQ(waiter.get(), document->id);
+}
+
+TEST(DefaultDocumentBuilderTest, WaitUntilWorkspaceUnblocksWhenArmedBeforeBuild) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = shared->workspace.documentFactory->fromString(
+      "content", test::make_file_uri("wait-workspace-success.test"));
+  ASSERT_NE(document, nullptr);
+  shared->workspace.documents->addDocument(document);
+
+  auto waiter = std::async(std::launch::async, [&shared]() {
+    shared->workspace.documentBuilder->waitUntil(DocumentState::Validated);
+  });
+  EXPECT_EQ(waiter.wait_for(20ms), std::future_status::timeout);
+
+  BuildOptions options;
+  options.validation = true;
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, options);
+
+  EXPECT_EQ(waiter.wait_for(1s), std::future_status::ready);
+  EXPECT_NO_THROW(waiter.get());
+}
+
+TEST(DefaultDocumentBuilderTest,
+     WaitUntilWorkspaceResolvesAfterBuildPhaseCallbacksForSameState) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices =
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = shared->workspace.documentFactory->fromString(
+      "content", test::make_file_uri("wait-workspace-order.test"));
+  ASSERT_NE(document, nullptr);
+  shared->workspace.documents->addDocument(document);
+
+  std::mutex eventsMutex;
+  std::vector<std::string> events;
+  std::future<void> waiter;
+  auto waiterStartedPromise = std::make_shared<std::promise<void>>();
+  auto waiterStarted = waiterStartedPromise->get_future();
+  auto disposable = shared->workspace.documentBuilder->onBuildPhase(
+      DocumentState::Validated,
+      [&shared, &events, &eventsMutex, &waiter, &waiterStarted,
+       waiterStartedPromise](
+          std::span<const std::shared_ptr<Document>>, utils::CancellationToken) {
+        {
+          std::scoped_lock lock(eventsMutex);
+          events.push_back("B");
+        }
+        waiter = std::async(std::launch::async,
+                            [&shared, &events, &eventsMutex,
+                             waiterStartedPromise]() {
+                              waiterStartedPromise->set_value();
+                              shared->workspace.documentBuilder->waitUntil(
+                                  DocumentState::Validated);
+                              std::scoped_lock lock(eventsMutex);
+                              events.push_back("W");
+                            });
+        EXPECT_EQ(waiterStarted.wait_for(1s), std::future_status::ready);
+        EXPECT_EQ(waiter.wait_for(20ms), std::future_status::timeout);
+      });
+
+  BuildOptions options;
+  options.validation = true;
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, options);
+
+  ASSERT_TRUE(waiter.valid());
+  EXPECT_EQ(waiter.wait_for(1s), std::future_status::ready);
+  EXPECT_NO_THROW(waiter.get());
+  EXPECT_EQ(events, (std::vector<std::string>{"B", "W"}));
+}
+
+TEST(DefaultDocumentBuilderTest, WaitUntilWorkspaceUnblocksMultipleWaiters) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices =
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = shared->workspace.documentFactory->fromString(
+      "content", test::make_file_uri("wait-workspace-multiple.test"));
+  ASSERT_NE(document, nullptr);
+  shared->workspace.documents->addDocument(document);
+
+  auto waiter1 = std::async(std::launch::async, [&shared]() {
+    shared->workspace.documentBuilder->waitUntil(DocumentState::Validated);
+  });
+  auto waiter2 = std::async(std::launch::async, [&shared]() {
+    shared->workspace.documentBuilder->waitUntil(DocumentState::Validated);
+  });
+  EXPECT_EQ(waiter1.wait_for(20ms), std::future_status::timeout);
+  EXPECT_EQ(waiter2.wait_for(20ms), std::future_status::timeout);
+
+  BuildOptions options;
+  options.validation = true;
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, options);
+
+  EXPECT_EQ(waiter1.wait_for(1s), std::future_status::ready);
+  EXPECT_EQ(waiter2.wait_for(1s), std::future_status::ready);
+  EXPECT_NO_THROW(waiter1.get());
+  EXPECT_NO_THROW(waiter2.get());
+}
+
+TEST(DefaultDocumentBuilderTest,
+     WaitUntilWorkspaceSurvivesCancelledBuildAndResolvesOnRetry) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices =
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = shared->workspace.documentFactory->fromString(
+      "content", test::make_file_uri("wait-workspace-retry.test"));
+  ASSERT_NE(document, nullptr);
+  shared->workspace.documents->addDocument(document);
+
+  auto waiter = std::async(std::launch::async, [&shared]() {
+    shared->workspace.documentBuilder->waitUntil(DocumentState::Validated);
+  });
+
+  utils::CancellationTokenSource cancellationSource;
+  bool cancelled = false;
+  auto disposable = shared->workspace.documentBuilder->onBuildPhase(
+      DocumentState::ComputedScopes,
+      [&cancellationSource, &cancelled](std::span<const std::shared_ptr<Document>>,
+                                        utils::CancellationToken) {
+        if (!cancelled) {
+          cancelled = true;
+          cancellationSource.request_stop();
+        }
+      });
+
+  BuildOptions options;
+  options.validation = true;
+  EXPECT_THROW(shared->workspace.documentBuilder->build(
+                   std::array<std::shared_ptr<Document>, 1>{document}, options,
+                   cancellationSource.get_token()),
+               utils::OperationCancelled);
+  EXPECT_EQ(document->state, DocumentState::ComputedScopes);
+  EXPECT_EQ(waiter.wait_for(20ms), std::future_status::timeout);
+
+  EXPECT_NO_THROW(shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, options));
+  EXPECT_EQ(waiter.wait_for(1s), std::future_status::ready);
+  EXPECT_NO_THROW(waiter.get());
+}
+
+TEST(DefaultDocumentBuilderTest,
+     WaitUntilWorkspaceResolvesWhenValidatedPhaseHasNoDocuments) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices =
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = shared->workspace.documentFactory->fromString(
+      "content", test::make_file_uri("wait-workspace-empty-phase.test"));
+  ASSERT_NE(document, nullptr);
+  shared->workspace.documents->addDocument(document);
+
+  bool validatedPhaseReached = false;
+  auto disposable = shared->workspace.documentBuilder->onBuildPhase(
+      DocumentState::Validated,
+      [&validatedPhaseReached](std::span<const std::shared_ptr<Document>>,
+                               utils::CancellationToken) {
+        validatedPhaseReached = true;
+      });
+  auto waiter = std::async(std::launch::async, [&shared]() {
+    shared->workspace.documentBuilder->waitUntil(DocumentState::Validated);
+  });
+  EXPECT_EQ(waiter.wait_for(20ms), std::future_status::timeout);
+
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document});
+
+  EXPECT_FALSE(validatedPhaseReached);
+  EXPECT_EQ(document->state, DocumentState::IndexedReferences);
+  EXPECT_EQ(waiter.wait_for(1s), std::future_status::ready);
+  EXPECT_NO_THROW(waiter.get());
+}
+
+TEST(DefaultDocumentBuilderTest,
+     WaitUntilThrowsWhenWorkspaceAlreadyValidatedInterruptedDocument) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto interruptedDocument = shared->workspace.documentFactory->fromString(
+      "interrupted", test::make_file_uri("wait-interrupted.test"));
+  auto validatedDocument = shared->workspace.documentFactory->fromString(
+      "validated", test::make_file_uri("wait-after-interrupted.test"));
+  ASSERT_NE(interruptedDocument, nullptr);
+  ASSERT_NE(validatedDocument, nullptr);
+  shared->workspace.documents->addDocument(interruptedDocument);
+  shared->workspace.documents->addDocument(validatedDocument);
+
+  utils::CancellationTokenSource updateCancellation;
+  bool cancelled = false;
+  auto disposable = shared->workspace.documentBuilder->onBuildPhase(
+      DocumentState::Parsed, [&updateCancellation, &cancelled](
+                                 std::span<const std::shared_ptr<Document>>,
+                                 utils::CancellationToken) {
+        if (!cancelled) {
+          cancelled = true;
+          updateCancellation.request_stop();
+        }
+      });
+
+  EXPECT_THROW((void)shared->workspace.documentBuilder->update(
+                   {}, {}, updateCancellation.get_token()),
+               utils::OperationCancelled);
+  ASSERT_EQ(interruptedDocument->state, DocumentState::Parsed);
+
+  BuildOptions validatedOptions;
+  validatedOptions.validation = true;
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{validatedDocument},
+      validatedOptions);
+  ASSERT_EQ(validatedDocument->state, DocumentState::Validated);
+
+  try {
+    (void)shared->workspace.documentBuilder->waitUntil(
+        DocumentState::Validated, interruptedDocument->id);
+    FAIL() << "waitUntil should fail once the workspace has already advanced.";
+  } catch (const std::runtime_error &error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("requiring Validated"), std::string::npos);
+    EXPECT_NE(message.find("workspace state is already Validated"),
+              std::string::npos);
+  }
 }
 
 } // namespace

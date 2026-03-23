@@ -5,19 +5,19 @@
 #include <lsp/messages.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/TextDocumentHandlers.hpp>
-#include <pegium/workspace/DefaultTextDocuments.hpp>
+#include <pegium/lsp/workspace/DefaultTextDocuments.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 TEST(TextDocumentHandlersTest, NotificationsUpdateTextDocumentsStore) {
-  workspace::DefaultTextDocuments documents;
+  DefaultTextDocuments documents;
   test::MemoryStream stream;
   ::lsp::Connection connection(stream);
   ::lsp::MessageHandler handler(connection);
 
-  addTextDocumentHandlers(handler, documents);
+  auto disposable = documents.listen(handler);
+  (void)disposable;
 
   const auto uri = test::make_file_uri("runtime-text-document.test");
 
@@ -33,8 +33,8 @@ TEST(TextDocumentHandlersTest, NotificationsUpdateTextDocumentsStore) {
 
   auto opened = documents.get(uri);
   ASSERT_NE(opened, nullptr);
-  EXPECT_EQ(opened->text(), "alpha");
-  EXPECT_EQ(opened->clientVersion(), 1);
+  EXPECT_EQ(opened->getText(), "alpha");
+  EXPECT_EQ(opened->version(), 1);
 
   ::lsp::DidChangeTextDocumentParams changeParams{};
   changeParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
@@ -49,8 +49,9 @@ TEST(TextDocumentHandlersTest, NotificationsUpdateTextDocumentsStore) {
 
   auto changed = documents.get(uri);
   ASSERT_NE(changed, nullptr);
-  EXPECT_EQ(changed->text(), "beta");
-  EXPECT_EQ(changed->clientVersion(), 2);
+  EXPECT_EQ(changed.get(), opened.get());
+  EXPECT_EQ(changed->getText(), "beta");
+  EXPECT_EQ(changed->version(), 2);
 
   ::lsp::DidSaveTextDocumentParams saveParams{};
   saveParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
@@ -62,7 +63,7 @@ TEST(TextDocumentHandlersTest, NotificationsUpdateTextDocumentsStore) {
 
   auto saved = documents.get(uri);
   ASSERT_NE(saved, nullptr);
-  EXPECT_EQ(saved->text(), "gamma");
+  EXPECT_EQ(saved->getText(), "beta");
 
   ::lsp::DidCloseTextDocumentParams closeParams{};
   closeParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
@@ -76,14 +77,15 @@ TEST(TextDocumentHandlersTest, NotificationsUpdateTextDocumentsStore) {
 
 TEST(TextDocumentHandlersTest,
      WillSaveRequestsCallInitializationHookAndReturnEdits) {
-  workspace::DefaultTextDocuments documents;
+  DefaultTextDocuments documents;
   test::MemoryStream stream;
   ::lsp::Connection connection(stream);
   ::lsp::MessageHandler handler(connection);
 
   int initializedCalls = 0;
-  addTextDocumentHandlers(handler, documents,
-                          [&initializedCalls]() { ++initializedCalls; });
+  auto disposable =
+      documents.listen(handler, [&initializedCalls]() { ++initializedCalls; });
+  (void)disposable;
 
   workspace::TextDocumentSaveReason seenReason =
       workspace::TextDocumentSaveReason::Manual;
@@ -91,19 +93,28 @@ TEST(TextDocumentHandlersTest,
       [&seenReason](const workspace::TextDocumentWillSaveEvent &event) {
         seenReason = event.reason;
       });
+  auto firstWillSaveWaitUntil = documents.onWillSaveWaitUntil(
+      [](const workspace::TextDocumentWillSaveEvent &) {
+        workspace::TextEdit edit{};
+        edit.range.start = text::Position(0, 0);
+        edit.range.end = text::Position(0, 0);
+        edit.newText = "stale ";
+        return std::vector<workspace::TextEdit>{std::move(edit)};
+      });
   auto onWillSaveWaitUntil = documents.onWillSaveWaitUntil(
       [](const workspace::TextDocumentWillSaveEvent &) {
-        workspace::TextDocumentEdit edit{};
+        workspace::TextEdit edit{};
         edit.range.start = text::Position(0, 0);
         edit.range.end = text::Position(0, 0);
         edit.newText = "prefix ";
-        return std::vector<workspace::TextDocumentEdit>{std::move(edit)};
+        return std::vector<workspace::TextEdit>{std::move(edit)};
       });
   (void)onWillSave;
+  (void)firstWillSaveWaitUntil;
   (void)onWillSaveWaitUntil;
 
   const auto uri = test::make_file_uri("runtime-will-save.test");
-  ASSERT_NE(documents.open(uri, "test", "alpha", 1), nullptr);
+  ASSERT_NE(test::set_text_document(documents, uri, "test", "alpha", 1), nullptr);
 
   ::lsp::WillSaveTextDocumentParams willSaveParams{};
   willSaveParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
@@ -127,7 +138,8 @@ TEST(TextDocumentHandlersTest,
   EXPECT_EQ(initializedCalls, 2);
   EXPECT_NE(stream.written().find("\"id\":1"), std::string::npos);
   EXPECT_NE(stream.written().find("prefix "), std::string::npos);
+  EXPECT_EQ(stream.written().find("stale "), std::string::npos);
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

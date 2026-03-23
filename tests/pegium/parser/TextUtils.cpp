@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <pegium/parser/TextUtils.hpp>
+#include <pegium/core/parser/TextUtils.hpp>
 
 using namespace pegium::parser;
 

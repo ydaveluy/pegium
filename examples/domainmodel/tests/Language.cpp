@@ -24,7 +24,10 @@ TEST(DomainModelLanguageTest, ParsesEntityModel) {
 }
 
 TEST(DomainModelLanguageTest, ResolvesTypeReferenceToEntitySubtype) {
-  auto shared = pegium::test::make_shared_services();
+  auto shared = pegium::test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   ASSERT_TRUE(domainmodel::services::register_language_services(*shared));
 
   auto document = pegium::test::open_and_build_document(
@@ -46,7 +49,8 @@ TEST(DomainModelLanguageTest, ResolvesTypeReferenceToEntitySubtype) {
   ASSERT_EQ(blog->features.size(), 1u);
   ASSERT_NE(blog->features.front(), nullptr);
   ASSERT_NE(blog->features.front()->type.get(), nullptr);
-  auto *person = dynamic_cast<ast::Entity *>(blog->features.front()->type.get());
+  const auto *person =
+      dynamic_cast<const ast::Entity *>(blog->features.front()->type.get());
   ASSERT_NE(person, nullptr);
   EXPECT_EQ(person->name, "Person");
 }

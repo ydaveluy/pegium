@@ -3,12 +3,9 @@
 #include <statemachine/ast.hpp>
 
 #include <cctype>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include <pegium/validation/DiagnosticRanges.hpp>
 
 namespace statemachine::services::validation {
 namespace {
@@ -17,15 +14,16 @@ using namespace statemachine::ast;
 
 } // namespace
 
-void StatemachineValidator::registerValidationChecks(
-    pegium::validation::ValidationRegistry &registry,
-    const pegium::services::Services & /*services*/) {
-  const StatemachineValidator validator;
+void registerValidationChecks(
+    statemachine::services::StatemachineServices &services) {
+  auto &registry = *services.validation.validationRegistry;
+  auto &validator = *services.statemachine.validation.statemachineValidator;
+
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
            &StatemachineValidator::checkStateNameStartsWithCapital>(validator),
        pegium::validation::ValidationRegistry::makeValidationCheck<
-           &StatemachineValidator::checkUniqueNames>(validator)});
+           &StatemachineValidator::checkUniqueStatesAndEvents>(validator)});
 }
 
 void StatemachineValidator::checkStateNameStartsWithCapital(
@@ -41,42 +39,43 @@ void StatemachineValidator::checkStateNameStartsWithCapital(
   }
 }
 
-void StatemachineValidator::checkUniqueNames(
+void StatemachineValidator::checkUniqueStatesAndEvents(
     const Statemachine &model,
     const pegium::validation::ValidationAcceptor &accept) const {
-  std::unordered_map<std::string, std::vector<const pegium::AstNode *>> names;
+  std::unordered_map<std::string, std::vector<const Event *>> eventsByName;
   for (const auto &event : model.events) {
     if (event) {
-      names[event->name].push_back(event.get());
+      eventsByName[event->name].push_back(event.get());
     }
   }
+  std::unordered_map<std::string, std::vector<const State *>> statesByName;
   for (const auto &state : model.states) {
     if (state) {
-      names[state->name].push_back(state.get());
+      statesByName[state->name].push_back(state.get());
     }
   }
 
-  const auto acceptDuplicate = [&](const pegium::AstNode &node,
-                                   std::string_view name) {
-    if (const auto *event = dynamic_cast<const Event *>(&node)) {
-      accept.error(*event, "Duplicate identifier name: " + std::string(name))
-          .property<&Event::name>();
-      return;
-    }
-    if (const auto *state = dynamic_cast<const State *>(&node)) {
-      accept.error(*state, "Duplicate identifier name: " + std::string(name))
-          .property<&State::name>();
-      return;
-    }
-    accept.error(node, "Duplicate identifier name: " + std::string(name));
-  };
-
-  for (const auto &[name, nodes] : names) {
-    if (nodes.size() <= 1) {
+  for (const auto &[name, events] : eventsByName) {
+    if (events.size() <= 1) {
       continue;
     }
-    for (const auto *node : nodes) {
-      acceptDuplicate(*node, name);
+    for (const auto *event : events) {
+      if (event != nullptr) {
+        accept.error(*event, "Duplicate identifier name: " + name)
+            .property<&Event::name>();
+      }
+    }
+  }
+
+  for (const auto &[name, states] : statesByName) {
+    if (states.size() <= 1) {
+      continue;
+    }
+    for (const auto *state : states) {
+      if (state != nullptr) {
+        accept.error(*state, "Duplicate identifier name: " + name)
+            .property<&State::name>();
+      }
     }
   }
 }

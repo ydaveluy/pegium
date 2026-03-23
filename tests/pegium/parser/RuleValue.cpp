@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <pegium/parser/RuleValue.hpp>
+#include <pegium/core/parser/RuleValue.hpp>
 
 #include <cstdint>
 #include <string>

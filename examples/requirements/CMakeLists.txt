@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.14)
 
 add_library(pegium_example_requirements
+    src/cli/CliUtils.cpp
     src/RequirementsModule.cpp
+    src/cli/Generator.cpp
     src/Language.cpp
     src/lsp/RequirementsFormatter.cpp
     src/validation/RequirementsValidator.cpp
@@ -16,13 +18,19 @@ target_include_directories(pegium_example_requirements
 )
 
 target_compile_features(pegium_example_requirements PUBLIC cxx_std_20)
-target_link_libraries(pegium_example_requirements PUBLIC pegium)
+target_link_libraries(pegium_example_requirements PUBLIC
+    pegium
+    PegiumCli
+)
 
 add_executable(pegium-example-requirements-cli
     src/cli_main.cpp
 )
 target_compile_features(pegium-example-requirements-cli PRIVATE cxx_std_20)
-target_link_libraries(pegium-example-requirements-cli PRIVATE pegium_example_requirements)
+target_link_libraries(pegium-example-requirements-cli PRIVATE
+    PegiumCli
+    pegium_example_requirements
+)
 
 add_executable(pegium-example-requirements-lsp
     src/lsp_main.cpp

@@ -8,10 +8,11 @@
 #include <vector>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/AbstractFormatter.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/lsp/formatting/AbstractFormatter.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 using namespace pegium::parser;
@@ -73,18 +74,20 @@ protected:
 #pragma clang diagnostic pop
 };
 
-const services::Services &lookup_services(const services::SharedServices &shared,
-                                          std::string_view languageId) {
-  const auto *coreServices =
-      shared.serviceRegistry->getServicesByLanguageId(std::string(languageId));
-  if (coreServices == nullptr) {
-    throw std::runtime_error("Missing language services for formatter test.");
+const pegium::Services &lookup_services(const pegium::SharedServices &shared,
+                                        std::string_view languageId) {
+  for (const auto *coreServices : shared.serviceRegistry->all()) {
+    if (coreServices == nullptr ||
+        coreServices->languageMetaData.languageId != languageId) {
+      continue;
+    }
+    const auto *services = as_services(coreServices);
+    if (services == nullptr) {
+      throw std::runtime_error("Invalid formatter test services type.");
+    }
+    return *services;
   }
-  const auto *services = dynamic_cast<const services::Services *>(coreServices);
-  if (services == nullptr) {
-    throw std::runtime_error("Invalid formatter test services type.");
-  }
-  return *services;
+  throw std::runtime_error("Missing language services for formatter test.");
 }
 
 const mini::ast::Model *model_of(const workspace::Document &document) {
@@ -92,16 +95,19 @@ const mini::ast::Model *model_of(const workspace::Document &document) {
 }
 
 struct ParsedMiniDocument {
-  std::unique_ptr<services::SharedServices> shared;
+  std::unique_ptr<pegium::SharedServices> shared;
   std::shared_ptr<workspace::Document> document;
 };
 
 ParsedMiniDocument open_mini_document(std::string text) {
-  auto shared = test::make_shared_services();
-  auto services = test::make_services<MiniParser>(*shared, "mini", {".mini"});
-  if (!shared->serviceRegistry->registerServices(std::move(services))) {
-    throw std::runtime_error("Failed to register mini formatter services.");
-  }
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  auto services = test::make_uninstalled_services<MiniParser>(*shared, "mini", {".mini"});
+  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultLspServices(*services);
+  shared->serviceRegistry->registerServices(std::move(services));
 
   auto document = test::open_and_build_document(
       *shared, test::make_file_uri("mini-format.test"), "mini", std::move(text));
@@ -116,16 +122,16 @@ ParsedMiniDocument open_mini_document(std::string text) {
 
 std::string apply_text_edits(const workspace::Document &document,
                              std::vector<::lsp::TextEdit> edits) {
-  auto text = document.text();
-  std::sort(edits.begin(), edits.end(),
-            [&document](const auto &left, const auto &right) {
-              return document.positionToOffset(left.range.start) >
-                     document.positionToOffset(right.range.start);
-            });
+  const auto &textDocument = document.textDocument();
+  auto text = std::string(textDocument.getText());
+  std::ranges::sort(edits, [&document](const auto &left, const auto &right) {
+    return document.textDocument().offsetAt(left.range.start) >
+           document.textDocument().offsetAt(right.range.start);
+  });
 
   for (const auto &edit : edits) {
-    const auto begin = document.positionToOffset(edit.range.start);
-    const auto end = document.positionToOffset(edit.range.end);
+    const auto begin = textDocument.offsetAt(edit.range.start);
+    const auto end = textDocument.offsetAt(edit.range.end);
     text.replace(begin, end - begin, edit.newText);
   }
   return text;
@@ -143,7 +149,7 @@ protected:
 
 class KeywordSpacingFormatter final : public AbstractFormatter {
 public:
-  explicit KeywordSpacingFormatter(const services::Services &services)
+  explicit KeywordSpacingFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<mini::ast::Item>(&KeywordSpacingFormatter::formatItem);
   }
@@ -158,7 +164,7 @@ protected:
 
 class PriorityFormatter final : public AbstractFormatter {
 public:
-  explicit PriorityFormatter(const services::Services &services)
+  explicit PriorityFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<mini::ast::Item>(&PriorityFormatter::formatItem);
   }
@@ -174,7 +180,7 @@ protected:
 
 class OverlapFormatter final : public AbstractFormatter {
 public:
-  explicit OverlapFormatter(const services::Services &services)
+  explicit OverlapFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<mini::ast::Item>(&OverlapFormatter::formatItem);
   }
@@ -190,7 +196,7 @@ protected:
 
 class FlexibleWhitespaceFormatter final : public AbstractFormatter {
 public:
-  explicit FlexibleWhitespaceFormatter(const services::Services &services)
+  explicit FlexibleWhitespaceFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<mini::ast::Item>(&FlexibleWhitespaceFormatter::formatItem);
   }
@@ -206,7 +212,7 @@ protected:
 
 class FitFormatter final : public AbstractFormatter {
 public:
-  explicit FitFormatter(const services::Services &services)
+  explicit FitFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<mini::ast::Item>(&FitFormatter::formatItem);
   }
@@ -221,7 +227,7 @@ protected:
 
 class MiniLayoutFormatter final : public AbstractFormatter {
 public:
-  explicit MiniLayoutFormatter(const services::Services &services)
+  explicit MiniLayoutFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<mini::ast::Model>(&MiniLayoutFormatter::formatModel);
     on<mini::ast::Item>(&MiniLayoutFormatter::formatItem);
@@ -256,7 +262,7 @@ protected:
 
 class HiddenSelectionFormatter final : public AbstractFormatter {
 public:
-  explicit HiddenSelectionFormatter(const services::Services &services)
+  explicit HiddenSelectionFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<mini::ast::Model>(&HiddenSelectionFormatter::formatModel);
     on<mini::ast::Item>(&HiddenSelectionFormatter::formatItem);
@@ -295,7 +301,7 @@ protected:
 
 class HiddenReplacementFormatter final : public AbstractFormatter {
 public:
-  explicit HiddenReplacementFormatter(const services::Services &services)
+  explicit HiddenReplacementFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<mini::ast::Model>(&HiddenReplacementFormatter::formatModel);
     on<mini::ast::Item>(&HiddenReplacementFormatter::formatItem);
@@ -336,7 +342,7 @@ protected:
 
 class ExactDispatchFormatter final : public AbstractFormatter {
 public:
-  explicit ExactDispatchFormatter(const services::Services &services)
+  explicit ExactDispatchFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<AstNode>(&ExactDispatchFormatter::formatAstNode);
     on<mini::ast::Model>(&ExactDispatchFormatter::formatModel);
@@ -369,7 +375,7 @@ protected:
 
 class OverridingRegistrationFormatter final : public AbstractFormatter {
 public:
-  explicit OverridingRegistrationFormatter(const services::Services &services)
+  explicit OverridingRegistrationFormatter(const pegium::Services &services)
       : AbstractFormatter(services) {
     on<mini::ast::Item>(&OverridingRegistrationFormatter::formatItemWithThreeSpaces);
     on<mini::ast::Item>(&OverridingRegistrationFormatter::formatItemWithOneSpace);
@@ -390,7 +396,7 @@ protected:
 class OverridingHiddenRegistrationFormatter final : public AbstractFormatter {
 public:
   explicit OverridingHiddenRegistrationFormatter(
-      const services::Services &services)
+      const pegium::Services &services)
       : AbstractFormatter(services) {
     on<mini::ast::Model>(&OverridingHiddenRegistrationFormatter::formatModel);
     on<mini::ast::Item>(&OverridingHiddenRegistrationFormatter::formatItem);
@@ -420,7 +426,8 @@ protected:
 
   virtual void formatCommentSecond(HiddenNodeFormatter &comment) const {
     comment.replace(
-        formatMultilineComment(comment, {.forceMultiline = true, .maxBlankLines = 0}));
+        formatMultilineComment(comment,
+                               {.forceMultiline = true, .maxBlankLines = 0}));
   }
 };
 
@@ -435,8 +442,8 @@ public:
 
   [[nodiscard]] static std::string
   formatComment(std::string_view text,
-                MultilineCommentFormatOptions options = {}) {
-    return formatMultilineComment(text, std::move(options));
+                const MultilineCommentFormatOptions &options = {}) {
+    return formatMultilineComment(text, options);
   }
 
   [[nodiscard]] static std::string
@@ -446,14 +453,21 @@ public:
 };
 
 TEST(AbstractFormatterTest, FullFormattingSkipsRecoveredDocuments) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services(*shared, "mini", {".mini"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services(*shared, "mini", {".mini"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
-  workspace::Document document;
-  document.uri = test::make_file_uri("recovered.mini");
-  document.languageId = "mini";
-  document.setText("entity A {}");
+  workspace::Document document(
+      test::make_text_document(test::make_file_uri("recovered.mini"), "mini",
+                               "entity A {}"));
   document.parseResult.parseDiagnostics.push_back(parser::ParseDiagnostic{.offset = 0});
 
   CountingFormatter provider(lookup_services(*shared, "mini"));
@@ -465,14 +479,21 @@ TEST(AbstractFormatterTest, FullFormattingSkipsRecoveredDocuments) {
 }
 
 TEST(AbstractFormatterTest, RangeFormattingSkipsRangesWithEarlierParseErrors) {
-  auto shared = test::make_shared_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_services(*shared, "mini", {".mini"})));
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_services(*shared, "mini", {".mini"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
-  workspace::Document document;
-  document.uri = test::make_file_uri("range-error.mini");
-  document.languageId = "mini";
-  document.setText("entity A {}\nentity B {}");
+  workspace::Document document(test::make_text_document(
+      test::make_file_uri("range-error.mini"), "mini",
+      "entity A {}\nentity B {}"));
   document.parseResult.parseDiagnostics.push_back(parser::ParseDiagnostic{.offset = 0});
 
   CountingFormatter provider(lookup_services(*shared, "mini"));
@@ -810,6 +831,61 @@ TEST(AbstractFormatterTest, MultilineCommentUtilityNormalizesTagsAndContinuation
             " */");
 }
 
+TEST(AbstractFormatterTest, MultilineCommentUtilityUsesConfiguredTagPrefix) {
+  EXPECT_EQ(FormattingApiProbe::formatComment(
+                "/**\n"
+                "* !param   x   first   value\n"
+                "*   more   details\n"
+                "*/",
+                {.tagStart = std::string("!")}),
+            "/**\n"
+            " * !param x first value\n"
+            " *  more details\n"
+            " */");
+}
+
+TEST(AbstractFormatterTest, MultilineCommentUtilityUsesConfiguredLinePrefix) {
+  EXPECT_EQ(FormattingApiProbe::formatComment(
+                "/*\n"
+                "#   hello\n"
+                "#   world\n"
+                "*/",
+                {.start = "/*",
+                 .end = "*/",
+                 .newLineStart = " #"}),
+            "/*\n"
+            " # hello\n"
+            " # world\n"
+            " */");
+}
+
+TEST(AbstractFormatterTest,
+     MultilineCommentUtilityKeepsFirstLineUntouchedWhenMultiline) {
+  EXPECT_EQ(FormattingApiProbe::formatComment(
+                "/*#   hello\n"
+                "#   world\n"
+                "*/",
+                {.start = "/*",
+                 .end = "*/",
+                 .newLineStart = " #"}),
+            "/*\n"
+            " # # hello\n"
+            " # world\n"
+            " */");
+}
+
+TEST(AbstractFormatterTest,
+     MultilineCommentUtilityKeepsWhitespaceOnlyPrefixesForClosingLine) {
+  EXPECT_EQ(FormattingApiProbe::formatComment(
+                "/*\n"
+                "comment\n"
+                "*/",
+                {.start = "/*", .end = "*/", .newLineStart = "    "}),
+            "/*\n"
+            "    comment\n"
+            "    */");
+}
+
 TEST(AbstractFormatterTest, MultilineCommentUtilityLeavesUnmatchedCommentsUntouched) {
   EXPECT_EQ(FormattingApiProbe::formatComment("/* keep me */"), "/* keep me */");
 }
@@ -841,4 +917,4 @@ TEST(AbstractFormatterTest, PreservesLeadingHiddenNodesBeforeRootContent) {
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

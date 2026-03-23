@@ -1,11 +1,17 @@
 #include <gtest/gtest.h>
+#include <pegium/ParseSupport.hpp>
 #include <pegium/TestCstBuilderHarness.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <cassert>
+#include <concepts>
 #include <sstream>
 
 using namespace pegium::parser;
 
 namespace {
+
+static_assert(!std::copy_constructible<pegium::parser::PegiumParser>);
+static_assert(!std::movable<pegium::parser::PegiumParser>);
 
 struct FailingEntryNode : pegium::AstNode {};
 struct KeywordChoiceNode : pegium::AstNode {};
@@ -55,10 +61,7 @@ std::vector<std::string> describe_path(const ExpectPath &path) {
   std::vector<std::string> result;
   result.reserve(path.elements.size());
   for (const auto *element : path.elements) {
-    if (element == nullptr) {
-      result.push_back("<null>");
-      continue;
-    }
+    assert(element != nullptr);
     switch (element->getKind()) {
     case pegium::grammar::ElementKind::Literal:
       result.push_back("keyword:" +
@@ -491,13 +494,29 @@ TEST(ParserTest, UntilOperatorConsumesUntilClosingToken) {
 
 TEST(ParserTest, EntryRuleFailureLeavesTopLevelCstEmpty) {
   FailingEntryParser parser;
-  auto document = std::make_unique<pegium::workspace::Document>();
-  document->setText("");
-  parser.parse(*document);
+  const auto result = parser.parse("");
 
-  ASSERT_NE(document->parseResult.cst, nullptr);
-  EXPECT_EQ(document->parseResult.cst->begin(), document->parseResult.cst->end());
-  EXPECT_FALSE(document->parseSucceeded());
+  ASSERT_NE(result.cst, nullptr);
+  EXPECT_EQ(result.cst->begin(), result.cst->end());
+  EXPECT_FALSE(result.fullMatch);
+  EXPECT_FALSE(result.value);
+}
+
+TEST(ParserTest, StandaloneParseKeepsTextButNoAttachedDocument) {
+  KeywordChoiceParser parser;
+
+  const auto resultFromText = parser.parse("entity");
+  const auto resultFromSnapshot =
+      parser.parse(pegium::text::TextSnapshot::copy("entity"));
+
+  ASSERT_NE(resultFromText.cst, nullptr);
+  ASSERT_NE(resultFromSnapshot.cst, nullptr);
+  EXPECT_EQ(resultFromText.cst->getText(), "entity");
+  EXPECT_EQ(resultFromSnapshot.cst->getText(), "entity");
+  EXPECT_FALSE(resultFromText.cst->hasDocument());
+  EXPECT_FALSE(resultFromSnapshot.cst->hasDocument());
+  EXPECT_TRUE(resultFromText.fullMatch);
+  EXPECT_TRUE(resultFromSnapshot.fullMatch);
 }
 
 TEST(ParserTest, ExpectReturnsKeywordAlternativesAtRoot) {

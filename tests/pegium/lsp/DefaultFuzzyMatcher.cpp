@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include <pegium/lsp/DefaultFuzzyMatcher.hpp>
+#include <pegium/lsp/support/DefaultFuzzyMatcher.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 TEST(DefaultFuzzyMatcherTest, MatchesFullStringAndPrefixesIgnoringCase) {
@@ -23,4 +23,4 @@ TEST(DefaultFuzzyMatcherTest, MatchesSubsequencesAndRejectsMissingPatterns) {
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

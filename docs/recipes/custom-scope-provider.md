@@ -18,7 +18,26 @@ Each one solves a different problem:
 - scope computation: which symbols are exported and indexed
 - scope provider: which symbols are visible at a given reference site
 
-## Recommended order
+In practice, a custom name provider usually customizes both:
+
+- `getName(...)` for the exported symbol key
+- `getNameNode(...)` for declaration ranges used by editor features
+
+When your AST already stores declaration names in a shared base type, prefer
+the recommended naming pattern described in
+[References and Scoping](../build-a-language/references-and-scoping.md#recommended-naming-pattern).
+
+## Scope provider contract
+
+Custom scope providers implement:
+
+- `getScopeEntry(...)` for fast exact lookup
+- `visitScopeEntries(...)` for candidate enumeration
+
+`visitScopeEntries(...)` should preserve lexical visibility order. Return
+`false` when the visitor requests an early stop.
+
+## A practical order
 
 1. keep the default linker
 2. customize exported names if needed

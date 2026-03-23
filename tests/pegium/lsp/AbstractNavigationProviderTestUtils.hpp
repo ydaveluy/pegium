@@ -4,10 +4,11 @@
 #include <string_view>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/syntax-tree/AstUtils.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/syntax-tree/AstUtils.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
 
-namespace pegium::lsp::test_navigation {
+namespace pegium::test_navigation {
 
 using namespace pegium::parser;
 
@@ -53,19 +54,23 @@ protected:
 #pragma clang diagnostic pop
 };
 
-inline const services::Services *
-lookup_services(const services::SharedServices &shared,
+inline const pegium::Services *
+lookup_services(const pegium::SharedServices &shared,
                 std::string_view languageId) {
-  const auto *coreServices =
-      shared.serviceRegistry->getServicesByLanguageId(languageId);
-  if (coreServices == nullptr) {
-    return nullptr;
+  for (const auto *coreServices : shared.serviceRegistry->all()) {
+    if (coreServices != nullptr &&
+        coreServices->languageMetaData.languageId == languageId) {
+      const auto *services = as_services(coreServices);
+      if (services != nullptr) {
+        return services;
+      }
+    }
   }
-  return dynamic_cast<const services::Services *>(coreServices);
+  return nullptr;
 }
 
 inline TextOffset use_name_offset(const workspace::Document &document) {
-  return static_cast<TextOffset>(document.text().rfind("Alpha"));
+  return static_cast<TextOffset>(document.textDocument().getText().rfind("Alpha"));
 }
 
 inline ::lsp::LocationLink link_to_element(const AstNode &element) {
@@ -74,10 +79,12 @@ inline ::lsp::LocationLink link_to_element(const AstNode &element) {
 
   ::lsp::LocationLink link{};
   link.targetUri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
-  link.targetRange.start = document->offsetToPosition(cstNode.getBegin());
-  link.targetRange.end = document->offsetToPosition(cstNode.getEnd());
+  link.targetRange.start =
+      document->textDocument().positionAt(cstNode.getBegin());
+  link.targetRange.end =
+      document->textDocument().positionAt(cstNode.getEnd());
   link.targetSelectionRange = link.targetRange;
   return link;
 }
 
-} // namespace pegium::lsp::test_navigation
+} // namespace pegium::test_navigation

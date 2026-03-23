@@ -62,6 +62,6 @@ view of an editor user, not just from the point of view of a parser author.
 ## Continue with
 
 - [Formatting](../../recipes/custom-formatter.md)
-- [Default LSP Services](../../reference/lsp-services.md)
+- [LSP Services](../../build-a-language/lsp-services.md)
 - [Document Lifecycle](../../reference/document-lifecycle.md)
 - [Recipes](../../recipes/index.md) for the advanced customization path

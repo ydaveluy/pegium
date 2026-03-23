@@ -5,15 +5,17 @@
 #include <stdexcept>
 #include <string>
 
-#include <pegium/utils/Caching.hpp>
+#include <pegium/core/utils/Caching.hpp>
 
 #include "CacheTestUtils.hpp"
+#include "CacheKeyTestUtils.hpp"
 
 namespace pegium::utils {
 namespace {
 
 using test_support::make_cache_shared_services;
 using test_support::make_document;
+using test_support::replace_document_text;
 
 TEST(DocumentCacheTest, InvalidatesChangedDocumentOnUpdate) {
   test::RecordingEventDocumentBuilder *builder = nullptr;
@@ -28,7 +30,7 @@ TEST(DocumentCacheTest, InvalidatesChangedDocumentOnUpdate) {
   cache.set(document1->id, "key", "first");
   cache.set(document2->id, "key", "second");
 
-  document1->replaceText("updated");
+  replace_document_text(*document1, "updated");
   builder->emitUpdate({document1->id}, {});
 
   EXPECT_FALSE(cache.has(document1->id, "key"));
@@ -56,7 +58,7 @@ TEST(DocumentCacheTest, RecomputesValueAfterUpdate) {
             }),
             "first");
 
-  document->replaceText("second");
+  replace_document_text(*document, "second");
   builder->emitUpdate({document->id}, {});
 
   EXPECT_EQ(cache.get(document->id, "key", [&]() {
@@ -105,6 +107,24 @@ TEST(DocumentCacheTest, DisposeRemovesListenersAndRejectsFurtherAccess) {
   EXPECT_THROW((void)cache.erase(document->id, "key"), std::runtime_error);
   EXPECT_THROW(cache.clear(document->id), std::runtime_error);
   EXPECT_THROW(cache.clear(), std::runtime_error);
+}
+
+TEST(DocumentCacheTest, SupportsCustomHashAndEqualityForKeys) {
+  test::RecordingEventDocumentBuilder *builder = nullptr;
+  auto shared = make_cache_shared_services(builder);
+  DocumentCache<test_support::NamedKey, std::string, test_support::NamedKeyHash,
+                test_support::NamedKeyEqual>
+      cache(*shared);
+
+  const auto document =
+      make_document(*shared, test::make_file_uri("cache-custom-key.test"));
+
+  cache.set(document->id, {.value = "key"}, "value");
+
+  EXPECT_TRUE(cache.has(document->id, {.value = "key"}));
+  EXPECT_EQ(cache.get(document->id, {.value = "key"}),
+            std::optional<std::string>("value"));
+  EXPECT_TRUE(cache.erase(document->id, {.value = "key"}));
 }
 
 } // namespace

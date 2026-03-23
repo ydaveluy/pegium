@@ -1,18 +1,18 @@
 #include <gtest/gtest.h>
 
 #include <pegium/LspTestSupport.hpp>
-#include <pegium/lsp/AbstractExecuteCommandHandler.hpp>
+#include <pegium/lsp/services/AbstractExecuteCommandHandler.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 class TestExecuteCommandHandler final : public AbstractExecuteCommandHandler {
 public:
-  explicit TestExecuteCommandHandler(services::SharedServices &sharedServices)
+  explicit TestExecuteCommandHandler(pegium::SharedServices &sharedServices)
       : AbstractExecuteCommandHandler(sharedServices) {}
 
 protected:
-  void registerCommands(const ExecuteCommandAcceptor &acceptor) override {
+  void registerCommands(const ExecuteCommandAcceptor &acceptor) const override {
     acceptor("test.echo",
              [](const ::lsp::LSPArray &arguments,
                 const utils::CancellationToken &) -> std::optional<::lsp::LSPAny> {
@@ -37,7 +37,10 @@ protected:
 };
 
 TEST(AbstractExecuteCommandHandlerTest, RegisteredCommandsPreserveRegistrationOrder) {
-  auto shared = test::make_shared_services();
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   TestExecuteCommandHandler handler(*shared);
 
   const auto commands = handler.commands();
@@ -45,7 +48,10 @@ TEST(AbstractExecuteCommandHandlerTest, RegisteredCommandsPreserveRegistrationOr
 }
 
 TEST(AbstractExecuteCommandHandlerTest, ExecuteCommandReturnsRegisteredResult) {
-  auto shared = test::make_shared_services();
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
   TestExecuteCommandHandler handler(*shared);
 
   ::lsp::LSPArray arguments;
@@ -59,4 +65,4 @@ TEST(AbstractExecuteCommandHandlerTest, ExecuteCommandReturnsRegisteredResult) {
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

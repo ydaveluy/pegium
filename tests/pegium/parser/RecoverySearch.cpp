@@ -1,8 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <pegium/ParseJsonTestSupport.hpp>
-#include <pegium/parser/PegiumParser.hpp>
-#include <pegium/parser/RecoverySearch.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/parser/RecoverySearch.hpp>
+#include <pegium/core/text/TextSnapshot.hpp>
 
 using namespace pegium::parser;
 
@@ -54,7 +55,6 @@ struct RecoveryStatementListNode : pegium::AstNode {
 };
 
 struct RecoveryAttemptHarness {
-  std::unique_ptr<pegium::workspace::Document> document;
   detail::RecoveryAttempt attempt;
 };
 
@@ -64,19 +64,17 @@ RecoveryAttemptHarness bestRecoveryAttempt(const RuleType &entryRule,
                                            const Skipper &skipper,
   ParseOptions options = {}) {
   RecoveryAttemptHarness harness;
-  harness.document = std::make_unique<pegium::workspace::Document>();
-  harness.document->setText(std::string{text});
+  const auto snapshot = pegium::text::TextSnapshot::copy(text);
 
-  const auto strictResult =
-      detail::run_strict_parse(entryRule, skipper, *harness.document);
+  const auto strictResult = detail::run_strict_parse(entryRule, skipper, snapshot);
   const auto failureAnalysis = detail::analyze_failure(
-      entryRule, skipper, *harness.document, strictResult.summary);
+      entryRule, skipper, snapshot, strictResult.summary);
   const auto window = detail::compute_recovery_window(
       failureAnalysis.snapshot,
       std::max<std::uint32_t>(1u, options.recoveryWindowTokenCount));
   const auto spec = detail::build_recovery_attempt_spec({}, window);
-  auto attempt = detail::run_recovery_attempt(entryRule, skipper, options,
-                                              *harness.document, spec);
+  auto attempt =
+      detail::run_recovery_attempt(entryRule, skipper, options, snapshot, spec);
   detail::classify_recovery_attempt(attempt);
   detail::score_recovery_attempt(attempt);
   if (!harness.attempt.cst ||
@@ -94,10 +92,10 @@ TEST(RecoverySearchTest, MissingDelimiterUsesInsertionAttempt) {
   ParseOptions options;
   options.recoveryWindowTokenCount = 4;
   options.maxRecoveryWindowTokenCount = 8;
-  const auto document = pegium::test::ParseDocument(entry, "hello", options);
+  const auto result = pegium::test::Parse(entry, "hello", options);
 
   pegium::test::ExpectCst(
-      *document,
+      result,
       R"json({
   "content": [
     {
@@ -115,9 +113,8 @@ TEST(RecoverySearchTest, MissingDelimiterUsesInsertionAttempt) {
     }
   ]
 })json");
-  ASSERT_FALSE(document->parseResult.parseDiagnostics.empty());
-  EXPECT_EQ(document->parseResult.parseDiagnostics.front().kind,
-            ParseDiagnosticKind::Inserted);
+  ASSERT_FALSE(result.parseDiagnostics.empty());
+  EXPECT_EQ(result.parseDiagnostics.front().kind, ParseDiagnosticKind::Inserted);
 }
 
 TEST(RecoverySearchTest,
@@ -134,9 +131,7 @@ TEST(RecoverySearchTest,
       some(append<&RecoveryStatementListNode::statements>(statement))};
   const auto skipper = SkipperBuilder().ignore(ws).build();
 
-  const auto document =
-      pegium::test::ParseDocument(entry, "def a\ndef b;", skipper);
-  const auto &parsed = document->parseResult;
+  const auto parsed = pegium::test::Parse(entry, "def a\ndef b;", skipper);
 
   ASSERT_TRUE(parsed.value);
   EXPECT_TRUE(parsed.fullMatch);
@@ -179,8 +174,7 @@ TEST(RecoverySearchTest,
       "def a;\n"
       "v\n"
       "def b;\n";
-  const auto document = pegium::test::ParseDocument(entry, input, skipper);
-  const auto &parsed = document->parseResult;
+  const auto parsed = pegium::test::Parse(entry, input, skipper);
 
   ASSERT_TRUE(parsed.value);
   EXPECT_TRUE(parsed.fullMatch);
@@ -212,13 +206,12 @@ TEST(RecoverySearchTest, RecoveryAttemptSpecsStayGenericWithoutAnchorVariants) {
   ParserRule<RecoveryPairNode> entry{
       "Entry", assign<&RecoveryPairNode::first>(id) + ";"_kw +
                    assign<&RecoveryPairNode::second>(id)};
+  const auto text = pegium::text::TextSnapshot::copy("one two");
 
-  auto document = std::make_unique<pegium::workspace::Document>();
-  document->setText("one two");
-
-  const auto strictResult = detail::run_strict_parse(entry, NoOpSkipper(), *document);
+  const auto strictResult =
+      detail::run_strict_parse(entry, NoOpSkipper(), text);
   const auto failureAnalysis = detail::analyze_failure(
-      entry, NoOpSkipper(), *document, strictResult.summary);
+      entry, NoOpSkipper(), text, strictResult.summary);
   const auto window =
       detail::compute_recovery_window(failureAnalysis.snapshot, 2u);
   const auto spec = detail::build_recovery_attempt_spec({}, window);
@@ -234,15 +227,15 @@ TEST(RecoverySearchTest, RecoveryReportStaysEmptyWhenStrictParseMatches) {
   ParserRule<RecoverySearchNode> entry{
       "Entry", assign<&RecoverySearchNode::name>(id)};
 
-  const auto document = pegium::test::ParseDocument(entry, "hello");
+  const auto result = pegium::test::Parse(entry, "hello");
 
-  EXPECT_TRUE(document->parseResult.fullMatch);
-  EXPECT_TRUE(document->parseResult.parseDiagnostics.empty());
-  EXPECT_FALSE(document->parseResult.recoveryReport.hasRecovered);
-  EXPECT_FALSE(document->parseResult.recoveryReport.fullRecovered);
-  EXPECT_EQ(document->parseResult.recoveryReport.recoveryCount, 0u);
-  EXPECT_EQ(document->parseResult.recoveryReport.recoveryEdits, 0u);
-  EXPECT_FALSE(document->parseResult.recoveryReport.lastRecoveryWindow.has_value());
+  EXPECT_TRUE(result.fullMatch);
+  EXPECT_TRUE(result.parseDiagnostics.empty());
+  EXPECT_FALSE(result.recoveryReport.hasRecovered);
+  EXPECT_FALSE(result.recoveryReport.fullRecovered);
+  EXPECT_EQ(result.recoveryReport.recoveryCount, 0u);
+  EXPECT_EQ(result.recoveryReport.recoveryEdits, 0u);
+  EXPECT_FALSE(result.recoveryReport.lastRecoveryWindow.has_value());
 }
 
 TEST(RecoverySearchTest,
@@ -317,19 +310,19 @@ TEST(RecoverySearchTest, WordLiteralSingleSubstitutionCanRecoverGenerically) {
   ParserRule<RecoverySearchNode> entry{
       "Entry", assign<&RecoverySearchNode::name>("service"_kw)};
 
-  const auto document = pegium::test::ParseDocument(entry, "servixe");
+  const auto result = pegium::test::Parse(entry, "servixe");
 
-  EXPECT_TRUE(document->parseResult.fullMatch);
-  ASSERT_TRUE(document->parseResult.value);
+  EXPECT_TRUE(result.fullMatch);
+  ASSERT_TRUE(result.value);
 }
 
 TEST(RecoverySearchTest, LongWordLiteralSingleSubstitutionCanRecoverGenerically) {
   ParserRule<RecoverySearchNode> entry{
       "Entry", assign<&RecoverySearchNode::name>("catalogue"_kw)};
 
-  const auto document = pegium::test::ParseDocument(entry, "catalogoe");
-  EXPECT_TRUE(document->parseResult.fullMatch);
-  ASSERT_TRUE(document->parseResult.value);
+  const auto result = pegium::test::Parse(entry, "catalogoe");
+  EXPECT_TRUE(result.fullMatch);
+  ASSERT_TRUE(result.value);
 }
 
 TEST(RecoverySearchTest, ParserKeepsStrictResultWhenNoSelectableAttemptExists) {
@@ -346,30 +339,29 @@ TEST(RecoverySearchTest, ParserKeepsStrictResultWhenNoSelectableAttemptExists) {
   options.maxRecoveryWindows = 1;
   options.maxRecoveryEditsPerAttempt = 1;
 
-  const auto document =
-      pegium::test::ParseDocument(entry, "one two three", skipper, options);
-  auto attemptDocument = std::make_unique<pegium::workspace::Document>();
-  attemptDocument->setText("one two three");
+  const auto result =
+      pegium::test::Parse(entry, "one two three", skipper, options);
+  const auto text = pegium::text::TextSnapshot::copy("one two three");
   const auto strictResult =
-      detail::run_strict_parse(entry, skipper, *attemptDocument);
+      detail::run_strict_parse(entry, skipper, text);
   const auto failureAnalysis = detail::analyze_failure(
-      entry, skipper, *attemptDocument, strictResult.summary);
+      entry, skipper, text, strictResult.summary);
   const auto window = detail::compute_recovery_window(
       failureAnalysis.snapshot, options.recoveryWindowTokenCount);
   const auto spec = detail::build_recovery_attempt_spec({}, window);
   bool foundSelectableAttempt = false;
-  auto attempt = detail::run_recovery_attempt(entry, skipper, options,
-                                              *attemptDocument, spec);
+  auto attempt =
+      detail::run_recovery_attempt(entry, skipper, options, text, spec);
   detail::classify_recovery_attempt(attempt);
   foundSelectableAttempt |= detail::is_selectable_recovery_attempt(attempt);
 
   pegium::test::ExpectCst(
-      *document,
+      result,
       R"json({
   "content": []
 })json",
       kRecoveryCstJsonOptions);
-  EXPECT_FALSE(document->parseResult.fullMatch);
+  EXPECT_FALSE(result.fullMatch);
   EXPECT_FALSE(foundSelectableAttempt);
 }
 
@@ -380,15 +372,15 @@ TEST(RecoverySearchTest, EditBudgetCanDisableRecoveryAttempts) {
 
   ParseOptions options;
   options.maxRecoveryEditsPerAttempt = 0;
-  const auto document =
-      pegium::test::ParseDocument(entry, "hello{", NoOpSkipper(), options);
+  const auto result =
+      pegium::test::Parse(entry, "hello{", NoOpSkipper(), options);
 
   pegium::test::ExpectCst(
-      *document,
+      result,
       R"json({
   "content": []
 })json");
-  EXPECT_FALSE(document->parseResult.fullMatch);
+  EXPECT_FALSE(result.fullMatch);
 }
 
 TEST(RecoverySearchTest, SingleWindowResumesStrictParsingAfterRecovery) {
@@ -402,11 +394,10 @@ TEST(RecoverySearchTest, SingleWindowResumesStrictParsingAfterRecovery) {
   options.recoveryWindowTokenCount = 1;
   options.maxRecoveryWindowTokenCount = 1;
   options.maxRecoveryWindows = 1;
-  const auto document =
-      pegium::test::ParseDocument(entry, "one two", skipper, options);
+  const auto result = pegium::test::Parse(entry, "one two", skipper, options);
 
   pegium::test::ExpectCst(
-      *document,
+      result,
       R"json({
   "content": [
     {
@@ -430,26 +421,18 @@ TEST(RecoverySearchTest, SingleWindowResumesStrictParsingAfterRecovery) {
     }
   ]
 })json");
-  EXPECT_TRUE(document->parseResult.fullMatch);
-  ASSERT_EQ(document->parseResult.parseDiagnostics.size(), 1u);
-  EXPECT_EQ(document->parseResult.parseDiagnostics.front().kind,
-            ParseDiagnosticKind::Inserted);
-  EXPECT_TRUE(document->parseResult.recoveryReport.hasRecovered);
-  EXPECT_TRUE(document->parseResult.recoveryReport.fullRecovered);
-  EXPECT_EQ(document->parseResult.recoveryReport.recoveryCount, 1u);
-  EXPECT_EQ(document->parseResult.recoveryReport.recoveryEdits, 1u);
-  ASSERT_TRUE(document->parseResult.recoveryReport.lastRecoveryWindow.has_value());
-  EXPECT_EQ(document->parseResult.recoveryReport.lastRecoveryWindow->beginOffset,
-            0u);
-  EXPECT_EQ(
-      document->parseResult.recoveryReport.lastRecoveryWindow->maxCursorOffset,
-      4u);
-  EXPECT_EQ(
-      document->parseResult.recoveryReport.lastRecoveryWindow->backwardTokenCount,
-      1u);
-  EXPECT_EQ(
-      document->parseResult.recoveryReport.lastRecoveryWindow->forwardTokenCount,
-      1u);
+  EXPECT_TRUE(result.fullMatch);
+  ASSERT_EQ(result.parseDiagnostics.size(), 1u);
+  EXPECT_EQ(result.parseDiagnostics.front().kind, ParseDiagnosticKind::Inserted);
+  EXPECT_TRUE(result.recoveryReport.hasRecovered);
+  EXPECT_TRUE(result.recoveryReport.fullRecovered);
+  EXPECT_EQ(result.recoveryReport.recoveryCount, 1u);
+  EXPECT_EQ(result.recoveryReport.recoveryEdits, 1u);
+  ASSERT_TRUE(result.recoveryReport.lastRecoveryWindow.has_value());
+  EXPECT_EQ(result.recoveryReport.lastRecoveryWindow->beginOffset, 0u);
+  EXPECT_EQ(result.recoveryReport.lastRecoveryWindow->maxCursorOffset, 4u);
+  EXPECT_EQ(result.recoveryReport.lastRecoveryWindow->backwardTokenCount, 1u);
+  EXPECT_EQ(result.recoveryReport.lastRecoveryWindow->forwardTokenCount, 1u);
 }
 
 TEST(RecoverySearchTest, ParserCanRecoverSeparatedErrorsAcrossTwoWindows) {
@@ -465,11 +448,11 @@ TEST(RecoverySearchTest, ParserCanRecoverSeparatedErrorsAcrossTwoWindows) {
   options.recoveryWindowTokenCount = 1;
   options.maxRecoveryWindowTokenCount = 1;
   options.maxRecoveryWindows = 2;
-  const auto document =
-      pegium::test::ParseDocument(entry, "one;two three four", skipper, options);
+  const auto result =
+      pegium::test::Parse(entry, "one;two three four", skipper, options);
 
   pegium::test::ExpectCst(
-      *document,
+      result,
       R"json({
   "content": [
     {
@@ -512,24 +495,18 @@ TEST(RecoverySearchTest, ParserCanRecoverSeparatedErrorsAcrossTwoWindows) {
   ]
 })json",
       kRecoveryCstJsonOptions);
-  EXPECT_TRUE(document->parseResult.fullMatch);
-  EXPECT_EQ(document->parseResult.parseDiagnostics.size(), 2u);
-  EXPECT_TRUE(document->parseResult.recoveryReport.hasRecovered);
-  EXPECT_TRUE(document->parseResult.recoveryReport.fullRecovered);
-  EXPECT_EQ(document->parseResult.recoveryReport.recoveryCount, 2u);
-  EXPECT_EQ(document->parseResult.recoveryReport.recoveryEdits, 2u);
-  ASSERT_TRUE(document->parseResult.recoveryReport.lastRecoveryWindow.has_value());
-  EXPECT_EQ(
-      document->parseResult.recoveryReport.lastRecoveryWindow->backwardTokenCount,
-      1u);
-  EXPECT_EQ(
-      document->parseResult.recoveryReport.lastRecoveryWindow->forwardTokenCount,
-      1u);
-  EXPECT_GE(
-      document->parseResult.recoveryReport.lastRecoveryWindow->beginOffset, 3u);
-  EXPECT_GE(document->parseResult.recoveryReport.lastRecoveryWindow
-                ->maxCursorOffset,
-            document->parseResult.recoveryReport.lastRecoveryWindow->beginOffset);
+  EXPECT_TRUE(result.fullMatch);
+  EXPECT_EQ(result.parseDiagnostics.size(), 2u);
+  EXPECT_TRUE(result.recoveryReport.hasRecovered);
+  EXPECT_TRUE(result.recoveryReport.fullRecovered);
+  EXPECT_EQ(result.recoveryReport.recoveryCount, 2u);
+  EXPECT_EQ(result.recoveryReport.recoveryEdits, 2u);
+  ASSERT_TRUE(result.recoveryReport.lastRecoveryWindow.has_value());
+  EXPECT_EQ(result.recoveryReport.lastRecoveryWindow->backwardTokenCount, 1u);
+  EXPECT_EQ(result.recoveryReport.lastRecoveryWindow->forwardTokenCount, 1u);
+  EXPECT_GE(result.recoveryReport.lastRecoveryWindow->beginOffset, 3u);
+  EXPECT_GE(result.recoveryReport.lastRecoveryWindow->maxCursorOffset,
+            result.recoveryReport.lastRecoveryWindow->beginOffset);
 }
 
 TEST(RecoverySearchTest, ParserCanRecoverSeparatedErrorsAcrossTwoWindowsWithTrivia) {
@@ -546,11 +523,11 @@ TEST(RecoverySearchTest, ParserCanRecoverSeparatedErrorsAcrossTwoWindowsWithTriv
   options.maxRecoveryWindowTokenCount = 1;
   options.maxRecoveryWindows = 2;
 
-  const auto document = pegium::test::ParseDocument(
+  const auto result = pegium::test::Parse(
       entry, "one;\n\ntwo three\n\nfour", skipper, options);
 
   pegium::test::ExpectCst(
-      *document,
+      result,
       R"json({
   "content": [
     {
@@ -593,12 +570,12 @@ TEST(RecoverySearchTest, ParserCanRecoverSeparatedErrorsAcrossTwoWindowsWithTriv
   ]
 })json",
       kRecoveryCstJsonOptions);
-  EXPECT_TRUE(document->parseResult.fullMatch);
-  EXPECT_EQ(document->parseResult.parseDiagnostics.size(), 2u);
-  EXPECT_TRUE(document->parseResult.recoveryReport.hasRecovered);
-  EXPECT_TRUE(document->parseResult.recoveryReport.fullRecovered);
-  EXPECT_EQ(document->parseResult.recoveryReport.recoveryCount, 2u);
-  EXPECT_EQ(document->parseResult.recoveryReport.recoveryEdits, 2u);
+  EXPECT_TRUE(result.fullMatch);
+  EXPECT_EQ(result.parseDiagnostics.size(), 2u);
+  EXPECT_TRUE(result.recoveryReport.hasRecovered);
+  EXPECT_TRUE(result.recoveryReport.fullRecovered);
+  EXPECT_EQ(result.recoveryReport.recoveryCount, 2u);
+  EXPECT_EQ(result.recoveryReport.recoveryEdits, 2u);
 }
 
 TEST(RecoverySearchTest,
@@ -614,12 +591,11 @@ TEST(RecoverySearchTest,
   options.maxRecoveryWindowTokenCount = 1;
   options.maxRecoveryWindows = 2;
 
-  const auto document =
-      pegium::test::ParseDocument(entry, "catalogxoe demo next", skipper,
-                                  options);
+  const auto result =
+      pegium::test::Parse(entry, "catalogxoe demo next", skipper, options);
 
   pegium::test::ExpectCst(
-      *document,
+      result,
       R"json({
   "content": [
     {
@@ -651,9 +627,9 @@ TEST(RecoverySearchTest,
   ]
 })json",
       kRecoveryCstJsonOptions);
-  EXPECT_TRUE(document->parseResult.fullMatch);
-  ASSERT_EQ(document->parseResult.parseDiagnostics.size(), 2u);
-  ASSERT_TRUE(document->parseResult.value);
+  EXPECT_TRUE(result.fullMatch);
+  ASSERT_EQ(result.parseDiagnostics.size(), 2u);
+  ASSERT_TRUE(result.value);
 }
 
 TEST(RecoverySearchTest,
@@ -669,17 +645,16 @@ TEST(RecoverySearchTest,
   options.maxRecoveryWindowTokenCount = 1;
   options.maxRecoveryWindows = 2;
 
-  const auto document =
-      pegium::test::ParseDocument(entry, "cxtxlgxxe demo next", skipper,
-                                  options);
+  const auto result =
+      pegium::test::Parse(entry, "cxtxlgxxe demo next", skipper, options);
 
-  pegium::test::ExpectCst(*document, R"json({
+  pegium::test::ExpectCst(result, R"json({
   "content": []
 })json",
                           kRecoveryCstJsonOptions);
-  EXPECT_FALSE(document->parseResult.fullMatch);
-  EXPECT_FALSE(document->parseResult.value);
-  ASSERT_FALSE(document->parseResult.parseDiagnostics.empty());
+  EXPECT_FALSE(result.fullMatch);
+  EXPECT_FALSE(result.value);
+  ASSERT_FALSE(result.parseDiagnostics.empty());
 }
 
 TEST(RecoverySearchTest, ParserSingleWindowStopsAtNextSeparatedError) {
@@ -696,12 +671,11 @@ TEST(RecoverySearchTest, ParserSingleWindowStopsAtNextSeparatedError) {
   options.recoveryWindowTokenCount = 1;
   options.maxRecoveryWindowTokenCount = 1;
   options.maxRecoveryWindows = 1;
-  const auto document =
-      pegium::test::ParseDocument(entry, "one;two three;four five", skipper,
-                                  options);
+  const auto result =
+      pegium::test::Parse(entry, "one;two three;four five", skipper, options);
 
   pegium::test::ExpectCst(
-      *document,
+      result,
       R"json({
   "content": [
     {
@@ -750,13 +724,13 @@ TEST(RecoverySearchTest, ParserSingleWindowStopsAtNextSeparatedError) {
   ]
 })json",
       kRecoveryCstJsonOptions);
-  EXPECT_FALSE(document->parseResult.fullMatch);
-  EXPECT_EQ(document->parseResult.parseDiagnostics.size(), 1u);
-  EXPECT_TRUE(document->parseResult.recoveryReport.hasRecovered);
-  EXPECT_FALSE(document->parseResult.recoveryReport.fullRecovered);
-  EXPECT_EQ(document->parseResult.recoveryReport.recoveryCount, 1u);
-  EXPECT_EQ(document->parseResult.recoveryReport.recoveryEdits, 1u);
-  ASSERT_TRUE(document->parseResult.recoveryReport.lastRecoveryWindow.has_value());
+  EXPECT_FALSE(result.fullMatch);
+  EXPECT_EQ(result.parseDiagnostics.size(), 1u);
+  EXPECT_TRUE(result.recoveryReport.hasRecovered);
+  EXPECT_FALSE(result.recoveryReport.fullRecovered);
+  EXPECT_EQ(result.recoveryReport.recoveryCount, 1u);
+  EXPECT_EQ(result.recoveryReport.recoveryEdits, 1u);
+  ASSERT_TRUE(result.recoveryReport.lastRecoveryWindow.has_value());
 }
 
 } // namespace

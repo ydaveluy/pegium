@@ -64,8 +64,10 @@ struct SuspiciousRecovery {
 };
 
 [[nodiscard]] std::filesystem::path repo_root() {
-  auto path = std::filesystem::path(__FILE__);
-  return path.parent_path().parent_path().parent_path().parent_path();
+  return pegium::test::current_source_directory()
+      .parent_path()
+      .parent_path()
+      .parent_path();
 }
 
 [[nodiscard]] std::string read_file(const std::filesystem::path &path) {
@@ -415,7 +417,8 @@ generate_mutations(std::string_view text, std::uint32_t seed,
 [[nodiscard]] std::optional<std::string>
 classify_suspicious_recovery(const workspace::Document &document,
                              const MutationCase &mutation) {
-  const auto textSize = static_cast<TextOffset>(document.textView().size());
+  const auto textSize =
+      static_cast<TextOffset>(document.textDocument().getText().size());
   if (!document.parseResult.fullMatch && document.parseResult.parseDiagnostics.empty()) {
     return "partial parse without syntax diagnostics";
   }

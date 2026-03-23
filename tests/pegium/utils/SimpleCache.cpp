@@ -3,7 +3,9 @@
 #include <optional>
 #include <string>
 
-#include <pegium/utils/Caching.hpp>
+#include <pegium/core/utils/Caching.hpp>
+
+#include "CacheKeyTestUtils.hpp"
 
 namespace pegium::utils {
 namespace {
@@ -21,6 +23,18 @@ TEST(SimpleCacheTest, SupportsBasicSetGetProviderAndEraseOperations) {
   EXPECT_TRUE(cache.erase("key"));
   EXPECT_FALSE(cache.erase("key"));
   EXPECT_FALSE(cache.has("key"));
+}
+
+TEST(SimpleCacheTest, SupportsCustomHashAndEqualityForKeys) {
+  SimpleCache<test_support::NamedKey, std::string, test_support::NamedKeyHash,
+              test_support::NamedKeyEqual>
+      cache;
+
+  cache.set({.value = "key"}, "value");
+
+  EXPECT_TRUE(cache.has({.value = "key"}));
+  EXPECT_EQ(cache.get({.value = "key"}), std::optional<std::string>("value"));
+  EXPECT_TRUE(cache.erase({.value = "key"}));
 }
 
 } // namespace

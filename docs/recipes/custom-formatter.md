@@ -3,8 +3,8 @@
 The formatter API is built for method-pointer registration and CST-backed
 selections.
 
-Use this page when you already know that formatting is the subsystem you want
-to customize and you need the concrete formatter wiring pattern.
+This page focuses on the concrete wiring pattern once you already know that
+formatting is the subsystem you want to customize.
 
 ## Pattern
 

@@ -1,8 +1,8 @@
 # 3. Write the Grammar
 
-Your Pegium project is now built and you have chosen an example to start from.
-The next step is to define the grammar of your language. In Pegium, that means
-writing a `PegiumParser` subclass in C++.
+Your project is now ready to be shaped into your language. The next step is to
+define the grammar. In Pegium, that means writing a `PegiumParser` subclass in
+C++.
 
 The grammar is the most important part of the language definition. It controls:
 

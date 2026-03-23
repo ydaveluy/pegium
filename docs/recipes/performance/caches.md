@@ -17,7 +17,7 @@ completion, validation, or navigation features.
 
 ## Cache types in Pegium
 
-`src/pegium/utils/Caching.hpp` provides four main cache shapes:
+`src/pegium/core/utils/Caching.hpp` provides four main cache shapes:
 
 - `SimpleCache<K, V>` for plain key-value memoization
 - `ContextCache<Context, Key, Value>` for one cache per context object
@@ -99,5 +99,5 @@ that never hear about document updates.
 ## Related pages
 
 - [Document Lifecycle](../../reference/document-lifecycle.md)
-- [Workspace Concepts](../../reference/workspace.md)
+- [Workspace Lifecycle](../../build-a-language/workspace.md)
 - [Scoping](../scoping/index.md)

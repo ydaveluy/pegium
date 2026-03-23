@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <pegium/CoreTestSupport.hpp>
-#include <pegium/documentation/DefaultDocumentationProvider.hpp>
-#include <pegium/documentation/DocumentationProvider.hpp>
-#include <pegium/parser/PegiumParser.hpp>
+#include <pegium/core/documentation/DefaultDocumentationProvider.hpp>
+#include <pegium/core/documentation/DocumentationProvider.hpp>
+#include <pegium/core/parser/PegiumParser.hpp>
 
 namespace pegium::documentation {
 namespace {
@@ -81,10 +81,15 @@ parse_docs_document(services::SharedCoreServices &shared, std::string text) {
 
 TEST(DefaultDocumentationProviderTest,
      ReturnsNulloptForNodeWithoutLeadingComment) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services<DocumentationParser>(*shared, "docs",
-                                                    {".docs"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services<DocumentationParser>(*shared, "docs",
+                                                    {".docs"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = parse_docs_document(*shared, "entry Plain\n");
   ASSERT_NE(document, nullptr);
@@ -92,21 +97,25 @@ TEST(DefaultDocumentationProviderTest,
       dynamic_cast<DocumentationModel *>(document->parseResult.value.get());
   ASSERT_NE(model, nullptr);
 
-  const auto *services = shared->serviceRegistry->getServicesByLanguageId("docs");
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->documentation.documentationProvider, nullptr);
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.documentation.documentationProvider, nullptr);
 
-  EXPECT_EQ(services->documentation.documentationProvider->getDocumentation(
+  EXPECT_EQ(services.documentation.documentationProvider->getDocumentation(
                 *model->entries.front()),
             std::nullopt);
 }
 
 TEST(DefaultDocumentationProviderTest,
      RendersJSDocMarkdownWithNormalizedLinksAndTags) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services<DocumentationParser>(*shared, "docs",
-                                                    {".docs"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services<DocumentationParser>(*shared, "docs",
+                                                    {".docs"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = parse_docs_document(
       *shared,
@@ -121,12 +130,11 @@ TEST(DefaultDocumentationProviderTest,
       dynamic_cast<DocumentationModel *>(document->parseResult.value.get());
   ASSERT_NE(model, nullptr);
 
-  const auto *services = shared->serviceRegistry->getServicesByLanguageId("docs");
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->documentation.documentationProvider, nullptr);
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.documentation.documentationProvider, nullptr);
 
   const auto documentation =
-      services->documentation.documentationProvider->getDocumentation(
+      services.documentation.documentationProvider->getDocumentation(
           *model->entries.front());
   ASSERT_TRUE(documentation.has_value());
   EXPECT_NE(documentation->find("Adds numbers."), std::string::npos);
@@ -138,10 +146,15 @@ TEST(DefaultDocumentationProviderTest,
 
 TEST(DefaultDocumentationProviderTest,
      RendersJSDocMarkdownForSingleLineJSDoc) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services<DocumentationParser>(*shared, "docs",
-                                                    {".docs"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services<DocumentationParser>(*shared, "docs",
+                                                    {".docs"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = parse_docs_document(
       *shared,
@@ -152,11 +165,10 @@ TEST(DefaultDocumentationProviderTest,
       dynamic_cast<DocumentationModel *>(document->parseResult.value.get());
   ASSERT_NE(model, nullptr);
 
-  const auto *services = shared->serviceRegistry->getServicesByLanguageId("docs");
-  ASSERT_NE(services, nullptr);
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
 
   const auto documentation =
-      services->documentation.documentationProvider->getDocumentation(
+      services.documentation.documentationProvider->getDocumentation(
           *model->entries.front());
   ASSERT_TRUE(documentation.has_value());
   EXPECT_EQ(*documentation, "- `@deprecated Since 1.0`");
@@ -164,10 +176,15 @@ TEST(DefaultDocumentationProviderTest,
 
 TEST(DefaultDocumentationProviderTest,
      RendersJSDocMarkdownForRootNodeDocumentation) {
-  auto shared = test::make_shared_core_services();
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(
-      test::make_core_services<DocumentationParser>(*shared, "docs",
-                                                    {".docs"})));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = 
+      test::make_uninstalled_core_services<DocumentationParser>(*shared, "docs",
+                                                    {".docs"});
+    pegium::services::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
 
   auto document = parse_docs_document(
       *shared,
@@ -179,23 +196,24 @@ TEST(DefaultDocumentationProviderTest,
       dynamic_cast<DocumentationModel *>(document->parseResult.value.get());
   ASSERT_NE(model, nullptr);
 
-  const auto *services = shared->serviceRegistry->getServicesByLanguageId("docs");
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->documentation.documentationProvider, nullptr);
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.documentation.documentationProvider, nullptr);
 
   const auto documentation =
-      services->documentation.documentationProvider->getDocumentation(*model);
+      services.documentation.documentationProvider->getDocumentation(*model);
   ASSERT_TRUE(documentation.has_value());
   EXPECT_NE(documentation->find("Root docs."), std::string::npos);
 }
 
 TEST(DefaultDocumentationProviderTest, ExposesHooksForLinkAndTagRendering) {
-  auto shared = test::make_shared_core_services();
-  auto services =
-      test::make_core_services<DocumentationParser>(*shared, "docs", {".docs"});
-  services->documentation.documentationProvider =
-      std::make_unique<HookedDocumentationProvider>(*services);
-  ASSERT_TRUE(shared->serviceRegistry->registerServices(std::move(services)));
+  auto shared = test::make_empty_shared_core_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  auto registeredServices =
+      test::make_uninstalled_core_services<DocumentationParser>(*shared, "docs", {".docs"});
+  pegium::services::installDefaultCoreServices(*registeredServices);
+  registeredServices->documentation.documentationProvider =
+      std::make_unique<HookedDocumentationProvider>(*registeredServices);
+  shared->serviceRegistry->registerServices(std::move(registeredServices));
 
   auto document = parse_docs_document(
       *shared,
@@ -209,11 +227,10 @@ TEST(DefaultDocumentationProviderTest, ExposesHooksForLinkAndTagRendering) {
       dynamic_cast<DocumentationModel *>(document->parseResult.value.get());
   ASSERT_NE(model, nullptr);
 
-  const auto *servicesPtr = shared->serviceRegistry->getServicesByLanguageId("docs");
-  ASSERT_NE(servicesPtr, nullptr);
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
 
   const auto documentation =
-      servicesPtr->documentation.documentationProvider->getDocumentation(
+      services.documentation.documentationProvider->getDocumentation(
           *model->entries.front());
   ASSERT_TRUE(documentation.has_value());
   EXPECT_NE(documentation->find("<Value|Shown>"), std::string::npos);

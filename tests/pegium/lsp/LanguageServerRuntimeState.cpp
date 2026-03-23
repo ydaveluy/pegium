@@ -4,9 +4,9 @@
 #include <future>
 #include <memory>
 
-#include <pegium/lsp/LanguageServerRuntimeState.hpp>
+#include <pegium/lsp/runtime/LanguageServerRuntimeState.hpp>
 
-namespace pegium::lsp {
+namespace pegium {
 namespace {
 
 TEST(LanguageServerRuntimeStateTest, TracksLifecycleFlags) {
@@ -78,4 +78,4 @@ TEST(LanguageServerRuntimeStateTest, CancelRequestByKeyRequestsStop) {
 }
 
 } // namespace
-} // namespace pegium::lsp
+} // namespace pegium

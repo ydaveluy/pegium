@@ -5,8 +5,8 @@
 #include <string_view>
 
 #include <pegium/ParseJsonTestSupport.hpp>
-#include <pegium/parser/RecoveryAnalysis.hpp>
-#include <pegium/workspace/Document.hpp>
+#include <pegium/core/parser/RecoveryAnalysis.hpp>
+#include <pegium/core/text/TextSnapshot.hpp>
 
 namespace pegium::test {
 
@@ -20,8 +20,7 @@ inline converter::CstJsonConversionOptions recovery_cst_json_options() {
 }
 
 template <typename Result>
-struct RecoveryHarnessDocument {
-  std::unique_ptr<workspace::Document> document;
+struct RecoveryHarnessResult {
   Result result;
 };
 
@@ -29,11 +28,10 @@ template <typename RuleType>
 auto StrictRecoveryDocument(const RuleType &entryRule, std::string_view text,
                             const parser::Skipper &skipper,
                             const utils::CancellationToken &cancelToken = {}) {
-  RecoveryHarnessDocument<parser::detail::StrictParseResult> harness;
-  harness.document = std::make_unique<workspace::Document>();
-  harness.document->setText(std::string{text});
+  RecoveryHarnessResult<parser::detail::StrictParseResult> harness;
+  const auto snapshot = text::TextSnapshot::copy(text);
   harness.result = parser::detail::run_strict_parse(
-      entryRule, skipper, *harness.document, cancelToken);
+      entryRule, skipper, snapshot, cancelToken);
   return harness;
 }
 
@@ -43,12 +41,10 @@ auto FailureAnalysisDocument(
     const parser::Skipper &skipper,
     const utils::CancellationToken &cancelToken = {}) {
   auto harness = StrictRecoveryDocument(entryRule, text, skipper, cancelToken);
-  RecoveryHarnessDocument<parser::detail::FailureAnalysisResult> failureHarness;
-  failureHarness.document = std::make_unique<workspace::Document>();
-  failureHarness.document->setText(std::string{text});
+  RecoveryHarnessResult<parser::detail::FailureAnalysisResult> failureHarness;
+  const auto snapshot = text::TextSnapshot::copy(text);
   failureHarness.result = parser::detail::analyze_failure(
-      entryRule, skipper, *failureHarness.document, harness.result.summary,
-      cancelToken);
+      entryRule, skipper, snapshot, harness.result.summary, cancelToken);
   return failureHarness;
 }
 

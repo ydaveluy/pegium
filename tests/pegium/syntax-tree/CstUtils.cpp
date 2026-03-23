@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <pegium/TestCstBuilderHarness.hpp>
-#include <pegium/syntax-tree/CstUtils.hpp>
+#include <pegium/core/syntax-tree/CstUtils.hpp>
 
 #include <ostream>
 
