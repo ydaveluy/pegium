@@ -261,11 +261,15 @@ DefaultCompletionProvider::getReferenceCandidates(
   auto allCandidates = reference;
   allCandidates.referenceText = {};
   std::vector<const workspace::AstNodeDescription *> candidates;
-  (void)scopeProvider->visitScopeEntries(
-      allCandidates, [&candidates](const workspace::AstNodeDescription &candidate) {
+  const auto collectCandidate =
+      [&candidates](const workspace::AstNodeDescription &candidate) {
         candidates.push_back(std::addressof(candidate));
         return true;
-      });
+      };
+  (void)scopeProvider->visitScopeEntries(
+      allCandidates,
+      utils::function_ref<bool(const workspace::AstNodeDescription &)>(
+          collectCandidate));
   return candidates;
 }
 

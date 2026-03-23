@@ -40,6 +40,13 @@ getCodeLens(pegium::SharedServices &sharedServices,
             const utils::CancellationToken &cancelToken =
                 utils::default_cancel_token);
 
+/// Resolves deferred metadata for one code lens.
+[[nodiscard]] std::optional<::lsp::CodeLens>
+resolveCodeLens(pegium::SharedServices &sharedServices,
+                const ::lsp::CodeLens &codeLens,
+                const utils::CancellationToken &cancelToken =
+                    utils::default_cancel_token);
+
 /// Computes document symbols for one document.
 [[nodiscard]] std::vector<::lsp::DocumentSymbol>
 getDocumentSymbols(pegium::SharedServices &sharedServices,

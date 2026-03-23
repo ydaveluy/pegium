@@ -1,6 +1,7 @@
 #include <pegium/core/observability/ObservationFormat.hpp>
 
 #include <algorithm>
+#include <format>
 #include <string>
 
 #include <pegium/core/workspace/Document.hpp>
@@ -10,8 +11,8 @@ namespace {
 
 std::string sanitize_single_line(std::string_view text) {
   std::string sanitized(text);
-  std::replace(sanitized.begin(), sanitized.end(), '\n', ' ');
-  std::replace(sanitized.begin(), sanitized.end(), '\r', ' ');
+  std::ranges::replace(sanitized, '\n', ' ');
+  std::ranges::replace(sanitized, '\r', ' ');
   return sanitized;
 }
 
@@ -39,7 +40,7 @@ std::string format_observation(const Observation &observation) {
   append_field(formatted, "languageId", observation.languageId);
   append_field(formatted, "category", observation.category);
   if (observation.documentId != workspace::InvalidDocumentId) {
-    formatted += " documentId=" + std::to_string(observation.documentId);
+    formatted += std::format(" documentId={}", observation.documentId);
   }
   if (observation.state.has_value()) {
     formatted += " state=" + std::string(to_string(*observation.state));
@@ -48,58 +49,61 @@ std::string format_observation(const Observation &observation) {
 }
 
 std::string_view to_string(ObservationSeverity severity) noexcept {
+  using enum ObservationSeverity;
   switch (severity) {
-  case ObservationSeverity::Trace:
+  case Trace:
     return "trace";
-  case ObservationSeverity::Info:
+  case Info:
     return "info";
-  case ObservationSeverity::Warning:
+  case Warning:
     return "warning";
-  case ObservationSeverity::Error:
+  case Error:
     return "error";
   }
   return "info";
 }
 
 std::string_view to_string(ObservationCode code) noexcept {
+  using enum ObservationCode;
   switch (code) {
-  case ObservationCode::WorkspaceDirectoryReadFailed:
+  case WorkspaceDirectoryReadFailed:
     return "WorkspaceDirectoryReadFailed";
-  case ObservationCode::WorkspaceBootstrapFailed:
+  case WorkspaceBootstrapFailed:
     return "WorkspaceBootstrapFailed";
-  case ObservationCode::DocumentUpdateDispatchFailed:
+  case DocumentUpdateDispatchFailed:
     return "DocumentUpdateDispatchFailed";
-  case ObservationCode::LspRuntimeBackgroundTaskFailed:
+  case LspRuntimeBackgroundTaskFailed:
     return "LspRuntimeBackgroundTaskFailed";
-  case ObservationCode::LanguageMappingCollision:
+  case LanguageMappingCollision:
     return "LanguageMappingCollision";
-  case ObservationCode::ValidationCheckThrew:
+  case ValidationCheckThrew:
     return "ValidationCheckThrew";
-  case ObservationCode::ValidationPreparationThrew:
+  case ValidationPreparationThrew:
     return "ValidationPreparationThrew";
-  case ObservationCode::ValidationFinalizationThrew:
+  case ValidationFinalizationThrew:
     return "ValidationFinalizationThrew";
-  case ObservationCode::ReferenceResolutionProblem:
+  case ReferenceResolutionProblem:
     return "ReferenceResolutionProblem";
   }
   return "Observation";
 }
 
 std::string_view to_string(workspace::DocumentState state) noexcept {
+  using enum workspace::DocumentState;
   switch (state) {
-  case workspace::DocumentState::Changed:
+  case Changed:
     return "Changed";
-  case workspace::DocumentState::Parsed:
+  case Parsed:
     return "Parsed";
-  case workspace::DocumentState::IndexedContent:
+  case IndexedContent:
     return "IndexedContent";
-  case workspace::DocumentState::ComputedScopes:
+  case ComputedScopes:
     return "ComputedScopes";
-  case workspace::DocumentState::Linked:
+  case Linked:
     return "Linked";
-  case workspace::DocumentState::IndexedReferences:
+  case IndexedReferences:
     return "IndexedReferences";
-  case workspace::DocumentState::Validated:
+  case Validated:
     return "Validated";
   }
   return "Changed";

@@ -112,9 +112,9 @@ DefaultConfigurationProvider::getConfiguration(std::string_view languageId,
 
 utils::ScopedDisposable
 DefaultConfigurationProvider::onConfigurationSectionUpdate(
-    typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
-        listener) {
-  return _onSectionUpdate.on(std::move(listener));
+    const typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
+        &listener) {
+  return _onSectionUpdate.on(listener);
 }
 
 WorkspaceConfiguration DefaultConfigurationProvider::getWorkspaceConfiguration(
@@ -150,8 +150,8 @@ WorkspaceConfiguration DefaultConfigurationProvider::apply_section_overrides(
   }
 
   const auto &section = sectionConfiguration.object();
-  const auto validationIt = section.find("validation");
-  if (validationIt != section.end()) {
+  if (const auto validationIt = section.find("validation");
+      validationIt != section.end()) {
     (void)readValidationOption(validationIt->second, configuration.validation);
   }
   return configuration;

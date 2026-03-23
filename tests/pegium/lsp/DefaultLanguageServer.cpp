@@ -107,7 +107,8 @@ public:
   }
 
   utils::ScopedDisposable onConfigurationSectionUpdate(
-      typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener) override {
+      const typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
+          &) override {
     return {};
   }
 
@@ -204,7 +205,8 @@ public:
   }
 
   utils::ScopedDisposable onConfigurationSectionUpdate(
-      typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener) override {
+      const typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
+          &) override {
     return {};
   }
 
@@ -294,7 +296,8 @@ public:
   }
 
   utils::ScopedDisposable onConfigurationSectionUpdate(
-      typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener) override {
+      const typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener
+          &) override {
     return {};
   }
 
@@ -506,11 +509,30 @@ public:
 
 class TestCodeLensProvider final : public ::pegium::CodeLensProvider {
 public:
+  explicit TestCodeLensProvider(bool resolveProvider = false)
+      : resolveProvider(resolveProvider) {}
+
   std::vector<::lsp::CodeLens>
   provideCodeLens(const workspace::Document &, const ::lsp::CodeLensParams &,
                   const utils::CancellationToken &) const override {
     return {};
   }
+
+  [[nodiscard]] bool supportsResolveCodeLens() const noexcept override {
+    return resolveProvider;
+  }
+
+  std::optional<::lsp::CodeLens>
+  resolveCodeLens(const ::lsp::CodeLens &codeLens,
+                  const utils::CancellationToken &) const override {
+    if (!resolveProvider) {
+      return std::nullopt;
+    }
+    return codeLens;
+  }
+
+private:
+  bool resolveProvider = false;
 };
 
 class TestDocumentLinkProvider final : public ::pegium::DocumentLinkProvider {
@@ -700,7 +722,7 @@ TEST(DefaultLanguageServerTest, OptInServicesAdvertiseCapabilitiesWhenInstalledE
   services->lsp.typeProvider = std::make_unique<TestTypeDefinitionProvider>();
   services->lsp.implementationProvider =
       std::make_unique<TestImplementationProvider>();
-  services->lsp.codeLensProvider = std::make_unique<TestCodeLensProvider>();
+  services->lsp.codeLensProvider = std::make_unique<TestCodeLensProvider>(true);
   services->lsp.documentLinkProvider =
       std::make_unique<TestDocumentLinkProvider>();
   services->lsp.formatter = std::make_unique<TestFormatter>();
@@ -767,7 +789,7 @@ TEST(DefaultLanguageServerTest, OptInServicesAdvertiseCapabilitiesWhenInstalledE
       },
       *result.capabilities.workspaceSymbolProvider));
   ASSERT_TRUE(result.capabilities.codeLensProvider.has_value());
-  EXPECT_FALSE(result.capabilities.codeLensProvider->resolveProvider.value_or(false));
+  EXPECT_TRUE(result.capabilities.codeLensProvider->resolveProvider.value_or(false));
   ASSERT_TRUE(result.capabilities.documentLinkProvider.has_value());
   EXPECT_FALSE(
       result.capabilities.documentLinkProvider->resolveProvider.value_or(false));

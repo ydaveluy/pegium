@@ -2,16 +2,27 @@
 
 #include <cassert>
 #include <optional>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
 #include <lsp/error.h>
 
 #include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/support/JsonValue.hpp>
 
 namespace pegium {
 
 namespace {
+
+constexpr std::string_view kCodeLensMetadataKey = "__pegiumCodeLens";
+constexpr std::string_view kCodeLensUriKey = "uri";
+constexpr std::string_view kCodeLensDataKey = "data";
+
+struct WrappedCodeLens {
+  std::string uri;
+  ::lsp::CodeLens codeLens;
+};
 
 template <typename F>
 decltype(auto) with_workspace_read_lock(
@@ -76,6 +87,52 @@ Result with_item_provider(pegium::SharedServices &sharedServices,
       });
 }
 
+::lsp::CodeLens wrap_code_lens(std::string_view uri, ::lsp::CodeLens codeLens) {
+  services::JsonValue::Object metadata;
+  metadata.try_emplace(std::string(kCodeLensMetadataKey), true);
+  metadata.try_emplace(std::string(kCodeLensUriKey), std::string(uri));
+  if (codeLens.data.has_value()) {
+    metadata.try_emplace(std::string(kCodeLensDataKey),
+                         from_lsp_any(*codeLens.data));
+  }
+  codeLens.data = to_lsp_any(services::JsonValue(std::move(metadata)));
+  return codeLens;
+}
+
+std::optional<WrappedCodeLens> unwrap_code_lens(const ::lsp::CodeLens &codeLens) {
+  if (!codeLens.data.has_value()) {
+    return std::nullopt;
+  }
+
+  const auto data = from_lsp_any(*codeLens.data);
+  if (!data.isObject()) {
+    return std::nullopt;
+  }
+
+  const auto &metadata = data.object();
+  const auto markerIt = metadata.find(kCodeLensMetadataKey);
+  if (markerIt == metadata.end() || !markerIt->second.isBoolean() ||
+      !markerIt->second.boolean()) {
+    return std::nullopt;
+  }
+
+  const auto uriIt = metadata.find(kCodeLensUriKey);
+  if (uriIt == metadata.end() || !uriIt->second.isString()) {
+    return std::nullopt;
+  }
+
+  ::lsp::CodeLens unwrapped = codeLens;
+  if (const auto dataIt = metadata.find(kCodeLensDataKey);
+      dataIt != metadata.end()) {
+    unwrapped.data = to_lsp_any(dataIt->second);
+  } else {
+    unwrapped.data = std::nullopt;
+  }
+
+  return WrappedCodeLens{.uri = uriIt->second.string(),
+                         .codeLens = std::move(unwrapped)};
+}
+
 } // namespace
 
 std::optional<::lsp::CompletionList>
@@ -128,7 +185,55 @@ getCodeLens(pegium::SharedServices &sharedServices,
       [](const auto &services) { return services.lsp.codeLensProvider.get(); },
       [&params, &cancelToken](const auto &provider,
                               const workspace::Document &document) {
-        return provider.provideCodeLens(document, params, cancelToken);
+        auto codeLens = provider.provideCodeLens(document, params, cancelToken);
+        if (!provider.supportsResolveCodeLens()) {
+          return codeLens;
+        }
+        for (auto &item : codeLens) {
+          utils::throw_if_cancelled(cancelToken);
+          item = wrap_code_lens(document.uri, std::move(item));
+        }
+        return codeLens;
+      });
+}
+
+std::optional<::lsp::CodeLens>
+resolveCodeLens(pegium::SharedServices &sharedServices,
+                const ::lsp::CodeLens &codeLens,
+                const utils::CancellationToken &cancelToken) {
+  return with_workspace_read_lock(
+      sharedServices,
+      [&sharedServices, &codeLens,
+       &cancelToken]() -> std::optional<::lsp::CodeLens> {
+        auto wrappedCodeLens = unwrap_code_lens(codeLens);
+        if (!wrappedCodeLens.has_value()) {
+          return std::nullopt;
+        }
+
+        const auto *services =
+            get_services(*sharedServices.serviceRegistry, wrappedCodeLens->uri);
+        if (services == nullptr) {
+          throw ::lsp::RequestError(
+              ::lsp::MessageError::RequestFailed,
+              "Could not find service instance for uri: '" +
+                  wrappedCodeLens->uri + "'");
+        }
+
+        const auto *provider = services->lsp.codeLensProvider.get();
+        if (provider == nullptr || !provider->supportsResolveCodeLens()) {
+          return std::nullopt;
+        }
+
+        auto resolved =
+            provider->resolveCodeLens(wrappedCodeLens->codeLens, cancelToken);
+        if (!resolved.has_value()) {
+          return std::nullopt;
+        }
+        if (!resolved->data.has_value() &&
+            wrappedCodeLens->codeLens.data.has_value()) {
+          resolved->data = wrappedCodeLens->codeLens.data;
+        }
+        return wrap_code_lens(wrappedCodeLens->uri, std::move(*resolved));
       });
 }
 

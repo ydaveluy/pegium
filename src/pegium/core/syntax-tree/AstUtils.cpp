@@ -1,7 +1,8 @@
 #include <pegium/core/syntax-tree/AstUtils.hpp>
 
 #include <memory>
-#include <stdexcept>
+
+#include <pegium/core/utils/Errors.hpp>
 
 namespace pegium {
 
@@ -15,7 +16,7 @@ const workspace::Document *tryGetDocument(const AstNode &node) noexcept {
 const workspace::Document &getDocument(const AstNode &node) {
   auto *document = tryGetDocument(node);
   if (document == nullptr) {
-    throw std::logic_error("AST node has no document.");
+    throw utils::MissingAstDocumentError("AST node has no document.");
   }
   return *document;
 }

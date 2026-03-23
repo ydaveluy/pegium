@@ -41,8 +41,7 @@ std::vector<TextDocumentContentChangeEvent> to_text_document_changes(
              text::Position{range->range.start.line, range->range.start.character},
              text::Position{range->range.end.line, range->range.end.character}),
          .rangeLength = range->rangeLength.has_value()
-                            ? std::optional<TextOffset>(
-                                  static_cast<TextOffset>(*range->rangeLength))
+                            ? std::optional<TextOffset>(*range->rangeLength)
                             : std::nullopt,
          .text = range->text});
   }
@@ -136,7 +135,7 @@ std::vector<std::string> DefaultTextDocuments::keys() const {
 
 utils::ScopedDisposable DefaultTextDocuments::listen(
     ::lsp::MessageHandler &messageHandler,
-    std::function<void()> ensureInitialized) {
+    const std::function<void()> &ensureInitialized) {
   messageHandler.add<::lsp::notifications::TextDocument_DidOpen>(
       [this](::lsp::DidOpenTextDocumentParams &&params) {
         auto normalizedUri =
@@ -286,32 +285,32 @@ utils::ScopedDisposable DefaultTextDocuments::onWillSaveWaitUntil(
 }
 
 void DefaultTextDocuments::emitDidOpen(
-    const std::shared_ptr<TextDocument> &document) {
+    const std::shared_ptr<TextDocument> &document) const {
   assert(document != nullptr);
   _onDidOpen.emit({.document = document});
 }
 
 void DefaultTextDocuments::emitDidChangeContent(
-    const std::shared_ptr<TextDocument> &document) {
+    const std::shared_ptr<TextDocument> &document) const {
   assert(document != nullptr);
   _onDidChangeContent.emit({.document = document});
 }
 
 void DefaultTextDocuments::emitDidSave(
-    const std::shared_ptr<TextDocument> &document) {
+    const std::shared_ptr<TextDocument> &document) const {
   assert(document != nullptr);
   _onDidSave.emit({.document = document});
 }
 
 void DefaultTextDocuments::emitDidClose(
-    const std::shared_ptr<TextDocument> &document) {
+    const std::shared_ptr<TextDocument> &document) const {
   assert(document != nullptr);
   _onDidClose.emit({.document = document});
 }
 
 void DefaultTextDocuments::emitWillSave(
     const std::shared_ptr<TextDocument> &document,
-    TextDocumentSaveReason reason) {
+    TextDocumentSaveReason reason) const {
   assert(document != nullptr);
   _onWillSave.emit({.document = document, .reason = reason});
 }

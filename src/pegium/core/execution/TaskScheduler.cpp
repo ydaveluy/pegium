@@ -129,7 +129,7 @@ void TaskScheduler::enqueue(const std::shared_ptr<TaskGroupState> &group,
     return;
   }
 
-  group->pending.fetch_add(1, std::memory_order_relaxed);
+  group->pending.fetch_add(1);
   ScheduledTask scheduled{.group = group, .task = std::move(task)};
 
   if (executionContext.isWorkerOf(*this) &&
@@ -150,14 +150,14 @@ void TaskScheduler::join(const std::shared_ptr<TaskGroupState> &group,
     return;
   }
 
-  while (group->pending.load(std::memory_order_acquire) != 0U) {
+  while (group->pending.load() != 0U) {
     if (ScheduledTask task; tryPopTask(task, executionContext)) {
       executeTask(std::move(task), executionContext);
       continue;
     }
 
     std::unique_lock lock(group->mutex);
-    if (group->pending.load(std::memory_order_acquire) == 0U) {
+    if (group->pending.load() == 0U) {
       break;
     }
     group->cv.wait_for(lock, std::chrono::milliseconds(1));
@@ -230,7 +230,7 @@ bool TaskScheduler::tryStealTask(std::size_t thiefIndex, ScheduledTask &task) {
   return false;
 }
 
-void TaskScheduler::executeTask(ScheduledTask task,
+void TaskScheduler::executeTask(ScheduledTask &&task,
                                 ExecutionContext executionContext) {
   if (!task.group || !task.task) {
     return;
@@ -251,7 +251,7 @@ void TaskScheduler::executeTask(ScheduledTask task,
         task.group->cancelToken.stop_requested()) {
       task.group->exception = std::make_exception_ptr(utils::OperationCancelled());
     }
-  } catch (...) {
+  } catch (const std::exception &) {
     task.group->cancelled.store(true);
     std::scoped_lock lock(task.group->mutex);
     if (task.group->exception == nullptr) {
@@ -259,7 +259,7 @@ void TaskScheduler::executeTask(ScheduledTask task,
     }
   }
 
-  task.group->pending.fetch_sub(1, std::memory_order_acq_rel);
+  task.group->pending.fetch_sub(1);
   std::scoped_lock lock(task.group->mutex);
   task.group->cv.notify_all();
 }
@@ -283,7 +283,7 @@ void TaskScheduler::workerLoop(std::size_t workerIndex,
 
 TaskScheduler::Scope::Scope(
     TaskScheduler &scheduler, std::shared_ptr<TaskGroupState> group) noexcept
-    : Scope(scheduler, std::move(group), {}) {}
+    : Scope(scheduler, std::move(group), ExecutionContext{}) {}
 
 TaskScheduler::Scope::Scope(
     TaskScheduler &scheduler, std::shared_ptr<TaskGroupState> group,

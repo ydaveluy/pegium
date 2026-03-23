@@ -34,7 +34,7 @@ template <typename TServices = pegium::Services>
 /// Builds one language service container with the default core and LSP services installed.
 [[nodiscard]] std::unique_ptr<TServices>
 makeDefaultServices(const pegium::SharedServices &sharedServices,
-                    std::string languageId) {
+                    const std::string &languageId) {
   static_assert(std::is_base_of_v<pegium::Services, TServices>,
                 "TServices must derive from pegium::Services.");
   static_assert(
@@ -42,7 +42,7 @@ makeDefaultServices(const pegium::SharedServices &sharedServices,
       "TServices must be constructible from const pegium::SharedServices&.");
 
   auto services = std::make_unique<TServices>(sharedServices);
-  services->languageMetaData.languageId = std::move(languageId);
+  services->languageMetaData.languageId = languageId;
   installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   return services;

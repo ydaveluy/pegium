@@ -58,8 +58,8 @@ struct FormattedCommentLine {
     std::string_view line,
     const MultilineCommentFormatOptions &options) noexcept {
   line = trim_horizontal(line);
-  const auto linePrefix = trim_horizontal(options.newLineStart);
-  if (!linePrefix.empty() && line.starts_with(linePrefix)) {
+  if (const auto linePrefix = trim_horizontal(options.newLineStart);
+      !linePrefix.empty() && line.starts_with(linePrefix)) {
     line.remove_prefix(linePrefix.size());
     if (!line.empty() && is_horizontal_whitespace(line.front())) {
       line.remove_prefix(1);
@@ -792,8 +792,8 @@ std::string AbstractFormatter::formatMultilineComment(
     }
 
     blankRun = 0;
-    const auto normalized = normalize_tag_line(*it, options);
-    if (is_tag_line(normalized, options)) {
+    if (const auto normalized = normalize_tag_line(*it, options);
+        is_tag_line(normalized, options)) {
       lines.push_back(
           FormattedCommentLine{.kind = CommentLineKind::Tag, .text = normalized});
       previousWasTag = true;
@@ -844,7 +844,7 @@ std::string AbstractFormatter::formatMultilineComment(
 
 void AbstractFormatter::formatBlock(FormattingRegion open, FormattingRegion close,
                                     FormattingRegion content,
-                                    BlockFormatOptions options) {
+                                    const BlockFormatOptions &options) {
   if (open.empty() || close.empty()) {
     return;
   }
@@ -867,7 +867,7 @@ void AbstractFormatter::formatBlock(FormattingRegion open, FormattingRegion clos
 }
 
 void AbstractFormatter::formatSeparatedList(
-    FormattingRegion separators, SeparatedListFormatOptions options) {
+    FormattingRegion separators, const SeparatedListFormatOptions &options) {
   if (separators.empty()) {
     return;
   }
@@ -877,7 +877,7 @@ void AbstractFormatter::formatSeparatedList(
 }
 
 std::string AbstractFormatter::formatLineComment(
-    std::string_view text, LineCommentFormatOptions options) {
+    std::string_view text, const LineCommentFormatOptions &options) {
   if (!text.starts_with(options.start)) {
     return std::string(text);
   }
@@ -899,11 +899,12 @@ std::string AbstractFormatter::formatLineComment(
 }
 
 std::string AbstractFormatter::formatLineComment(
-    const HiddenNodeFormatter &comment, LineCommentFormatOptions options) {
-  return formatLineComment(comment.text(), std::move(options));
+    const HiddenNodeFormatter &comment,
+    const LineCommentFormatOptions &options) {
+  return formatLineComment(comment.text(), options);
 }
 
-void HiddenNodeFormatter::replace(std::string text) {
+void HiddenNodeFormatter::replace(std::string text) const {
   if (_textCollector) {
     _textCollector(_node, std::move(text));
   }

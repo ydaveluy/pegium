@@ -181,7 +181,7 @@ public:
   [[nodiscard]] std::string indentation(std::int32_t delta = 0) const;
 
   /// Replaces the full hidden node text.
-  void replace(std::string text);
+  void replace(std::string text) const;
 
   /// Applies `formatting` to the whitespace before this hidden node.
   HiddenNodeFormatter &prepend(const FormattingAction &formatting);
@@ -540,14 +540,14 @@ protected:
 
   static void formatBlock(FormattingRegion open, FormattingRegion close,
                           FormattingRegion content,
-                          BlockFormatOptions options);
+                          const BlockFormatOptions &options);
 
   static void formatSeparatedList(FormattingRegion separators) {
     formatSeparatedList(std::move(separators), SeparatedListFormatOptions{});
   }
 
   static void formatSeparatedList(FormattingRegion separators,
-                                  SeparatedListFormatOptions options);
+                                  const SeparatedListFormatOptions &options);
 
   [[nodiscard]] static std::string
   formatLineComment(std::string_view text) {
@@ -556,7 +556,7 @@ protected:
 
   [[nodiscard]] static std::string
   formatLineComment(std::string_view text,
-                    LineCommentFormatOptions options);
+                    const LineCommentFormatOptions &options);
 
   [[nodiscard]] static std::string
   formatLineComment(const HiddenNodeFormatter &comment) {
@@ -565,7 +565,7 @@ protected:
 
   [[nodiscard]] static std::string
   formatLineComment(const HiddenNodeFormatter &comment,
-                    LineCommentFormatOptions options);
+                    const LineCommentFormatOptions &options);
 
   /// Registers a formatter method of the current formatter object for `NodeT`.
   ///

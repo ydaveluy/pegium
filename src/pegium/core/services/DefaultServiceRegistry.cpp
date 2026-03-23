@@ -8,6 +8,7 @@
 #include <pegium/core/observability/ObservabilitySink.hpp>
 #include <pegium/core/parser/AstReflectionBootstrap.hpp>
 #include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 
 namespace pegium::services {
@@ -58,14 +59,14 @@ void publish_language_mapping_collision(
 void DefaultServiceRegistry::registerServices(
     std::unique_ptr<CoreServices> services) {
   if (!services) {
-    throw std::invalid_argument("Cannot register null core services.");
+    throw utils::ServiceRegistrationError("Cannot register null core services.");
   }
   if (services->languageMetaData.languageId.empty()) {
-    throw std::invalid_argument(
+    throw utils::ServiceRegistrationError(
         "Cannot register core services without a languageId.");
   }
   if (!services->isComplete()) {
-    throw std::invalid_argument(
+    throw utils::ServiceRegistrationError(
         "Cannot register incomplete core services for language '" +
         services->languageMetaData.languageId + "'.");
   }
@@ -96,7 +97,7 @@ const CoreServices &
 DefaultServiceRegistry::getServices(std::string_view uri) const {
   std::scoped_lock lock(_mutex);
   if (_servicesByLanguageId.empty()) {
-    throw std::runtime_error(
+    throw utils::ServiceRegistryError(
         "The service registry is empty. Use `registerServices` to register "
         "the services of a language.");
   }
@@ -108,12 +109,12 @@ DefaultServiceRegistry::getServices(std::string_view uri) const {
   }
 
   const auto path = utils::file_uri_to_path(normalizedUri);
-  const auto fileName = path.has_value()
-                            ? std::filesystem::path(*path).filename().string()
-                            : std::filesystem::path(std::string(normalizedUri))
-                                  .filename()
-                                  .string();
-  if (!fileName.empty()) {
+  if (const auto fileName = path.has_value()
+                                ? std::filesystem::path(*path).filename().string()
+                                : std::filesystem::path(std::string(normalizedUri))
+                                      .filename()
+                                      .string();
+      !fileName.empty()) {
     if (const auto *services = lookupByFileName(fileName)) {
       return *services;
     }
@@ -128,7 +129,8 @@ DefaultServiceRegistry::getServices(std::string_view uri) const {
     return *services;
   }
 
-  throw std::runtime_error(language_error_message(extension, languageId));
+  throw utils::ServiceRegistryError(
+      language_error_message(extension, languageId));
 }
 
 const CoreServices *
@@ -170,12 +172,12 @@ const CoreServices *DefaultServiceRegistry::findServicesLocked(
   }
 
   const auto path = utils::file_uri_to_path(normalizedUri);
-  const auto fileName = path.has_value()
-                            ? std::filesystem::path(*path).filename().string()
-                            : std::filesystem::path(std::string(normalizedUri))
-                                  .filename()
-                                  .string();
-  if (!fileName.empty()) {
+  if (const auto fileName = path.has_value()
+                                ? std::filesystem::path(*path).filename().string()
+                                : std::filesystem::path(std::string(normalizedUri))
+                                      .filename()
+                                      .string();
+      !fileName.empty()) {
     if (const auto *services = lookupByFileName(fileName)) {
       return services;
     }

@@ -4,6 +4,7 @@
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
 
 #include <ostream>
+#include <ranges>
 
 namespace {
 
@@ -39,6 +40,10 @@ pegium::CstNodeView previous_sibling(const pegium::CstNodeView &node) {
 
 namespace pegium {
 namespace {
+
+static_assert(std::forward_iterator<ChildIterator>);
+static_assert(std::ranges::forward_range<CstNodeView>);
+static_assert(std::ranges::forward_range<RootCstNode>);
 
 TEST(CstNodeViewTest, NavigatesNodesAndSiblings) {
   DummyElement literal{grammar::ElementKind::Literal};

@@ -4,7 +4,7 @@
 
 #include <array>
 #include <concepts>
-#include <cstddef>
+#include <memory>
 #include <pegium/core/grammar/Assignment.hpp>
 #include <pegium/core/grammar/InfixRule.hpp>
 #include <pegium/core/grammar/ParserRule.hpp>
@@ -217,9 +217,10 @@ struct InfixRule final : grammar::InfixRule {
   }
   std::string_view getName() const noexcept override { return _name; }
   InfixRule(const InfixRule &other)
-      : _name(other._name), _obj(nullptr), _ops(other._ops) {
-    if (other._obj)
+      : _name(other._name), _ops(other._ops) {
+    if (other._obj) {
       _obj = _ops.clone(other._obj);
+    }
   }
 
   InfixRule(InfixRule &&other) noexcept { move_from(std::move(other)); }
@@ -233,8 +234,9 @@ struct InfixRule final : grammar::InfixRule {
     _name = other._name;
     _ops = other._ops;
 
-    if (other._obj)
+    if (other._obj) {
       _obj = _ops.clone(other._obj);
+    }
     return *this;
   }
 
@@ -281,8 +283,9 @@ private:
   }
 
   void reset() noexcept {
-    if (!_obj)
+    if (!_obj) {
       return;
+    }
     _ops.destroy(_obj);
     _obj = nullptr;
     _ops = {};
@@ -357,15 +360,16 @@ private:
 
     static const grammar::InfixOperator *
     getOperator(const void *self, std::size_t index) noexcept {
-      return OperatorCatalog::getOperator(static_cast<const Model *>(self),
-                                          index);
+      return OperatorCatalog::getOperator(static_cast<const Model *>(self), index);
     }
 
     static std::size_t operatorCount(const void *) noexcept {
       return OperatorCatalog::operatorCount();
     }
 
-    static void del(void *self) noexcept { delete static_cast<Model *>(self); }
+    static void destroy(void *self) noexcept {
+      delete static_cast<Model *>(self);
+    }
     static void *clone(const void *self) {
       return new Model(*static_cast<const Model *>(self));
     }
@@ -383,7 +387,7 @@ private:
           .elem = &Model::elem,
           .getOperator = &Model::getOperator,
           .operatorCount = &Model::operatorCount,
-          .destroy = &Model::del,
+          .destroy = &Model::destroy,
           .clone = &Model::clone,
       };
     }
@@ -650,7 +654,7 @@ private:
   // ------------------- data -------------------
   std::string _name{};
 
-  void *_obj = nullptr; // heap-only
+  void *_obj = nullptr;
   Ops _ops{};
 };
 

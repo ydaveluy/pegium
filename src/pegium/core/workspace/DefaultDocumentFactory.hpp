@@ -24,7 +24,7 @@ public:
       const utils::CancellationToken &cancelToken = {}) const override;
 
   [[nodiscard]] std::shared_ptr<Document>
-  fromString(std::string text, std::string uri,
+  fromString(std::string text, std::string_view uri,
              const utils::CancellationToken &cancelToken = {}) const override;
 
   [[nodiscard]] std::shared_ptr<Document>

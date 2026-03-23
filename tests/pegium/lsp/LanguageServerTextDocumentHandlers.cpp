@@ -10,11 +10,14 @@
 #include <lsp/messages.h>
 
 #include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/code-actions/CodeLensProvider.hpp>
 #include <pegium/lsp/hierarchy/CallHierarchyProvider.hpp>
 #include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
 #include <pegium/lsp/runtime/LanguageServerHandlerContext.hpp>
 #include <pegium/lsp/runtime/LanguageServerRequestHandlerParts.hpp>
+#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
 #include <pegium/lsp/navigation/RenameProvider.hpp>
+#include <pegium/lsp/support/JsonValue.hpp>
 #include <pegium/lsp/navigation/TypeDefinitionProvider.hpp>
 
 namespace pegium {
@@ -108,6 +111,45 @@ public:
   outgoingCalls(const ::lsp::CallHierarchyOutgoingCallsParams &,
                 const utils::CancellationToken &) const override {
     return {};
+  }
+};
+
+class TestResolveCodeLensProvider final : public ::pegium::CodeLensProvider {
+public:
+  mutable std::optional<services::JsonValue> lastResolveData;
+
+  std::vector<::lsp::CodeLens>
+  provideCodeLens(const workspace::Document &document,
+                  const ::lsp::CodeLensParams &,
+                  const utils::CancellationToken &) const override {
+    ::lsp::CodeLens codeLens{};
+    codeLens.range.start = document.textDocument().positionAt(0);
+    codeLens.range.end = document.textDocument().positionAt(0);
+    codeLens.data = to_lsp_any(services::JsonValue(services::JsonValue::Object{
+        {"seed", "value"},
+    }));
+    return {std::move(codeLens)};
+  }
+
+  [[nodiscard]] bool supportsResolveCodeLens() const noexcept override {
+    return true;
+  }
+
+  std::optional<::lsp::CodeLens>
+  resolveCodeLens(const ::lsp::CodeLens &codeLens,
+                  const utils::CancellationToken &) const override {
+    if (codeLens.data.has_value()) {
+      lastResolveData = from_lsp_any(*codeLens.data);
+    } else {
+      lastResolveData = std::nullopt;
+    }
+
+    ::lsp::CodeLens resolved = codeLens;
+    ::lsp::Command command{};
+    command.title = "Resolved handler lens";
+    command.command = "test.resolveCodeLens";
+    resolved.command = std::move(command);
+    return resolved;
   }
 };
 
@@ -282,6 +324,47 @@ TEST_F(LanguageServerTextDocumentHandlersTest,
   response = send_request(3);
   ASSERT_TRUE(response.get("result").isObject());
   EXPECT_TRUE(response.get("result").object().get("defaultBehavior").boolean());
+}
+
+TEST_F(LanguageServerTextDocumentHandlersTest,
+       CodeLensResolveUsesOriginalProviderData) {
+  TestResolveCodeLensProvider *recording = nullptr;
+  auto document = registerTestLanguageAndDocument(
+      [&recording](auto &services) {
+        auto provider = std::make_unique<TestResolveCodeLensProvider>();
+        recording = provider.get();
+        services.lsp.codeLensProvider = std::move(provider);
+      },
+      "code-lens-resolve.test");
+  ASSERT_NE(document, nullptr);
+  ASSERT_NE(recording, nullptr);
+
+  auto context = makeContext();
+  auto harness = makeHarness(context);
+
+  ::lsp::CodeLensParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+  const auto codeLens = getCodeLens(*shared, params, utils::default_cancel_token);
+  ASSERT_EQ(codeLens.size(), 1u);
+
+  harness->stream.pushInput(test::make_request_message(
+      12, ::lsp::requests::CodeLens_Resolve::Method, codeLens.front()));
+  harness->handler.processIncomingMessages();
+
+  const auto response = wait_for_response_object(harness->stream);
+  ASSERT_TRUE(response.get("result").isObject());
+  ASSERT_TRUE(response.get("result").object().contains("command"));
+  EXPECT_EQ(response.get("result")
+                .object()
+                .get("command")
+                .object()
+                .get("title")
+                .string(),
+            "Resolved handler lens");
+
+  ASSERT_TRUE(recording->lastResolveData.has_value());
+  ASSERT_TRUE(recording->lastResolveData->isObject());
+  EXPECT_EQ(recording->lastResolveData->object().at("seed").string(), "value");
 }
 
 TEST_F(LanguageServerTextDocumentHandlersTest,

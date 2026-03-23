@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 
 namespace pegium::workspace {
@@ -32,15 +33,17 @@ DocumentId DefaultDocuments::getOrCreateDocumentId(std::string_view uri) {
 void DefaultDocuments::addDocument(std::shared_ptr<Document> document) {
   assert(document != nullptr);
   if (document->uri.empty()) {
-    throw std::runtime_error("Cannot add a document without URI.");
+    throw utils::DocumentStoreError("Cannot add a document without URI.");
   }
   if (document->uri != utils::normalize_uri(document->uri)) {
-    throw std::runtime_error("Cannot add a document with a non-normalized URI.");
+    throw utils::DocumentStoreError(
+        "Cannot add a document with a non-normalized URI.");
   }
 
   std::scoped_lock lock(_mutex);
   if (_documents.has(document->uri)) {
-    throw std::runtime_error("A document with the same URI is already present.");
+    throw utils::DocumentStoreError(
+        "A document with the same URI is already present.");
   }
   (void)addDocumentLocked(std::move(document));
 }
@@ -126,7 +129,8 @@ std::shared_ptr<Document> DefaultDocuments::createDocument(
 
   std::scoped_lock lock(_mutex);
   if (_documents.has(document->uri)) {
-    throw std::runtime_error("A document with the same URI is already present.");
+    throw utils::DocumentStoreError(
+        "A document with the same URI is already present.");
   }
   return addDocumentLocked(std::move(document));
 }

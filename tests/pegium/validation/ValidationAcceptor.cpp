@@ -73,10 +73,10 @@ TEST(ValidationAcceptorTest, EmitsDiagnosticForSelectedPropertySubrange) {
   auto &node = parse_validation_accept_node(document);
 
   services::Diagnostic diagnostic;
-  const ValidationAcceptor acceptor =
+  const ValidationAcceptor acceptor{
       [&diagnostic](services::Diagnostic value) {
         diagnostic = std::move(value);
-      };
+      }};
 
   acceptor.error(node, "Invalid name")
       .property<&ValidationAcceptNode::name>()
@@ -116,10 +116,10 @@ TEST(ValidationAcceptorTest, SelectsIndexedVectorPropertyAssignment) {
   auto &node = parse_validation_accept_node(document);
 
   services::Diagnostic diagnostic;
-  const ValidationAcceptor acceptor =
+  const ValidationAcceptor acceptor{
       [&diagnostic](services::Diagnostic value) {
         diagnostic = std::move(value);
-      };
+      }};
 
   acceptor.warning(node, "Second tag")
       .property<&ValidationAcceptNode::tags>(1u);
@@ -137,10 +137,10 @@ TEST(ValidationAcceptorTest, AppendsRelatedInformationFromListAndSpan) {
   auto &node = parse_validation_accept_node(document);
 
   services::Diagnostic diagnostic;
-  const ValidationAcceptor acceptor =
+  const ValidationAcceptor acceptor{
       [&diagnostic](services::Diagnostic value) {
         diagnostic = std::move(value);
-      };
+      }};
 
   const std::array<services::DiagnosticRelatedInformation, 1> extra{
       services::DiagnosticRelatedInformation{

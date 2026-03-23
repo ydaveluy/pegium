@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -64,12 +65,10 @@ struct Document {
     if (parseResult.recoveryReport.hasRecovered) {
       return true;
     }
-    for (const auto &diagnostic : parseResult.parseDiagnostics) {
-      if (diagnostic.isSyntax()) {
-        return true;
-      }
-    }
-    return false;
+    return std::ranges::any_of(parseResult.parseDiagnostics,
+                               [](const auto &diagnostic) {
+                                 return diagnostic.isSyntax();
+                               });
   }
 
   /// Returns the number of source bytes consumed by the parse result.

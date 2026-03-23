@@ -19,6 +19,12 @@ struct AstReflectionInitContext;
 
 namespace detail {
 
+template <typename Expr>
+concept HasInitImpl =
+    requires(const Expr &expression, AstReflectionInitContext &ctx) {
+      expression.init_impl(ctx);
+    };
+
 [[nodiscard]] inline std::type_index invalid_type() noexcept {
   return std::type_index(typeid(void));
 }
@@ -175,8 +181,8 @@ private:
       return;
     }
 
-    const DirectSubtypeEdge edge{.subtype = subtype, .supertype = supertype};
-    if (!_directSubtypeEdges.insert(edge).second) {
+    if (const DirectSubtypeEdge edge{.subtype = subtype, .supertype = supertype};
+        !_directSubtypeEdges.insert(edge).second) {
       return;
     }
 
@@ -217,17 +223,13 @@ private:
 
 struct InitAccess {
   template <typename Expr>
-    requires requires(const Expr &expression, AstReflectionInitContext &ctx) {
-      expression.init_impl(ctx);
-    }
+    requires HasInitImpl<Expr>
   static void init(const Expr &expression, AstReflectionInitContext &ctx) {
     expression.init_impl(ctx);
   }
 
   template <typename Expr>
-    requires(!requires(const Expr &expression, AstReflectionInitContext &ctx) {
-      expression.init_impl(ctx);
-    })
+    requires(!HasInitImpl<Expr>)
   static void init(const Expr &, AstReflectionInitContext &) {}
 };
 

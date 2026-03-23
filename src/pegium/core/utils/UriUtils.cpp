@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <filesystem>
+#include <span>
 #include <string>
 
 namespace pegium::utils {
@@ -36,7 +38,8 @@ std::string percent_encode(std::string_view text) {
   std::string encoded;
   encoded.reserve(text.size());
 
-  for (unsigned char c : text) {
+  for (const auto byte : std::as_bytes(std::span(text.data(), text.size()))) {
+    const auto c = std::to_integer<unsigned char>(byte);
     if (is_unreserved(c)) {
       encoded.push_back(static_cast<char>(c));
       continue;
@@ -61,21 +64,32 @@ int from_hex(char c) {
   return -1;
 }
 
+std::optional<unsigned char>
+decode_percent_escape(std::string_view text, std::size_t index) {
+  if (text[index] != '%' || index + 2 >= text.size()) {
+    return std::nullopt;
+  }
+
+  const auto high = from_hex(text[index + 1]);
+  const auto low = from_hex(text[index + 2]);
+  if (high < 0 || low < 0) {
+    return std::nullopt;
+  }
+
+  return static_cast<unsigned char>((static_cast<unsigned int>(high) << 4U) |
+                                    static_cast<unsigned int>(low));
+}
+
 std::string percent_decode(std::string_view text) {
   std::string decoded;
   decoded.reserve(text.size());
 
   for (std::size_t index = 0; index < text.size(); ++index) {
-    if (text[index] == '%' && index + 2 < text.size()) {
-      const auto high = from_hex(text[index + 1]);
-      const auto low = from_hex(text[index + 2]);
-      if (high >= 0 && low >= 0) {
-        decoded.push_back(
-            static_cast<char>((static_cast<unsigned int>(high) << 4U) |
-                              static_cast<unsigned int>(low)));
-        index += 2;
-        continue;
-      }
+    if (const auto decodedByte = decode_percent_escape(text, index);
+        decodedByte.has_value()) {
+      decoded.push_back(static_cast<char>(*decodedByte));
+      index += 2;
+      continue;
     }
     decoded.push_back(text[index]);
   }
@@ -114,10 +128,10 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
 
   if (!remainder.empty() && remainder.front() != '/') {
     const auto slashIndex = remainder.find('/');
-    const auto authority = slashIndex == std::string_view::npos
-                               ? remainder
-                               : remainder.substr(0, slashIndex);
-    if (!authority.empty()) {
+    if (const auto authority = slashIndex == std::string_view::npos
+                                   ? remainder
+                                   : remainder.substr(0, slashIndex);
+        !authority.empty()) {
       std::string lowered(authority);
       std::ranges::transform(lowered, lowered.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
@@ -201,10 +215,11 @@ std::string relative_uri(std::string_view from, std::string_view to) {
     return normalizedTo;
   }
 
-  const auto relative =
-      normalize_file_path(*toPath).lexically_relative(normalize_file_path(*fromPath))
-          .generic_string();
-  if (!relative.empty()) {
+  if (const auto relative =
+          normalize_file_path(*toPath)
+              .lexically_relative(normalize_file_path(*fromPath))
+              .generic_string();
+      !relative.empty()) {
     return relative;
   }
   return normalize_file_path(*toPath).generic_string();

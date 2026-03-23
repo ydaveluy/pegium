@@ -36,7 +36,7 @@ public:
   /// Hooks the store to LSP text-document notifications.
   virtual utils::ScopedDisposable
   listen(::lsp::MessageHandler &messageHandler,
-         std::function<void()> ensureInitialized = {}) = 0;
+         const std::function<void()> &ensureInitialized = {}) = 0;
 
   /// Subscribes to open-document events.
   virtual utils::ScopedDisposable onDidOpen(

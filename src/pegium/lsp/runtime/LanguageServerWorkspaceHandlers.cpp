@@ -60,9 +60,12 @@ void addLanguageServerWorkspaceHandlers(
               ensure_initialized(server);
               wait_until_phase(sharedServices, cancelToken, std::nullopt,
                                workspaceSymbolRequirement);
+              auto symbolForResolve = symbol;
+              auto resolvedSymbol =
+                  resolveWorkspaceSymbol(sharedServices, symbolForResolve,
+                                         cancelToken);
               return adapt_async_result<::lsp::WorkspaceSymbol>(
-                  server,
-                  resolveWorkspaceSymbol(sharedServices, symbol, cancelToken),
+                  server, std::move(resolvedSymbol),
                   wrap_resolved_or_original<::lsp::WorkspaceSymbol>{
                       std::move(symbol)},
                   cancelToken);

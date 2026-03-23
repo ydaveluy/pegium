@@ -19,6 +19,7 @@ class CstNodeView;
 
 class ChildIterator {
 public:
+  using iterator_concept = std::forward_iterator_tag;
   using iterator_category = std::forward_iterator_tag;
   using value_type = CstNodeView;
   using difference_type = std::ptrdiff_t;
@@ -35,6 +36,8 @@ public:
   reference operator*() const noexcept;
   /// Advances to the next sibling.
   ChildIterator &operator++() noexcept;
+  /// Advances to the next sibling and returns the previous iterator state.
+  ChildIterator operator++(int) noexcept;
 
   friend bool operator==(const ChildIterator &a,
                          const ChildIterator &b) noexcept = default;
@@ -214,6 +217,13 @@ inline ChildIterator &ChildIterator::operator++() noexcept {
 
   _cur = _root->node(_cur).nextSiblingId;
   return *this;
+}
+
+/// Advances the iterator and returns the previous position.
+inline ChildIterator ChildIterator::operator++(int) noexcept {
+  auto copy = *this;
+  ++(*this);
+  return copy;
 }
 
 } // namespace pegium

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <vector>
 
 #include <lsp/types.h>
@@ -19,6 +20,24 @@ public:
                   const ::lsp::CodeLensParams &params,
                   const utils::CancellationToken &cancelToken =
                       utils::default_cancel_token) const = 0;
+
+  /// Returns whether this provider supports deferred code-lens resolution.
+  [[nodiscard]] virtual bool supportsResolveCodeLens() const noexcept {
+    return false;
+  }
+
+  /// Resolves extra metadata for one code lens returned by `provideCodeLens(...)`.
+  ///
+  /// Pegium restores the original `CodeLens::data` before calling this hook and
+  /// preserves it across repeated resolve requests.
+  virtual std::optional<::lsp::CodeLens>
+  resolveCodeLens(const ::lsp::CodeLens &codeLens,
+                  const utils::CancellationToken &cancelToken =
+                      utils::default_cancel_token) const {
+    (void)codeLens;
+    (void)cancelToken;
+    return std::nullopt;
+  }
 };
 
 } // namespace pegium

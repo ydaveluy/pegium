@@ -6,9 +6,9 @@
 #include <cstdint>
 #include <limits>
 #include <memory_resource>
-#include <pegium/core/text/TextSnapshot.hpp>
 #include <pegium/core/syntax-tree/CstNode.hpp>
-#include <stdexcept>
+#include <pegium/core/text/TextSnapshot.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -71,7 +71,8 @@ public:
   /// case, callers should use `hasDocument()` or `tryGetDocument()` first.
   [[nodiscard]] const workspace::Document &getDocument() const {
     if (_document == nullptr) [[unlikely]] {
-      throw std::logic_error("CST root has no attached document.");
+      throw utils::MissingAstDocumentError(
+          "CST root has no attached document.");
     }
     return *_document;
   }

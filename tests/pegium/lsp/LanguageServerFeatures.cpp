@@ -123,7 +123,9 @@ public:
 
 class RecordingCodeLensProvider final : public ::pegium::CodeLensProvider {
 public:
+  bool resolveSupported = false;
   mutable std::string lastUri;
+  mutable std::optional<services::JsonValue> lastResolveData;
 
   std::vector<::lsp::CodeLens>
   provideCodeLens(const workspace::Document &document,
@@ -134,7 +136,36 @@ public:
     ::lsp::CodeLens codeLens{};
     codeLens.range.start = document.textDocument().positionAt(0);
     codeLens.range.end = document.textDocument().positionAt(0);
+    codeLens.data = to_lsp_any(services::JsonValue(services::JsonValue::Object{
+        {"seed", "alpha"},
+    }));
     return {std::move(codeLens)};
+  }
+
+  [[nodiscard]] bool supportsResolveCodeLens() const noexcept override {
+    return resolveSupported;
+  }
+
+  std::optional<::lsp::CodeLens>
+  resolveCodeLens(const ::lsp::CodeLens &codeLens,
+                  const utils::CancellationToken &) const override {
+    if (!resolveSupported) {
+      return std::nullopt;
+    }
+
+    if (codeLens.data.has_value()) {
+      lastResolveData = from_lsp_any(*codeLens.data);
+    } else {
+      lastResolveData = std::nullopt;
+    }
+
+    ::lsp::CodeLens resolved = codeLens;
+    ::lsp::Command command{};
+    command.title = "Resolved lens";
+    command.command = "test.resolveCodeLens";
+    resolved.command = std::move(command);
+    resolved.data = std::nullopt;
+    return resolved;
   }
 };
 
@@ -283,6 +314,50 @@ TEST(LanguageServerFeaturesTest, DispatchesCodeLensRequestsToLanguageService) {
   const auto codeLens = getCodeLens(*shared, params, utils::default_cancel_token);
   ASSERT_EQ(codeLens.size(), 1u);
   EXPECT_EQ(recording->lastUri, document->uri);
+}
+
+TEST(LanguageServerFeaturesTest,
+     ResolvesCodeLensRequestsAndPreservesOriginalProviderData) {
+  auto shared = test::make_empty_shared_services();
+  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  auto services = test::make_uninstalled_services(*shared, "test", {".test"});
+  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultLspServices(*services);
+  auto provider = std::make_unique<RecordingCodeLensProvider>();
+  provider->resolveSupported = true;
+  auto *recording = provider.get();
+  services->lsp.codeLensProvider = std::move(provider);
+  shared->serviceRegistry->registerServices(std::move(services));
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("codelens-resolve.test"), "test", "alpha");
+  ASSERT_NE(document, nullptr);
+
+  ::lsp::CodeLensParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+
+  const auto codeLens = getCodeLens(*shared, params, utils::default_cancel_token);
+  ASSERT_EQ(codeLens.size(), 1u);
+  ASSERT_TRUE(codeLens.front().data.has_value());
+
+  const auto resolved =
+      resolveCodeLens(*shared, codeLens.front(), utils::default_cancel_token);
+  ASSERT_TRUE(resolved.has_value());
+  ASSERT_TRUE(resolved->command.has_value());
+  EXPECT_EQ(resolved->command->title, "Resolved lens");
+
+  ASSERT_TRUE(recording->lastResolveData.has_value());
+  ASSERT_TRUE(recording->lastResolveData->isObject());
+  EXPECT_EQ(recording->lastResolveData->object().at("seed").string(), "alpha");
+
+  const auto resolvedAgain =
+      resolveCodeLens(*shared, *resolved, utils::default_cancel_token);
+  ASSERT_TRUE(resolvedAgain.has_value());
+  ASSERT_TRUE(resolvedAgain->command.has_value());
+  ASSERT_TRUE(recording->lastResolveData.has_value());
+  EXPECT_EQ(recording->lastResolveData->object().at("seed").string(), "alpha");
 }
 
 TEST(LanguageServerFeaturesTest,

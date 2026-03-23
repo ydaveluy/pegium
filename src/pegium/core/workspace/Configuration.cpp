@@ -36,8 +36,8 @@ bool readValidationOptions(const services::JsonValue &configuration,
   }
 
   const auto &validationObject = configuration.object();
-  const auto categoriesIt = validationObject.find("categories");
-  if (categoriesIt != validationObject.end()) {
+  if (const auto categoriesIt = validationObject.find("categories");
+      categoriesIt != validationObject.end()) {
     const auto &categoriesValue = categoriesIt->second;
     if (categoriesValue.isArray()) {
       target.categories.clear();
@@ -89,8 +89,8 @@ bool readValidationOption(const services::JsonValue &configuration,
 }
 
 StaticConfigurationProvider::StaticConfigurationProvider(
-    WorkspaceConfiguration configuration)
-    : _configuration(configuration) {}
+    const WorkspaceConfiguration &configuration)
+    : _configuration{configuration} {}
 
 void StaticConfigurationProvider::initialize(const InitializeParams &) {}
 
@@ -115,7 +115,7 @@ StaticConfigurationProvider::getConfiguration(std::string_view,
 
 utils::ScopedDisposable
 StaticConfigurationProvider::onConfigurationSectionUpdate(
-    typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener) {
+    const typename utils::EventEmitter<ConfigurationSectionUpdate>::Listener &) {
   return {};
 }
 

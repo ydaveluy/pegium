@@ -134,7 +134,7 @@ TEST(DefaultValidationRegistryTest, FiltersChecksByTypeAndCategory) {
       },
       "slow");
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA nodeA;
 
   const std::vector<std::string> fastCategories{"fast"};
@@ -185,7 +185,7 @@ TEST(DefaultValidationRegistryTest,
       },
       "fast");
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA nodeA;
   initialChecks->run(nodeA, noopAcceptor, {});
 
@@ -237,7 +237,7 @@ TEST(DefaultValidationRegistryTest, StoresBeforeAndAfterDocumentHooks) {
   ASSERT_EQ(registry.checksBefore().size(), 1u);
   ASSERT_EQ(registry.checksAfter().size(), 1u);
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA root;
   const std::vector<std::string> categories{"fast"};
 
@@ -277,7 +277,7 @@ TEST(DefaultValidationRegistryTest, LateRegistrationsUpdateHookReads) {
   ASSERT_EQ(registry.checksBefore().size(), 2u);
   ASSERT_EQ(registry.checksAfter().size(), 2u);
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA root;
   const std::vector<std::string> categories{"fast"};
 
@@ -313,7 +313,7 @@ TEST(DefaultValidationRegistryTest, RegisterChecksAddsGroupedTypedChecks) {
            })},
       "fast");
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA nodeA;
   ValidationNodeB nodeB;
 
@@ -336,7 +336,7 @@ TEST(DefaultValidationRegistryTest, RegisterChecksBindsValidatorMethods) {
            validator)},
       "fast");
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA nodeA;
   ValidationNodeB nodeB;
 
@@ -359,7 +359,7 @@ TEST(DefaultValidationRegistryTest,
           MoveOnlyValidator(std::move(calls)))},
       "fast");
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA nodeA;
   run_checks(registry, nodeA, {}, noopAcceptor);
 
@@ -376,11 +376,11 @@ TEST(DefaultValidationRegistryTest, ValidationCheckExceptionsBecomeDiagnostics) 
       });
 
   std::vector<std::string> messages;
-  const ValidationAcceptor acceptor =
+  const ValidationAcceptor acceptor{
       [&messages](services::Diagnostic diagnostic) {
         EXPECT_EQ(diagnostic.severity, services::DiagnosticSeverity::Error);
         messages.push_back(std::move(diagnostic.message));
-      };
+      }};
 
   ValidationNodeA node;
   run_checks(registry, node, {}, acceptor);
@@ -421,10 +421,10 @@ TEST(DefaultValidationRegistryTest,
   ASSERT_NE(node, nullptr);
 
   std::optional<services::Diagnostic> captured;
-  const ValidationAcceptor acceptor =
+  const ValidationAcceptor acceptor{
       [&captured](services::Diagnostic diagnostic) {
         captured = std::move(diagnostic);
-      };
+      }};
 
   run_checks(registry, *node, {}, acceptor);
 
@@ -454,7 +454,7 @@ TEST(DefaultValidationRegistryTest,
       },
       "fast");
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA nodeA;
   ValidationNodeB nodeB;
 
@@ -489,7 +489,7 @@ TEST(DefaultValidationRegistryTest,
   const auto fastChecks = registry.prepareChecks(fastCategories);
   const auto slowChecks = registry.prepareChecks(slowCategories);
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA nodeA;
   fastChecks->run(nodeA, noopAcceptor, {});
   slowChecks->run(nodeA, noopAcceptor, {});
@@ -512,7 +512,7 @@ TEST(DefaultValidationRegistryTest, UnknownCategoriesExecuteNothing) {
   const std::vector<std::string> unknownCategories{"unknown"};
   auto preparedChecks = registry.prepareChecks(unknownCategories);
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA nodeA;
   preparedChecks->run(nodeA, noopAcceptor, {});
 
@@ -543,7 +543,7 @@ TEST(DefaultValidationRegistryTest, ChecksExecuteInRegistrationOrder) {
       },
       "fast");
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA nodeA;
   run_checks(registry, nodeA, {}, noopAcceptor);
 
@@ -570,7 +570,7 @@ TEST(DefaultValidationRegistryTest,
     preparedChecks = registry.prepareChecks();
   }
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA nodeA;
   preparedChecks->run(nodeA, noopAcceptor, {});
 
@@ -588,11 +588,11 @@ TEST(DefaultValidationRegistryTest,
       });
 
   std::vector<std::string> messages;
-  const ValidationAcceptor acceptor =
+  const ValidationAcceptor acceptor{
       [&messages](services::Diagnostic diagnostic) {
         EXPECT_EQ(diagnostic.severity, services::DiagnosticSeverity::Error);
         messages.push_back(std::move(diagnostic.message));
-      };
+      }};
 
   ValidationNodeA root;
   registry.checksBefore().front()(root, acceptor, {}, {});
@@ -621,10 +621,10 @@ TEST(DefaultValidationRegistryTest,
       });
 
   std::vector<std::string> messages;
-  const ValidationAcceptor acceptor =
+  const ValidationAcceptor acceptor{
       [&messages](services::Diagnostic diagnostic) {
         messages.push_back(std::move(diagnostic.message));
-      };
+      }};
 
   ValidationNodeA root;
   registry.checksAfter().front()(root, acceptor, {}, {});
@@ -656,7 +656,7 @@ TEST(DefaultValidationRegistryTest, BaseTypeChecksApplyToDerivedNodes) {
         ++baseCalls;
       });
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationDerivedNode derivedNode;
 
   run_checks(registry, derivedNode, {}, noopAcceptor);
@@ -682,7 +682,7 @@ TEST(DefaultValidationRegistryTest,
   utils::CancellationTokenSource source;
   source.request_stop();
 
-  const ValidationAcceptor noopAcceptor = [](services::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{[](services::Diagnostic) {}};
   ValidationNodeA node;
 
   auto preparedChecks = registry.prepareChecks();

@@ -12,6 +12,7 @@
 #include <pegium/core/observability/ObservabilitySink.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
 #include <pegium/core/syntax-tree/AstUtils.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/validation/DiagnosticRanges.hpp>
 
 namespace pegium::validation {
@@ -70,17 +71,12 @@ void publish_validation_observation(
              const utils::CancellationToken &cancelToken) {
     try {
       check(node, acceptor, cancelToken);
-    } catch (const utils::OperationCancelled &) {
-      throw;
     } catch (const std::exception &error) {
+      if (dynamic_cast<const utils::OperationCancelled *>(&error) != nullptr) {
+        throw;
+      }
       auto message = std::string("An error occurred during validation: ") +
                      error.what();
-      publish_validation_observation(
-          *sink, node, observability::ObservationCode::ValidationCheckThrew,
-          message, category);
-      acceptor.error(node, message);
-    } catch (...) {
-      auto message = std::string("An error occurred during validation.");
       publish_validation_observation(
           *sink, node, observability::ObservationCode::ValidationCheckThrew,
           message, category);
@@ -102,16 +98,13 @@ void publish_validation_observation(
              const utils::CancellationToken &cancelToken) {
     try {
       check(rootNode, acceptor, categories, cancelToken);
-    } catch (const utils::OperationCancelled &) {
-      throw;
     } catch (const std::exception &error) {
+      if (dynamic_cast<const utils::OperationCancelled *>(&error) != nullptr) {
+        throw;
+      }
       auto message = errorPrefix + error.what();
       publish_validation_observation(*sink, rootNode, code, message);
       acceptor.error(rootNode, message);
-    } catch (...) {
-      publish_validation_observation(*sink, rootNode, code,
-                                     unknownErrorMessage);
-      acceptor.error(rootNode, unknownErrorMessage);
     }
   };
 }
@@ -192,7 +185,7 @@ build_filtered_check_index(
 
 void DefaultValidationRegistry::validate_category(std::string_view category) {
   if (category == kBuiltInValidationCategory) {
-    throw std::invalid_argument(
+    throw utils::ValidationRegistryError(
         "The 'built-in' category is reserved for parser/linking diagnostics.");
   }
 }

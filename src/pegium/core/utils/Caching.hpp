@@ -12,6 +12,7 @@
 #include <utility>
 
 #include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/Disposable.hpp>
 #include <pegium/core/workspace/DocumentBuilder.hpp>
 
@@ -55,7 +56,7 @@ protected:
   void throwIfDisposed() const {
     std::scoped_lock lock(_disposeMutex);
     if (_disposed) {
-      throw std::runtime_error("This cache has already been disposed.");
+      throw CacheDisposedError("This cache has already been disposed.");
     }
   }
 

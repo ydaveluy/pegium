@@ -72,6 +72,12 @@ For completion, start from `lsp::DefaultCompletionProvider` and override its
 protected hooks instead of replacing the whole feature pipeline. The API is
 documented in the [completion provider reference](../reference/completion-provider.md).
 
+Code lens providers can stay single-phase by only implementing
+`provideCodeLens(...)`. If a language wants deferred resolution, override
+`supportsResolveCodeLens()` and `resolveCodeLens(...)`. Pegium restores the
+original `CodeLens::data` before calling the resolve hook and preserves it
+across repeated resolve requests.
+
 When you override completion options, only advertise fields Pegium supports:
 
 - `triggerCharacters`

@@ -39,7 +39,8 @@ public:
 
   template <typename F>
   void scope(const utils::CancellationToken &cancelToken, F &&body) {
-    scopeWithExecutionContext(cancelToken, {}, std::forward<F>(body));
+    scopeWithExecutionContext(cancelToken, ExecutionContext{},
+                             std::forward<F>(body));
   }
 
   template <typename Range, typename F>
@@ -51,7 +52,7 @@ private:
     const TaskScheduler *scheduler;
     std::size_t workerIndex;
 
-    constexpr ExecutionContext(
+    explicit constexpr ExecutionContext(
         const TaskScheduler *scheduler = nullptr,
         std::size_t workerIndex = invalidWorkerIndex()) noexcept
         : scheduler(scheduler), workerIndex(workerIndex) {}
@@ -112,14 +113,15 @@ private:
 
   void enqueue(const std::shared_ptr<TaskGroupState> &group,
                std::function<void(Scope &)> task,
-               ExecutionContext executionContext = {});
+               ExecutionContext executionContext = ExecutionContext{});
   void join(const std::shared_ptr<TaskGroupState> &group,
-            ExecutionContext executionContext = {});
+            ExecutionContext executionContext = ExecutionContext{});
   [[nodiscard]] Scope makeScope(const utils::CancellationToken &cancelToken,
-                                ExecutionContext executionContext = {});
+                                ExecutionContext executionContext =
+                                    ExecutionContext{});
   void run(const utils::CancellationToken &cancelToken,
            const std::function<void(Scope &)> &body,
-           ExecutionContext executionContext = {});
+           ExecutionContext executionContext = ExecutionContext{});
 
   [[nodiscard]] bool tryPopTask(ScheduledTask &task,
                                 ExecutionContext executionContext);
@@ -127,7 +129,7 @@ private:
                                           ScheduledTask &task);
   [[nodiscard]] bool tryPopGlobalTask(ScheduledTask &task);
   [[nodiscard]] bool tryStealTask(std::size_t thiefIndex, ScheduledTask &task);
-  void executeTask(ScheduledTask task, ExecutionContext executionContext);
+  void executeTask(ScheduledTask &&task, ExecutionContext executionContext);
   void workerLoop(std::size_t workerIndex, std::stop_token stopToken);
 
   std::vector<std::unique_ptr<WorkerState>> _workers;

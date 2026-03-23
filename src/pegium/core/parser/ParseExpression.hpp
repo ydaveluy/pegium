@@ -110,9 +110,11 @@ struct Wrapper {
 
   Wrapper() = default;
 
-  Wrapper(const Wrapper &other) : _ops(other._ops) {
-    if (other._obj)
+  Wrapper(const Wrapper &other) noexcept
+      : _ops(other._ops) {
+    if (other._obj) {
       _obj = _ops.clone(other._obj);
+    }
   }
 
   Wrapper(Wrapper &&other) noexcept { move_from(std::move(other)); }
@@ -123,8 +125,9 @@ struct Wrapper {
 
     reset();
     _ops = other._ops;
-    if (other._obj)
+    if (other._obj) {
       _obj = _ops.clone(other._obj);
+    }
     return *this;
   }
 
@@ -179,8 +182,9 @@ struct Wrapper {
   }
 
   void reset() noexcept {
-    if (!_obj)
+    if (!_obj) {
       return;
+    }
     _ops.destroy(_obj);
     _obj = nullptr;
     _ops = {};
@@ -250,7 +254,9 @@ private:
     static void init(const void *self, AstReflectionInitContext &ctx) {
       parser::init(static_cast<const Model *>(self)->value, ctx);
     }
-    static void del(void *self) noexcept { delete static_cast<Model *>(self); }
+    static void destroy(void *self) noexcept {
+      delete static_cast<Model *>(self);
+    }
     static void *clone(const void *self) {
       return new Model(*static_cast<const Model *>(self));
     }
@@ -263,7 +269,7 @@ private:
           .parseExpect = &Model::parseExpect,
           .elem = &Model::elem,
           .init = &Model::init,
-          .destroy = &Model::del,
+          .destroy = &Model::destroy,
           .clone = &Model::clone,
       };
       if constexpr (RecoveryProbeCapableExpression<T>) {
@@ -281,7 +287,7 @@ private:
     ExpressionHolder<T> value;
   };
 
-  void *_obj = nullptr; // heap-only
+  void *_obj = nullptr;
   Ops _ops{};
 };
 } // namespace pegium::parser

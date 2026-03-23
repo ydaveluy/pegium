@@ -5,9 +5,25 @@
 
 #include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
 #include <pegium/lsp/runtime/LanguageServerRequestHandlerUtils.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 
 namespace pegium {
+
+namespace {
+
+bool has_code_lens_resolve_provider(const pegium::SharedServices &sharedServices) {
+  for (const auto *coreServices : sharedServices.serviceRegistry->all()) {
+    const auto *services = as_services(coreServices);
+    if (services != nullptr && services->lsp.codeLensProvider != nullptr &&
+        services->lsp.codeLensProvider->supportsResolveCodeLens()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
 
 void addLanguageServerTextDocumentHandlers(
     LanguageServerHandlerContext &server, ::lsp::MessageHandler &handler,
@@ -122,6 +138,24 @@ void addLanguageServerTextDocumentHandlers(
             return getCodeLens(sharedServices, params, cancelToken);
           },
           wrap_vector_payload<::lsp::TextDocument_CodeLensResult>{}));
+
+  if (has_code_lens_resolve_provider(sharedServices)) {
+    handler.add<::lsp::requests::CodeLens_Resolve>(
+        make_async_request<::lsp::CodeLens>(
+            server,
+            [&server, &sharedServices](::lsp::CodeLens &&codeLens,
+                                       const utils::CancellationToken &cancelToken) {
+              ensure_initialized(server);
+              auto codeLensForResolve = codeLens;
+              auto resolvedCodeLens =
+                  resolveCodeLens(sharedServices, codeLensForResolve, cancelToken);
+              return adapt_async_result<::lsp::CodeLens>(
+                  server, std::move(resolvedCodeLens),
+                  wrap_resolved_or_original<::lsp::CodeLens>{
+                      std::move(codeLens)},
+                  cancelToken);
+            }));
+  }
 
   handler.add<::lsp::requests::TextDocument_DocumentLink>(
       create_request_handler<::lsp::TextDocument_DocumentLinkResult,

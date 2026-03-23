@@ -24,8 +24,7 @@ DefaultAstNodeDescriptionProvider::createDescription(const AstNode &node,
   const auto cstNode = services.references.nameProvider->getNameNode(node)
                            .value_or(node.getCstNode());
   const auto offset = cstNode.getBegin();
-  const auto nameLength =
-      static_cast<TextOffset>(cstNode.getEnd() - cstNode.getBegin());
+  const auto nameLength = cstNode.getEnd() - cstNode.getBegin();
   assert(nameLength > 0);
 
   const auto symbolId = document.makeSymbolId(node);

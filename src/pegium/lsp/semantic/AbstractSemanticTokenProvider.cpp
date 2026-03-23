@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <mutex>
@@ -104,7 +105,7 @@ std::uint32_t utf16_length(std::string_view text) {
     std::uint32_t advance = 0;
     std::uint32_t utf16Units = 0;
     text::decodeOneUtf8ToUtf16Units(
-        reinterpret_cast<const std::uint8_t *>(remaining.data()),
+        reinterpret_cast<const std::byte *>(remaining.data()),
         static_cast<std::uint32_t>(remaining.size()), advance, utf16Units);
     remaining.remove_prefix(std::min<std::size_t>(advance, remaining.size()));
     length += utf16Units;
