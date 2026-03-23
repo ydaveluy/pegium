@@ -27,7 +27,7 @@ From the repository root:
 
 ```sh
 cmake -S . -B build
-cmake --build build -j
+cmake --build build
 ```
 
 ## Run the CLI
@@ -49,7 +49,7 @@ cmake --build build -j
 
 ```sh
 cmake -S . -B build
-cmake --build build -j
+cmake --build build
 ```
 
 ### 2. Install and compile the extension side
@@ -62,11 +62,13 @@ npm run compile
 
 ### 3. Start the extension in VS Code
 
-- Open `examples/statemachine` as the workspace folder in VS Code.
-- Start `Run Statemachine Extension` from `.vscode/launch.json`.
+- Open the repository root in VS Code.
+- Go to `Run and Debug`.
+- Start `Run Statemachine Extension` with `F5`.
 
-You can also open the repository root in VS Code, press `F5`, and select
-`Run Statemachine Extension`.
+The launch configuration lives in the repository root
+`.vscode/launch.json` and opens an Extension Development Host on
+`examples/statemachine/example`.
 
 If the server binary is not found automatically, set either:
 

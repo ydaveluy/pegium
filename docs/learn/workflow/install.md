@@ -14,14 +14,14 @@ machine and that you can run at least one shipped example.
 
 ```bash
 cmake -S . -B build
-cmake --build build -j32
+cmake --build build
 ```
 
 If you also want to validate the test suite:
 
 ```bash
 cd build
-ctest -j32 --output-on-failure
+ctest --output-on-failure
 ```
 
 ## Repository layout at a glance
