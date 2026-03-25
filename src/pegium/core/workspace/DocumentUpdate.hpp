@@ -11,7 +11,7 @@ namespace pegium::workspace {
 struct DocumentDiagnosticsSnapshot {
   std::string uri;
   std::string text;
-  std::vector<services::Diagnostic> diagnostics;
+  std::vector<pegium::Diagnostic> diagnostics;
 };
 
 } // namespace pegium::workspace

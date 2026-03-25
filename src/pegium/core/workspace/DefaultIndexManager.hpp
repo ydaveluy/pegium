@@ -16,9 +16,9 @@ namespace pegium::workspace {
 
 /// Default workspace index storing exported symbols and reference descriptions.
 class DefaultIndexManager : public IndexManager,
-                            protected services::DefaultSharedCoreService {
+                            protected pegium::DefaultSharedCoreService {
 public:
-  explicit DefaultIndexManager(services::SharedCoreServices &sharedServices);
+  explicit DefaultIndexManager(pegium::SharedCoreServices &sharedServices);
 
   void updateContent(Document &document,
                      utils::CancellationToken cancelToken) override;

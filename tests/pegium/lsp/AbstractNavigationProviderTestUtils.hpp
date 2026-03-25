@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/syntax-tree/AstUtils.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>

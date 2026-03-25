@@ -25,8 +25,8 @@ constexpr int clamp_to_lsp_integer(std::int64_t value) noexcept {
   return static_cast<int>(value);
 }
 
-::lsp::DiagnosticTag to_lsp_diagnostic_tag(services::DiagnosticTag tag) {
-  using enum services::DiagnosticTag;
+::lsp::DiagnosticTag to_lsp_diagnostic_tag(pegium::DiagnosticTag tag) {
+  using enum pegium::DiagnosticTag;
   switch (tag) {
   case Unnecessary:
     return ::lsp::DiagnosticTag::Unnecessary;

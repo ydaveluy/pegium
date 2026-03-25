@@ -5,13 +5,24 @@
 #include <string_view>
 #include <typeindex>
 
-#include <pegium/ExampleTestSupport.hpp>
+#include <pegium/core/CoreTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 
 namespace pegium::integration {
 namespace {
 
 using namespace pegium::parser;
+
+bool has_diagnostic_message(const workspace::Document &document,
+                            std::string_view needle) {
+  for (const auto &diagnostic : document.diagnostics) {
+    if (diagnostic.message.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
 
 struct CrossLanguageAbstractElement : AstNode {
   [[nodiscard]] virtual std::string_view kind() const noexcept = 0;
@@ -75,7 +86,7 @@ protected:
       pegium::test::make_empty_shared_services();
 
   CrossLanguageReferencesIntegrationTest() {
-    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedCoreServices(*shared);
     pegium::installDefaultSharedLspServices(*shared);
     pegium::test::initialize_shared_workspace_for_tests(*shared);
   }
@@ -83,11 +94,11 @@ protected:
   void registerLanguages() {
     auto consumer = test::make_uninstalled_services<CrossLanguageConsumerParser>(
         *shared, "cross-consumer", {".consumer"});
-    pegium::services::installDefaultCoreServices(*consumer);
+    pegium::installDefaultCoreServices(*consumer);
 
     auto provider = test::make_uninstalled_services<CrossLanguageProviderParser>(
         *shared, "cross-provider", {".provider"});
-    pegium::services::installDefaultCoreServices(*provider);
+    pegium::installDefaultCoreServices(*provider);
 
     if (GetParam() == RegistrationOrder::ConsumerThenProvider) {
       shared->serviceRegistry->registerServices(std::move(consumer));
@@ -135,7 +146,7 @@ TEST_P(CrossLanguageReferencesIntegrationTest,
   ASSERT_TRUE(consumerDocument->parseSucceeded());
   EXPECT_EQ(consumerDocument->state, workspace::DocumentState::Validated);
   EXPECT_FALSE(
-      test::has_diagnostic_message(*consumerDocument, "Unresolved reference"));
+      has_diagnostic_message(*consumerDocument, "Unresolved reference"));
 
   auto *consumer = dynamic_cast<CrossLanguageConsumerRoot *>(
       consumerDocument->parseResult.value.get());

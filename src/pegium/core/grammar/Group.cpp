@@ -1,4 +1,5 @@
 #include <pegium/core/grammar/Group.hpp>
+#include <pegium/core/grammar/PrintUtils.hpp>
 
 #include <cstddef>
 #include <ostream>
@@ -13,7 +14,7 @@ void Group::print(std::ostream &os) const {
     if (elementIndex > 0) {
       os << ' ';
     }
-    os << *get(elementIndex);
+    detail::print_element_reference(os, *get(elementIndex));
   }
   os << ')';
 }

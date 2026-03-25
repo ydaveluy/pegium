@@ -22,11 +22,11 @@ workspace and are served by the same runtime.
 
 The clearest reading path is:
 
-- `examples/requirements/src/RequirementsModule.cpp` for multi-language
+- `examples/requirements/src/core/RequirementsModule.cpp` for multi-language
   registration
-- `examples/requirements/src/Language.cpp` for the language definitions
-- `examples/requirements/src/validation/RequirementsValidator.cpp` and
-  `examples/requirements/src/validation/TestsValidator.cpp` for
+- `examples/requirements/src/core/Language.cpp` for the language definitions
+- `examples/requirements/src/core/validation/RequirementsValidator.cpp` and
+  `examples/requirements/src/core/validation/TestsValidator.cpp` for
   language-specific validation on both sides of the workspace
 - `examples/requirements/src/lsp/RequirementsFormatter.cpp` for shared
   editor-facing behavior

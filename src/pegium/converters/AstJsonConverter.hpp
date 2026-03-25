@@ -18,7 +18,7 @@ public:
   using Options = AstJsonConversionOptions;
 
   /// Converts `node` to JSON using `options`.
-  [[nodiscard]] static services::JsonValue convert(const AstNode &node,
+  [[nodiscard]] static pegium::JsonValue convert(const AstNode &node,
                                                    const Options &options = {});
 };
 

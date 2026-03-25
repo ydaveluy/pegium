@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include <pegium/CoreTestSupport.hpp>
+#include <pegium/core/CoreTestSupport.hpp>
 #include <pegium/lsp/workspace/DefaultTextDocuments.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 
@@ -134,6 +134,19 @@ TEST(DefaultTextDocumentsTest, AllAndKeysReflectCurrentState) {
   ASSERT_EQ(uris.size(), 2u);
   EXPECT_NE(std::ranges::find(uris, firstUri), uris.end());
   EXPECT_NE(std::ranges::find(uris, secondUri), uris.end());
+}
+
+TEST(DefaultTextDocumentsTest, WillSaveWaitUntilSubscriptionCanOutliveStore) {
+  utils::ScopedDisposable subscription;
+  {
+    auto documents = std::make_unique<DefaultTextDocuments>();
+    subscription = documents->onWillSaveWaitUntil(
+        [](const workspace::TextDocumentWillSaveEvent &) {
+          return std::vector<workspace::TextEdit>{};
+        });
+  }
+
+  EXPECT_FALSE(subscription.disposed());
 }
 
 } // namespace

@@ -27,8 +27,8 @@ bool matches_type(const AstNodeDescription &description,
 } // namespace
 
 DefaultIndexManager::DefaultIndexManager(
-    services::SharedCoreServices &sharedServices)
-    : services::DefaultSharedCoreService(sharedServices) {}
+    pegium::SharedCoreServices &sharedServices)
+    : pegium::DefaultSharedCoreService(sharedServices) {}
 
 void DefaultIndexManager::updateContent(Document &document,
                                         utils::CancellationToken cancelToken) {

@@ -19,7 +19,7 @@ class DocumentValidator {
 public:
   virtual ~DocumentValidator() noexcept = default;
   /// Returns the diagnostics produced for `document` under `options`.
-  [[nodiscard]] virtual std::vector<services::Diagnostic>
+  [[nodiscard]] virtual std::vector<pegium::Diagnostic>
   validateDocument(const workspace::Document &document,
                    const ValidationOptions &options,
                    const utils::CancellationToken &cancelToken) const = 0;

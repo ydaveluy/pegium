@@ -2,9 +2,9 @@
 
 #include <concepts>
 #include <limits>
-#include <optional>
 #include <pegium/core/grammar/Repetition.hpp>
 #include <pegium/core/parser/CompletionSupport.hpp>
+#include <pegium/core/parser/EditableRecoverySupport.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/ExpectFrontier.hpp>
 #include <pegium/core/parser/ParseAttempt.hpp>
@@ -159,23 +159,29 @@ private:
       };
       if constexpr (is_optional) {
         const auto checkpoint = ctx.mark();
-
+        const char *const savedMaxCursor = ctx.maxCursor();
         if (attempt_parse_no_edits(ctx, _element)) {
+          if (savedMaxCursor > ctx.maxCursor()) {
+            ctx.restoreMaxCursor(savedMaxCursor);
+          }
           return true;
         }
         ctx.rewind(checkpoint);
+        ctx.restoreMaxCursor(savedMaxCursor);
+        const bool prefixLooksStarted =
+            attempt_fast_probe(ctx, _element) ||
+            probe_locally_recoverable(_element, ctx);
         // Keep optional branches conservative in recovery: only try to edit the
         // optional element when its prefix is already locally plausible. This
         // avoids inventing an optional construct that was never started.
-        if (!attempt_fast_probe(ctx, _element) &&
-            !probe_locally_recoverable(_element, ctx)) {
+        if (!prefixLooksStarted) {
           return true;
         }
         if (try_recovery_iteration(ctx, /*skipBetweenIterations=*/false)) {
           return true;
         }
         ctx.rewind(checkpoint);
-        return true;
+        return false;
       } else if constexpr (is_star) {
         PEGIUM_RECOVERY_TRACE("[repeat * rule] enter offset=",
                               ctx.cursorOffset());
@@ -311,6 +317,91 @@ private:
 
   bool try_recovery_iteration(RecoveryContext &ctx,
                               bool skipBetweenIterations) const {
+    enum class RecoveryIterationChoice : std::uint8_t {
+      None,
+      NoInsert,
+      DeleteRetry,
+      Insert,
+    };
+    enum class RecoveryRetryPolicy : std::uint8_t {
+      None,
+      InsertOnly,
+      DeleteAndInsert,
+    };
+    struct IterationRecoveryCandidates {
+      detail::ProgressRecoveryCandidate noInsert;
+      detail::ProgressRecoveryCandidate deleteRetry;
+      detail::ProgressRecoveryCandidate insert;
+
+      [[nodiscard]] RecoveryIterationChoice select() const noexcept {
+        if (insert.matched) {
+          auto choice = RecoveryIterationChoice::Insert;
+          if (noInsert.matched &&
+              detail::is_better_progress_recovery_candidate(noInsert, insert)) {
+            choice = RecoveryIterationChoice::NoInsert;
+            if (deleteRetry.matched &&
+                detail::is_better_progress_recovery_candidate(deleteRetry,
+                                                              noInsert)) {
+              choice = RecoveryIterationChoice::DeleteRetry;
+            }
+          }
+          if (choice == RecoveryIterationChoice::Insert &&
+              deleteRetry.matched &&
+              detail::is_better_progress_recovery_candidate(deleteRetry,
+                                                            insert)) {
+            choice = RecoveryIterationChoice::DeleteRetry;
+          }
+          return choice;
+        }
+        if (deleteRetry.matched) {
+          return RecoveryIterationChoice::DeleteRetry;
+        }
+        if (noInsert.matched) {
+          return RecoveryIterationChoice::NoInsert;
+        }
+        return RecoveryIterationChoice::None;
+      }
+    };
+    struct NoInsertProbe {
+      bool matched = false;
+      bool progressed = false;
+      bool usedEdits = false;
+      bool reachedEndOfInput = false;
+    };
+    struct ProbeRecoveryPolicy {
+      bool keepNoInsertCandidate = false;
+      bool acceptNoInsertImmediately = false;
+      RecoveryRetryPolicy retryPolicy = RecoveryRetryPolicy::None;
+
+      [[nodiscard]] constexpr bool triesDeleteRetry() const noexcept {
+        return retryPolicy == RecoveryRetryPolicy::DeleteAndInsert;
+      }
+
+      [[nodiscard]] constexpr bool triesInsertRetry() const noexcept {
+        return retryPolicy != RecoveryRetryPolicy::None;
+      }
+
+      [[nodiscard]] constexpr bool
+      disablesDeleteDuringInsertRetry(const NoInsertProbe &probe) const noexcept {
+        return !probe.progressed &&
+               retryPolicy == RecoveryRetryPolicy::InsertOnly;
+      }
+
+      [[nodiscard]] constexpr bool
+      stopsNaturally(const NoInsertProbe &probe) const noexcept {
+        return !probe.progressed && retryPolicy == RecoveryRetryPolicy::None;
+      }
+
+      [[nodiscard]] constexpr bool acceptsInsertCandidate(
+          const NoInsertProbe &probe,
+          std::uint32_t editCountDelta) const noexcept {
+        if (!probe.reachedEndOfInput || triesDeleteRetry()) {
+          return true;
+        }
+        return editCountDelta == 1u;
+      }
+    };
+
     const auto iterationCheckpoint = ctx.mark();
     const auto editCountBefore = ctx.currentEditCount();
     if (skipBetweenIterations) {
@@ -320,123 +411,150 @@ private:
     const char *const parseStart = ctx.cursor();
     const TextOffset parseStartOffset = ctx.cursorOffset();
     const char *const maxCursorBeforeAttempt = ctx.maxCursor();
+    const TextOffset maxCursorBeforeAttemptOffset =
+        static_cast<TextOffset>(maxCursorBeforeAttempt - ctx.begin);
+    const TextOffset endOffset = static_cast<TextOffset>(ctx.end - ctx.begin);
     const TextOffset pendingRecoveryWindowBeginOffset =
         ctx.pendingRecoveryWindowBeginOffset();
     const TextOffset pendingRecoveryWindowMaxCursorOffset =
         ctx.pendingRecoveryWindowMaxCursorOffset();
-
     const bool previousAllowInsert = ctx.allowInsert;
-    ctx.allowInsert = false;
-    const bool matchedWithoutInsert = parse(_element, ctx);
-    const bool progressedWithoutInsert = ctx.cursor() != parseStart;
-    const bool reachedEndOfInputWithoutInsert =
-        ctx.maxCursor() == ctx.end && ctx.maxCursor() > parseStart &&
-        ctx.maxCursor() > maxCursorBeforeAttempt;
-    const bool usedEditsWithoutInsert =
-        ctx.currentEditCount() != editCountBefore;
-    detail::ProgressRecoveryCandidate noInsertCandidate;
-    std::optional<RecoveryContext::Checkpoint> matchedWithoutInsertState;
-    ctx.allowInsert = previousAllowInsert;
+    const bool previousAllowDelete = ctx.allowDelete;
+    const auto restore_iteration_edit_permissions = [&ctx, previousAllowInsert,
+                                                     previousAllowDelete]() {
+      ctx.allowInsert = previousAllowInsert;
+      ctx.allowDelete = previousAllowDelete;
+    };
+    const auto parse_without_new_insertions = [this, &ctx, parseStart]() {
+      const bool allowInsertBefore = ctx.allowInsert;
+      ctx.allowInsert = false;
+      const bool matched = parse(_element, ctx) && ctx.cursor() != parseStart;
+      ctx.allowInsert = allowInsertBefore;
+      return matched;
+    };
 
-    if (matchedWithoutInsert && progressedWithoutInsert) {
-      matchedWithoutInsertState = ctx.mark();
-      noInsertCandidate = {
-          .matched = true,
-          .cursorOffset = ctx.cursorOffset(),
-          .editCost = ctx.editCostDelta(iterationCheckpoint),
-      };
-      if (!usedEditsWithoutInsert) {
-        return true;
+    const bool noInsertMatched = parse_without_new_insertions();
+    const auto noInsertProbeProgress = detail::capture_recovery_probe_progress(ctx);
+    const NoInsertProbe noInsertProbe = {
+        .matched = noInsertMatched,
+        .progressed = noInsertProbeProgress.committedProgressed(parseStartOffset),
+        .usedEdits = ctx.currentEditCount() != editCountBefore,
+        // `maxCursor` is intentionally not rewound. A probe can fail after
+        // exploring deeper text and then rewind its committed cursor to the
+        // iteration start.
+        .reachedEndOfInput =
+            noInsertProbeProgress.reachedEndOfInput(endOffset) &&
+            noInsertProbeProgress.exploredBeyond(parseStartOffset) &&
+            noInsertProbeProgress.exploredBeyond(maxCursorBeforeAttemptOffset),
+    };
+    const bool failedInsideActiveRecoveryWindow =
+        !noInsertProbe.progressed && ctx.hasPendingRecoveryWindows() &&
+        parseStartOffset >= pendingRecoveryWindowBeginOffset &&
+        parseStartOffset < pendingRecoveryWindowMaxCursorOffset;
+    const ProbeRecoveryPolicy probePolicy = [&]() constexpr noexcept {
+      if (noInsertProbe.matched && noInsertProbe.progressed) {
+        return ProbeRecoveryPolicy{
+            .keepNoInsertCandidate = true,
+            .acceptNoInsertImmediately =
+                !noInsertProbe.usedEdits || !previousAllowInsert,
+            .retryPolicy = previousAllowInsert ? RecoveryRetryPolicy::InsertOnly
+                                               : RecoveryRetryPolicy::None,
+        };
       }
-      if (!previousAllowInsert) {
+      if (failedInsideActiveRecoveryWindow) {
+        return ProbeRecoveryPolicy{
+            .retryPolicy = RecoveryRetryPolicy::DeleteAndInsert,
+        };
+      }
+      if (noInsertProbe.reachedEndOfInput) {
+        return ProbeRecoveryPolicy{
+            .retryPolicy = RecoveryRetryPolicy::InsertOnly,
+        };
+      }
+      return ProbeRecoveryPolicy{};
+    }();
+    IterationRecoveryCandidates candidates;
+    candidates.noInsert.matched = probePolicy.keepNoInsertCandidate;
+    restore_iteration_edit_permissions();
+
+    if (probePolicy.keepNoInsertCandidate) {
+      candidates.noInsert =
+          detail::capture_progress_recovery_candidate(ctx, iterationCheckpoint);
+      if (probePolicy.acceptNoInsertImmediately) {
         return true;
       }
     }
 
     ctx.rewind(parseCheckpoint);
-    const bool allowDeleteDuringNoProgressRetry =
-        !progressedWithoutInsert && ctx.hasPendingRecoveryWindows() &&
-        parseStartOffset >= pendingRecoveryWindowBeginOffset &&
-        parseStartOffset < pendingRecoveryWindowMaxCursorOffset;
-    const bool allowInsertAfterRewoundProgress =
-        reachedEndOfInputWithoutInsert ||
-        // A repeated child can fail deep inside the active recovery window and
-        // then rewind to its start. Treat that as a recovery candidate instead
-        // of a natural end of repetition.
-        allowDeleteDuringNoProgressRetry;
-    if (!progressedWithoutInsert && !allowInsertAfterRewoundProgress) {
+    restore_iteration_edit_permissions();
+    if (probePolicy.stopsNaturally(noInsertProbe)) {
       ctx.rewind(iterationCheckpoint);
       return false;
     }
 
-    detail::ProgressRecoveryCandidate deleteRetryCandidate;
-    std::optional<RecoveryContext::Checkpoint> deleteRetryState;
-    if (allowDeleteDuringNoProgressRetry) {
-      const auto deleteRetryCheckpoint = ctx.mark();
-      const bool previousAllowInsertForDeleteRetry = ctx.allowInsert;
-      const bool previousAllowDeleteForDeleteRetry = ctx.allowDelete;
+    const auto parse_delete_retry = [this, &ctx, parseStart]() {
+      const bool allowInsertBefore = ctx.allowInsert;
+      const bool allowDeleteBefore = ctx.allowDelete;
       ctx.allowInsert = false;
-      const bool matchedWithDeleteRetry =
-          parse(_element, ctx) && ctx.cursor() != parseStart;
-      ctx.allowInsert = previousAllowInsertForDeleteRetry;
-      ctx.allowDelete = previousAllowDeleteForDeleteRetry;
+      const bool matched = parse(_element, ctx) && ctx.cursor() != parseStart;
+      ctx.allowInsert = allowInsertBefore;
+      ctx.allowDelete = allowDeleteBefore;
+      return matched;
+    };
+    if (probePolicy.triesDeleteRetry()) {
+      const bool matchedWithDeleteRetry = parse_delete_retry();
       if (matchedWithDeleteRetry) {
-        deleteRetryState = ctx.mark();
-        deleteRetryCandidate = {
-            .matched = true,
-            .cursorOffset = ctx.cursorOffset(),
-            .editCost = ctx.editCostDelta(iterationCheckpoint),
-        };
+        candidates.deleteRetry =
+            detail::capture_progress_recovery_candidate(ctx, iterationCheckpoint);
       }
-      ctx.rewind(deleteRetryCheckpoint);
+      ctx.rewind(parseCheckpoint);
+      restore_iteration_edit_permissions();
     }
 
-    const bool previousAllowDelete = ctx.allowDelete;
-    if (!progressedWithoutInsert && allowInsertAfterRewoundProgress &&
-        !allowDeleteDuringNoProgressRetry) {
-      ctx.allowDelete = false;
+    const auto parse_with_insert = [this, &ctx, parseStart,
+                                    noInsertProbe,
+                                    probePolicy]() {
+      const bool allowDeleteBefore = ctx.allowDelete;
+      if (probePolicy.disablesDeleteDuringInsertRetry(noInsertProbe)) {
+        ctx.allowDelete = false;
+      }
+      const bool matched = parse(_element, ctx) && ctx.cursor() != parseStart;
+      ctx.allowDelete = allowDeleteBefore;
+      return matched;
+    };
+    bool matchedWithInsert = parse_with_insert();
+    if (matchedWithInsert &&
+        !probePolicy.acceptsInsertCandidate(
+            noInsertProbe, ctx.currentEditCount() - editCountBefore)) {
+      matchedWithInsert = false;
     }
-
-    const bool matchedWithInsert =
-        parse(_element, ctx) && ctx.cursor() != parseStart;
-    ctx.allowDelete = previousAllowDelete;
+    restore_iteration_edit_permissions();
 
     if (matchedWithInsert) {
-      const detail::ProgressRecoveryCandidate insertCandidate{
-          .matched = true,
-          .cursorOffset = ctx.cursorOffset(),
-          .editCost = ctx.editCostDelta(iterationCheckpoint),
-      };
-      if (matchedWithoutInsertState.has_value()) {
-        if (detail::is_better_progress_recovery_candidate(noInsertCandidate,
-                                                          insertCandidate)) {
-          ctx.rewind(*matchedWithoutInsertState);
-          if (deleteRetryState.has_value() &&
-              detail::is_better_progress_recovery_candidate(
-                  deleteRetryCandidate, noInsertCandidate)) {
-            ctx.rewind(*deleteRetryState);
-          }
-          return true;
-        }
-      }
-      if (deleteRetryState.has_value() &&
-          detail::is_better_progress_recovery_candidate(deleteRetryCandidate,
-                                                        insertCandidate)) {
-        ctx.rewind(*deleteRetryState);
-      }
-      return true;
+      candidates.insert =
+          detail::capture_progress_recovery_candidate(ctx, iterationCheckpoint);
+    }
+    const auto choice = candidates.select();
+
+    if (choice == RecoveryIterationChoice::None) {
+      ctx.rewind(iterationCheckpoint);
+      return false;
     }
 
-    if (deleteRetryState.has_value()) {
-      ctx.rewind(*deleteRetryState);
-      return true;
+    // Rebuild only the winning branch from the shared parse checkpoint instead
+    // of keeping success checkpoints alive across competing recovery parses.
+    ctx.rewind(parseCheckpoint);
+    restore_iteration_edit_permissions();
+    switch (choice) {
+    case RecoveryIterationChoice::NoInsert:
+      return parse_without_new_insertions();
+    case RecoveryIterationChoice::DeleteRetry:
+      return parse_delete_retry();
+    case RecoveryIterationChoice::Insert:
+      return parse_with_insert();
+    case RecoveryIterationChoice::None:
+      break;
     }
-
-    if (matchedWithoutInsertState.has_value()) {
-      ctx.rewind(*matchedWithoutInsertState);
-      return true;
-    }
-
     ctx.rewind(iterationCheckpoint);
     return false;
   }

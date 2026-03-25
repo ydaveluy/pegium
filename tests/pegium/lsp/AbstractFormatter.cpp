@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/formatting/AbstractFormatter.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
@@ -101,11 +101,11 @@ struct ParsedMiniDocument {
 
 ParsedMiniDocument open_mini_document(std::string text) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services<MiniParser>(*shared, "mini", {".mini"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   shared->serviceRegistry->registerServices(std::move(services));
 
@@ -454,13 +454,13 @@ public:
 
 TEST(AbstractFormatterTest, FullFormattingSkipsRecoveredDocuments) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services(*shared, "mini", {".mini"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -480,13 +480,13 @@ TEST(AbstractFormatterTest, FullFormattingSkipsRecoveredDocuments) {
 
 TEST(AbstractFormatterTest, RangeFormattingSkipsRangesWithEarlierParseErrors) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services(*shared, "mini", {".mini"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }

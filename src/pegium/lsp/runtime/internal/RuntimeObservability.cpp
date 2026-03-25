@@ -18,7 +18,7 @@ void publish_lsp_runtime_failure(observability::ObservabilitySink &sink,
   });
 }
 
-void observe_background_task(const services::SharedCoreServices &sharedServices,
+void observe_background_task(const pegium::SharedCoreServices &sharedServices,
                              std::string_view category,
                              std::future<void> future) {
   if (!future.valid()) {

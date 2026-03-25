@@ -111,7 +111,7 @@ Document &DefaultDocumentFactory::update(
 
 std::shared_ptr<Document> DefaultDocumentFactory::createDocument(
     std::shared_ptr<TextDocument> textDocument,
-    const services::CoreServices &services,
+    const pegium::CoreServices &services,
     const utils::CancellationToken &cancelToken) const {
   assert(textDocument != nullptr);
 
@@ -151,7 +151,7 @@ std::shared_ptr<TextDocument> DefaultDocumentFactory::normalizeTextDocument(
 }
 
 void DefaultDocumentFactory::parse(
-    Document &document, const services::CoreServices &services,
+    Document &document, const pegium::CoreServices &services,
     const utils::CancellationToken &cancelToken) const {
   utils::throw_if_cancelled(cancelToken);
   document.parseResult = services.parser->parse(snapshot(document.textDocument()),

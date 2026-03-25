@@ -155,7 +155,7 @@ void attach_lsp_observability_sink(SharedServices &sharedServices,
 
 void initializeSharedServicesForLanguageServer(
     SharedServices &sharedServices, ::lsp::Connection &connection) {
-  services::installDefaultSharedCoreServices(sharedServices);
+  pegium::installDefaultSharedCoreServices(sharedServices);
   sharedServices.lsp.languageClient.reset();
   attach_lsp_observability_sink(sharedServices, connection);
   installDefaultSharedLspServices(sharedServices);

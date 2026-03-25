@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,10 +18,10 @@ namespace pegium::workspace {
 
 /// Default document builder driving parse, index, link, and validation phases.
 class DefaultDocumentBuilder : public DocumentBuilder,
-                               protected services::DefaultSharedCoreService {
+                               protected pegium::DefaultSharedCoreService {
 public:
   explicit DefaultDocumentBuilder(
-      const services::SharedCoreServices &sharedServices);
+      const pegium::SharedCoreServices &sharedServices);
 
   [[nodiscard]] BuildOptions &updateBuildOptions() noexcept override;
   [[nodiscard]] const BuildOptions &
@@ -76,6 +77,11 @@ private:
     std::size_t id = 0;
     Listener listener;
   };
+  template <typename Listener> struct ListenerState {
+    mutable std::mutex mutex;
+    std::vector<ListenerEntry<Listener>> listeners;
+    std::size_t nextId = 0;
+  };
 
   [[nodiscard]] BuildOptions getBuildOptions(const Document &document) const;
   [[nodiscard]] bool shouldLink(const Document &document) const;
@@ -120,6 +126,18 @@ private:
   awaitDocumentState(DocumentState state, DocumentId documentId,
                      utils::CancellationToken cancelToken) const;
   void cleanUpDeleted(DocumentId documentId) const;
+  template <typename Listener>
+  [[nodiscard]] utils::ScopedDisposable
+  addListener(const std::shared_ptr<ListenerState<Listener>> &state,
+              Listener listener) const;
+  template <typename Listener>
+  [[nodiscard]] std::vector<ListenerEntry<Listener>>
+  snapshotListeners(
+      const std::shared_ptr<ListenerState<Listener>> &state) const;
+  template <typename Listener>
+  [[nodiscard]] static std::array<std::shared_ptr<ListenerState<Listener>>,
+                                  kDocumentStateCount>
+  makeListenerStates();
 
   BuildOptions _updateBuildOptions{};
 
@@ -131,15 +149,14 @@ private:
   mutable std::unordered_map<DocumentId, DocumentBuildState>
       _buildStateByDocumentId;
 
-  mutable std::mutex _listenerMutex;
-  mutable std::size_t _nextListenerId = 0;
-  mutable std::vector<ListenerEntry<UpdateListener>> _updateListeners;
-  mutable std::array<std::vector<ListenerEntry<BuildPhaseListener>>,
-                     kDocumentStateCount>
-      _buildPhaseListeners;
-  mutable std::array<std::vector<ListenerEntry<DocumentPhaseListener>>,
-                     kDocumentStateCount>
-      _documentPhaseListeners;
+  std::shared_ptr<ListenerState<UpdateListener>> _updateListeners =
+      std::make_shared<ListenerState<UpdateListener>>();
+  std::array<std::shared_ptr<ListenerState<BuildPhaseListener>>,
+             kDocumentStateCount>
+      _buildPhaseListeners = makeListenerStates<BuildPhaseListener>();
+  std::array<std::shared_ptr<ListenerState<DocumentPhaseListener>>,
+             kDocumentStateCount>
+      _documentPhaseListeners = makeListenerStates<DocumentPhaseListener>();
 };
 
 template <typename Callback>
@@ -187,6 +204,44 @@ void DefaultDocumentBuilder::runCancelable(
 
   notifyBuildPhase(targetDocuments, targetState, cancelToken);
   publishWorkspaceState(targetState);
+}
+
+template <typename Listener>
+utils::ScopedDisposable DefaultDocumentBuilder::addListener(
+    const std::shared_ptr<ListenerState<Listener>> &state,
+    Listener listener) const {
+  std::size_t id = 0;
+  {
+    std::scoped_lock lock(state->mutex);
+    id = state->nextId++;
+    state->listeners.push_back({.id = id, .listener = std::move(listener)});
+  }
+
+  return utils::ScopedDisposable([state, id]() {
+    std::scoped_lock lock(state->mutex);
+    std::erase_if(state->listeners,
+                  [id](const auto &entry) { return entry.id == id; });
+  });
+}
+
+template <typename Listener>
+std::vector<DefaultDocumentBuilder::ListenerEntry<Listener>>
+DefaultDocumentBuilder::snapshotListeners(
+    const std::shared_ptr<ListenerState<Listener>> &state) const {
+  std::scoped_lock lock(state->mutex);
+  return state->listeners;
+}
+
+template <typename Listener>
+std::array<std::shared_ptr<DefaultDocumentBuilder::ListenerState<Listener>>,
+           DefaultDocumentBuilder::kDocumentStateCount>
+DefaultDocumentBuilder::makeListenerStates() {
+  std::array<std::shared_ptr<ListenerState<Listener>>, kDocumentStateCount>
+      states;
+  for (auto &state : states) {
+    state = std::make_shared<ListenerState<Listener>>();
+  }
+  return states;
 }
 
 } // namespace pegium::workspace

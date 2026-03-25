@@ -80,8 +80,8 @@ struct LspFeatureServices {
 };
 
 /// Language service container that extends core services with LSP features.
-struct Services : services::CoreServices {
-  using MetaData = services::LanguageMetaData;
+struct Services : pegium::CoreServices {
+  using MetaData = pegium::LanguageMetaData;
 
   explicit Services(const SharedServices &sharedServices);
   Services(Services &&) noexcept = default;

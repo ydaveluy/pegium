@@ -2,13 +2,13 @@
 
 #include <memory>
 
-#include <pegium/lsp/services/Services.hpp>
+#include <pegium/core/services/CoreServices.hpp>
 
-namespace arithmetics::services::validation {
+namespace arithmetics::validation {
 class ArithmeticsValidator;
 }
 
-namespace arithmetics::services {
+namespace arithmetics {
 
 struct ArithmeticsValidationServices {
   std::unique_ptr<validation::ArithmeticsValidator> arithmeticsValidator;
@@ -18,9 +18,9 @@ struct ArithmeticsAddedServices {
   ArithmeticsValidationServices validation;
 };
 
-struct ArithmeticsServices final : pegium::Services {
+struct ArithmeticsServices final : pegium::CoreServices {
   explicit ArithmeticsServices(
-      const pegium::SharedServices &sharedServices);
+      const pegium::SharedCoreServices &sharedServices);
   ArithmeticsServices(ArithmeticsServices &&) noexcept;
   ArithmeticsServices &operator=(ArithmeticsServices &&) noexcept = delete;
   ArithmeticsServices(const ArithmeticsServices &) = delete;
@@ -31,13 +31,8 @@ struct ArithmeticsServices final : pegium::Services {
 };
 
 [[nodiscard]] inline const ArithmeticsServices *
-as_arithmetics_services(const pegium::services::CoreServices &services) noexcept {
+as_arithmetics_services(const pegium::CoreServices &services) noexcept {
   return dynamic_cast<const ArithmeticsServices *>(&services);
 }
 
-[[nodiscard]] inline const ArithmeticsServices *
-as_arithmetics_services(const pegium::Services &services) noexcept {
-  return dynamic_cast<const ArithmeticsServices *>(&services);
-}
-
-} // namespace arithmetics::services
+} // namespace arithmetics

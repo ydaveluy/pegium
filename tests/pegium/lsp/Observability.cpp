@@ -2,7 +2,7 @@
 
 #include <lsp/connection.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/observability/ObservabilitySink.hpp>
 
 namespace pegium {

@@ -150,7 +150,7 @@ private:
 
     if constexpr (recover_word_boundary_split) {
       if (matchedEnd != nullptr && hasWordBoundaryViolation(matchedEnd)) {
-        considerChoice(detail::evaluate_insert_hidden_gap_terminal_candidate(
+        considerChoice(detail::evaluate_insert_synthetic_gap_terminal_candidate(
             ctx, cursorStart, matchedEnd, this,
             wordBoundarySplitPenalty(wordContinuationLength(matchedEnd))));
       }
@@ -172,12 +172,9 @@ private:
 
     if constexpr (recover_insertable) {
       const auto insertChoice =
-          detail::evaluate_insert_hidden_terminal_candidate(ctx, cursorStart,
-                                                            this);
+          detail::evaluate_insert_synthetic_terminal_candidate(ctx, cursorStart,
+                                                               this);
       considerChoice(insertChoice);
-      if (insertChoice.kind != LocalRecoveryChoiceKind::None) {
-        return bestChoice;
-      }
     }
 
     considerChoice(detail::evaluate_delete_scan_terminal_candidate(
@@ -208,8 +205,8 @@ private:
     switch (choice.kind) {
     case WordBoundarySplit:
       if (matchedEnd != nullptr && hasWordBoundaryViolation(matchedEnd) &&
-          detail::apply_insert_hidden_gap_recovery_edit(ctx, matchedEnd,
-                                                        this)) {
+          detail::apply_insert_synthetic_gap_and_match_recovery_edit(
+              ctx, matchedEnd, this, "Expecting separator")) {
         if constexpr (RecoveryParseModeContext<Context>) {
           PEGIUM_RECOVERY_TRACE("[literal rule] split word boundary for '",
                                 getValue(), "' at ",
@@ -238,9 +235,10 @@ private:
       }
       return false;
     }
-    case InsertHidden:
+    case InsertSynthetic:
       if constexpr (recover_insertable) {
-        if (detail::apply_insert_hidden_recovery_edit(ctx, this)) {
+        if (detail::apply_insert_synthetic_recovery_edit(ctx, this)) {
+          ctx.leaf(ctx.cursor(), this, false, true);
           if constexpr (RecoveryParseModeContext<Context>) {
             PEGIUM_RECOVERY_TRACE("[literal rule] inserted '", getValue(),
                                   "' at ", ctx.cursorOffset());

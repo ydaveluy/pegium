@@ -15,7 +15,7 @@
 #include <pegium/core/workspace/WorkspaceLock.hpp>
 #include <pegium/core/workspace/WorkspaceManager.hpp>
 
-namespace pegium::services {
+namespace pegium {
 
 /// Shared execution services reused by every language.
 struct SharedCoreExecutionServices {
@@ -69,4 +69,4 @@ struct SharedCoreServices {
 /// Installs the default shared core services into `sharedServices`.
 void installDefaultSharedCoreServices(SharedCoreServices &sharedServices);
 
-} // namespace pegium::services
+} // namespace pegium

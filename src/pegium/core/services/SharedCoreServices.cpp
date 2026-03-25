@@ -11,7 +11,7 @@
 #include <pegium/core/workspace/DefaultWorkspaceLock.hpp>
 #include <pegium/core/workspace/DefaultWorkspaceManager.hpp>
 
-namespace pegium::services {
+namespace pegium {
 
 void installDefaultSharedCoreServices(SharedCoreServices &sharedServices) {
   if (!sharedServices.observabilitySink) {
@@ -64,4 +64,4 @@ void installDefaultSharedCoreServices(SharedCoreServices &sharedServices) {
   }
 }
 
-} // namespace pegium::services
+} // namespace pegium

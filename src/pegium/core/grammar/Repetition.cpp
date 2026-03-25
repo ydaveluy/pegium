@@ -1,4 +1,5 @@
 #include <pegium/core/grammar/Repetition.hpp>
+#include <pegium/core/grammar/PrintUtils.hpp>
 
 #include <cstddef>
 #include <limits>
@@ -9,7 +10,7 @@ namespace pegium::grammar {
 void Repetition::print(std::ostream &os) const {
   const auto min = getMin();
   const auto max = getMax();
-  os << *getElement();
+  detail::print_element_reference(os, *getElement());
 
   if (min == 0 && max == 1) {
     os << '?';

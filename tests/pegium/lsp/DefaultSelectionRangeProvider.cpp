@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/ranges/DefaultSelectionRangeProvider.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
@@ -9,11 +9,11 @@ namespace {
 
 TEST(DefaultSelectionRangeProviderTest, RemainsAvailableAsPegiumOnlyOptInService) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
 
   DefaultSelectionRangeProvider provider(*services);

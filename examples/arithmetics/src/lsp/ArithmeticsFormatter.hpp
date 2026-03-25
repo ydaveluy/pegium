@@ -4,7 +4,7 @@
 
 #include <pegium/lsp/formatting/AbstractFormatter.hpp>
 
-namespace arithmetics::services::lsp {
+namespace arithmetics::lsp {
 
 class ArithmeticsFormatter : public pegium::AbstractFormatter {
 public:
@@ -27,4 +27,4 @@ protected:
   virtual void formatComment(HiddenNodeFormatter &comment) const;
 };
 
-} // namespace arithmetics::services::lsp
+} // namespace arithmetics::lsp

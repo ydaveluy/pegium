@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/workspace/DefaultFileOperationHandler.hpp>
 
 namespace pegium {
@@ -8,7 +8,7 @@ namespace {
 
 TEST(DefaultFileOperationHandlerTest, DidRenameFilesForwardsDeleteAndCreateEvents) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto *updates = new test::RecordingDocumentUpdateHandler();
@@ -35,7 +35,7 @@ TEST(DefaultFileOperationHandlerTest, DidRenameFilesForwardsDeleteAndCreateEvent
 
 TEST(DefaultFileOperationHandlerTest, ExposesDidFileOperationRegistrations) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   DefaultFileOperationHandler handler(*shared);

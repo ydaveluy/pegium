@@ -19,7 +19,7 @@
 #include <pegium/core/workspace/AstNodeLocator.hpp>
 #include <pegium/core/workspace/ReferenceDescriptionProvider.hpp>
 
-namespace pegium::services {
+namespace pegium {
 
 struct SharedCoreServices;
 
@@ -103,4 +103,4 @@ struct CoreServices {
 /// Shared defaults must already be installed on `services.shared`.
 void installDefaultCoreServices(CoreServices &services);
 
-} // namespace pegium::services
+} // namespace pegium

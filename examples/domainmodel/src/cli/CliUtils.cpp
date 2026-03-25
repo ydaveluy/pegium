@@ -38,7 +38,7 @@ FilePathData extract_destination_and_name(
 }
 
 void set_root_folder(std::string_view fileName,
-                     const pegium::services::CoreServices &services,
+                     const pegium::CoreServices &services,
                      std::optional<std::string_view> root) {
   auto rootPath = std::filesystem::path(std::string(fileName)).parent_path();
   if (root.has_value()) {

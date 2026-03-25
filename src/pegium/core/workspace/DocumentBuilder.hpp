@@ -16,7 +16,7 @@
 #include <pegium/core/workspace/Documents.hpp>
 #include <pegium/core/workspace/IndexManager.hpp>
 
-namespace pegium::services {
+namespace pegium {
 class ServiceRegistry;
 }
 

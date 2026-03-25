@@ -24,7 +24,7 @@ struct FilePathData {
     std::optional<std::string_view> destination);
 
 void set_root_folder(std::string_view fileName,
-                     const pegium::services::CoreServices &services,
+                     const pegium::CoreServices &services,
                      std::optional<std::string_view> root = std::nullopt);
 
 [[nodiscard]] const ast::DomainModel &

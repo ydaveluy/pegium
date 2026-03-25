@@ -3,7 +3,7 @@
 #include <pegium/core/services/DefaultCoreService.hpp>
 #include <pegium/core/workspace/ReferenceDescriptionProvider.hpp>
 
-namespace pegium::services {
+namespace pegium {
 struct CoreServices;
 }
 
@@ -12,9 +12,9 @@ namespace pegium::workspace {
 /// Default provider extracting reference descriptions from one document AST.
 class DefaultReferenceDescriptionProvider final
     : public ReferenceDescriptionProvider,
-      protected services::DefaultCoreService {
+      protected pegium::DefaultCoreService {
 public:
-  using services::DefaultCoreService::DefaultCoreService;
+  using pegium::DefaultCoreService::DefaultCoreService;
 
   [[nodiscard]] std::vector<ReferenceDescription>
   createDescriptions(const Document &document,

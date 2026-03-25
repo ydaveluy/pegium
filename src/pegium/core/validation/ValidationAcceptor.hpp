@@ -28,7 +28,7 @@ template <typename Node> class ValidationDiagnosticBuilder;
 template <typename Derived> class ValidationDiagnosticBuilderBase {
 public:
   ValidationDiagnosticBuilderBase(const ValidationAcceptor &acceptor,
-                                  services::DiagnosticSeverity severity,
+                                  pegium::DiagnosticSeverity severity,
                                   std::string_view message,
                                   const AstNode &node) noexcept;
 
@@ -92,14 +92,14 @@ public:
   Derived &code(std::string_view codeValue,
                 std::optional<std::string_view> description =
                     std::nullopt) {
-    _code = services::DiagnosticCode(std::string(codeValue));
+    _code = pegium::DiagnosticCode(std::string(codeValue));
     _codeDescription =
         description.has_value() ? std::optional<std::string>(std::string(*description))
                                 : std::nullopt;
     return derived();
   }
 
-  Derived &tags(std::initializer_list<services::DiagnosticTag> tags) {
+  Derived &tags(std::initializer_list<pegium::DiagnosticTag> tags) {
     _tags.assign(tags.begin(), tags.end());
     return derived();
   }
@@ -107,7 +107,7 @@ public:
   Derived &relatedInformation(TextOffset begin, TextOffset end,
                                   std::string_view message,
                                   std::string_view uri = {}) {
-    _relatedInformation.push_back(services::DiagnosticRelatedInformation{
+    _relatedInformation.push_back(pegium::DiagnosticRelatedInformation{
         .uri = std::string(uri),
         .message = std::string(message),
         .begin = begin,
@@ -122,20 +122,20 @@ public:
   }
 
   Derived &relatedInformation(
-      std::initializer_list<services::DiagnosticRelatedInformation> entries) {
+      std::initializer_list<pegium::DiagnosticRelatedInformation> entries) {
     _relatedInformation.insert(_relatedInformation.end(), entries.begin(),
                                entries.end());
     return derived();
   }
 
   Derived &relatedInformation(
-      std::span<const services::DiagnosticRelatedInformation> entries) {
+      std::span<const pegium::DiagnosticRelatedInformation> entries) {
     _relatedInformation.insert(_relatedInformation.end(), entries.begin(),
                                entries.end());
     return derived();
   }
 
-  Derived &data(services::JsonValue dataValue) {
+  Derived &data(pegium::JsonValue dataValue) {
     _data = std::move(dataValue);
     return derived();
   }
@@ -156,14 +156,14 @@ private:
 
   const ValidationAcceptor *_acceptor = nullptr;
   const AstNode *_node = nullptr;
-  services::DiagnosticSeverity _severity =
-      services::DiagnosticSeverity::Error;
+  pegium::DiagnosticSeverity _severity =
+      pegium::DiagnosticSeverity::Error;
   std::string _message;
-  std::optional<services::DiagnosticCode> _code;
+  std::optional<pegium::DiagnosticCode> _code;
   std::optional<std::string> _codeDescription;
-  std::vector<services::DiagnosticTag> _tags;
-  std::vector<services::DiagnosticRelatedInformation> _relatedInformation;
-  std::optional<services::JsonValue> _data;
+  std::vector<pegium::DiagnosticTag> _tags;
+  std::vector<pegium::DiagnosticRelatedInformation> _relatedInformation;
+  std::optional<pegium::JsonValue> _data;
   TextOffset _begin = 0;
   TextOffset _end = 0;
   bool _pending = true;
@@ -197,7 +197,7 @@ public:
 /// Callback adapter used by validation checks to emit diagnostics.
 class ValidationAcceptor {
 public:
-  using Callback = std::function<void(services::Diagnostic)>;
+  using Callback = std::function<void(pegium::Diagnostic)>;
 
   ValidationAcceptor() = default;
 
@@ -208,7 +208,7 @@ public:
   explicit ValidationAcceptor(CallbackType &&callback)
       : _callback(std::forward<CallbackType>(callback)) {}
 
-  void operator()(services::Diagnostic diagnostic) const {
+  void operator()(pegium::Diagnostic diagnostic) const {
     if (_callback) {
       _callback(std::move(diagnostic));
     }
@@ -220,7 +220,7 @@ public:
   ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>
   error(const Node &node, std::string_view message) const noexcept {
     return ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>(
-        *this, services::DiagnosticSeverity::Error, message, node);
+        *this, pegium::DiagnosticSeverity::Error, message, node);
   }
 
   template <typename Node>
@@ -228,7 +228,7 @@ public:
   ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>
   warning(const Node &node, std::string_view message) const noexcept {
     return ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>(
-        *this, services::DiagnosticSeverity::Warning, message, node);
+        *this, pegium::DiagnosticSeverity::Warning, message, node);
   }
 
   template <typename Node>
@@ -236,7 +236,7 @@ public:
   ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>
   info(const Node &node, std::string_view message) const noexcept {
     return ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>(
-        *this, services::DiagnosticSeverity::Information, message, node);
+        *this, pegium::DiagnosticSeverity::Information, message, node);
   }
 
   template <typename Node>
@@ -244,7 +244,7 @@ public:
   ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>
   hint(const Node &node, std::string_view message) const noexcept {
     return ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>(
-        *this, services::DiagnosticSeverity::Hint, message, node);
+        *this, pegium::DiagnosticSeverity::Hint, message, node);
   }
 
 private:
@@ -253,7 +253,7 @@ private:
 
 template <typename Derived>
 inline ValidationDiagnosticBuilderBase<Derived>::ValidationDiagnosticBuilderBase(
-    const ValidationAcceptor &acceptor, services::DiagnosticSeverity severity,
+    const ValidationAcceptor &acceptor, pegium::DiagnosticSeverity severity,
     std::string_view message, const AstNode &node) noexcept
     : _acceptor(&acceptor), _node(&node), _severity(severity), _message(message) {
   std::tie(_begin, _end) = range_of(node);
@@ -265,7 +265,7 @@ inline void ValidationDiagnosticBuilderBase<Derived>::emit() {
     return;
   }
 
-  services::Diagnostic diagnostic;
+  pegium::Diagnostic diagnostic;
   diagnostic.severity = _severity;
   diagnostic.message = _message;
   diagnostic.code = _code;

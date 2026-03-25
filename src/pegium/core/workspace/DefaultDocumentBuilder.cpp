@@ -61,8 +61,8 @@ DocumentId ensure_document_id(Documents &documents, Document &document) {
 } // namespace
 
 DefaultDocumentBuilder::DefaultDocumentBuilder(
-    const services::SharedCoreServices &sharedServices)
-    : services::DefaultSharedCoreService(sharedServices) {
+    const pegium::SharedCoreServices &sharedServices)
+    : pegium::DefaultSharedCoreService(sharedServices) {
   assert(sharedServices.workspace.documents != nullptr);
   assert(sharedServices.workspace.documentFactory != nullptr);
   assert(sharedServices.workspace.indexManager != nullptr);
@@ -336,11 +336,7 @@ bool DefaultDocumentBuilder::hasTextDocument(
 void DefaultDocumentBuilder::emitUpdate(
     std::span<const DocumentId> changedDocumentIds,
     std::span<const DocumentId> deletedDocumentIds) const {
-  std::vector<ListenerEntry<UpdateListener>> listeners;
-  {
-    std::scoped_lock lock(_listenerMutex);
-    listeners = _updateListeners;
-  }
+  const auto listeners = snapshotListeners(_updateListeners);
   for (const auto &entry : listeners) {
     entry.listener(changedDocumentIds, deletedDocumentIds);
   }
@@ -394,12 +390,8 @@ void DefaultDocumentBuilder::notifyBuildPhase(
     return;
   }
 
-  std::vector<ListenerEntry<BuildPhaseListener>> listeners;
-  {
-    std::scoped_lock lock(_listenerMutex);
-    listeners = _buildPhaseListeners[listener_index(targetState)];
-  }
-
+  const auto listeners =
+      snapshotListeners(_buildPhaseListeners[listener_index(targetState)]);
   for (const auto &entry : listeners) {
     utils::throw_if_cancelled(cancelToken);
     entry.listener(documents, cancelToken);
@@ -410,11 +402,8 @@ void DefaultDocumentBuilder::notifyDocumentPhase(
     const std::shared_ptr<Document> &document, DocumentState targetState,
     utils::CancellationToken cancelToken) const {
   assert(document != nullptr);
-  std::vector<ListenerEntry<DocumentPhaseListener>> listeners;
-  {
-    std::scoped_lock lock(_listenerMutex);
-    listeners = _documentPhaseListeners[listener_index(targetState)];
-  }
+  const auto listeners =
+      snapshotListeners(_documentPhaseListeners[listener_index(targetState)]);
 
   std::exception_ptr cancellationError;
   std::exception_ptr listenerError;
@@ -702,18 +691,7 @@ utils::ScopedDisposable DefaultDocumentBuilder::onUpdate(
     std::function<void(std::span<const DocumentId> changedDocumentIds,
                        std::span<const DocumentId> deletedDocumentIds)>
         listener) const {
-  std::size_t id = 0;
-  {
-    std::scoped_lock lock(_listenerMutex);
-    id = _nextListenerId++;
-    _updateListeners.push_back({.id = id, .listener = std::move(listener)});
-  }
-
-  return utils::ScopedDisposable([this, id]() {
-    std::scoped_lock lock(_listenerMutex);
-    std::erase_if(_updateListeners,
-                  [id](const auto &entry) { return entry.id == id; });
-  });
+  return addListener(_updateListeners, std::move(listener));
 }
 
 utils::ScopedDisposable DefaultDocumentBuilder::onBuildPhase(
@@ -722,20 +700,8 @@ utils::ScopedDisposable DefaultDocumentBuilder::onBuildPhase(
         void(std::span<const std::shared_ptr<Document>> builtDocuments,
              utils::CancellationToken cancelToken)>
         listener) const {
-  const auto index = listener_index(targetState);
-  std::size_t id = 0;
-  {
-    std::scoped_lock lock(_listenerMutex);
-    id = _nextListenerId++;
-    _buildPhaseListeners[index].push_back(
-        {.id = id, .listener = std::move(listener)});
-  }
-
-  return utils::ScopedDisposable([this, index, id]() {
-    std::scoped_lock lock(_listenerMutex);
-    std::erase_if(_buildPhaseListeners[index],
-                  [id](const auto &entry) { return entry.id == id; });
-  });
+  return addListener(_buildPhaseListeners[listener_index(targetState)],
+                     std::move(listener));
 }
 
 utils::ScopedDisposable DefaultDocumentBuilder::onDocumentPhase(
@@ -743,20 +709,8 @@ utils::ScopedDisposable DefaultDocumentBuilder::onDocumentPhase(
     std::function<void(const std::shared_ptr<Document> &,
                        utils::CancellationToken cancelToken)>
         listener) const {
-  const auto index = listener_index(targetState);
-  std::size_t id = 0;
-  {
-    std::scoped_lock lock(_listenerMutex);
-    id = _nextListenerId++;
-    _documentPhaseListeners[index].push_back(
-        {.id = id, .listener = std::move(listener)});
-  }
-
-  return utils::ScopedDisposable([this, index, id]() {
-    std::scoped_lock lock(_listenerMutex);
-    std::erase_if(_documentPhaseListeners[index],
-                  [id](const auto &entry) { return entry.id == id; });
-  });
+  return addListener(_documentPhaseListeners[listener_index(targetState)],
+                     std::move(listener));
 }
 
 void DefaultDocumentBuilder::resetToState(Document &document,

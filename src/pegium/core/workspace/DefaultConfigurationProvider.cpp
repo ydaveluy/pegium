@@ -9,8 +9,8 @@
 namespace pegium::workspace {
 
 DefaultConfigurationProvider::DefaultConfigurationProvider(
-    const services::SharedCoreServices &sharedServices)
-    : services::DefaultSharedCoreService(sharedServices) {}
+    const pegium::SharedCoreServices &sharedServices)
+    : pegium::DefaultSharedCoreService(sharedServices) {}
 
 void DefaultConfigurationProvider::initialize(const InitializeParams &params) {
   _workspaceConfigurationSupported = params.capabilities.workspaceConfiguration;
@@ -93,7 +93,7 @@ void DefaultConfigurationProvider::updateConfiguration(
   }
 }
 
-std::optional<services::JsonValue>
+std::optional<pegium::JsonValue>
 DefaultConfigurationProvider::getConfiguration(std::string_view languageId,
                                                std::string_view key) const {
   std::scoped_lock lock(_settingsMutex);
@@ -144,7 +144,7 @@ DefaultConfigurationProvider::getWorkspaceConfigurationForLanguage(
 
 WorkspaceConfiguration DefaultConfigurationProvider::apply_section_overrides(
     WorkspaceConfiguration configuration,
-    const services::JsonValue &sectionConfiguration) const {
+    const pegium::JsonValue &sectionConfiguration) const {
   if (!sectionConfiguration.isObject()) {
     return configuration;
   }

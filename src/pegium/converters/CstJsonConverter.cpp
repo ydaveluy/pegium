@@ -122,9 +122,9 @@ std::string grammar_source(const grammar::AbstractElement *grammarElement) {
   return "Unknown";
 }
 
-services::JsonValue::Array convert_children(const CstNodeView &node,
+pegium::JsonValue::Array convert_children(const CstNodeView &node,
                                             const CstJsonConversionOptions &options) {
-  services::JsonValue::Array children;
+  pegium::JsonValue::Array children;
   for (const auto &child : node) {
     children.emplace_back(CstJsonConverter::convert(child, options));
   }
@@ -133,9 +133,9 @@ services::JsonValue::Array convert_children(const CstNodeView &node,
 
 } // namespace
 
-services::JsonValue
+pegium::JsonValue
 CstJsonConverter::convert(const CstNodeView &node, const Options &options) {
-  services::JsonValue::Object object;
+  pegium::JsonValue::Object object;
   object.try_emplace("begin", static_cast<std::int64_t>(node.getBegin()));
   object.try_emplace("end", static_cast<std::int64_t>(node.getEnd()));
 
@@ -155,19 +155,19 @@ CstJsonConverter::convert(const CstNodeView &node, const Options &options) {
     object.try_emplace("content", convert_children(node, options));
   }
 
-  return services::JsonValue(std::move(object));
+  return pegium::JsonValue(std::move(object));
 }
 
-services::JsonValue
+pegium::JsonValue
 CstJsonConverter::convert(const RootCstNode &root, const Options &options) {
-  services::JsonValue::Object object;
-  services::JsonValue::Array content;
+  pegium::JsonValue::Object object;
+  pegium::JsonValue::Array content;
   for (const auto &child : root) {
     content.emplace_back(convert(child, options));
   }
   object.try_emplace("content", std::move(content));
 
-  return services::JsonValue(std::move(object));
+  return pegium::JsonValue(std::move(object));
 }
 
 } // namespace pegium::converter

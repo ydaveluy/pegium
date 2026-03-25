@@ -1,6 +1,6 @@
 #include "lsp/ArithmeticsFormatter.hpp"
 
-namespace arithmetics::services::lsp {
+namespace arithmetics::lsp {
 void ArithmeticsFormatter::formatModule(pegium::FormattingBuilder &builder,
                                         const ast::Module *module) const {
   auto formatter = builder.getNodeFormatter(module);
@@ -89,4 +89,4 @@ ArithmeticsFormatter::ArithmeticsFormatter(
   onHidden("ML_COMMENT", &ArithmeticsFormatter::formatComment);
 }
 
-} // namespace arithmetics::services::lsp
+} // namespace arithmetics::lsp

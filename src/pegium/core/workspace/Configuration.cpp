@@ -5,7 +5,7 @@
 namespace pegium::workspace {
 namespace {
 
-void apply_boolean_setting(const services::JsonValue::Object &configuration,
+void apply_boolean_setting(const pegium::JsonValue::Object &configuration,
                            std::string_view key, bool &target) {
   const auto it = configuration.find(std::string(key));
   if (it == configuration.end()) {
@@ -18,7 +18,7 @@ void apply_boolean_setting(const services::JsonValue::Object &configuration,
 }
 
 [[nodiscard]] std::optional<bool>
-read_optional_boolean(const services::JsonValue::Object &configuration,
+read_optional_boolean(const pegium::JsonValue::Object &configuration,
                       std::string_view key) {
   const auto it = configuration.find(std::string(key));
   if (it == configuration.end() || !it->second.isBoolean()) {
@@ -29,7 +29,7 @@ read_optional_boolean(const services::JsonValue::Object &configuration,
 
 } // namespace
 
-bool readValidationOptions(const services::JsonValue &configuration,
+bool readValidationOptions(const pegium::JsonValue &configuration,
                            validation::ValidationOptions &target) {
   if (!configuration.isObject()) {
     return false;
@@ -63,7 +63,7 @@ bool readValidationOptions(const services::JsonValue &configuration,
   return true;
 }
 
-bool readValidationOption(const services::JsonValue &configuration,
+bool readValidationOption(const pegium::JsonValue &configuration,
                           validation::BuildValidationOption &target) {
   if (configuration.isBoolean()) {
     target = configuration.boolean();
@@ -107,7 +107,7 @@ bool StaticConfigurationProvider::isReady() const noexcept { return _ready; }
 void StaticConfigurationProvider::updateConfiguration(
     const ConfigurationChangeParams &) {}
 
-std::optional<services::JsonValue>
+std::optional<pegium::JsonValue>
 StaticConfigurationProvider::getConfiguration(std::string_view,
                                               std::string_view) const {
   return std::nullopt;

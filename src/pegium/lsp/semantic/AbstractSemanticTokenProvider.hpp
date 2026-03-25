@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <initializer_list>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -103,7 +104,10 @@ private:
   mutable std::mutex _semanticTokenCacheMutex;
   mutable utils::TransparentStringMap<SemanticTokenCacheEntry> _semanticTokenCache;
   mutable std::uint64_t _nextSemanticTokenResultId = 1;
-  std::atomic<bool> _supportsMultilineTokens = false;
+  // Keep this as a byte flag instead of atomic<bool> for guided FuzzTest
+  // builds: it prevents Pegium from exporting another instrumented weak
+  // atomic<bool>::load that could recurse through sanitizer coverage.
+  std::atomic<std::uint8_t> _supportsMultilineTokens{0};
   utils::ScopedDisposable _languageServerInitializeSubscription;
   utils::ScopedDisposable _textDocumentCloseSubscription;
 };

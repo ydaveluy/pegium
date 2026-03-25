@@ -44,12 +44,8 @@ Pegium deliberately separates source text from derived analysis.
 - `TextDocument` owns the current source text, language id, version, and
   offset/position helpers
 
-When you need source text or text-coordinate conversions, use
-`document.textDocument()`. The managed workspace keeps the canonical URI on the
-`Document` stable while refreshing the authoritative `TextDocument` snapshot as
-files change.
-`TextDocument::getText()` exposes that current text as a borrowed
-`std::string_view`, so consumers that need ownership should copy explicitly.
+When you need source text or position conversions, use `document.textDocument()`.
+When you need parse results, scopes, or diagnostics, use `Document`.
 
 ## Why this matters
 
@@ -59,28 +55,18 @@ all rely on the same document and index infrastructure.
 
 ## What `DocumentBuilder` does
 
-`DocumentBuilder` is the orchestrator of the pipeline. It rebuilds documents
-through the successive analysis states and emits phase events that other
-services can observe.
-
-In practice, this is the part that makes “document changed, now update parse,
-index, linking, diagnostics, and editor state” coherent.
-
-The builder operates on managed documents only: non-null documents with a
-normalized non-empty URI.
+`DocumentBuilder` is the orchestrator of the pipeline. It is the reason a file
+change turns into a coherent rebuild instead of a pile of ad hoc reparsing.
 
 ## Readiness versus stable phases
 
-`WorkspaceManager::ready()` only means startup documents have been discovered
-and materialized.
-
-If a feature needs a real analysis milestone such as `Linked` or `Validated`,
-wait explicitly with `DocumentBuilder::waitUntil(...)` instead of treating
-workspace readiness as a stronger guarantee.
+`WorkspaceManager::ready()` only means startup documents have been discovered.
+If a feature needs a stronger guarantee such as `Linked` or `Validated`, wait
+for that phase explicitly.
 
 ## Practical guidance
 
-- keep document parsing deterministic
-- avoid custom workspace behavior until your language actually needs it
-- customize scoping or indexing first; customize the workspace infrastructure
-  itself only when the default lifecycle is too restrictive
+- keep parsing deterministic
+- customize scoping and indexing before touching workspace internals
+- treat the workspace as the shared foundation for references, diagnostics, and
+  editor features

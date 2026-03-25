@@ -21,7 +21,7 @@ feature.
 Typical wiring:
 
 ```cpp
-auto services = pegium::services::makeDefaultServices(
+auto services = pegium::makeDefaultServices(
     sharedServices, "my-language");
 
 services->parser = std::make_unique<const my::parser::MyParser>(*services);

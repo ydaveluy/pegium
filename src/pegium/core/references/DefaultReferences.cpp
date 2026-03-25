@@ -39,7 +39,7 @@ find_reference_at_cst_node(const workspace::Document &document,
 }
 
 void append_reference_targets(const AbstractReference &reference,
-                              const services::CoreServices &services,
+                              const pegium::CoreServices &services,
                               std::vector<const AstNode *> &results) {
   const auto &documents = *services.shared.workspace.documents;
   assert(reference.getContainer() != nullptr);
@@ -74,7 +74,7 @@ void append_reference_targets(const AbstractReference &reference,
 
 const AstNode *find_named_declaration(const AstNode &root,
                                       const CstNodeView &selectedNode,
-                                      const services::CoreServices &services) {
+                                      const pegium::CoreServices &services) {
   const auto *nameProvider = services.references.nameProvider.get();
 
   const AstNode *selected = nullptr;

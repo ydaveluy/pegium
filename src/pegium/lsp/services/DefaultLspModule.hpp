@@ -28,7 +28,7 @@ void installDefaultSharedLspServices(SharedServices &sharedServices);
 
 } // namespace pegium
 
-namespace pegium::services {
+namespace pegium {
 
 template <typename TServices = pegium::Services>
 /// Builds one language service container with the default core and LSP services installed.
@@ -48,4 +48,4 @@ makeDefaultServices(const pegium::SharedServices &sharedServices,
   return services;
 }
 
-} // namespace pegium::services
+} // namespace pegium

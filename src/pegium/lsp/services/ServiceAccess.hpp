@@ -10,7 +10,7 @@ namespace pegium {
 
 /// Downcasts a core service container to the LSP-aware `pegium::Services` type.
 [[nodiscard]] inline const Services *
-as_services(const services::CoreServices *services) noexcept {
+as_services(const pegium::CoreServices *services) noexcept {
   return dynamic_cast<const Services *>(services);
 }
 
@@ -18,7 +18,7 @@ as_services(const services::CoreServices *services) noexcept {
 ///
 /// `registry` must refer to a live service registry.
 [[nodiscard]] inline const Services *
-get_services(const services::ServiceRegistry &registry,
+get_services(const pegium::ServiceRegistry &registry,
              std::string_view uri) noexcept {
   return as_services(registry.findServices(uri));
 }

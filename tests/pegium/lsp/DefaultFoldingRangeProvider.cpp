@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include <pegium/LspTestSupport.hpp>
-#include <pegium/TestCstBuilderHarness.hpp>
+#include <pegium/core/TestCstBuilderHarness.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
@@ -16,13 +16,13 @@ using namespace pegium::parser;
 
 TEST(DefaultFoldingRangeProviderTest, ReturnsVisibleRangesSpanningMultipleLines) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services(*shared, "test", {".test"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -55,13 +55,13 @@ TEST(DefaultFoldingRangeProviderTest, ReturnsVisibleRangesSpanningMultipleLines)
 
 TEST(DefaultFoldingRangeProviderTest, SkipsHiddenNodes) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services(*shared, "test", {".test"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }

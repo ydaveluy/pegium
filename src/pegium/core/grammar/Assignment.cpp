@@ -1,4 +1,5 @@
 #include <pegium/core/grammar/Assignment.hpp>
+#include <pegium/core/grammar/PrintUtils.hpp>
 
 #include <ostream>
 
@@ -22,7 +23,8 @@ Assignment::AssignmentOperator Assignment::getOperator() const noexcept {
 }
 
 void Assignment::print(std::ostream &os) const {
-  os << getFeature() << getOperator() << *getElement();
+  os << getFeature() << getOperator();
+  detail::print_element_reference(os, *getElement());
 }
 
 } // namespace pegium::grammar

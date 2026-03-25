@@ -2,14 +2,14 @@
 
 #include <memory>
 
-#include <pegium/lsp/services/Services.hpp>
+#include <pegium/core/services/CoreServices.hpp>
 
-namespace requirements::services::validation {
+namespace requirements::validation {
 class RequirementsValidator;
 class TestsValidator;
 }
 
-namespace requirements::services {
+namespace requirements {
 
 struct RequirementsLangValidationServices {
   std::unique_ptr<validation::RequirementsValidator> requirementsValidator;
@@ -27,9 +27,9 @@ struct TestsLangAddedServices {
   TestsLangValidationServices validation;
 };
 
-struct RequirementsLangServices final : pegium::Services {
+struct RequirementsLangServices final : pegium::CoreServices {
   explicit RequirementsLangServices(
-      const pegium::SharedServices &sharedServices);
+      const pegium::SharedCoreServices &sharedServices);
   RequirementsLangServices(RequirementsLangServices &&) noexcept;
   RequirementsLangServices &operator=(RequirementsLangServices &&) noexcept =
       delete;
@@ -40,9 +40,9 @@ struct RequirementsLangServices final : pegium::Services {
   RequirementsLangAddedServices requirementsLang;
 };
 
-struct TestsLangServices final : pegium::Services {
+struct TestsLangServices final : pegium::CoreServices {
   explicit TestsLangServices(
-      const pegium::SharedServices &sharedServices);
+      const pegium::SharedCoreServices &sharedServices);
   TestsLangServices(TestsLangServices &&) noexcept;
   TestsLangServices &operator=(TestsLangServices &&) noexcept = delete;
   TestsLangServices(const TestsLangServices &) = delete;
@@ -54,24 +54,13 @@ struct TestsLangServices final : pegium::Services {
 
 [[nodiscard]] inline const RequirementsLangServices *
 as_requirements_lang_services(
-    const pegium::services::CoreServices &services) noexcept {
-  return dynamic_cast<const RequirementsLangServices *>(&services);
-}
-
-[[nodiscard]] inline const RequirementsLangServices *
-as_requirements_lang_services(
-    const pegium::Services &services) noexcept {
+    const pegium::CoreServices &services) noexcept {
   return dynamic_cast<const RequirementsLangServices *>(&services);
 }
 
 [[nodiscard]] inline const TestsLangServices *
-as_tests_lang_services(const pegium::services::CoreServices &services) noexcept {
+as_tests_lang_services(const pegium::CoreServices &services) noexcept {
   return dynamic_cast<const TestsLangServices *>(&services);
 }
 
-[[nodiscard]] inline const TestsLangServices *
-as_tests_lang_services(const pegium::Services &services) noexcept {
-  return dynamic_cast<const TestsLangServices *>(&services);
-}
-
-} // namespace requirements::services
+} // namespace requirements

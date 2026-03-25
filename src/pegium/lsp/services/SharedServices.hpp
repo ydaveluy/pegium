@@ -38,7 +38,7 @@ struct SharedLspServices {
 };
 
 /// Root shared service container for Pegium core plus LSP runtime state.
-struct SharedServices : services::SharedCoreServices {
+struct SharedServices : pegium::SharedCoreServices {
   SharedLspServices lsp;
 
   SharedServices();

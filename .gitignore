@@ -7,5 +7,5 @@ out/
 .cache/
 /Testing
 /tools/
-
-AGENTS.md
+/dist
+.fuzz/

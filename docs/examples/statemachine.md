@@ -22,8 +22,8 @@ whole-model validation and editor support together.
 
 Start with:
 
-- `examples/statemachine/src/StatemachineModule.cpp` for the service setup
-- `examples/statemachine/src/validation/StatemachineValidator.cpp` for typed
+- `examples/statemachine/src/core/StatemachineModule.cpp` for the service setup
+- `examples/statemachine/src/core/validation/StatemachineValidator.cpp` for typed
   validation checks
 - `examples/statemachine/src/lsp/StatemachineFormatter.cpp` for the formatter
 

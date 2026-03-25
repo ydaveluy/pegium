@@ -2,6 +2,9 @@
 
 This section contains the canonical concept documentation for Pegium.
 
+Use it when you already know what you are building and need the stable terms,
+surfaces, and responsibilities of the framework.
+
 ## Where to go from here?
 
 ### Glossary
@@ -32,5 +35,5 @@ Use these when you need the exact user-facing surface of a Pegium subsystem:
 
 For LSP, completion, workspace, and other advanced customization, prefer the
 task-oriented guides in [Build a Language](../build-a-language/index.md) and
-[Recipes](../recipes/index.md). The deeper pages are still linked from those
-guides when they add real user value.
+[Recipes](../recipes/index.md). The reference is best used alongside those
+pages, not instead of them.

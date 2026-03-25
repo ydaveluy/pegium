@@ -31,7 +31,7 @@ make_node_key(const workspace::AstNodeDescription &description) {
 }
 
 void log_reference_resolution_problem(
-    const services::SharedCoreServices &shared,
+    const pegium::SharedCoreServices &shared,
     const workspace::Document *document, std::string message,
     std::optional<workspace::DocumentState> state = std::nullopt) {
   observability::Observation observation{
@@ -52,8 +52,8 @@ void log_reference_resolution_problem(
 
 } // namespace
 
-DefaultLinker::DefaultLinker(const services::CoreServices &services)
-    : services::DefaultCoreService(services) {}
+DefaultLinker::DefaultLinker(const pegium::CoreServices &services)
+    : pegium::DefaultCoreService(services) {}
 
 void DefaultLinker::link(workspace::Document &document,
                          const utils::CancellationToken &cancelToken) const {

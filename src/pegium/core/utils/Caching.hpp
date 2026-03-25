@@ -253,7 +253,7 @@ template <typename K, typename V, typename Hash = std::hash<K>,
 /// Cache automatically invalidated when workspace documents change.
 class DocumentCache final : public DisposableCache {
 public:
-  explicit DocumentCache(const services::SharedCoreServices &sharedServices) {
+  explicit DocumentCache(const pegium::SharedCoreServices &sharedServices) {
     auto *documentBuilder = sharedServices.workspace.documentBuilder.get();
     this->onDispose(documentBuilder->onUpdate(
         [this](std::span<const workspace::DocumentId> changedDocumentIds,
@@ -407,7 +407,7 @@ template <typename K, typename V, typename Hash = std::hash<K>,
 class WorkspaceCache final : public SimpleCache<K, V, Hash, KeyEqual> {
 public:
   explicit WorkspaceCache(
-      const services::SharedCoreServices &sharedServices,
+      const pegium::SharedCoreServices &sharedServices,
       std::optional<workspace::DocumentState> state = std::nullopt) {
     auto *documentBuilder = sharedServices.workspace.documentBuilder.get();
     if (state.has_value()) {

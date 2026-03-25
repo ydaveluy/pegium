@@ -8,15 +8,14 @@ registered language.
 For most projects, the entry point is:
 
 ```cpp
-auto services = pegium::services::makeDefaultServices(
+auto services = pegium::makeDefaultServices(
     sharedServices, "my-language");
 
 services->parser = std::make_unique<const my::parser::MyParser>(*services);
 ```
 
-`makeDefaultServices(...)` gives you a complete baseline: default core
-services, default LSP services, and the `languageId` already assigned. From
-there, you usually add your parser and replace only the pieces that are truly
+`makeDefaultServices(...)` gives you a complete baseline. From there, you
+usually add your parser and replace only the pieces that are truly
 language-specific.
 
 ## Shared services
@@ -55,7 +54,7 @@ The most common customization style is to keep the default graph and replace
 individual services in place:
 
 ```cpp
-auto services = pegium::services::makeDefaultServices(
+auto services = pegium::makeDefaultServices(
     sharedServices, "my-language");
 
 services->parser = std::make_unique<const my::parser::MyParser>(*services);
@@ -90,7 +89,7 @@ struct MyServices : pegium::Services {
   } app;
 };
 
-auto services = pegium::services::makeDefaultServices<MyServices>(
+auto services = pegium::makeDefaultServices<MyServices>(
     sharedServices, "my-language");
 services->app.summaryService =
     std::make_unique<MySummaryService>(*services);

@@ -5,7 +5,7 @@
 namespace pegium {
 
 Services::Services(const SharedServices &sharedServices)
-    : services::CoreServices(sharedServices), shared(sharedServices) {}
+    : pegium::CoreServices(sharedServices), shared(sharedServices) {}
 
 Services::~Services() noexcept = default;
 

@@ -24,23 +24,8 @@ instead of rebuilding everything ad hoc.
 
 ## Creation of documents
 
-`DefaultDocumentFactory` is responsible for turning text into a
-`workspace::Document`.
-
-When the workspace manager or the LSP runtime needs a document, the factory:
-
-- gets the latest text from the shared text-document provider or the file
-  system
-- materializes a `Document` from the authoritative `TextDocument`
-- fixes the canonical document URI at construction time
-- resolves the language services from the document URI
-- normalizes the attached text-document `languageId` from those services
-- selects the registered parser
-- parses the text into AST and CST
-- stores the document in the `Parsed` state
-
-If the URI does not resolve to registered services, document creation fails
-instead of producing a partially typed workspace document.
+`DefaultDocumentFactory` is responsible for turning source text into a managed
+document with AST, CST, diagnostics, and workspace metadata.
 
 ## Indexing of symbols
 
@@ -58,49 +43,32 @@ linked references.
 After exported symbols are indexed, the document moves to `ComputedScopes`.
 
 This phase prepares the local symbol information that later scope providers use
-to answer the question "what is visible from this reference site?". In other
-words, it turns the parsed tree into a document that is ready for linking.
-
-This is also why scope computation should not depend on already linked
-references. Linked references happen later in the lifecycle.
+to answer the question "what is visible from this reference site?".
 
 ## Linking
 
 Once scopes are available, the linker can resolve references and move the
 document to `Linked`.
 
-Conceptually, linking combines:
-
-1. the written reference text
-2. the visible candidates exposed by the scope provider
-3. the target descriptions and target documents managed by the workspace
-
 At the end of this phase, editor features such as go to definition, references,
 rename, and many semantic validations can reason about concrete targets instead
-of just unresolved names.
+of unresolved names.
 
 ## Indexing of references
 
 After linking, the document enters `IndexedReferences`.
 
-In this phase, reference descriptions are collected and stored in the workspace
-index so that Pegium knows which documents depend on which others. This
-dependency information is what makes incremental rebuilds possible: when one
-document changes, Pegium can identify which other documents need to be
-relinked or revalidated.
+In this phase, reference descriptions are collected so Pegium knows which
+documents depend on which others. This is what makes incremental rebuilds
+possible.
 
 ## Validation
 
 The final build phase is `Validated`.
 
-`DocumentValidator` combines:
-
-- parse diagnostics
-- linking diagnostics
-- custom validation checks from the validation registry
-
-The resulting diagnostics are the stable diagnostics that editor clients and
-CLI tools usually care about.
+`DocumentValidator` combines parse diagnostics, linking diagnostics, and custom
+validation checks into the diagnostics that editor clients and CLI tools
+usually care about.
 
 ## Why this matters
 
@@ -109,54 +77,22 @@ This lifecycle is what makes the rest of the framework coherent.
 Typical examples:
 
 - formatting only needs parsed structure
-- completion or hover usually want at least linked references
+- completion and hover usually want at least linked references
 - rename and workspace navigation benefit from indexed references
 - published diagnostics normally correspond to the validated state
 
 ## Workspace readiness versus document state
 
 Workspace readiness and document phase are intentionally different concepts.
-
-`WorkspaceManager::ready()` only tells you that startup documents have been
-loaded into the workspace. The initial build may still be running when that
-happens.
-
-If a newer change arrives during bootstrap, the workspace lock may supersede
-the tail of that older build. This is a normal part of the lifecycle, not a
-consistency failure. `DocumentBuilder` resumes from the last completed phase
-and rebuilds toward the newest text snapshot.
-
-When a consumer needs a stable phase such as `Linked` or `Validated`, it
-should wait explicitly with `DocumentBuilder::waitUntil(...)`.
+`WorkspaceManager::ready()` only means startup documents have been discovered.
+When a feature needs `Linked` or `Validated`, it should wait for that phase
+explicitly.
 
 ## Modifications of a document
 
-`TextDocument` owns the source text, the current document version, and the
-offset/position helpers.
-`Document` keeps the analysis derived from that text plus the stable
-canonical URI used by the managed workspace.
-
-When the source text changes, managed updates refresh the current
-`TextDocument` through the document factory, invalidate the derived analysis
-state when needed, and move the document back toward `Changed`. The same
-`Document` instance and the same canonical URI stay in place while the builder
-reruns the necessary later phases instead of rebuilding the whole workspace
-from scratch.
-
-The backing `TextDocument` keeps an internal immutable text snapshot so the
-parser and CST can retain a stable view of the analyzed text without copying
-the whole source on every consumer access.
-`TextDocument::getText()` therefore returns a borrowed `std::string_view` over
-the current snapshot; take an explicit `std::string` copy only when mutation or
-ownership is required.
-
-Changing only the current text-document `languageId` does not trigger that
-incremental invalidation path. To rebuild a document under a different
-language, rematerialize it from a new text document.
-
-This is where the indexed reference information becomes important. Pegium can
-use it to determine which other documents may have been affected by the change
-and reset only those documents to the earliest phase they need to rerun.
+When the source text changes, Pegium invalidates the derived analysis state,
+rebuilds the changed document, and uses indexed references to determine which
+other documents may need relinking or revalidation.
 
 ## Related pages
 

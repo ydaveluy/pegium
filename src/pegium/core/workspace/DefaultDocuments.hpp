@@ -13,9 +13,9 @@ namespace pegium::workspace {
 
 /// Default in-memory implementation of the managed document registry.
 class DefaultDocuments : public Documents,
-                         protected services::DefaultSharedCoreService {
+                         protected pegium::DefaultSharedCoreService {
 public:
-  using services::DefaultSharedCoreService::DefaultSharedCoreService;
+  using pegium::DefaultSharedCoreService::DefaultSharedCoreService;
 
   void addDocument(std::shared_ptr<Document> document) override;
 

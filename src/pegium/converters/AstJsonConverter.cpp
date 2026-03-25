@@ -84,78 +84,86 @@ void collect_feature_assignments(const CstNodeView &node,
   }
 
   for (const auto &child : node) {
-    collect_feature_assignments(child, childRootIds, visitedNodeIds, assignments);
+    collect_feature_assignments(child, childRootIds, visitedNodeIds,
+                                assignments);
   }
 }
 
-services::JsonValue convert_rule_value(const grammar::RuleValue &value) {
+pegium::JsonValue convert_rule_value(const grammar::RuleValue &value) {
   return std::visit(
       []<typename T>(const T &item) {
         using Value = std::remove_cvref_t<T>;
         if constexpr (std::same_as<Value, std::nullptr_t>) {
-          return services::JsonValue(nullptr);
+          return pegium::JsonValue(nullptr);
         } else if constexpr (std::same_as<Value, bool>) {
-          return services::JsonValue(item);
+          return pegium::JsonValue(item);
         } else if constexpr (std::same_as<Value, char>) {
-          return services::JsonValue(std::string(1, item));
+          return pegium::JsonValue(std::string(1, item));
         } else if constexpr (std::same_as<Value, std::string_view>) {
-          return services::JsonValue(std::string(item));
+          return pegium::JsonValue(std::string(item));
         } else if constexpr (std::same_as<Value, std::string>) {
-          return services::JsonValue(item);
+          return pegium::JsonValue(item);
         } else if constexpr (std::floating_point<Value>) {
-          return services::JsonValue(static_cast<double>(item));
+          return pegium::JsonValue(static_cast<double>(item));
         } else if constexpr (std::unsigned_integral<Value>) {
           if (item >
               static_cast<Value>(std::numeric_limits<std::int64_t>::max())) {
-            return services::JsonValue(std::to_string(item));
+            return pegium::JsonValue(std::to_string(item));
           }
-          return services::JsonValue(static_cast<std::int64_t>(item));
+          return pegium::JsonValue(static_cast<std::int64_t>(item));
         } else if constexpr (std::signed_integral<Value>) {
-          return services::JsonValue(static_cast<std::int64_t>(item));
+          return pegium::JsonValue(static_cast<std::int64_t>(item));
         } else {
-          return services::JsonValue(nullptr);
+          return pegium::JsonValue(nullptr);
         }
       },
       value);
 }
 
-services::JsonValue convert_feature_value(const grammar::FeatureValue &value,
-                                          const AstNode &root,
-                                          const AstJsonConversionOptions &options);
+pegium::JsonValue
+convert_feature_value(const grammar::FeatureValue &value, const AstNode &root,
+                      const AstJsonConversionOptions &options);
 
-services::JsonValue convert_reference(const AbstractReference &reference,
+pegium::JsonValue convert_reference(const AbstractReference &reference,
                                       const AstNode &root,
                                       const AstJsonConversionOptions &options) {
-  services::JsonValue::Object object;
+  pegium::JsonValue::Object object;
+  const auto *document = tryGetDocument(root);
+  const bool canResolve =
+      document == nullptr ||
+      document->state >= workspace::DocumentState::ComputedScopes;
 
   if (options.includeReferenceText && !reference.getRefText().empty()) {
     object.try_emplace("$refText", reference.getRefText());
   }
 
-  services::JsonValue::Array refs;
+  pegium::JsonValue::Array refs;
   if (reference.isMultiReference()) {
     const auto *multi = static_cast<const AbstractMultiReference *>(&reference);
-    const auto *document = tryGetDocument(root);
-    const auto count = multi->resolvedDescriptionCount();
-    refs.reserve(count);
-    for (std::size_t index = 0; index < count; ++index) {
-      const auto &description = multi->resolvedDescriptionAt(index);
-      if (document == nullptr || description.documentId != document->id) {
-        continue;
-      }
-      const auto &target = document->getAstNode(description.symbolId);
-      const auto path = build_ast_path(target, root);
-      if (!path.empty()) {
-        refs.emplace_back(path);
+    if (reference.isResolved() || canResolve) {
+      const auto count = multi->resolvedDescriptionCount();
+      refs.reserve(count);
+      for (std::size_t index = 0; index < count; ++index) {
+        const auto &description = multi->resolvedDescriptionAt(index);
+        if (document == nullptr || description.documentId != document->id) {
+          continue;
+        }
+        const auto &target = document->getAstNode(description.symbolId);
+        const auto path = build_ast_path(target, root);
+        if (!path.empty()) {
+          refs.emplace_back(path);
+        }
       }
     }
     object.try_emplace("$refs", std::move(refs));
-  } else if (const auto *target =
-                 static_cast<const AbstractSingleReference &>(reference).resolve();
-             target != nullptr) {
-    const auto path = build_ast_path(*target, root);
-    if (!path.empty()) {
-      object.try_emplace("$ref", std::move(path));
+  } else if (reference.isResolved() || canResolve) {
+    if (const auto *target =
+            static_cast<const AbstractSingleReference &>(reference).resolve();
+        target != nullptr) {
+      const auto path = build_ast_path(*target, root);
+      if (!path.empty()) {
+        object.try_emplace("$ref", std::move(path));
+      }
     }
   }
 
@@ -164,44 +172,45 @@ services::JsonValue convert_reference(const AbstractReference &reference,
     object.try_emplace("$error", std::string(reference.getErrorMessage()));
   }
 
-  return services::JsonValue(std::move(object));
+  return pegium::JsonValue(std::move(object));
 }
 
-services::JsonValue convert_feature_value(const grammar::FeatureValue &value,
-                                          const AstNode &root,
-                                          const AstJsonConversionOptions &options) {
+pegium::JsonValue
+convert_feature_value(const grammar::FeatureValue &value, const AstNode &root,
+                      const AstJsonConversionOptions &options) {
   if (value.isRuleValue()) {
     return convert_rule_value(value.ruleValue());
   }
   if (value.isAstNode()) {
     const auto *node = value.astNode();
-    return node == nullptr ? services::JsonValue(nullptr)
+    return node == nullptr ? pegium::JsonValue(nullptr)
                            : AstJsonConverter::convert(*node, options);
   }
   if (value.isReference()) {
     const auto *reference = value.reference().value;
-    return reference == nullptr ? services::JsonValue(nullptr)
+    return reference == nullptr ? pegium::JsonValue(nullptr)
                                 : convert_reference(*reference, root, options);
   }
 
-  services::JsonValue::Array array;
+  pegium::JsonValue::Array array;
   for (const auto &item : value.array()) {
     array.emplace_back(convert_feature_value(item, root, options));
   }
-  return services::JsonValue(std::move(array));
+  return pegium::JsonValue(std::move(array));
 }
 
 } // namespace
 
-services::JsonValue AstJsonConverter::convert(const AstNode &node,
+pegium::JsonValue AstJsonConverter::convert(const AstNode &node,
                                               const Options &options) {
-  services::JsonValue::Object object;
+  pegium::JsonValue::Object object;
   if (options.includeType) {
-    object.try_emplace("$type", parser::detail::runtime_type_name(typeid(node)));
+    object.try_emplace("$type",
+                       parser::detail::runtime_type_name(typeid(node)));
   }
 
   if (!node.hasCstNode()) {
-    return services::JsonValue(std::move(object));
+    return pegium::JsonValue(std::move(object));
   }
 
   std::unordered_set<NodeId> childRootIds;
@@ -210,7 +219,8 @@ services::JsonValue AstJsonConverter::convert(const AstNode &node,
   FeatureAssignments assignments;
   std::unordered_set<NodeId> visitedNodeIds;
   for (const auto &child : node.getCstNode()) {
-    collect_feature_assignments(child, childRootIds, visitedNodeIds, assignments);
+    collect_feature_assignments(child, childRootIds, visitedNodeIds,
+                                assignments);
   }
 
   utils::TransparentStringSet seenFeatures;
@@ -220,11 +230,12 @@ services::JsonValue AstJsonConverter::convert(const AstNode &node,
     if (!seenFeatures.insert(feature).second) {
       continue;
     }
-    object.try_emplace(feature, convert_feature_value(assignment->getValue(&node),
-                                                      *root, options));
+    object.try_emplace(
+        feature,
+        convert_feature_value(assignment->getValue(&node), *root, options));
   }
 
-  return services::JsonValue(std::move(object));
+  return pegium::JsonValue(std::move(object));
 }
 
 } // namespace pegium::converter

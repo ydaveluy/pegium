@@ -61,22 +61,22 @@ public:
     return future;
   }
 
-  [[nodiscard]] std::future<std::vector<services::JsonValue>>
+  [[nodiscard]] std::future<std::vector<pegium::JsonValue>>
   fetchConfiguration(::lsp::ConfigurationParams params) override {
     if (params.items.empty()) {
-      std::promise<std::vector<services::JsonValue>> promise;
+      std::promise<std::vector<pegium::JsonValue>> promise;
       promise.set_value({});
       return promise.get_future();
     }
 
     auto promise =
-        std::make_shared<std::promise<std::vector<services::JsonValue>>>();
+        std::make_shared<std::promise<std::vector<pegium::JsonValue>>>();
     auto future = promise->get_future();
     try {
       (void)_messageHandler.sendRequest<::lsp::requests::Workspace_Configuration>(
           std::move(params),
           [promise](::lsp::Workspace_ConfigurationResult &&result) mutable {
-            std::vector<services::JsonValue> values;
+            std::vector<pegium::JsonValue> values;
             values.reserve(result.size());
             for (const auto &value : result) {
               values.push_back(from_lsp_any(value));

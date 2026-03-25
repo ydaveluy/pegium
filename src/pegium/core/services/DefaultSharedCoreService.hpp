@@ -2,7 +2,7 @@
 
 #include <pegium/core/services/SharedCoreServices.hpp>
 
-namespace pegium::services {
+namespace pegium {
 
 /// Convenience base class for default services bound to shared core services.
 class DefaultSharedCoreService {
@@ -15,4 +15,4 @@ protected:
   const SharedCoreServices &shared;
 };
 
-} // namespace pegium::services
+} // namespace pegium

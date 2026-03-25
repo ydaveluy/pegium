@@ -4,7 +4,7 @@
 #include <pegium/core/references/References.hpp>
 #include <pegium/core/workspace/IndexManager.hpp>
 
-namespace pegium::services {
+namespace pegium {
 struct CoreServices;
 }
 
@@ -12,9 +12,9 @@ namespace pegium::references {
 
 /// Default implementation of declaration and reference queries.
 class DefaultReferences : public References,
-                          protected services::DefaultCoreService {
+                          protected pegium::DefaultCoreService {
 public:
-  using services::DefaultCoreService::DefaultCoreService;
+  using pegium::DefaultCoreService::DefaultCoreService;
 
   /// Resolves the declarations designated by `sourceCstNode`.
   std::vector<const AstNode *>

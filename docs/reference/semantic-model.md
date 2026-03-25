@@ -43,8 +43,8 @@ Rule<ast::Entity> EntityRule{
         "}"_kw};
 ```
 
-So the semantic model in Pegium is not a post-processing artifact. It is the
-combined result of AST node definitions and grammar wiring.
+So the semantic model in Pegium is the combined result of AST node definitions
+and grammar wiring.
 
 ## Why this matters
 
@@ -57,43 +57,21 @@ The shape of the AST is not just an implementation detail. It directly affects:
 
 ## References are part of the model
 
-References are not just strings stored in fields. They carry:
-
-- the text written by the user
-- the owning container, feature name, target type, and reference cardinality
-- the source CST node, when available
-- the resolved target, once linking has happened
-
-That is why the same model can support linking, completion, rename, and hover
-without inventing separate data structures for each feature.
+References are more than strings. They let the same model support linking,
+completion, rename, and hover without inventing separate data structures for
+each feature.
 
 ## Runtime type information
 
-Runtime AST reflection also treats `pegium::AstNode` as the implicit root type
-of every registered AST class. In practice, `AstReflection::isSubtype(...)` and
-`AstReflection::getAllSubTypes(...)` stay consistent with
-`AstReflection::isInstance(..., typeid(pegium::AstNode))`.
+Pegium also keeps runtime type information for registered AST classes. For
+language authors, the practical consequence is simple: AST types produced
+directly by parser rules should stay default-constructible and lightweight.
 
-`AstReflection::getAllTypes()` and `AstReflection::getAllSubTypes(...)` expose
-stable `std::unordered_set` views over the bootstrapped registry state, so
-their iteration order is intentionally unspecified.
+The recommended pattern is:
 
-Pegium bootstraps that reflection once during single-threaded language
-registration by walking the parser entry rule. Because this bootstrap probes
-the participating AST types directly, AST-producing parser aliases such as
-`Rule<T>` and `Infix<T, ...>` require `DefaultConstructibleAstNode<T>`.
-
-That constraint only applies to AST types that are produced directly by parser
-rules. Abstract or non-default-constructible AST supertypes can still be used
-as reference targets or as containment slot supertypes in assignments; the
-bootstrap only needs their runtime type information for subtype filtering.
-
-Pegium therefore treats the parsed AST as a mutable technical model of the
-source program. The recommended pattern is:
-
-- keep parser-managed AST nodes simple and default-constructible
-- express semantic constraints with validation, linking, or later transforms
-- build a stricter domain model after parsing if your application needs one
+- keep parser-managed AST nodes simple
+- express semantic constraints with validation and linking
+- build a stricter application model afterwards only if needed
 
 ## Why the CST still matters
 
@@ -111,12 +89,12 @@ So the real working model of a Pegium language is AST plus CST plus references.
 ## Stable modeling advice
 
 For mature languages, it is worth treating the AST as a deliberate API rather
-than just whatever happened to fall out of the first grammar draft.
+than whatever happened to fall out of the first grammar draft.
 
-Good signs of a stable model:
+Good signs of a stable model are:
 
 - containment is explicit
-- references are modeled as references, not as raw strings
+- references are modeled as references, not raw strings
 - optionality reflects real semantics
 - later services can reason about the tree without special-case hacks
 

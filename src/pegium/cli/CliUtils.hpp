@@ -5,7 +5,7 @@
 #include <string_view>
 
 #include <pegium/core/services/CoreServices.hpp>
-#include <pegium/lsp/services/SharedServices.hpp>
+#include <pegium/core/services/SharedCoreServices.hpp>
 
 namespace pegium::workspace {
 struct Document;
@@ -14,12 +14,12 @@ struct Document;
 namespace pegium::cli {
 
 /// Creates shared services for standalone CLI execution.
-[[nodiscard]] SharedServices make_shared_services();
+[[nodiscard]] pegium::SharedCoreServices make_shared_services();
 
 /// Loads or rebuilds the document for `path` and returns the shared snapshot.
 [[nodiscard]] std::shared_ptr<workspace::Document>
 build_document_from_path(std::string_view path,
-                         const services::CoreServices &services,
+                         const pegium::CoreServices &services,
                          bool validation = true);
 
 /// Returns whether `document` currently contains error diagnostics.

@@ -18,9 +18,9 @@ namespace pegium::workspace {
 
 /// Default workspace manager handling startup discovery and initial builds.
 class DefaultWorkspaceManager : public WorkspaceManager,
-                                protected services::DefaultSharedCoreService {
+                                protected pegium::DefaultSharedCoreService {
 public:
-  explicit DefaultWorkspaceManager(const services::SharedCoreServices &sharedServices);
+  explicit DefaultWorkspaceManager(const pegium::SharedCoreServices &sharedServices);
 
   [[nodiscard]] BuildOptions &initialBuildOptions() override;
   [[nodiscard]] const BuildOptions &initialBuildOptions() const override;

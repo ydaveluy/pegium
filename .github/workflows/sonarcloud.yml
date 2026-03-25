@@ -36,7 +36,7 @@ jobs:
             cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPEGIUM_ENABLE_CODECOVERAGE=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -S ${{github.workspace}}
       -  name: Build
          run: |
-            cmake --build build --config Debug -j 2
+            cmake --build build --config Debug -j 4
       -  name: Run tests
          run: |
             cd build && ctest -C Debug --output-on-failure

@@ -5,7 +5,7 @@
 #include <memory>
 #include <type_traits>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/lsp/services/Services.hpp>
@@ -32,14 +32,14 @@ private:
   bool *destroyed = nullptr;
 };
 
-struct ExtendedCoreServices final : services::CoreServices {
+struct ExtendedCoreServices final : pegium::CoreServices {
   struct {
     std::shared_ptr<int> telemetry;
   } observability;
 
-  explicit ExtendedCoreServices(const services::SharedCoreServices &sharedServices,
+  explicit ExtendedCoreServices(const pegium::SharedCoreServices &sharedServices,
                                 bool *destroyed = nullptr)
-      : services::CoreServices(sharedServices), destroyed(destroyed) {}
+      : pegium::CoreServices(sharedServices), destroyed(destroyed) {}
 
   ~ExtendedCoreServices() noexcept override {
     if (destroyed != nullptr) {
@@ -70,15 +70,15 @@ private:
   bool *destroyed = nullptr;
 };
 
-static_assert(std::has_virtual_destructor_v<services::SharedCoreServices>);
+static_assert(std::has_virtual_destructor_v<pegium::SharedCoreServices>);
 static_assert(std::has_virtual_destructor_v<SharedServices>);
-static_assert(std::has_virtual_destructor_v<services::CoreServices>);
+static_assert(std::has_virtual_destructor_v<pegium::CoreServices>);
 static_assert(std::has_virtual_destructor_v<Services>);
 
 TEST(SharedServicesTest, CanBeExtendedWithCustomSections) {
   ExtendedSharedServices shared;
 
-  services::installDefaultSharedCoreServices(shared);
+  pegium::installDefaultSharedCoreServices(shared);
   installDefaultSharedLspServices(shared);
 
   shared.observability.telemetry = std::make_shared<int>(42);
@@ -112,10 +112,10 @@ TEST(SharedServicesTest, InitializeSharedServicesForLanguageServerBootstrapsLspR
 
 TEST(SharedServicesTest, CoreServicesCanBeExtendedWithCustomSections) {
   ExtendedSharedServices shared;
-  services::installDefaultSharedCoreServices(shared);
+  pegium::installDefaultSharedCoreServices(shared);
 
   ExtendedCoreServices languageServices{shared};
-  services::installDefaultCoreServices(languageServices);
+  pegium::installDefaultCoreServices(languageServices);
 
   languageServices.observability.telemetry = std::make_shared<int>(7);
 
@@ -127,11 +127,11 @@ TEST(SharedServicesTest, CoreServicesCanBeExtendedWithCustomSections) {
 
 TEST(SharedServicesTest, LanguageServicesCanBeExtendedWithCustomSections) {
   ExtendedSharedServices shared;
-  services::installDefaultSharedCoreServices(shared);
+  pegium::installDefaultSharedCoreServices(shared);
   installDefaultSharedLspServices(shared);
 
   ExtendedServices languageServices{shared};
-  services::installDefaultCoreServices(languageServices);
+  pegium::installDefaultCoreServices(languageServices);
   installDefaultLspServices(languageServices);
 
   languageServices.observability.telemetry = std::make_shared<int>(99);
@@ -144,11 +144,11 @@ TEST(SharedServicesTest, LanguageServicesCanBeExtendedWithCustomSections) {
 
 TEST(SharedServicesTest, MakeDefaultServicesBootstrapsBaselineLanguageServices) {
   SharedServices shared;
-  services::installDefaultSharedCoreServices(shared);
+  pegium::installDefaultSharedCoreServices(shared);
   installDefaultSharedLspServices(shared);
 
   auto services =
-      services::makeDefaultServices(shared, "default-language");
+      pegium::makeDefaultServices(shared, "default-language");
 
   ASSERT_NE(services, nullptr);
   EXPECT_EQ(services->languageMetaData.languageId, "default-language");
@@ -164,11 +164,11 @@ TEST(SharedServicesTest, MakeDefaultServicesBootstrapsBaselineLanguageServices) 
 
 TEST(SharedServicesTest, MakeDefaultServicesSupportsDerivedLanguageServices) {
   ExtendedSharedServices shared;
-  services::installDefaultSharedCoreServices(shared);
+  pegium::installDefaultSharedCoreServices(shared);
   installDefaultSharedLspServices(shared);
 
   auto services =
-      services::makeDefaultServices<ExtendedServices>(shared, "extended-language");
+      pegium::makeDefaultServices<ExtendedServices>(shared, "extended-language");
 
   ASSERT_NE(services, nullptr);
   EXPECT_EQ(services->languageMetaData.languageId, "extended-language");
@@ -183,10 +183,10 @@ TEST(SharedServicesTest, SupportsDestructionThroughBasePointers) {
 
   {
     auto derived = std::make_unique<ExtendedSharedServices>(&destroyed);
-    services::installDefaultSharedCoreServices(*derived);
+    pegium::installDefaultSharedCoreServices(*derived);
     installDefaultSharedLspServices(*derived);
 
-    std::unique_ptr<services::SharedCoreServices> base = std::move(derived);
+    std::unique_ptr<pegium::SharedCoreServices> base = std::move(derived);
     ASSERT_NE(base, nullptr);
   }
 
@@ -195,7 +195,7 @@ TEST(SharedServicesTest, SupportsDestructionThroughBasePointers) {
 
 TEST(SharedServicesTest, SupportsCoreAndLanguageDestructionThroughBasePointers) {
   ExtendedSharedServices shared;
-  services::installDefaultSharedCoreServices(shared);
+  pegium::installDefaultSharedCoreServices(shared);
   installDefaultSharedLspServices(shared);
 
   bool coreDestroyed = false;
@@ -203,16 +203,16 @@ TEST(SharedServicesTest, SupportsCoreAndLanguageDestructionThroughBasePointers) 
 
   {
     auto derived = std::make_unique<ExtendedCoreServices>(shared, &coreDestroyed);
-    services::installDefaultCoreServices(*derived);
-    std::unique_ptr<services::CoreServices> base = std::move(derived);
+    pegium::installDefaultCoreServices(*derived);
+    std::unique_ptr<pegium::CoreServices> base = std::move(derived);
     ASSERT_NE(base, nullptr);
   }
 
   {
     auto derived = std::make_unique<ExtendedServices>(shared, &languageDestroyed);
-    services::installDefaultCoreServices(*derived);
+    pegium::installDefaultCoreServices(*derived);
     installDefaultLspServices(*derived);
-    std::unique_ptr<services::CoreServices> base = std::move(derived);
+    std::unique_ptr<pegium::CoreServices> base = std::move(derived);
     ASSERT_NE(base, nullptr);
   }
 

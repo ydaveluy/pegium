@@ -5,7 +5,7 @@
 #include <pegium/core/references/ScopeComputation.hpp>
 #include <pegium/core/workspace/AstNodeDescriptionProvider.hpp>
 
-namespace pegium::services {
+namespace pegium {
 struct CoreServices;
 }
 
@@ -13,9 +13,9 @@ namespace pegium::references {
 
 /// Default symbol collection strategy used during document indexing.
 class DefaultScopeComputation : public ScopeComputation,
-                                protected services::DefaultCoreService {
+                                protected pegium::DefaultCoreService {
 public:
-  using services::DefaultCoreService::DefaultCoreService;
+  using pegium::DefaultCoreService::DefaultCoreService;
 
   /// Collects exported symbols from the document root and its direct AST content.
   std::vector<workspace::AstNodeDescription> collectExportedSymbols(

@@ -20,7 +20,7 @@ The `domainmodel` example uses the following registration pattern:
 
 ```cpp
 void registerValidationChecks(
-    domainmodel::services::DomainModelServices &services) {
+    domainmodel::DomainModelServices &services) {
   auto &registry = *services.validation.validationRegistry;
   auto &validator = *services.domainModel.validation.domainModelValidator;
   registry.registerChecks(

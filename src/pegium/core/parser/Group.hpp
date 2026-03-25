@@ -9,6 +9,7 @@
 
 #include <pegium/core/grammar/Group.hpp>
 #include <pegium/core/parser/CompletionSupport.hpp>
+#include <pegium/core/parser/EditableRecoverySupport.hpp>
 #include <pegium/core/parser/ExpectFrontier.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/ParseAttempt.hpp>
@@ -118,7 +119,13 @@ public:
 
 public:
   friend struct detail::ParseAccess;
+  friend struct detail::FastProbeAccess;
   friend struct detail::InitAccess;
+
+  template <StrictParseModeContext Context>
+  bool fast_probe_impl(Context &ctx) const {
+    return attempt_fast_probe(ctx, std::get<0>(elements));
+  }
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     return parse_elements<Context, 0>(ctx);
@@ -149,10 +156,23 @@ public:
           }
           return parse_elements<Context, I + 1>(ctx);
         }
-        if (try_sync_missing_element<I>(ctx)) {
-          return parse_elements<Context, I + 1>(ctx);
+        if (try_insert_missing_element<I>(ctx)) {
+          return true;
         }
+        const auto checkpoint = ctx.mark();
         if (!parse(std::get<I>(elements), ctx)) {
+          if constexpr (std::remove_cvref_t<
+                            decltype(std::get<I>(elements))>::nullable) {
+            const auto &current = std::get<I>(elements);
+            if (current.getKind() != ElementKind::AndPredicate &&
+                current.getKind() != ElementKind::NotPredicate) {
+              ctx.rewind(checkpoint);
+              if (parse_elements<Context, I + 1>(ctx)) {
+                return true;
+              }
+            }
+          }
+          ctx.rewind(checkpoint);
           return false;
         }
         return parse_elements<Context, I + 1>(ctx);
@@ -181,61 +201,58 @@ public:
     }
   }
 
+private:
   template <std::size_t I>
-  bool try_sync_missing_element(RecoveryContext &ctx) const {
-    if constexpr (I + 1 >= sizeof...(Elements)) {
-      return false;
-    } else if constexpr (std::remove_cvref_t<
-                             decltype(std::get<I>(elements))>::nullable) {
+  bool try_insert_missing_element(RecoveryContext &ctx) const {
+    if constexpr (std::remove_cvref_t<
+                      decltype(std::get<I>(elements))>::nullable) {
       return false;
     } else {
       const auto &current = std::get<I>(elements);
-      const auto &next = std::get<I + 1>(elements);
-      if (current.getKind() != ElementKind::Assignment ||
-          !isDelimiterLiteral(next)) {
-        return false;
-      }
       if (detail::attempt_parse_without_side_effects(ctx, current)) {
         return false;
       }
-      if (probe_locally_recoverable(current, ctx)) {
+      if (current.getKind() == ElementKind::Literal ||
+          current.getKind() == ElementKind::TerminalRule) {
         return false;
       }
-
-      const auto syncCheckpoint = ctx.mark();
-      ctx.skip();
-      const bool nextMatches = detail::attempt_parse_without_side_effects(
-          ctx, next);
-      ctx.rewind(syncCheckpoint);
-      if (!nextMatches) {
+      const auto checkpoint = ctx.mark();
+      const auto baseEditCost = ctx.currentEditCost();
+      const auto baseEditCount = ctx.currentEditCount();
+      const auto baseRecoveryEditCount = ctx.recoveryEditCount();
+      const auto parseCandidate = detail::evaluate_editable_recovery_candidate(
+          ctx, checkpoint, baseEditCost, baseEditCount, baseRecoveryEditCount,
+          [this, &ctx, &current]() {
+            return parse(current, ctx) && parse_elements<RecoveryContext, I + 1>(ctx);
+          });
+      const auto insertCandidate = detail::evaluate_editable_recovery_candidate(
+          ctx, checkpoint, baseEditCost, baseEditCount, baseRecoveryEditCount,
+          [this, &ctx, &current]() {
+            return detail::apply_insert_synthetic_recovery_edit(
+                       ctx, std::addressof(current)) &&
+                   parse_elements<RecoveryContext, I + 1>(ctx);
+          });
+      if (!insertCandidate.matched ||
+          insertCandidate.postSkipCursorOffset <=
+              insertCandidate.firstEditOffset) {
         return false;
       }
-
-      return detail::apply_insert_hidden_recovery_edit(
-          ctx, std::addressof(current));
+      if (parseCandidate.matched &&
+          !detail::is_better_choice_recovery_candidate_for_element(
+              insertCandidate, parseCandidate, std::addressof(current))) {
+          return false;
+      }
+      return detail::apply_insert_synthetic_recovery_edit(
+                 ctx, std::addressof(current)) &&
+             parse_elements<RecoveryContext, I + 1>(ctx);
     }
   }
 
-private:
   template <std::size_t I>
   void init_elements(AstReflectionInitContext &ctx) const {
     if constexpr (I < sizeof...(Elements)) {
       parser::init(std::get<I>(elements), ctx);
       init_elements<I + 1>(ctx);
-    }
-  }
-
-  template <typename E>
-  static bool isDelimiterLiteral(const E &element) {
-    if constexpr (!std::derived_from<std::remove_cvref_t<E>, grammar::Literal>) {
-      return false;
-    } else {
-      if (element.getKind() != ElementKind::Literal) {
-        return false;
-      }
-      const auto value = element.getValue();
-      return !value.empty() &&
-             !std::ranges::all_of(value, [](char c) { return isWord(c); });
     }
   }
 

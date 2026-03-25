@@ -244,41 +244,41 @@ element_text_impl(const grammar::AbstractElement *element,
   return element_text_impl(element, visited, 0);
 }
 
-[[nodiscard]] services::JsonValue
+[[nodiscard]] pegium::JsonValue
 element_to_json(const grammar::AbstractElement *element) {
   if (element == nullptr) {
     return nullptr;
   }
 
-  return services::JsonValue::Object{
+  return pegium::JsonValue::Object{
       {"kind", json_int(static_cast<std::uint32_t>(element->getKind()))},
       {"text", element_text(element)},
   };
 }
 
-[[nodiscard]] services::JsonValue
+[[nodiscard]] pegium::JsonValue
 parse_diagnostic_to_json(const ParseDiagnostic &diagnostic) {
   std::ostringstream stream;
   stream << diagnostic.kind;
-  return services::JsonValue::Object{
+  return pegium::JsonValue::Object{
       {"element", element_to_json(diagnostic.element)},
       {"kind", stream.str()},
       {"offset", json_int(diagnostic.offset)},
   };
 }
 
-[[nodiscard]] services::JsonValue
+[[nodiscard]] pegium::JsonValue
 failure_leaf_to_json(const FailureLeaf &leaf) {
-  return services::JsonValue::Object{
+  return pegium::JsonValue::Object{
       {"beginOffset", json_int(leaf.beginOffset)},
       {"element", element_to_json(leaf.element)},
       {"endOffset", json_int(leaf.endOffset)},
   };
 }
 
-[[nodiscard]] services::JsonValue
+[[nodiscard]] pegium::JsonValue
 edit_trace_to_json(const EditTrace &trace) {
-  return services::JsonValue::Object{
+  return pegium::JsonValue::Object{
       {"codepointDeleteCount", json_int(trace.codepointDeleteCount)},
       {"deleteCount", json_int(trace.deleteCount)},
       {"diagnosticCount", json_int(trace.diagnosticCount)},
@@ -295,9 +295,9 @@ edit_trace_to_json(const EditTrace &trace) {
   };
 }
 
-[[nodiscard]] services::JsonValue
+[[nodiscard]] pegium::JsonValue
 score_to_json(const RecoveryScore &score) {
-  return services::JsonValue::Object{
+  return pegium::JsonValue::Object{
       {"credible", score.credible},
       {"diagnosticCount", json_int(score.diagnosticCount)},
       {"editCost", json_int(score.editCost)},
@@ -311,9 +311,9 @@ score_to_json(const RecoveryScore &score) {
   };
 }
 
-[[nodiscard]] services::JsonValue
+[[nodiscard]] pegium::JsonValue
 attempt_spec_to_json(const RecoveryAttemptSpec &spec) {
-  services::JsonValue::Object object{
+  pegium::JsonValue::Object object{
       {"windows", recovery_windows_to_json(spec.windows)},
   };
   return object;
@@ -339,9 +339,9 @@ recovery_attempt_status_name(RecoveryAttemptStatus status) noexcept {
   return "Unknown";
 }
 
-services::JsonValue
+pegium::JsonValue
 strict_parse_summary_to_json(const StrictParseSummary &summary) {
-  return services::JsonValue::Object{
+  return pegium::JsonValue::Object{
       {"entryRuleMatched", summary.entryRuleMatched},
       {"fullMatch", summary.fullMatch},
       {"inputSize", json_int(summary.inputSize)},
@@ -350,14 +350,14 @@ strict_parse_summary_to_json(const StrictParseSummary &summary) {
   };
 }
 
-services::JsonValue failure_snapshot_to_json(const FailureSnapshot &snapshot) {
-  services::JsonValue::Array leaves;
+pegium::JsonValue failure_snapshot_to_json(const FailureSnapshot &snapshot) {
+  pegium::JsonValue::Array leaves;
   leaves.reserve(snapshot.failureLeafHistory.size());
   for (const auto &leaf : snapshot.failureLeafHistory) {
     leaves.emplace_back(failure_leaf_to_json(leaf));
   }
 
-  services::JsonValue::Object object{
+  pegium::JsonValue::Object object{
       {"failureLeafHistory", std::move(leaves)},
       {"failureTokenIndex", json_int(snapshot.failureTokenIndex)},
       {"hasFailureToken", snapshot.hasFailureToken},
@@ -374,8 +374,8 @@ services::JsonValue failure_snapshot_to_json(const FailureSnapshot &snapshot) {
   return object;
 }
 
-services::JsonValue recovery_window_to_json(const RecoveryWindow &window) {
-  return services::JsonValue::Object{
+pegium::JsonValue recovery_window_to_json(const RecoveryWindow &window) {
+  return pegium::JsonValue::Object{
       {"backwardTokenCount", json_int(window.tokenCount)},
       {"beginOffset", json_int(window.beginOffset)},
       {"forwardTokenCount", json_int(window.tokenCount)},
@@ -384,9 +384,9 @@ services::JsonValue recovery_window_to_json(const RecoveryWindow &window) {
   };
 }
 
-services::JsonValue
+pegium::JsonValue
 recovery_windows_to_json(std::span<const RecoveryWindow> windows) {
-  services::JsonValue::Array array;
+  pegium::JsonValue::Array array;
   array.reserve(windows.size());
   for (const auto &window : windows) {
     array.emplace_back(recovery_window_to_json(window));
@@ -394,16 +394,16 @@ recovery_windows_to_json(std::span<const RecoveryWindow> windows) {
   return array;
 }
 
-services::JsonValue
+pegium::JsonValue
 recovery_attempt_to_json(const RecoveryAttempt &attempt,
                          const RecoveryAttemptSpec *spec) {
-  services::JsonValue::Array diagnostics;
+  pegium::JsonValue::Array diagnostics;
   diagnostics.reserve(attempt.parseDiagnostics.size());
   for (const auto &diagnostic : attempt.parseDiagnostics) {
     diagnostics.emplace_back(parse_diagnostic_to_json(diagnostic));
   }
 
-  services::JsonValue::Object object{
+  pegium::JsonValue::Object object{
       {"completedRecoveryWindows", json_int(attempt.completedRecoveryWindows)},
       {"editCost", json_int(attempt.editCost)},
       {"editCount", json_int(attempt.editCount)},
@@ -413,7 +413,7 @@ recovery_attempt_to_json(const RecoveryAttempt &attempt,
       {"failureSnapshot",
        attempt.failureSnapshot.has_value()
            ? failure_snapshot_to_json(*attempt.failureSnapshot)
-           : services::JsonValue(nullptr)},
+           : pegium::JsonValue(nullptr)},
       {"fullMatch", attempt.fullMatch},
       {"maxCursorOffset", json_int(attempt.maxCursorOffset)},
       {"parseDiagnostics", std::move(diagnostics)},

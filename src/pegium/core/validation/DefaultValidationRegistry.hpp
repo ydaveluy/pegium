@@ -15,10 +15,10 @@ struct CompiledValidationRegistry;
 
 /// Default mutable registry of validation checks and preparations.
 class DefaultValidationRegistry : public ValidationRegistry,
-                                  protected services::DefaultCoreService {
+                                  protected pegium::DefaultCoreService {
 public:
   using ValidationRegistry::registerCheck;
-  using services::DefaultCoreService::DefaultCoreService;
+  using pegium::DefaultCoreService::DefaultCoreService;
 
   [[nodiscard]] std::unique_ptr<const PreparedChecks>
   prepareChecks(std::span<const std::string> categories = {}) const override;

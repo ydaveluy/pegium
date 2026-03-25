@@ -108,8 +108,8 @@ private:
       return deleteCandidate;
     }
 
-    return detail::evaluate_insert_hidden_terminal_candidate(ctx, cursorStart,
-                                                             this);
+    return detail::evaluate_insert_synthetic_terminal_candidate(ctx, cursorStart,
+                                                                this);
   }
 
   template <EditableParseModeContext Context>
@@ -118,10 +118,11 @@ private:
                                 const LocalRecoveryChoice &choice) const {
     using enum LocalRecoveryChoiceKind;
     switch (choice.kind) {
-    case InsertHidden:
-      if (detail::apply_insert_hidden_recovery_edit(ctx, this)) {
+    case InsertSynthetic:
+      if (detail::apply_insert_synthetic_recovery_edit(ctx, this)) {
+        ctx.leaf(ctx.cursor(), this, false, true);
         if constexpr (RecoveryParseModeContext<Context>) {
-          PEGIUM_RECOVERY_TRACE("[terminal rule] insert-hidden ", getName(),
+          PEGIUM_RECOVERY_TRACE("[terminal rule] insert-synthetic ", getName(),
                                 " offset=", ctx.cursorOffset());
         }
         return true;
@@ -295,8 +296,16 @@ private:
     }
   }
 
+  [[nodiscard]] static constexpr bool
+  is_zero_width_recovered_leaf(const CstNodeView &node) noexcept {
+    return node.isRecovered() && node.getBegin() == node.getEnd();
+  }
+
   T convertDefaultValue(const CstNodeView &node,
                         const ValueBuildContext *context) const {
+    if (is_zero_width_recovered_leaf(node)) {
+      return {};
+    }
     const auto text = node.getText();
     if constexpr (std::is_same_v<T, std::string_view>) {
       return text;
@@ -333,6 +342,9 @@ private:
 
   T convertValue(const CstNodeView &node,
                  const ValueBuildContext *context) const {
+    if (is_zero_width_recovered_leaf(node)) {
+      return {};
+    }
     if (!_hasCustomValueConverter) {
       return convertDefaultValue(node, context);
     }

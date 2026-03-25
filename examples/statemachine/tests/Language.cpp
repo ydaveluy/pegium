@@ -3,7 +3,7 @@
 #include <statemachine/parser/Parser.hpp>
 #include <statemachine/services/Module.hpp>
 
-#include <pegium/ExampleTestSupport.hpp>
+#include <pegium/examples/ExampleTestSupport.hpp>
 
 namespace statemachine::tests {
 namespace {
@@ -27,10 +27,10 @@ TEST(StatemachineLanguageTest, ParsesSimpleStateMachine) {
 
 TEST(StatemachineLanguageTest, LinksInitialStateTransitionAndActionReferences) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(statemachine::services::register_language_services(*shared));
+  ASSERT_TRUE(statemachine::register_language_services(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("linked.statemachine"),

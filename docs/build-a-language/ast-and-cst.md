@@ -1,11 +1,16 @@
 # AST and CST
 
-Pegium keeps both the abstract syntax tree and the concrete syntax tree
-available.
+Pegium keeps two complementary views of a document:
 
-## AST
+- the AST for language semantics
+- the CST for source structure
 
-Define AST nodes by deriving from `pegium::AstNode`:
+Most language work starts with the AST. Most source-aware tooling eventually
+needs the CST too.
+
+## Treat the AST as your language model
+
+AST nodes are ordinary C++ types derived from `pegium::AstNode`:
 
 ```cpp
 struct Entity : pegium::AstNode {
@@ -15,239 +20,83 @@ struct Entity : pegium::AstNode {
 };
 ```
 
-The AST should model language semantics:
+That one type already says a lot:
 
-- names and scalar values
-- containment between nodes
-- cross-references
-- optional and repeated properties
+- `name` is plain data
+- `superType` is a link to another declaration
+- `features` are owned children
 
-## AST construction contract
+If the AST is shaped well, validation, scoping, navigation, and formatting all
+become easier later.
 
-Pegium parses directly into your C++ AST types, but parser-managed AST nodes
-are created as empty mutable shells and then filled through grammar
-assignments.
+## Use a small set of field shapes
 
-In practice, that means:
+Most languages only need a few recurring patterns.
 
-- concrete AST node types produced by `Rule<T>`, `create<T>()`,
-  `nest<T, ...>()`, or `Infix<T, ...>` must be default-constructible
-- constructor-enforced semantic invariants are not the intended modeling style
-  for parser-managed AST nodes
-- if your application needs a stricter domain model, build it after parsing as
-  a separate layer
+- Use scalar values for names, numbers, booleans, enums, and other plain data.
+- Use `pointer<T>` for one contained child.
+- Use `vector<pointer<T>>` for repeated contained children.
+- Use `reference<T>` for one link to another node.
+- Use `vector<reference<T>>` for several independent links written in the
+  source.
+- Use `multi_reference<T>` only when one reference occurrence is expected to
+  resolve to several targets.
+- Use `optional<T>` only when absence is part of the language semantics.
 
-This is a current limitation of the generic runtime design. It keeps the
-grammar API lightweight and avoids requiring explicit hierarchy metadata for
-every AST type.
+This keeps the model predictable for both users of the AST and Pegium itself.
 
-## AST field types
+## Keep parser-managed nodes simple
 
-Pegium supports a small set of field shapes that cover the common language
-modeling needs.
+Pegium parses directly into your AST types. That means AST nodes created by the
+parser should stay lightweight and default-constructible.
 
-### Scalar values
+A good rule of thumb is:
 
-Use regular value fields for textual or numeric data:
+- keep parser-managed nodes as the technical model of the source text
+- enforce semantic rules in validation and linking
+- build a stricter application model afterwards only if you really need one
 
-```cpp
-struct NumberLiteral : pegium::AstNode {
-  double value = 0.0;
-};
+This avoids fighting the parser while still keeping your domain logic clean.
 
-struct Feature : pegium::AstNode {
-  bool many = false;
-  string name;
-};
-```
+## The CST is about source structure
 
-Typical scalar field types:
+The CST preserves what the user actually wrote:
 
-- `string`
-- `bool`
-- integer aliases inherited from `AstNode` such as `int32_t`, `uint64_t`, and
-  so on
-- floating-point values such as `double`
-- enums
-- custom value types, as long as your terminal or data-type rule can construct
-  them
-- `variant<T...>` when a property is intentionally one-of-several value shapes
+- token boundaries
+- hidden nodes such as comments
+- exact keyword positions
+- recovered structure after syntax errors
 
-Use scalar fields for values that are owned directly by the node and do not
-represent containment or cross-document linking.
+That is why CST access matters for:
 
-Example:
+- formatting
+- hover over comments
+- precise selections and ranges
+- cursor-sensitive editor features
 
-```cpp
-struct Example : pegium::AstNode {
-  variant<bool, string> value;
-};
-```
+## Use the AST first, then drop to the CST when needed
 
-### Optional scalar values
+A useful decision rule is simple:
 
-Use `optional<T>` when the property may be absent:
+- if the feature is semantic, start from the AST
+- if the feature depends on exact text layout, use the CST
 
-```cpp
-struct Test : pegium::AstNode {
-  optional<string> testFile;
-};
-```
+For example:
 
-This is useful for optional names, strings, numbers, enums, and similar value
-properties.
+- validation and scoping are AST-first
+- formatting and comment-aware features are CST-aware
 
-### Single contained child
+## Recommended modeling checklist
 
-Use `pointer<T>` for a single contained AST child:
+When a model starts feeling awkward, check these points:
 
-```cpp
-struct Evaluation : pegium::AstNode {
-  pointer<Expression> expression;
-};
-```
+1. Are contained children modeled as containment rather than plain values?
+2. Are cross-references modeled as `reference<T>` rather than raw strings?
+3. Is optionality meaningful, or just convenient?
+4. Does the AST feel natural to traverse without special-case helpers?
 
-`pointer<T>` is an alias for `std::unique_ptr<T>`. This is the standard way to
-model containment in Pegium.
+## Related pages
 
-Typical use cases:
-
-- one expression inside another node
-- one optional-like child that is either present or absent
-- one owned nested declaration
-
-### Repeated contained children
-
-Use `vector<pointer<T>>` for a list of contained AST children:
-
-```cpp
-struct Entity : pegium::AstNode {
-  vector<pointer<Feature>> features;
-};
-```
-
-This is the standard shape for repeated containment.
-
-### Single reference
-
-Use `reference<T>` for a link to another AST node:
-
-```cpp
-struct FunctionCall : pegium::AstNode {
-  reference<AbstractDefinition> func;
-};
-```
-
-A `reference<T>` stores reference text and resolves later through the linker. It
-is not containment.
-
-Typical use cases:
-
-- super types
-- called functions
-- referenced states, commands, or environments
-
-### Optional reference
-
-Use `optional<reference<T>>` when a reference may be absent:
-
-```cpp
-struct Entity : pegium::AstNode {
-  optional<reference<Entity>> superType;
-};
-```
-
-### Repeated references
-
-Use `vector<reference<T>>` when the source syntax contains several independent
-references:
-
-```cpp
-struct Requirement : pegium::AstNode {
-  vector<reference<Environment>> environments;
-};
-```
-
-This is useful when the text contains several names that should each resolve to
-one target.
-
-### Multi-reference
-
-Pegium also provides `multi_reference<T>` for one reference slot that may
-resolve to several targets.
-
-```cpp
-struct Example : pegium::AstNode {
-  multi_reference<MyNode> targets;
-};
-```
-
-There is also `optional<multi_reference<T>>` when that slot itself is optional.
-
-Use `multi_reference<T>` only when one reference occurrence in the source is
-meant to resolve to multiple targets. If the source contains several explicit
-names, `vector<reference<T>>` is usually the better shape.
-
-### Repeated scalar values
-
-Use `vector<T>` for repeated scalar data:
-
-```cpp
-struct Example : pegium::AstNode {
-  vector<string> tags;
-};
-```
-
-This is for repeated values, not repeated contained nodes. For repeated child
-nodes, keep using `vector<pointer<T>>`.
-
-## AST aliases inherited from `AstNode`
-
-When you derive from `pegium::AstNode`, you can use these aliases directly in
-the struct body:
-
-- `string`
-- `int8_t`, `int16_t`, `int32_t`, `int64_t`
-- `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`
-- `optional<T>`
-- `variant<T...>`
-- `vector<T>`
-- `pointer<T>`
-- `reference<T>`
-- `multi_reference<T>`
-
-That is why the examples can write `string`, `pointer<Expression>`, or
-`vector<reference<Environment>>` without qualifying them.
-
-## Recommended AST style
-
-Prefer these shapes:
-
-- scalar values for plain data
-- `pointer<T>` for one contained child
-- `vector<pointer<T>>` for repeated contained children
-- `reference<T>` for one linked target
-- `vector<reference<T>>` for repeated explicit links
-- `optional<T>` only when absence is semantically meaningful
-
-This matches the shipped examples and keeps the AST easy to traverse and link.
-
-## CST
-
-- `pegium::CstNodeView` represents a stable view into the parsed concrete tree
-- offsets, ranges, children, siblings, hidden nodes, and recovered nodes are
-  available through the CST API
-- `pegium::CstUtils` contains lookup helpers for properties, keywords, interior
-  nodes, and node-at-offset operations
-
-## Why both matter
-
-- AST drives semantics, validation, scoping, and most editor features
-- CST is required for precise formatting, offset-based lookup, and source-level
-  operations that must preserve text layout
-
-## Recommended pattern
-
-Model semantics in the AST first. Drop to CST only when the feature is
-inherently source-aware, such as formatting, comment handling, or
-cursor-position logic.
+- [4. Shape the AST and CST](../learn/workflow/generate_ast.md)
+- [Semantic Model](../reference/semantic-model.md)
+- [References and Scoping](references-and-scoping.md)

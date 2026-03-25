@@ -1,12 +1,12 @@
 #include "lsp/ArithmeticsCodeActionProvider.hpp"
 
-#include "validation/ArithmeticsValidator.hpp"
+#include "core/validation/ArithmeticsValidator.hpp"
 
 #include <format>
 #include <string>
 #include <string_view>
 
-namespace arithmetics::services::lsp {
+namespace arithmetics::lsp {
 
 void ArithmeticsCodeActionProvider::appendCodeActions(
     const pegium::workspace::Document &document,
@@ -23,7 +23,8 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
     if (!diagnostic.code.has_value() ||
         !std::holds_alternative<::lsp::String>(*diagnostic.code) ||
         std::get<::lsp::String>(*diagnostic.code) !=
-            std::string(validation::IssueCodes::ExpressionNormalizable) ||
+            std::string(
+                arithmetics::validation::IssueCodes::ExpressionNormalizable) ||
         !diagnostic.data.has_value() || !diagnostic.data->isObject()) {
       continue;
     }
@@ -59,4 +60,4 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
   }
 }
 
-} // namespace arithmetics::services::lsp
+} // namespace arithmetics::lsp

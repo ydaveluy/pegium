@@ -36,7 +36,7 @@ void register_arithmetics_benchmarks(BenchmarkRegistry &registry) {
       {.name = "arithmetics",
        .languageId = "arithmetics",
        .extension = ".calc",
-       .registerLanguages = arithmetics::services::register_language_services,
+       .registerLanguages = arithmetics::register_language_services,
        .makeSource = make_source});
 }
 

@@ -91,6 +91,14 @@ private:
   }
 };
 
+/// Coalesces adjacent recovery diagnostics into stable parser-facing output.
+///
+/// This keeps delete runs contiguous and merges same-offset inserted
+/// expectations so downstream consumers do not need to reconstruct recovery
+/// edit structure on their own.
+[[nodiscard]] std::vector<ParseDiagnostic>
+normalizeParseDiagnostics(std::span<const ParseDiagnostic> diagnostics);
+
 /// Heuristics and limits controlling recovery and expectation search.
 struct ParseOptions {
   /// Maximum number of codepoints that one attempt may delete consecutively.

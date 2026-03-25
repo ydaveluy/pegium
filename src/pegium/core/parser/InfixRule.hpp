@@ -482,23 +482,8 @@ private:
             return true;
           }
           ctx.skip();
-          const bool previousAllowInsert = ctx.allowInsert;
-          const bool previousAllowDelete = ctx.allowDelete;
-          const bool rhsStartsWithUnexpectedOperator =
-              starts_with_operator_terminal(model, ctx.cursor());
-          ctx.allowInsert = false;
-          // Allow generic delete-based recovery inside the RHS primary only
-          // when the tail starts with another operator token of the same infix
-          // rule (for example `+` in `2 * +c`). This fixes doubled-operator
-          // cases without letting the RHS delete arbitrary valid trailing
-          // tokens such as statement terminators.
-          ctx.allowDelete =
-              previousAllowDelete && rhsStartsWithUnexpectedOperator;
           const auto rhsStart = ctx.cursor();
-          const bool matchedRhs = parse(model->primary, ctx);
-          ctx.allowInsert = previousAllowInsert;
-          ctx.allowDelete = previousAllowDelete;
-          if (!matchedRhs) {
+          if (!parse(model->primary, ctx)) {
             ctx.rewind(nodeCheckpoint);
             return true;
           }
@@ -506,25 +491,6 @@ private:
           (void)parse_tail_editable(model, ctx, nextMinPrecedence, rhsStart);
           assert(model->_owner && "The owner must be set");
           ctx.exit(lhsStart, model->_owner);
-        }
-      }
-
-      template <std::size_t I = 0>
-      static bool starts_with_operator_terminal(const Model *model,
-                                                const char *cursor) noexcept {
-        if constexpr (I == sizeof...(Operators)) {
-          return false;
-        } else {
-          const auto &op = std::get<I>(model->ops);
-          if constexpr (requires {
-                          { op.terminal(cursor) } noexcept
-                              -> std::same_as<const char *>;
-                        }) {
-            if (op.terminal(cursor) != nullptr) {
-              return true;
-            }
-          }
-          return starts_with_operator_terminal<I + 1>(model, cursor);
         }
       }
 

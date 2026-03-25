@@ -1,19 +1,15 @@
 # Pegium Mental Model
 
-This page gives a quick concept mapping for readers who want a high-level
-mental model before diving into Pegium-specific APIs.
+This page gives a quick high-level model of how Pegium fits together before you
+start reading the subsystem pages.
 
-## Concept mapping
+## The five ideas to keep in mind
 
-| General concept | Pegium concept |
-| --- | --- |
-| Grammar rules | `Terminal<T>`, `Rule<T>`, `Infix<...>` |
-| AST nodes | `pegium::AstNode` subclasses |
-| CST helpers | `pegium::CstNodeView` and `pegium::CstUtils` |
-| Validation registry | `pegium::validation::ValidationRegistry` |
-| Scope provider | `pegium::references::ScopeProvider` |
-| Formatter | `pegium::AbstractFormatter` |
-| Default LSP providers | `pegium::Services::lsp` |
+1. The grammar is ordinary C++ code.
+2. The AST is your semantic model.
+3. References are resolved after parsing, not during parsing.
+4. Services assemble the language behavior.
+5. The same document model powers parsing, diagnostics, and editor features.
 
 ## Main differences
 
@@ -22,20 +18,18 @@ mental model before diving into Pegium-specific APIs.
 - Pegium uses a PEG-based parser DSL as the foundation of the grammar layer.
 - C++ types and member pointers are used directly for AST construction and
   formatter selections.
-- Service composition happens through the Pegium services layer and explicit
-  registration APIs.
+- Service composition happens through explicit service wiring.
 
 ## How to translate your intuition
 
 If you are used to language tooling frameworks:
 
-- think of `PegiumParser` subclasses as the place where grammar structure lives
-- think of `Rule<T>` and `Terminal<T>` as Pegium's named grammar rules and
-  terminals
-- think of `AstNode` structs as the semantic node types of your language
-- think of `reference<T>` plus linker/scope services as the reference pipeline
-- think of `AbstractFormatter` and `ValidationRegistry` as close conceptual
-  equivalents of formatter and validation registries
+- think of the parser class as the home of the grammar
+- think of your AST structs as the language model you will validate and
+  traverse
+- think of scoping and linking as the stage that turns names into targets
+- think of the service container as the place where the language gets its
+  parser, validator, formatter, and editor behavior
 
 The biggest mental shift is that grammar and language services are ordinary C++
 code. You get stronger type coupling with the AST, but less of the declarative

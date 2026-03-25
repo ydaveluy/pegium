@@ -15,9 +15,9 @@ namespace pegium::workspace {
 
 /// Default factory creating managed documents from shared services and parsers.
 class DefaultDocumentFactory : public DocumentFactory,
-                               protected services::DefaultSharedCoreService {
+                               protected pegium::DefaultSharedCoreService {
 public:
-  using services::DefaultSharedCoreService::DefaultSharedCoreService;
+  using pegium::DefaultSharedCoreService::DefaultSharedCoreService;
 
   [[nodiscard]] std::shared_ptr<Document> fromTextDocument(
       std::shared_ptr<TextDocument> textDocument,
@@ -38,7 +38,7 @@ public:
 private:
   [[nodiscard]] std::shared_ptr<Document>
   createDocument(std::shared_ptr<TextDocument> textDocument,
-                 const services::CoreServices &services,
+                 const pegium::CoreServices &services,
                  const utils::CancellationToken &cancelToken) const;
 
   [[nodiscard]] std::shared_ptr<TextDocument>
@@ -49,7 +49,7 @@ private:
   normalizeTextDocument(std::shared_ptr<TextDocument> textDocument,
                         std::string_view languageId = {}) const;
 
-  void parse(Document &document, const services::CoreServices &services,
+  void parse(Document &document, const pegium::CoreServices &services,
              const utils::CancellationToken &cancelToken) const;
 };
 

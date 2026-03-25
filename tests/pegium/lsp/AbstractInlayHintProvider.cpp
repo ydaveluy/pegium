@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/semantic/AbstractInlayHintProvider.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
@@ -85,13 +85,13 @@ protected:
 
 TEST(AbstractInlayHintProviderTest, VisitsOnlyAstNodesInRequestedRange) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services<HintParser>(*shared, "hint", {".hint"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }

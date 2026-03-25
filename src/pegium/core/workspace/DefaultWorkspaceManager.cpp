@@ -19,7 +19,7 @@ namespace pegium::workspace {
 namespace {
 
 void publish_workspace_bootstrap_failure(
-    const services::SharedCoreServices &sharedServices,
+    const pegium::SharedCoreServices &sharedServices,
     std::span<const WorkspaceFolder> workspaceFolders, std::string message) {
   observability::Observation observation{
       .severity = observability::ObservationSeverity::Error,
@@ -34,8 +34,8 @@ void publish_workspace_bootstrap_failure(
 } // namespace
 
 DefaultWorkspaceManager::DefaultWorkspaceManager(
-    const services::SharedCoreServices &sharedServices)
-    : services::DefaultSharedCoreService(sharedServices) {
+    const pegium::SharedCoreServices &sharedServices)
+    : pegium::DefaultSharedCoreService(sharedServices) {
   _readyPromise = std::make_shared<std::promise<void>>();
   _readyFuture = _readyPromise->get_future().share();
 

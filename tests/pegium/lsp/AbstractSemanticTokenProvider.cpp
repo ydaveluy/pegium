@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/semantic/AbstractSemanticTokenProvider.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
@@ -143,13 +143,13 @@ void initialize_multiline_semantic_tokens(pegium::SharedServices &shared,
 
 TEST(AbstractSemanticTokenProviderTest, ExposesLegendAndEncodesTokens) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services<SemanticParser>(*shared, "semantic", {".semantic"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -184,13 +184,13 @@ TEST(AbstractSemanticTokenProviderTest, ExposesLegendAndEncodesTokens) {
 
 TEST(AbstractSemanticTokenProviderTest, EncodesAsciiTokenLengthInUtf16Units) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = test::make_uninstalled_services<QuotedSemanticParser>(
         *shared, "quoted-semantic", {".qsemantic"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -226,13 +226,13 @@ TEST(AbstractSemanticTokenProviderTest, EncodesAsciiTokenLengthInUtf16Units) {
 
 TEST(AbstractSemanticTokenProviderTest, EncodesAccentTokenLengthInUtf16Units) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = test::make_uninstalled_services<QuotedSemanticParser>(
         *shared, "quoted-semantic", {".qsemantic"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -266,13 +266,13 @@ TEST(AbstractSemanticTokenProviderTest, EncodesAccentTokenLengthInUtf16Units) {
 
 TEST(AbstractSemanticTokenProviderTest, EncodesEmojiTokenLengthInUtf16Units) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = test::make_uninstalled_services<QuotedSemanticParser>(
         *shared, "quoted-semantic", {".qsemantic"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -307,13 +307,13 @@ TEST(AbstractSemanticTokenProviderTest, EncodesEmojiTokenLengthInUtf16Units) {
 TEST(AbstractSemanticTokenProviderTest,
      KeepsMultilineTokenWholeWhenClientSupportsIt) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = test::make_uninstalled_services<QuotedSemanticParser>(
         *shared, "quoted-semantic", {".qsemantic"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -347,13 +347,13 @@ TEST(AbstractSemanticTokenProviderTest,
 TEST(AbstractSemanticTokenProviderTest,
      SplitsMultilineTokenWhenClientDoesNotSupportIt) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = test::make_uninstalled_services<QuotedSemanticParser>(
         *shared, "quoted-semantic", {".qsemantic"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -389,13 +389,13 @@ TEST(AbstractSemanticTokenProviderTest,
 
 TEST(AbstractSemanticTokenProviderTest, RangeHighlightFiltersTokens) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services<SemanticParser>(*shared, "semantic", {".semantic"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -427,13 +427,13 @@ TEST(AbstractSemanticTokenProviderTest, RangeHighlightFiltersTokens) {
 
 TEST(AbstractSemanticTokenProviderTest, DeltaFallsBackToFullForUnknownSnapshot) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services<SemanticParser>(*shared, "semantic", {".semantic"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -465,13 +465,13 @@ TEST(AbstractSemanticTokenProviderTest, DeltaFallsBackToFullForUnknownSnapshot) 
 TEST(AbstractSemanticTokenProviderTest,
      DeltaReturnsEditsForKnownSnapshotAndClearsCacheOnClose) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services<SemanticParser>(*shared, "semantic", {".semantic"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
