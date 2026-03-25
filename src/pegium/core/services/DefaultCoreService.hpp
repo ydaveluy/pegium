@@ -2,7 +2,7 @@
 
 #include <pegium/core/services/CoreServices.hpp>
 
-namespace pegium::services {
+namespace pegium {
 
 /// Convenience base class for default services bound to one `CoreServices`.
 class DefaultCoreService {
@@ -15,4 +15,4 @@ protected:
   const CoreServices &services;
 };
 
-} // namespace pegium::services
+} // namespace pegium

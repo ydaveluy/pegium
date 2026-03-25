@@ -17,7 +17,8 @@ struct TaskScheduler::TaskGroupState {
   mutable std::mutex mutex;
   std::condition_variable cv;
   std::atomic<std::size_t> pending{0};
-  std::atomic<bool> cancelled{false};
+  // See TaskScheduler::_stopping for why guided fuzzing uses a byte flag here.
+  std::atomic<std::uint8_t> cancelled{0};
   utils::CancellationToken cancelToken;
   std::exception_ptr exception;
 };
@@ -45,7 +46,7 @@ TaskScheduler::TaskScheduler(std::size_t workerCount) {
 }
 
 TaskScheduler::~TaskScheduler() noexcept {
-  _stopping.store(true);
+  _stopping.store(1);
   _globalCv.notify_all();
 }
 
@@ -104,7 +105,7 @@ void TaskScheduler::run(const utils::CancellationToken &cancelToken,
       if (scope._group->exception == nullptr) {
         scope._group->exception = bodyException;
       }
-      scope._group->cancelled.store(true);
+      scope._group->cancelled.store(1);
     }
   }
 
@@ -238,21 +239,21 @@ void TaskScheduler::executeTask(ScheduledTask &&task,
 
   try {
     if (task.group->cancelToken.stop_requested() ||
-        task.group->cancelled.load()) {
+        task.group->cancelled.load() != 0) {
       throw utils::OperationCancelled();
     }
     Scope scope(*this, task.group, executionContext);
     task.task(scope);
     scope.throwIfCancelled();
   } catch (const utils::OperationCancelled &) {
-    task.group->cancelled.store(true);
+    task.group->cancelled.store(1);
     std::scoped_lock lock(task.group->mutex);
     if (task.group->exception == nullptr &&
         task.group->cancelToken.stop_requested()) {
       task.group->exception = std::make_exception_ptr(utils::OperationCancelled());
     }
   } catch (const std::exception &) {
-    task.group->cancelled.store(true);
+    task.group->cancelled.store(1);
     std::scoped_lock lock(task.group->mutex);
     if (task.group->exception == nullptr) {
       task.group->exception = std::current_exception();
@@ -268,7 +269,7 @@ void TaskScheduler::workerLoop(std::size_t workerIndex,
                                std::stop_token stopToken) {
   const ExecutionContext executionContext(this, workerIndex);
 
-  while (!stopToken.stop_requested() && !_stopping.load()) {
+  while (!stopToken.stop_requested() && _stopping.load() == 0) {
     if (ScheduledTask task; tryPopTask(task, executionContext)) {
       executeTask(std::move(task), executionContext);
       continue;
@@ -276,7 +277,8 @@ void TaskScheduler::workerLoop(std::size_t workerIndex,
 
     std::unique_lock lock(_globalMutex);
     _globalCv.wait_for(lock, std::chrono::milliseconds(1), [this, &stopToken]() {
-      return stopToken.stop_requested() || _stopping.load() || !_globalQueue.empty();
+      return stopToken.stop_requested() || _stopping.load() != 0 ||
+             !_globalQueue.empty();
     });
   }
 }
@@ -301,7 +303,7 @@ TaskScheduler::Scope::cancellationToken() const noexcept {
 }
 
 void TaskScheduler::Scope::throwIfCancelled() const {
-  if (_group->cancelToken.stop_requested() || _group->cancelled.load()) {
+  if (_group->cancelToken.stop_requested() || _group->cancelled.load() != 0) {
     throw utils::OperationCancelled();
   }
 }

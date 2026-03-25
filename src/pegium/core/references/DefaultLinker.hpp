@@ -9,7 +9,7 @@
 #include <pegium/core/workspace/Documents.hpp>
 #include <pegium/core/workspace/IndexManager.hpp>
 
-namespace pegium::services {
+namespace pegium {
 struct CoreServices;
 }
 
@@ -17,10 +17,10 @@ namespace pegium::references {
 
 /// Default linker backed by the registered scope provider and document index.
 class DefaultLinker : public Linker,
-                      protected services::DefaultCoreService {
+                      protected pegium::DefaultCoreService {
 public:
   /// Creates a linker using the reference and workspace services from `services`.
-  explicit DefaultLinker(const services::CoreServices &services);
+  explicit DefaultLinker(const pegium::CoreServices &services);
 
   /// Resolves and caches every reference owned by `document`.
   void link(workspace::Document &document,

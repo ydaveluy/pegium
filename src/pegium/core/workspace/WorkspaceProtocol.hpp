@@ -34,14 +34,14 @@ struct InitializeParams {
 struct InitializedParams {
   std::function<std::future<void>(std::vector<std::string>)>
       registerDidChangeConfiguration;
-  std::function<std::future<std::vector<services::JsonValue>>(
+  std::function<std::future<std::vector<pegium::JsonValue>>(
       std::vector<std::string>)>
       fetchConfiguration;
 };
 
 /// Configuration change notification payload.
 struct ConfigurationChangeParams {
-  services::JsonValue settings;
+  pegium::JsonValue settings;
 };
 
 } // namespace pegium::workspace

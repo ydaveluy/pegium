@@ -10,15 +10,15 @@
 namespace pegium {
 
 /// Converts one protocol value to the internal JSON representation.
-[[nodiscard]] services::JsonValue from_lsp_any(const ::lsp::LSPAny &value);
+[[nodiscard]] pegium::JsonValue from_lsp_any(const ::lsp::LSPAny &value);
 /// Converts one internal JSON value to the protocol representation.
-[[nodiscard]] ::lsp::LSPAny to_lsp_any(const services::JsonValue &value);
+[[nodiscard]] ::lsp::LSPAny to_lsp_any(const pegium::JsonValue &value);
 
 /// Converts an LSP diagnostic severity to the shared diagnostic model.
-[[nodiscard]] services::DiagnosticSeverity
+[[nodiscard]] pegium::DiagnosticSeverity
 from_lsp_diagnostic_severity(::lsp::DiagnosticSeverity severity);
 /// Converts a shared diagnostic severity to the LSP representation.
 [[nodiscard]] ::lsp::DiagnosticSeverity
-to_lsp_diagnostic_severity(services::DiagnosticSeverity severity);
+to_lsp_diagnostic_severity(pegium::DiagnosticSeverity severity);
 
 } // namespace pegium

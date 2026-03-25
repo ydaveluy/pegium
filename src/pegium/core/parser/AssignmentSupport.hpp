@@ -6,6 +6,7 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <typeindex>
@@ -118,6 +119,33 @@ template <auto feature>
 ordered_choice_no_selectable_error() {
   return std::runtime_error("OrderedChoice has no assignable selected value for " +
                             std::string(detail::member_name_v<feature>));
+}
+
+template <auto feature>
+[[nodiscard]] inline std::runtime_error
+ordered_choice_no_selectable_error(const CstNodeView &node) {
+  std::string message =
+      "OrderedChoice has no assignable selected value for " +
+      std::string(detail::member_name_v<feature>) +
+      " nodeText=\"" + std::string(node.getText()) + "\"" +
+      " recovered=" + (node.isRecovered() ? "true" : "false") +
+      " leaf=" + (node.isLeaf() ? "true" : "false");
+  std::size_t childIndex = 0;
+  for (const auto child : node) {
+    std::ostringstream grammarStream;
+    grammarStream << *child.getGrammarElement();
+    message += " child[" + std::to_string(childIndex++) + "]={text=\"" +
+               std::string(child.getText()) + "\", grammar=\"" +
+               grammarStream.str() + "\"";
+    message += ", hidden=";
+    message += child.isHidden() ? "true" : "false";
+    message += ", recovered=";
+    message += child.isRecovered() ? "true" : "false";
+    message += ", leaf=";
+    message += child.isLeaf() ? "true" : "false";
+    message += "}";
+  }
+  return std::runtime_error(std::move(message));
 }
 
 template <auto feature>
@@ -460,10 +488,12 @@ private:
 
   [[nodiscard]] static bool
   ordered_choice_contains_recovery(const CstNodeView &node) {
-    return node.isRecovered() ||
-           std::ranges::any_of(node, [](const CstNodeView &child) {
-             return child.isRecovered();
-           });
+    if (node.isRecovered()) {
+      return true;
+    }
+    return std::ranges::any_of(node, [](const CstNodeView &child) {
+      return ordered_choice_contains_recovery(child);
+    });
   }
 
   template <typename ClassType, typename AttrType>
@@ -491,7 +521,9 @@ private:
                          ? OrderedChoiceAssignStatus::Assigned
                          : OrderedChoiceAssignStatus::AssignFailed;
           });
-      return matched ? status : OrderedChoiceAssignStatus::NoSelectable;
+      if (matched) {
+        return status;
+      }
     }
     return OrderedChoiceAssignStatus::NoSelectable;
   }
@@ -511,7 +543,7 @@ private:
         if (ordered_choice_contains_recovery(node)) {
           return;
         }
-        throw detail::ordered_choice_no_selectable_error<feature>();
+        throw detail::ordered_choice_no_selectable_error<feature>(node);
       }
       if (status == OrderedChoiceAssignStatus::AssignFailed) [[unlikely]] {
         throw detail::ordered_choice_not_assignable_error<feature>();

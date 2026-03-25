@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mutex>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -73,6 +74,14 @@ private:
   emitWillSaveWaitUntil(
       const std::shared_ptr<workspace::TextDocument> &document,
       workspace::TextDocumentSaveReason reason) const;
+  struct WillSaveWaitUntilState {
+    mutable std::mutex mutex;
+    std::function<std::vector<workspace::TextEdit>(
+        const workspace::TextDocumentWillSaveEvent &)>
+        listener;
+    std::size_t nextId = 0;
+    std::size_t activeId = 0;
+  };
 
   mutable std::mutex _mutex;
   std::unordered_map<std::string, std::shared_ptr<workspace::TextDocument>>
@@ -82,10 +91,8 @@ private:
   utils::EventEmitter<workspace::TextDocumentChangeEvent> _onDidSave;
   utils::EventEmitter<workspace::TextDocumentChangeEvent> _onDidClose;
   utils::EventEmitter<workspace::TextDocumentWillSaveEvent> _onWillSave;
-  std::function<std::vector<workspace::TextEdit>(
-      const workspace::TextDocumentWillSaveEvent &)>
-      _onWillSaveWaitUntil;
-  std::size_t _nextWillSaveWaitUntilId = 0;
+  std::shared_ptr<WillSaveWaitUntilState> _onWillSaveWaitUntil =
+      std::make_shared<WillSaveWaitUntilState>();
 };
 
 } // namespace pegium

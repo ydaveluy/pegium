@@ -12,15 +12,15 @@
 
 #include <domainmodel/cli/CliUtils.hpp>
 #include <domainmodel/cli/Generator.hpp>
-#include <domainmodel/services/Module.hpp>
-#include <domainmodel/services/Services.hpp>
+#include <domainmodel/lsp/Module.hpp>
+#include <domainmodel/lsp/Services.hpp>
 
 #include "../src/lsp/DomainModelFormatter.hpp"
 #include "../src/lsp/DomainModelRenameProvider.hpp"
-#include "../src/references/DomainModelScopeComputation.hpp"
-#include "../src/references/QualifiedNameProvider.hpp"
+#include "../src/core/references/DomainModelScopeComputation.hpp"
+#include "../src/core/references/QualifiedNameProvider.hpp"
 
-#include <pegium/ExampleTestSupport.hpp>
+#include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/cli/CliUtils.hpp>
 #include <pegium/core/references/DefaultNameProvider.hpp>
 #include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
@@ -160,11 +160,11 @@ std::vector<std::string> collect_reference_ranges(
 
 TEST(DomainModelModuleTest, InstallsLanguageSpecificOverrides) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
-      domainmodel::services::create_language_services(*shared, "domain-model");
+      domainmodel::lsp::create_language_services(*shared, "domain-model");
 
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->domainModel.references.qualifiedNameProvider, nullptr);
@@ -172,13 +172,13 @@ TEST(DomainModelModuleTest, InstallsLanguageSpecificOverrides) {
   EXPECT_NE(dynamic_cast<pegium::references::DefaultNameProvider *>(
                 services->references.nameProvider.get()),
             nullptr);
-  EXPECT_NE(dynamic_cast<domainmodel::services::references::DomainModelScopeComputation *>(
+  EXPECT_NE(dynamic_cast<domainmodel::references::DomainModelScopeComputation *>(
                 services->references.scopeComputation.get()),
             nullptr);
-  EXPECT_NE(dynamic_cast<domainmodel::services::lsp::DomainModelRenameProvider *>(
+  EXPECT_NE(dynamic_cast<domainmodel::lsp::DomainModelRenameProvider *>(
                 services->lsp.renameProvider.get()),
             nullptr);
-  EXPECT_NE(dynamic_cast<domainmodel::services::lsp::DomainModelFormatter *>(
+  EXPECT_NE(dynamic_cast<domainmodel::lsp::DomainModelFormatter *>(
                 services->lsp.formatter.get()),
             nullptr);
 
@@ -188,7 +188,7 @@ TEST(DomainModelModuleTest, InstallsLanguageSpecificOverrides) {
   EXPECT_EQ(services->references.nameProvider->getName(entity),
             (std::optional<std::string>{"Person"}));
 
-  domainmodel::services::references::QualifiedNameProvider qualifiedNames;
+  domainmodel::references::QualifiedNameProvider qualifiedNames;
   domainmodel::ast::PackageDeclaration parent;
   parent.name = "blog";
   domainmodel::ast::PackageDeclaration child;
@@ -201,10 +201,10 @@ TEST(DomainModelModuleTest, InstallsLanguageSpecificOverrides) {
 
 TEST(DomainModelModuleTest, ValidatorWarnsOnLowerCaseTypeName) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::services::register_language_services(*shared));
+  ASSERT_TRUE(domainmodel::lsp::register_language_services(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("domainmodel-module.dmodel"),
@@ -217,10 +217,10 @@ TEST(DomainModelModuleTest, ValidatorWarnsOnLowerCaseTypeName) {
 
 TEST(DomainModelModuleTest, ValidatorWarnsOnLowerCaseDataTypeName) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::services::register_language_services(*shared));
+  ASSERT_TRUE(domainmodel::lsp::register_language_services(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("domainmodel-datatype.dmodel"),
@@ -233,14 +233,18 @@ TEST(DomainModelModuleTest, ValidatorWarnsOnLowerCaseDataTypeName) {
 
 TEST(DomainModelModuleTest, RegistersExampleSpecificServicesInRegistry) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::services::register_language_services(*shared));
+  ASSERT_TRUE(domainmodel::lsp::register_language_services(*shared));
 
-  const auto *services = domainmodel::services::as_domain_model_services(
-      shared->serviceRegistry->getServices(
-          pegium::test::make_file_uri("registry-check.dmodel")));
+  const auto *coreServices =
+      &shared->serviceRegistry->getServices(
+          pegium::test::make_file_uri("registry-check.dmodel"));
+  const auto *lspServices = as_services(coreServices);
+  ASSERT_NE(lspServices, nullptr);
+  const auto *services =
+      domainmodel::lsp::as_domain_model_services(*lspServices);
   ASSERT_NE(services, nullptr);
   EXPECT_NE(services->domainModel.references.qualifiedNameProvider, nullptr);
   EXPECT_NE(services->domainModel.validation.domainModelValidator, nullptr);
@@ -248,10 +252,10 @@ TEST(DomainModelModuleTest, RegistersExampleSpecificServicesInRegistry) {
 
 TEST(DomainModelModuleTest, ScopeComputationQualifiesExportsAndLocalSymbols) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::services::register_language_services(*shared));
+  ASSERT_TRUE(domainmodel::lsp::register_language_services(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("scope-names.dmodel"), "domain-model",
@@ -297,10 +301,10 @@ TEST(DomainModelModuleTest, ScopeComputationQualifiesExportsAndLocalSymbols) {
 
 TEST(DomainModelModuleTest, FindsCrossReferencesFromDeclarations) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::services::register_language_services(*shared));
+  ASSERT_TRUE(domainmodel::lsp::register_language_services(*shared));
 
   auto datatypeDocument = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("datatypes.dmodel"), "domain-model",
@@ -342,10 +346,10 @@ TEST(DomainModelModuleTest, FindsCrossReferencesFromDeclarations) {
 
 TEST(DomainModelModuleTest, ReindexesCrossReferencesAfterDocumentUpdate) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::services::register_language_services(*shared));
+  ASSERT_TRUE(domainmodel::lsp::register_language_services(*shared));
 
   auto superDocument = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("super.dmodel"), "domain-model",
@@ -395,10 +399,10 @@ TEST(DomainModelModuleTest, ReindexesCrossReferencesAfterDocumentUpdate) {
 TEST(DomainModelModuleTest,
      RenameUpdatesQualifiedReferencesThroughPackageSubtree) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::services::register_language_services(*shared));
+  ASSERT_TRUE(domainmodel::lsp::register_language_services(*shared));
 
   auto typesDocument = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("rename-types.dmodel"), "domain-model",
@@ -454,10 +458,10 @@ TEST(DomainModelModuleTest,
 
 TEST(DomainModelModuleTest, RenameFeatureEditsOnlyFeatureDeclaration) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::services::register_language_services(*shared));
+  ASSERT_TRUE(domainmodel::lsp::register_language_services(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("rename-feature.dmodel"), "domain-model",
@@ -494,11 +498,11 @@ TEST(DomainModelModuleTest, RenameFeatureEditsOnlyFeatureDeclaration) {
 
 TEST(DomainModelModuleTest, FormatterFormatsCompactModel) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      domainmodel::services::create_language_services(*shared, "domain-model");
+      domainmodel::lsp::create_language_services(*shared, "domain-model");
 
   ASSERT_NE(registeredServices, nullptr);
 
@@ -532,11 +536,11 @@ TEST(DomainModelModuleTest, FormatterFormatsCompactModel) {
 
 TEST(DomainModelModuleTest, FormatterPreservesCommentsWhileReindenting) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      domainmodel::services::create_language_services(*shared, "domain-model");
+      domainmodel::lsp::create_language_services(*shared, "domain-model");
 
   ASSERT_NE(registeredServices, nullptr);
 
@@ -577,11 +581,11 @@ TEST(DomainModelModuleTest, FormatterPreservesCommentsWhileReindenting) {
 
 TEST(DomainModelModuleTest, FormatterIndentsMultilineCommentsInsideBlocks) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      domainmodel::services::create_language_services(*shared, "domain-model");
+      domainmodel::lsp::create_language_services(*shared, "domain-model");
 
   ASSERT_NE(registeredServices, nullptr);
 
@@ -619,11 +623,11 @@ TEST(DomainModelModuleTest, FormatterIndentsMultilineCommentsInsideBlocks) {
 
 TEST(DomainModelModuleTest, FormatterPreservesDocCommentStyle) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      domainmodel::services::create_language_services(*shared, "domain-model");
+      domainmodel::lsp::create_language_services(*shared, "domain-model");
 
   ASSERT_NE(registeredServices, nullptr);
 
@@ -657,9 +661,9 @@ TEST(DomainModelModuleTest, FormatterPreservesDocCommentStyle) {
 
 TEST(DomainModelModuleTest, GeneratorCreatesExpectedJavaFiles) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  auto services = domainmodel::services::create_language_services(*shared);
+  auto services = domainmodel::lsp::create_language_services(*shared);
   auto &domainmodelServices = *services;
   shared->serviceRegistry->registerServices(std::move(services));
 

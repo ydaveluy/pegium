@@ -9,7 +9,7 @@
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/code-actions/CodeLensProvider.hpp>
 #include <pegium/lsp/hierarchy/CallHierarchyProvider.hpp>
 #include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
@@ -116,7 +116,7 @@ public:
 
 class TestResolveCodeLensProvider final : public ::pegium::CodeLensProvider {
 public:
-  mutable std::optional<services::JsonValue> lastResolveData;
+  mutable std::optional<pegium::JsonValue> lastResolveData;
 
   std::vector<::lsp::CodeLens>
   provideCodeLens(const workspace::Document &document,
@@ -125,7 +125,7 @@ public:
     ::lsp::CodeLens codeLens{};
     codeLens.range.start = document.textDocument().positionAt(0);
     codeLens.range.end = document.textDocument().positionAt(0);
-    codeLens.data = to_lsp_any(services::JsonValue(services::JsonValue::Object{
+    codeLens.data = to_lsp_any(pegium::JsonValue(pegium::JsonValue::Object{
         {"seed", "value"},
     }));
     return {std::move(codeLens)};
@@ -204,7 +204,7 @@ protected:
   LanguageServerRuntimeState runtimeState;
 
   LanguageServerTextDocumentHandlersTest() {
-    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedCoreServices(*shared);
     pegium::installDefaultSharedLspServices(*shared);
     pegium::test::initialize_shared_workspace_for_tests(*shared);
   }
@@ -222,7 +222,7 @@ protected:
   registerTestLanguageAndDocument(Configure &&configure,
                                   std::string_view fileName) {
     auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-    pegium::services::installDefaultCoreServices(*services);
+    pegium::installDefaultCoreServices(*services);
     pegium::installDefaultLspServices(*services);
     configure(*services);
     shared->serviceRegistry->registerServices(std::move(services));

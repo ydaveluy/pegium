@@ -14,7 +14,7 @@
 #include <pegium/core/workspace/Document.hpp>
 #include <pegium/core/workspace/IndexManager.hpp>
 
-namespace pegium::services {
+namespace pegium {
 struct CoreServices;
 }
 
@@ -22,10 +22,10 @@ namespace pegium::references {
 
 /// Default scope provider combining local symbols with globally indexed exports.
 class DefaultScopeProvider : public ScopeProvider,
-                             protected services::DefaultCoreService {
+                             protected pegium::DefaultCoreService {
 public:
   /// Creates a scope provider backed by the shared caches and index manager from `services`.
-  explicit DefaultScopeProvider(const services::CoreServices &services);
+  explicit DefaultScopeProvider(const pegium::CoreServices &services);
 
   /// Returns the first visible match for `context.referenceText`.
   [[nodiscard]] const workspace::AstNodeDescription *

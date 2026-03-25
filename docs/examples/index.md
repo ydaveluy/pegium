@@ -59,4 +59,4 @@ projects, a useful order is:
 
 - [Learn Pegium](../learn/index.md)
 - [Recipes](../recipes/index.md)
-- [Examples: Arithmetics](arithmetics.md)
+- [Arithmetics](arithmetics.md)

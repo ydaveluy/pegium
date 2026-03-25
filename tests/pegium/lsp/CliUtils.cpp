@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include <pegium/CoreTestSupport.hpp>
+#include <pegium/core/CoreTestSupport.hpp>
 #include <pegium/cli/CliUtils.hpp>
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
@@ -18,7 +18,7 @@ namespace pegium {
 namespace {
 
 struct RegisteredLanguage {
-  services::CoreServices *services = nullptr;
+  pegium::CoreServices *services = nullptr;
   test::FakeParser *parser = nullptr;
   test::FakeDocumentValidator *validator = nullptr;
 };
@@ -40,11 +40,11 @@ std::filesystem::path write_file(const std::filesystem::path &path,
 }
 
 RegisteredLanguage register_language(
-    SharedServices &shared, std::string languageId,
+    pegium::SharedCoreServices &shared, std::string languageId,
     std::vector<std::string> fileExtensions = {},
     std::vector<std::string> fileNames = {}) {
-  auto languageServices = std::make_unique<services::CoreServices>(shared);
-  services::installDefaultCoreServices(*languageServices);
+  auto languageServices = std::make_unique<pegium::CoreServices>(shared);
+  pegium::installDefaultCoreServices(*languageServices);
 
   auto parser = std::make_unique<test::FakeParser>();
   auto *parserPtr = parser.get();

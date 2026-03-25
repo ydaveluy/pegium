@@ -3,11 +3,11 @@
 #include <optional>
 #include <string_view>
 
-#include <domainmodel/services/Services.hpp>
+#include <domainmodel/lsp/Services.hpp>
 
 #include <pegium/lsp/navigation/DefaultRenameProvider.hpp>
 
-namespace domainmodel::services::lsp {
+namespace domainmodel::lsp {
 
 class DomainModelRenameProvider final : public pegium::DefaultRenameProvider {
 public:
@@ -22,8 +22,8 @@ private:
   [[nodiscard]] std::optional<std::string>
   buildQualifiedName(const pegium::AstNode &node, const pegium::AstNode &renamedRoot,
                      std::string_view replacementName,
-                     const references::QualifiedNameProvider
+                     const domainmodel::references::QualifiedNameProvider
                          *qualifiedNameProvider) const;
 };
 
-} // namespace domainmodel::services::lsp
+} // namespace domainmodel::lsp

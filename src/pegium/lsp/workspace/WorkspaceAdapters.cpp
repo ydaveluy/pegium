@@ -108,7 +108,7 @@ make_workspace_initialized_params(LanguageClient *languageClient) {
   params.fetchConfiguration =
       [languageClient](const std::vector<std::string> &sections) {
         if (sections.empty()) {
-          std::promise<std::vector<services::JsonValue>> promise;
+          std::promise<std::vector<pegium::JsonValue>> promise;
           promise.set_value({});
           return promise.get_future();
         }

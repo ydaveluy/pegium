@@ -6,7 +6,7 @@
 
 #include <pegium/core/services/CoreServices.hpp>
 
-namespace pegium::services {
+namespace pegium {
 
 /// Resolves the language service container associated with a document URI.
 class ServiceRegistry {
@@ -39,4 +39,4 @@ public:
   [[nodiscard]] virtual std::vector<const CoreServices *> all() const = 0;
 };
 
-} // namespace pegium::services
+} // namespace pegium

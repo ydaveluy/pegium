@@ -8,20 +8,6 @@ rewriting the whole provider.
 This keeps the default implementation language-agnostic while still making it
 easy to customize references, keywords, rule-level proposals, and snippets.
 
-Pegium produces completion items directly from the completion request and does
-not expose a separate `completionItem/resolve` dispatch path. Completion
-options are therefore only used for fields that affect completion triggering or
-client-side behavior such as trigger characters and commit characters.
-
-At the provider boundary, this is represented by `CompletionProviderOptions`,
-which currently supports only:
-
-- `triggerCharacters`
-- `allCommitCharacters`
-
-Fields such as `resolveProvider` or `completionItem` are intentionally not part
-of the provider options contract because the runtime does not honor them.
-
 ## Default flow
 
 1. The parser computes reachable `CompletionFeature` values at the cursor.
@@ -31,7 +17,8 @@ of the provider options contract because the runtime does not honor them.
 
 ## `CompletionContext`
 
-`CompletionContext` gives each hook the document state around the cursor:
+`CompletionContext` gives each hook the document state around the cursor.
+The fields you will usually care about are:
 
 - `document`: current workspace document
 - `params`: original LSP completion request
@@ -44,10 +31,6 @@ of the provider options contract because the runtime does not honor them.
 - `feature`: current parser completion feature, always present for the active
   completion alternative
 
-`tokenText` and `prefix` are borrowed views into the current document text for
-the duration of the completion request. Provider hooks should treat them as
-read-only slices, not as owned strings.
-
 The `feature` can describe a `Keyword`, a `Reference`, or a `Rule`.
 
 ## `CompletionValue`
@@ -55,7 +38,7 @@ The `feature` can describe a `Keyword`, a `Reference`, or a `Rule`.
 `CompletionValue` is the generic payload produced by hooks before it is turned
 into an LSP item.
 
-Useful fields:
+The most useful fields are:
 
 - `label`: visible label, and default inserted text
 - `newText`: replacement text when it differs from `label`
@@ -73,28 +56,16 @@ If you omit `textEdit`, the default provider computes it from
 
 ## Reference completion
 
-Reference completion is driven by `ReferenceInfo`.
-
-`ReferenceInfo` carries the container node, current reference text, and the
-originating grammar `Assignment`. Feature name and expected target type are
-derived from that assignment. When a concrete `AbstractReference` already
-exists in the AST, the default provider reuses its stored assignment directly.
-
-This context works both:
-
-- when a concrete `AbstractReference` already exists in the recovered document
-- when the cursor is on an unfinished reference and only the grammar assignment
-  metadata is available
-
-The default provider uses `ScopeProvider::visitScopeEntries(...)`, so custom
-scoping logic stays reusable for linking and completion.
+Reference completion is driven by `ReferenceInfo`, and the default provider uses
+the `ScopeProvider`. This is why good scoping usually gives you good completion
+for free.
 
 ## Hooks
 
 ### `completionFor`
 
-Top-level dispatch hook. Override it only if you want to replace the routing
-between `Reference`, `Rule`, and `Keyword` features.
+Top-level dispatch hook. Override it only when you really want to replace the
+routing between `Reference`, `Rule`, and `Keyword` features.
 
 ### `completionForReference`
 
@@ -106,20 +77,14 @@ Called for reference features. The default implementation iterates over
 
 The best low-risk extension point for filtering reference proposals.
 
-The default implementation enumerates all visible entries through the scope
-provider and lets the fuzzy matcher filter them against `context.prefix`.
-
 ### `createReferenceCompletionItem`
 
-Transforms one `AstNodeDescription` into a `CompletionValue`. Override this to
-change labels, details, documentation, or inserted text for references.
+Transforms one `AstNodeDescription` into a `CompletionValue`.
 
 ### `completionForRule`
 
-Called for parser rule features. The default implementation emits nothing.
-
-This hook is the natural place to add language templates or snippets tied to a
-specific rule.
+Called for parser rule features. This is the natural place to add snippets tied
+to a specific rule.
 
 ### `completionForKeyword`
 
@@ -132,14 +97,11 @@ Cheap boolean filter executed before keyword item creation.
 
 ### `fillCompletionItem`
 
-Final hook before returning the LSP item. Override it to add metadata that is
-independent from the feature source, such as commit characters or custom text
-edits.
+Final hook before returning the LSP item.
 
 ### `continueCompletion`
 
-Controls whether later parser features should still be processed. Return
-`false` when the first matching feature should stop the pipeline.
+Controls whether later parser features should still be processed.
 
 ## Common override patterns
 
@@ -200,6 +162,13 @@ void completionForRule(const pegium::CompletionContext &context,
   });
 }
 ```
+
+## Provider options
+
+`CompletionProviderOptions` currently supports:
+
+- `triggerCharacters`
+- `allCommitCharacters`
 
 ## Recommended customization order
 

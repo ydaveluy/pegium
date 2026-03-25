@@ -22,17 +22,20 @@ can_apply_recovery_match(const Context &ctx, const char *endPtr) noexcept {
 
 template <EditableParseModeContext Context, typename Element>
 [[nodiscard]] constexpr bool
-apply_insert_hidden_recovery_edit(Context &ctx, const Element *element) {
-  return ctx.insertHidden(element);
+apply_insert_synthetic_recovery_edit(Context &ctx, const Element *element) {
+  return ctx.insertSynthetic(element);
 }
 
 template <EditableParseModeContext Context, typename Element>
 [[nodiscard]] constexpr bool
-apply_insert_hidden_gap_recovery_edit(Context &ctx, const char *position,
-                                      const Element *element) {
-  if (!ctx.insertHiddenGapAt(position)) {
+apply_insert_synthetic_gap_and_match_recovery_edit(
+    Context &ctx, const char *position, const Element *element,
+    const char *message = nullptr) {
+  if (!ctx.insertSyntheticGapAt(position, message)) {
     return false;
   }
+  // The source text already matches `element`; the recovery edit only inserts a
+  // synthetic separator at `position` so the existing match can be committed.
   ctx.leaf(position, element);
   return true;
 }

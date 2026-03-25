@@ -2,7 +2,7 @@
 
 #include <lsp/json/json.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
@@ -56,14 +56,14 @@ protected:
 
 TEST(MultilineCommentHoverProviderTest, ReturnsNoHoverWithoutDocumentation) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices =
         test::make_uninstalled_services<HoverParser>(*shared, "test",
                                                      {".test"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -88,13 +88,13 @@ TEST(MultilineCommentHoverProviderTest, ReturnsNoHoverWithoutDocumentation) {
 
 TEST(MultilineCommentHoverProviderTest, UsesDocumentationWhenAvailable) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services<HoverParser>(*shared, "docs", {".docs"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -125,13 +125,13 @@ TEST(MultilineCommentHoverProviderTest, UsesDocumentationWhenAvailable) {
 
 TEST(MultilineCommentHoverProviderTest, UsesDocumentationWhenHoveringNamedRootNode) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services<HoverParser>(*shared, "docs", {".docs"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }

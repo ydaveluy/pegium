@@ -1,0 +1,4 @@
+add_subdirectory(arithmetics)
+add_subdirectory(domainmodel)
+add_subdirectory(requirements)
+add_subdirectory(statemachine)

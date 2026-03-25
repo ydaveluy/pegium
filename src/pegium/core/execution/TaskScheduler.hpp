@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstddef>
 #include <condition_variable>
 #include <deque>
@@ -137,7 +138,10 @@ private:
   mutable std::mutex _globalMutex;
   std::condition_variable _globalCv;
   std::deque<ScheduledTask> _globalQueue;
-  std::atomic<bool> _stopping{false};
+  // Keep this as a byte flag instead of atomic<bool>: in guided FuzzTest builds,
+  // the weak inline atomic<bool>::load symbol can otherwise be resolved to an
+  // instrumented Pegium TU and recurse through sanitizer coverage callbacks.
+  std::atomic<std::uint8_t> _stopping{0};
 
   template <typename>
   static inline constexpr bool always_false_v = false;

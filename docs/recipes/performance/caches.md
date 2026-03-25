@@ -43,7 +43,7 @@ Use `SimpleCache` only when lifecycle-driven invalidation is not important.
 ```cpp
 class MySummaryService {
 public:
-  explicit MySummaryService(const pegium::services::SharedCoreServices &shared)
+  explicit MySummaryService(const pegium::SharedCoreServices &shared)
       : _cache(shared) {}
 
   std::vector<std::string> summary(const pegium::AstNode &node) const {

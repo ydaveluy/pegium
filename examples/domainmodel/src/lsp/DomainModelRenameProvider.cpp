@@ -10,7 +10,7 @@
 #include <typeindex>
 #include <utility>
 
-#include "references/QualifiedNameProvider.hpp"
+#include "core/references/QualifiedNameProvider.hpp"
 
 #include <pegium/lsp/support/LspProviderUtils.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
@@ -21,16 +21,16 @@
 #include <pegium/core/utils/TransparentStringHash.hpp>
 #include <pegium/core/workspace/Documents.hpp>
 
-namespace domainmodel::services::lsp {
+namespace domainmodel::lsp {
 namespace {
 
 using namespace domainmodel::ast;
 using namespace pegium::provider_detail;
 
-const references::QualifiedNameProvider *qualified_name_provider(
+const domainmodel::references::QualifiedNameProvider *qualified_name_provider(
     const pegium::Services &services) {
   const auto *domainModelServices =
-      domainmodel::services::as_domain_model_services(services);
+      domainmodel::lsp::as_domain_model_services(services);
   if (domainModelServices == nullptr) {
     return nullptr;
   }
@@ -44,7 +44,7 @@ const ast::PackageDeclaration *parent_package(const pegium::AstNode &node) {
 std::string package_qualified_name(
     const ast::PackageDeclaration &package, const pegium::AstNode &renamedRoot,
     std::string_view replacementName,
-    const references::QualifiedNameProvider *qualifiedNameProvider) {
+    const domainmodel::references::QualifiedNameProvider *qualifiedNameProvider) {
   const auto currentName =
       &package == &renamedRoot ? std::string(replacementName) : package.name;
   const auto *parent = parent_package(package);
@@ -180,7 +180,7 @@ std::optional<::lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
 std::optional<std::string> DomainModelRenameProvider::buildQualifiedName(
     const pegium::AstNode &node, const pegium::AstNode &renamedRoot,
     std::string_view replacementName,
-    const references::QualifiedNameProvider *qualifiedNameProvider) const {
+    const domainmodel::references::QualifiedNameProvider *qualifiedNameProvider) const {
   if (services.shared.astReflection->isInstance(
           node, std::type_index(typeid(Feature)))) {
     return std::nullopt;
@@ -208,4 +208,4 @@ std::optional<std::string> DomainModelRenameProvider::buildQualifiedName(
   return qualifier.empty() ? resolvedName : qualifier + "." + resolvedName;
 }
 
-} // namespace domainmodel::services::lsp
+} // namespace domainmodel::lsp

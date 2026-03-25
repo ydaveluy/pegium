@@ -60,8 +60,7 @@ the AST.
 
 ### `format(FormattingBuilder &, const AstNode *)`
 
-Override this only if you need advanced fallback behavior. Most formatters
-should rely on `on<T>(...)` and `onHidden(...)`.
+Override this only if you need advanced fallback behavior.
 
 ### `FormattingBuilder::getNodeFormatter(const NodeT *node)`
 
@@ -140,14 +139,6 @@ Useful operations:
 
 These helpers are designed to cover common patterns such as brace blocks,
 comma-separated lists, and comment normalization.
-
-`formatMultilineComment(...)` does not hardcode a continuation marker. It
-emits continuation lines from `newLineStart`, so `newLineStart = " *"` covers
-doc comments while `newLineStart = ""` keeps plain block comments. In
-multiline comments, this prefix is stripped only from lines after the opening
-line. Tag handling uses `tagStart` and `tagContinuation`; by default
-`tagStart = "@"`, and setting `tagStart = nullopt` disables tag-specific
-formatting entirely.
 
 ## Related pages
 

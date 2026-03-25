@@ -19,10 +19,10 @@ public:
   using Options = CstJsonConversionOptions;
 
   /// Converts one CST subtree to JSON using `options`.
-  [[nodiscard]] static services::JsonValue convert(const CstNodeView &node,
+  [[nodiscard]] static pegium::JsonValue convert(const CstNodeView &node,
                                                    const Options &options = {});
   /// Converts one CST root node to JSON using `options`.
-  [[nodiscard]] static services::JsonValue convert(const RootCstNode &root,
+  [[nodiscard]] static pegium::JsonValue convert(const RootCstNode &root,
                                                    const Options &options = {});
 };
 

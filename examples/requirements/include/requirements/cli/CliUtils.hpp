@@ -33,6 +33,6 @@ struct ExtractedRequirementModelWithTests {
 
 [[nodiscard]] ExtractedRequirementModelWithTests
 extract_requirement_model_with_test_models(
-    std::string_view fileName, const pegium::services::CoreServices &services);
+    std::string_view fileName, const pegium::CoreServices &services);
 
 } // namespace requirements::cli

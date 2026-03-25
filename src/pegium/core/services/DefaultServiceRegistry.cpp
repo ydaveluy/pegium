@@ -11,7 +11,7 @@
 #include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 
-namespace pegium::services {
+namespace pegium {
 namespace {
 
 std::string normalize_extension(std::string_view extension) {
@@ -268,4 +268,4 @@ void DefaultServiceRegistry::addLanguageMappingsLocked(
   }
 }
 
-} // namespace pegium::services
+} // namespace pegium

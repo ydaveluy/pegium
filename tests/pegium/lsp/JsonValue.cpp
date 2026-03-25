@@ -10,23 +10,23 @@ namespace pegium {
 namespace {
 
 TEST(JsonValueTest, RoundTripsNestedValuesBetweenPegiumAndLsp) {
-  services::JsonValue::Object nestedObject;
+  pegium::JsonValue::Object nestedObject;
   nestedObject.try_emplace("name", "demo");
   nestedObject.try_emplace("enabled", true);
   nestedObject.try_emplace("count", std::int64_t{42});
 
-  services::JsonValue::Array nestedArray;
+  pegium::JsonValue::Array nestedArray;
   nestedArray.emplace_back(nullptr);
   nestedArray.emplace_back(3.5);
-  nestedArray.emplace_back(services::JsonValue::Object{
+  nestedArray.emplace_back(pegium::JsonValue::Object{
       {"flag", false},
   });
 
-  services::JsonValue::Object root;
+  pegium::JsonValue::Object root;
   root.try_emplace("object", std::move(nestedObject));
   root.try_emplace("array", std::move(nestedArray));
 
-  const services::JsonValue value{std::move(root)};
+  const pegium::JsonValue value{std::move(root)};
   const auto roundTripped = from_lsp_any(to_lsp_any(value));
 
   ASSERT_TRUE(roundTripped.isObject());
@@ -51,9 +51,9 @@ TEST(JsonValueTest, RoundTripsNestedValuesBetweenPegiumAndLsp) {
 
 TEST(JsonValueTest, ClampsIntegersToLspIntegerRange) {
   const auto largest = to_lsp_any(
-      services::JsonValue{std::numeric_limits<std::int64_t>::max()});
+      pegium::JsonValue{std::numeric_limits<std::int64_t>::max()});
   const auto smallest = to_lsp_any(
-      services::JsonValue{std::numeric_limits<std::int64_t>::min()});
+      pegium::JsonValue{std::numeric_limits<std::int64_t>::min()});
 
   ASSERT_TRUE(largest.isInteger());
   ASSERT_TRUE(smallest.isInteger());
@@ -63,10 +63,10 @@ TEST(JsonValueTest, ClampsIntegersToLspIntegerRange) {
 
 TEST(JsonValueTest, ConvertsDiagnosticSeverityBothWays) {
   constexpr std::array severities{
-      services::DiagnosticSeverity::Error,
-      services::DiagnosticSeverity::Warning,
-      services::DiagnosticSeverity::Information,
-      services::DiagnosticSeverity::Hint,
+      pegium::DiagnosticSeverity::Error,
+      pegium::DiagnosticSeverity::Warning,
+      pegium::DiagnosticSeverity::Information,
+      pegium::DiagnosticSeverity::Hint,
   };
 
   for (const auto severity : severities) {
@@ -75,7 +75,7 @@ TEST(JsonValueTest, ConvertsDiagnosticSeverityBothWays) {
   }
 
   EXPECT_EQ(from_lsp_diagnostic_severity(::lsp::DiagnosticSeverity::MAX_VALUE),
-            services::DiagnosticSeverity::Error);
+            pegium::DiagnosticSeverity::Error);
 }
 
 } // namespace

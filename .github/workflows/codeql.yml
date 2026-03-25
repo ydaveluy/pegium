@@ -78,7 +78,7 @@ jobs:
       shell: bash
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPEGIUM_BUILD_EXAMPLES=ON -S ${{github.workspace}}
-        cmake --build build --config Debug -j 2
+        cmake --build build --config Debug -j 4
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4

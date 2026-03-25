@@ -3,7 +3,7 @@
 #include <requirements/parser/Parser.hpp>
 #include <requirements/services/Module.hpp>
 
-#include <pegium/ExampleTestSupport.hpp>
+#include <pegium/examples/ExampleTestSupport.hpp>
 
 namespace requirements::tests {
 namespace {
@@ -26,10 +26,10 @@ TEST(RequirementsLanguageTest, ParsesRequirementModel) {
 
 TEST(RequirementsLanguageTest, LinksEnvironmentMultiReferencesAndReportsUnresolvedOnes) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(requirements::services::register_language_services(*shared));
+  ASSERT_TRUE(requirements::register_language_services(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("linking.req"), "requirements-lang",

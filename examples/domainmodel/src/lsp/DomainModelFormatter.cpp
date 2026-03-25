@@ -1,6 +1,6 @@
 #include "lsp/DomainModelFormatter.hpp"
 
-namespace domainmodel::services::lsp {
+namespace domainmodel::lsp {
 
 namespace {
 
@@ -80,4 +80,4 @@ DomainModelFormatter::DomainModelFormatter(
   onHidden("SL_COMMENT", &DomainModelFormatter::formatLineComment);
 }
 
-} // namespace domainmodel::services::lsp
+} // namespace domainmodel::lsp

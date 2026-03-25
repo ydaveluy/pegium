@@ -11,7 +11,7 @@
 #include <pegium/core/services/ServiceRegistry.hpp>
 #include <pegium/core/utils/TransparentStringHash.hpp>
 
-namespace pegium::services {
+namespace pegium {
 
 /// Default registry mapping URIs to their language service container.
 class DefaultServiceRegistry : public ServiceRegistry,
@@ -49,4 +49,4 @@ private:
   utils::TransparentStringMap<std::string> _languageIdByFileName;
 };
 
-} // namespace pegium::services
+} // namespace pegium

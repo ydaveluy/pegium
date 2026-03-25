@@ -2,7 +2,7 @@
 
 #include <typeindex>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/references/References.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
@@ -94,12 +94,12 @@ public:
 TEST(DefaultDocumentHighlightProviderTest,
      HighlightsDeclarationAndLocalReferences) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
       test::make_uninstalled_services<HighlightParser>(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*registeredServices);
+  pegium::installDefaultCoreServices(*registeredServices);
   pegium::installDefaultLspServices(*registeredServices);
 
   auto references = std::make_unique<TestReferences>();

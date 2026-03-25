@@ -123,7 +123,7 @@ AbstractTypeHierarchyProvider::createTypeHierarchyItem(const AstNode &node) cons
       textDocument.positionAt(namedNode->selectionNode.getBegin());
   item.selectionRange.end =
       textDocument.positionAt(namedNode->selectionNode.getEnd());
-  item.data = to_lsp_any(services::JsonValue(
+  item.data = to_lsp_any(pegium::JsonValue(
       static_cast<std::int64_t>(document.makeSymbolId(node))));
   customizeTypeHierarchyItem(node, item);
   return item;

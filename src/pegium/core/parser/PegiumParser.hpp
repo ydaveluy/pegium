@@ -84,17 +84,17 @@ struct ParseContext;
 struct RecoveryContext;
 }
 
-namespace pegium::services {
+namespace pegium {
 struct CoreServices;
 }
 
 namespace pegium::parser {
 
-class PegiumParser : public Parser, protected services::DefaultCoreService {
+class PegiumParser : public Parser, protected pegium::DefaultCoreService {
 public:
   PegiumParser() noexcept;
-  explicit PegiumParser(const services::CoreServices &services) noexcept
-      : services::DefaultCoreService(services) {}
+  explicit PegiumParser(const pegium::CoreServices &services) noexcept
+      : pegium::DefaultCoreService(services) {}
   ~PegiumParser() noexcept override = default;
 
   PegiumParser(const PegiumParser &) = delete;

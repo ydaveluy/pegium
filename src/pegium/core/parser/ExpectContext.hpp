@@ -274,7 +274,7 @@ struct ExpectContext {
                                    maxEditCost, customCost);
   }
 
-  bool insertHidden(const grammar::AbstractElement *) {
+  bool insertSynthetic(const grammar::AbstractElement *) {
     if (!trackEditState || !canInsert() ||
         !canAffordEdit(ParseDiagnosticKind::Inserted)) {
       return false;
@@ -285,7 +285,9 @@ struct ExpectContext {
     return true;
   }
 
-  bool insertHiddenGapAt(const char *position) {
+  bool insertSyntheticGapAt(const char *position,
+                            const char *message = nullptr) {
+    (void)message;
     if (!trackEditState || position < begin || position > anchor) {
       return false;
     }

@@ -4,7 +4,7 @@
 
 #include <pegium/lsp/formatting/AbstractFormatter.hpp>
 
-namespace statemachine::services::lsp {
+namespace statemachine::lsp {
 
 class StatemachineFormatter : public pegium::AbstractFormatter {
 public:
@@ -19,4 +19,4 @@ protected:
                                 const ast::Transition *transition) const;
 };
 
-} // namespace statemachine::services::lsp
+} // namespace statemachine::lsp

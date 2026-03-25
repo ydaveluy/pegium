@@ -4,7 +4,7 @@
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/workspace/FileOperationHandler.hpp>
 #include <pegium/lsp/runtime/LanguageServerRuntime.hpp>
 
@@ -128,7 +128,7 @@ protected:
   std::unique_ptr<pegium::SharedServices> shared = test::make_empty_shared_services();
 
   LanguageServerRuntimeTest() {
-    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedCoreServices(*shared);
     pegium::installDefaultSharedLspServices(*shared);
     pegium::test::initialize_shared_workspace_for_tests(*shared);
   }

@@ -40,25 +40,26 @@ evaluate_terminal_recovery_candidate(Context &ctx, const char *cursorStart,
 
 template <EditableParseModeContext Context, typename Element>
 [[nodiscard]] TerminalRecoveryCandidate
-evaluate_insert_hidden_terminal_candidate(Context &ctx,
-                                          const char *cursorStart,
-                                          const Element *element) {
+evaluate_insert_synthetic_terminal_candidate(Context &ctx,
+                                             const char *cursorStart,
+                                             const Element *element) {
   return evaluate_terminal_recovery_candidate(
-      ctx, cursorStart, TerminalRecoveryChoiceKind::InsertHidden, 1u, 0u, 1u,
-      [&ctx, element]() { return apply_insert_hidden_recovery_edit(ctx, element); });
+      ctx, cursorStart, TerminalRecoveryChoiceKind::InsertSynthetic, 1u, 0u,
+      1u, [&ctx, element]() {
+        return apply_insert_synthetic_recovery_edit(ctx, element);
+      });
 }
 
 template <EditableParseModeContext Context, typename Element>
 [[nodiscard]] TerminalRecoveryCandidate
-evaluate_insert_hidden_gap_terminal_candidate(Context &ctx,
-                                              const char *cursorStart,
-                                              const char *position,
-                                              const Element *element,
-                                              std::uint32_t extraPenalty = 0u) {
+evaluate_insert_synthetic_gap_terminal_candidate(
+    Context &ctx, const char *cursorStart, const char *position,
+    const Element *element, std::uint32_t extraPenalty = 0u) {
   return evaluate_terminal_recovery_candidate(
       ctx, cursorStart, TerminalRecoveryChoiceKind::WordBoundarySplit, 1u, 0u,
       1u, [&ctx, position, element]() {
-        return apply_insert_hidden_gap_recovery_edit(ctx, position, element);
+        return apply_insert_synthetic_gap_and_match_recovery_edit(
+            ctx, position, element);
       },
       extraPenalty);
 }

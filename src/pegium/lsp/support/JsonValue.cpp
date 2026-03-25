@@ -20,7 +20,7 @@ to_lsp_integer(std::int64_t value) noexcept {
 
 } // namespace
 
-services::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
+pegium::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
   if (value.isNull()) {
     return nullptr;
   }
@@ -37,7 +37,7 @@ services::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
     return value.number();
   }
   if (value.isArray()) {
-    services::JsonValue::Array out;
+    pegium::JsonValue::Array out;
     out.reserve(value.array().size());
     for (const auto &entry : value.array()) {
       out.push_back(from_lsp_any(entry));
@@ -45,7 +45,7 @@ services::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
     return out;
   }
   if (value.isObject()) {
-    services::JsonValue::Object out;
+    pegium::JsonValue::Object out;
     for (const auto &[key, entry] : value.object().keyValueMap()) {
       out.try_emplace(key, from_lsp_any(entry));
     }
@@ -54,7 +54,7 @@ services::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
   return nullptr;
 }
 
-::lsp::LSPAny to_lsp_any(const services::JsonValue &value) {
+::lsp::LSPAny to_lsp_any(const pegium::JsonValue &value) {
   if (value.isNull()) {
     return nullptr;
   }
@@ -88,27 +88,27 @@ services::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
   return nullptr;
 }
 
-services::DiagnosticSeverity
+pegium::DiagnosticSeverity
 from_lsp_diagnostic_severity(::lsp::DiagnosticSeverity severity) {
   using enum ::lsp::DiagnosticSeverity;
   switch (severity) {
   case Error:
-    return services::DiagnosticSeverity::Error;
+    return pegium::DiagnosticSeverity::Error;
   case Warning:
-    return services::DiagnosticSeverity::Warning;
+    return pegium::DiagnosticSeverity::Warning;
   case Information:
-    return services::DiagnosticSeverity::Information;
+    return pegium::DiagnosticSeverity::Information;
   case Hint:
-    return services::DiagnosticSeverity::Hint;
+    return pegium::DiagnosticSeverity::Hint;
   case MAX_VALUE:
     break;
   }
-  return services::DiagnosticSeverity::Error;
+  return pegium::DiagnosticSeverity::Error;
 }
 
 ::lsp::DiagnosticSeverity
-to_lsp_diagnostic_severity(services::DiagnosticSeverity severity) {
-  using enum services::DiagnosticSeverity;
+to_lsp_diagnostic_severity(pegium::DiagnosticSeverity severity) {
+  using enum pegium::DiagnosticSeverity;
   switch (severity) {
   case Error:
     return ::lsp::DiagnosticSeverity::Error;

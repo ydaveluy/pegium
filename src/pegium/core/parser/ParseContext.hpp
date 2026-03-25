@@ -215,7 +215,9 @@ struct RecoveryContext : TrackedParseContext {
   struct RecoveryEdit {
     ParseDiagnosticKind kind = ParseDiagnosticKind::Deleted;
     TextOffset offset = 0;
+    TextOffset endOffset = 0;
     const grammar::AbstractElement *element = nullptr;
+    const char *message = nullptr;
   };
 
   struct RecoveryState {
@@ -492,11 +494,13 @@ struct RecoveryContext : TrackedParseContext {
       diagnostics.push_back({.kind = edit.kind,
                              .offset = edit.offset,
                              .beginOffset = edit.offset,
-                             .endOffset = edit.offset,
+                             .endOffset = edit.endOffset,
                              .element = edit.element,
-                             .message = {}});
+                             .message = edit.message == nullptr
+                                            ? std::string{}
+                                            : std::string(edit.message)});
     }
-    return diagnostics;
+    return normalizeParseDiagnostics(diagnostics);
   }
 
   [[nodiscard]] constexpr bool
@@ -513,7 +517,7 @@ struct RecoveryContext : TrackedParseContext {
                                    customCost);
   }
 
-  bool insertHidden(const grammar::AbstractElement *element) {
+  bool insertSynthetic(const grammar::AbstractElement *element) {
     if (!trackEditState) {
       return false;
     }
@@ -524,38 +528,42 @@ struct RecoveryContext : TrackedParseContext {
     }
     recoveryEdits.push_back({.kind = ParseDiagnosticKind::Inserted,
                              .offset = cursorOffset(),
+                             .endOffset = cursorOffset(),
                              .element = element});
     detail::apply_insert_edit_state(
         detail::default_edit_cost(ParseDiagnosticKind::Inserted),
         recoveryState.editCost, recoveryState.editCount,
         recoveryState.hadEdits, recoveryState.consecutiveDeletes);
     detail::stepTraceInc(detail::StepCounter::ParseContextInsert);
-    PEGIUM_RECOVERY_TRACE("[rule] insert hidden offset=", cursorOffset(),
+    PEGIUM_RECOVERY_TRACE("[rule] insert synthetic offset=", cursorOffset(),
                           " kind=", static_cast<int>(element->getKind()));
     ++recoveryStateVersion;
     return true;
   }
 
-  bool insertHiddenGapAt(const char *position) {
+  bool insertSyntheticGapAt(const char *position,
+                            const char *message = nullptr) {
     if (!trackEditState || position < begin || position > end) {
       return false;
     }
     const auto offset = static_cast<TextOffset>(position - begin);
     if (!detail::can_insert(allowInsert, canEditAtOffset(offset)) ||
         !canAffordEdit(ParseDiagnosticKind::Inserted)) {
-      PEGIUM_RECOVERY_TRACE("[rule] insert hidden gap blocked offset=", offset,
+      PEGIUM_RECOVERY_TRACE("[rule] insert synthetic gap blocked offset=", offset,
                             " floor=", editFloorOffset);
       return false;
     }
     recoveryEdits.push_back({.kind = ParseDiagnosticKind::Inserted,
                              .offset = offset,
-                             .element = nullptr});
+                             .endOffset = offset,
+                             .element = nullptr,
+                             .message = message});
     detail::apply_insert_edit_state(
         detail::default_edit_cost(ParseDiagnosticKind::Inserted),
         recoveryState.editCost, recoveryState.editCount,
         recoveryState.hadEdits, recoveryState.consecutiveDeletes);
     detail::stepTraceInc(detail::StepCounter::ParseContextInsert);
-    PEGIUM_RECOVERY_TRACE("[rule] insert hidden gap offset=", offset);
+    PEGIUM_RECOVERY_TRACE("[rule] insert synthetic gap offset=", offset);
     ++recoveryStateVersion;
     return true;
   }
@@ -581,6 +589,8 @@ struct RecoveryContext : TrackedParseContext {
     }
     recoveryEdits.push_back({.kind = ParseDiagnosticKind::Deleted,
                              .offset = cursorOffset(),
+                             .endOffset =
+                                 static_cast<TextOffset>(deletedEnd - begin),
                              .element = nullptr});
     detail::apply_delete_edit_state(
         detail::default_edit_cost(ParseDiagnosticKind::Deleted),
@@ -627,6 +637,7 @@ struct RecoveryContext : TrackedParseContext {
     (void)beforeOffset;
     recoveryEdits.push_back({.kind = ParseDiagnosticKind::Replaced,
                              .offset = cursorOffset(),
+                             .endOffset = endOffset,
                              .element = element});
     detail::apply_replace_edit_state(
         replacementCost, recoveryState.editCost, recoveryState.editCount,

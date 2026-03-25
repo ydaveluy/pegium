@@ -46,7 +46,7 @@ void register_statemachine_benchmarks(BenchmarkRegistry &registry) {
       {.name = "statemachine",
        .languageId = "statemachine",
        .extension = ".statemachine",
-       .registerLanguages = statemachine::services::register_language_services,
+       .registerLanguages = statemachine::register_language_services,
        .makeSource = make_source});
 }
 

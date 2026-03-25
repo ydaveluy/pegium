@@ -4,8 +4,8 @@
 #include <string_view>
 #include <variant>
 
-#include <pegium/LspExpectTestSupport.hpp>
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspExpectTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/grammar/AbstractElement.hpp>
 #include <pegium/core/grammar/Literal.hpp>
 #include <pegium/lsp/completion/DefaultCompletionProvider.hpp>
@@ -282,7 +282,7 @@ std::unique_ptr<pegium::Services> make_services_with_provider(
   auto services = test::make_uninstalled_services<ParserType>(sharedServices,
                                                   std::move(languageId),
                                                   std::move(fileExtensions));
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   services->lsp.completionProvider = std::make_unique<Provider>(*services);
   return services;
@@ -293,7 +293,7 @@ protected:
   std::unique_ptr<pegium::SharedServices> shared = test::make_empty_shared_services();
 
   DefaultCompletionProviderTest() {
-    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedCoreServices(*shared);
     pegium::installDefaultSharedLspServices(*shared);
     pegium::test::initialize_shared_workspace_for_tests(*shared);
   }
@@ -305,7 +305,7 @@ protected:
       auto registeredServices = 
         test::make_uninstalled_services<ParserType>(*shared, std::move(languageId),
                                         std::move(fileExtensions));
-      pegium::services::installDefaultCoreServices(*registeredServices);
+      pegium::installDefaultCoreServices(*registeredServices);
       pegium::installDefaultLspServices(*registeredServices);
       shared->serviceRegistry->registerServices(std::move(registeredServices));
     }

@@ -36,7 +36,7 @@ instead of once per reference during completion or linking.
 
 ## Step 1: define how names are joined
 
-`examples/domainmodel/src/references/QualifiedNameProvider.cpp` keeps the rule
+`examples/domainmodel/src/core/references/QualifiedNameProvider.cpp` keeps the rule
 small and explicit:
 
 ```cpp

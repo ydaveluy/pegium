@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/services/AbstractExecuteCommandHandler.hpp>
 
 namespace pegium {
@@ -38,7 +38,7 @@ protected:
 
 TEST(AbstractExecuteCommandHandlerTest, RegisteredCommandsPreserveRegistrationOrder) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   TestExecuteCommandHandler handler(*shared);
@@ -49,7 +49,7 @@ TEST(AbstractExecuteCommandHandlerTest, RegisteredCommandsPreserveRegistrationOr
 
 TEST(AbstractExecuteCommandHandlerTest, ExecuteCommandReturnsRegisteredResult) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   TestExecuteCommandHandler handler(*shared);

@@ -1,16 +1,21 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include <arithmetics/services/Services.hpp>
-#include <pegium/lsp/services/SharedServices.hpp>
+#include <pegium/core/services/SharedCoreServices.hpp>
 
-namespace arithmetics::services {
+namespace arithmetics {
 
+/// Builds the core language services for the arithmetics example.
 std::unique_ptr<ArithmeticsServices>
-create_language_services(const pegium::SharedServices &sharedServices,
-                         std::string languageId = "arithmetics");
+create_language_services(
+    const pegium::SharedCoreServices &sharedServices,
+    std::string languageId = "arithmetics");
 
-bool register_language_services(pegium::SharedServices &sharedServices);
+/// Registers the arithmetics core language services in `sharedServices`.
+bool register_language_services(
+    pegium::SharedCoreServices &sharedServices);
 
-} // namespace arithmetics::services
+} // namespace arithmetics

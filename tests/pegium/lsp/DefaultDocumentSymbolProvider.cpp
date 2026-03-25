@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <pegium/LspExpectTestSupport.hpp>
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspExpectTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
@@ -48,13 +48,13 @@ protected:
 
 TEST(DefaultDocumentSymbolProviderTest, ReturnsEmptyWithoutAstOrNameProvider) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services(*shared, "test", {".test"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -76,13 +76,13 @@ TEST(DefaultDocumentSymbolProviderTest, ReturnsEmptyWithoutAstOrNameProvider) {
 
 TEST(DefaultDocumentSymbolProviderTest, UsesAstNamesWhenAvailable) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services<SymbolParser>(*shared, "symbols", {".symbols"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -98,13 +98,13 @@ TEST(DefaultDocumentSymbolProviderTest, UsesAstNamesWhenAvailable) {
 
 TEST(DefaultDocumentSymbolProviderTest, UsesFullNodeRangeAndNameSelectionRange) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices =
         test::make_uninstalled_services<SymbolParser>(*shared, "symbols", {".symbols"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }

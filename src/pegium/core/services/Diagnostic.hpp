@@ -9,7 +9,7 @@
 #include <pegium/core/services/JsonValue.hpp>
 #include <pegium/core/syntax-tree/CstNode.hpp>
 
-namespace pegium::services {
+namespace pegium {
 
 /// Severity level of one diagnostic entry.
 enum class DiagnosticSeverity {
@@ -50,4 +50,4 @@ struct Diagnostic {
   TextOffset end = 0;
 };
 
-} // namespace pegium::services
+} // namespace pegium

@@ -10,10 +10,10 @@ namespace pegium::workspace {
 
 /// Shared configuration provider backed by LSP workspace settings.
 class DefaultConfigurationProvider final : public ConfigurationProvider,
-                                           protected services::DefaultSharedCoreService {
+                                           protected pegium::DefaultSharedCoreService {
 public:
   explicit DefaultConfigurationProvider(
-      const services::SharedCoreServices &sharedServices);
+      const pegium::SharedCoreServices &sharedServices);
 
   void initialize(const InitializeParams &params) override;
   [[nodiscard]] std::future<void>
@@ -21,7 +21,7 @@ public:
   [[nodiscard]] bool isReady() const noexcept override;
 
   void updateConfiguration(const ConfigurationChangeParams &params) override;
-  [[nodiscard]] std::optional<services::JsonValue>
+  [[nodiscard]] std::optional<pegium::JsonValue>
   getConfiguration(std::string_view languageId,
                    std::string_view key) const override;
 
@@ -39,10 +39,10 @@ public:
 private:
   WorkspaceConfiguration apply_section_overrides(
       WorkspaceConfiguration configuration,
-      const services::JsonValue &sectionConfiguration) const;
+      const pegium::JsonValue &sectionConfiguration) const;
 
   mutable std::mutex _settingsMutex;
-  std::unordered_map<std::string, services::JsonValue> _settingsBySection;
+  std::unordered_map<std::string, pegium::JsonValue> _settingsBySection;
   utils::EventEmitter<ConfigurationSectionUpdate> _onSectionUpdate;
   bool _workspaceConfigurationSupported = false;
   bool _ready = false;

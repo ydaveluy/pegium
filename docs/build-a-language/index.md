@@ -3,10 +3,9 @@
 This section groups the main subsystem guides for designing and wiring a
 language with Pegium.
 
-If you want the guided end-to-end path, start with
-[Pegium's Workflow](../learn/workflow/index.md). If you already know the common
-workflow and want focused reading on one subsystem at a time, use the pages
-below.
+Use it when you already know the overall workflow and want to focus on one
+problem at a time: grammar design, AST shape, scoping, formatting, validation,
+editor services, or workspace behavior.
 
 ## Topics
 
@@ -22,5 +21,5 @@ below.
 
 - Use [Learn](../learn/index.md) for the recommended order of implementation.
 - Use these pages when you want a topic-by-topic explanation of one subsystem.
-- Use [Reference](../reference/index.md) when you need the exact framework
-  concepts behind a subsystem.
+- Use [Reference](../reference/index.md) when you need the exact user-facing
+  concepts and APIs behind a subsystem.

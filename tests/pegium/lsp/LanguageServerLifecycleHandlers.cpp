@@ -7,7 +7,7 @@
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
 #include <pegium/lsp/runtime/LanguageServerHandlerContext.hpp>
 #include <pegium/lsp/runtime/LanguageServerRequestHandlerParts.hpp>
@@ -53,7 +53,7 @@ public:
     (void)params;
   }
 
-  std::optional<services::JsonValue>
+  std::optional<pegium::JsonValue>
   getConfiguration(std::string_view languageId,
                    std::string_view key) const override {
     (void)languageId;
@@ -145,7 +145,7 @@ public:
 TEST(LanguageServerLifecycleHandlersTest,
      InitializedNotificationDoesNotBlockOnBackgroundInitializationFutures) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
 
   std::promise<void> gatePromise;

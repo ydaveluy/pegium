@@ -4,7 +4,7 @@
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/support/Diagnostics.hpp>
 
 namespace pegium {
@@ -20,14 +20,14 @@ TEST(DiagnosticsTest, PublishDiagnosticsSerializesExtendedDiagnosticFields) {
       .text = "alpha\nbeta\n",
       .diagnostics =
           {{
-              .severity = services::DiagnosticSeverity::Warning,
+              .severity = pegium::DiagnosticSeverity::Warning,
               .message = "Use a better name",
               .source = "pegium-test",
               .code = std::int64_t{std::numeric_limits<std::int64_t>::max()},
               .codeDescription = "https://example.test/diagnostic",
               .tags = {
-                  services::DiagnosticTag::Deprecated,
-                  services::DiagnosticTag::Unnecessary,
+                  pegium::DiagnosticTag::Deprecated,
+                  pegium::DiagnosticTag::Unnecessary,
               },
               .relatedInformation =
                   {{
@@ -36,7 +36,7 @@ TEST(DiagnosticsTest, PublishDiagnosticsSerializesExtendedDiagnosticFields) {
                       .begin = 0,
                       .end = 5,
                   }},
-              .data = services::JsonValue::Object{
+              .data = pegium::JsonValue::Object{
                   {"category", "style"},
                   {"fixable", true},
               },

@@ -2,9 +2,9 @@
 
 Formatting is implemented by deriving from `pegium::AbstractFormatter`.
 
-The formatter is a regular class stored in `services->lsp.formatter`. It works
-on top of the CST, which is why formatting becomes much easier once your
-grammar and AST shape are already reasonably stable.
+The formatter lives in `services->lsp.formatter` and works on top of the CST.
+That is why formatting is usually one of the last core features to add, after
+the grammar and AST shape are already stable enough.
 
 ## Creating a formatter
 
@@ -33,16 +33,16 @@ DomainModelFormatter::DomainModelFormatter(
 }
 ```
 
-That constructor is where you declare which formatting method should run for
-each exact AST type or hidden terminal rule.
+This constructor is where you register the formatting methods for the node types
+and hidden tokens your language cares about.
 
 ## Formatting one node
 
-Inside a formatting method:
+Inside a formatting method, the usual flow is:
 
 1. get a node-scoped formatter from the builder
-2. select CST-backed regions
-3. attach whitespace actions to those regions
+2. select the CST-backed regions you care about
+3. attach spacing, line-break, or indentation actions to those regions
 
 Example:
 
@@ -63,14 +63,8 @@ void DomainModelFormatter::formatEntity(
 }
 ```
 
-This does three things:
-
-- forces one space after `entity`
-- normalizes spacing around `extends`
-- formats the `{ ... }` block with the generic block helper
-
-This is the basic pattern of the whole formatting DSL: select a region, then
-attach spacing, line-break, or indentation actions to it.
+This is the basic Pegium formatting pattern: select a region, then describe the
+layout you want around it.
 
 ## Registering several rules
 
@@ -82,9 +76,6 @@ on<ast::PackageDeclaration>(&MyFormatter::formatPackageDeclaration);
 on<ast::Entity>(&MyFormatter::formatEntity);
 on<ast::Feature>(&MyFormatter::formatFeature);
 ```
-
-The formatter engine walks the AST and dispatches to the registered method when
-it encounters that exact node type.
 
 Use `onHidden("RULE_NAME", ...)` for hidden tokens such as comments:
 
@@ -118,7 +109,7 @@ formatter.keyword(":").prepend(noSpace).append(oneSpace);
 
 ## Built-in actions
 
-Inside `AbstractFormatter`, the main whitespace actions are:
+Inside `AbstractFormatter`, the main layout actions are:
 
 - `noSpace`
 - `oneSpace`
@@ -147,8 +138,8 @@ patterns:
 - `formatLineComment(...)`
 - `formatMultilineComment(...)`
 
-Use them whenever the rule is a standard block, comma-separated list, or
-comment normalization. That keeps the formatter small and consistent.
+Use them whenever the pattern is already standard in your language. That keeps
+the formatter small and consistent.
 
 ## Formatting hidden nodes
 
@@ -162,11 +153,8 @@ void MyFormatter::formatLineComment(HiddenNodeFormatter &comment) const {
 }
 ```
 
-This is the right place to:
-
-- normalize line comments
-- reflow multiline comments
-- keep documentation tags such as `@param ...` consistent
+This is the right place to normalize or reflow comment text when the layout of
+the comment itself matters.
 
 ## Wiring the formatter into services
 
@@ -174,7 +162,7 @@ Creating the formatter class is not enough. You must also install it into the
 language services:
 
 ```cpp
-auto services = pegium::services::makeDefaultServices(
+auto services = pegium::makeDefaultServices(
     sharedServices, "domain-model");
 
 services->parser =
@@ -184,19 +172,16 @@ services->lsp.formatter =
     std::make_unique<lsp::DomainModelFormatter>(*services);
 ```
 
-`makeDefaultServices(...)` creates the service container and installs the common
-defaults, but you still assign your language parser explicitly.
-
-Without the formatter assignment, the formatter slot stays empty and formatting
-requests do nothing.
+Without the formatter assignment, formatting requests simply keep using the
+empty default slot.
 
 ## Practical advice
 
-- start with one or two node types
+- start with one or two important node types
 - keep one formatting method per exact AST type
 - prefer `formatBlock(...)` and `formatSeparatedList(...)` over repeating the
-  same brace or comma logic everywhere
-- use hidden-node formatting only when comment text itself needs rewriting
+  same layout logic everywhere
+- touch hidden-node formatting only when comment text itself must change
 
 Use the [formatter DSL reference](../reference/formatter-dsl.md) for the full
 API surface.

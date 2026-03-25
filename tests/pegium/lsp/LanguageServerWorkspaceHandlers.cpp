@@ -7,7 +7,7 @@
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
 #include <pegium/lsp/services/ExecuteCommandHandler.hpp>
 #include <pegium/lsp/runtime/LanguageServerHandlerContext.hpp>
@@ -94,7 +94,7 @@ protected:
   LanguageServerHandlerContext context{server, *shared, runtimeState};
 
   LanguageServerWorkspaceHandlersTest() {
-    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedCoreServices(*shared);
     pegium::installDefaultSharedLspServices(*shared);
     pegium::test::initialize_shared_workspace_for_tests(*shared);
   }

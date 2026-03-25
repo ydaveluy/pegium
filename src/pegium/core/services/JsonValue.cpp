@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace pegium::services {
+namespace pegium {
 namespace {
 
 void append_indent(std::string &out, std::size_t count) { out.append(count, ' '); }
@@ -268,4 +268,4 @@ std::string JsonValue::toJsonString(const SerializationOptions &options) const {
   return out;
 }
 
-} // namespace pegium::services
+} // namespace pegium

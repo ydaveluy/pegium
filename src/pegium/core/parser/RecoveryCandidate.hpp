@@ -14,7 +14,7 @@ enum class TerminalRecoveryChoiceKind : std::uint8_t {
   None,
   WordBoundarySplit,
   Fuzzy,
-  InsertHidden,
+  InsertSynthetic,
   DeleteScan,
 };
 
@@ -37,7 +37,7 @@ terminal_recovery_choice_priority(TerminalRecoveryChoiceKind kind) noexcept {
     return 0u;
   case Fuzzy:
     return 1u;
-  case InsertHidden:
+  case InsertSynthetic:
     return 2u;
   case DeleteScan:
     return 3u;
@@ -52,6 +52,20 @@ terminal_recovery_choice_priority(TerminalRecoveryChoiceKind kind) noexcept {
     const TerminalRecoveryCandidate &rhs) noexcept {
   if (rhs.kind == TerminalRecoveryChoiceKind::None) {
     return lhs.kind != TerminalRecoveryChoiceKind::None;
+  }
+  const auto prefer_nearby_delete_scan_over_insert =
+      [](const TerminalRecoveryCandidate &deleteScan,
+         const TerminalRecoveryCandidate &insert) constexpr noexcept {
+        return deleteScan.kind == TerminalRecoveryChoiceKind::DeleteScan &&
+               insert.kind == TerminalRecoveryChoiceKind::InsertSynthetic &&
+               deleteScan.consumed > insert.consumed &&
+               deleteScan.operationCount <= 2u;
+      };
+  if (prefer_nearby_delete_scan_over_insert(lhs, rhs)) {
+    return true;
+  }
+  if (prefer_nearby_delete_scan_over_insert(rhs, lhs)) {
+    return false;
   }
   if (lhs.normalizedEditCost != rhs.normalizedEditCost) {
     return lhs.normalizedEditCost < rhs.normalizedEditCost;
@@ -75,9 +89,13 @@ terminal_recovery_choice_priority(TerminalRecoveryChoiceKind kind) noexcept {
 struct EditableRecoveryCandidate {
   bool matched = false;
   TextOffset cursorOffset = 0;
+  // Cursor after one skipper pass from the matched position. This lets
+  // choice recovery ignore progress that only comes from trailing trivia.
+  TextOffset postSkipCursorOffset = 0;
   std::uint32_t editCost = 0;
   std::uint32_t editCount = 0;
   TextOffset firstEditOffset = std::numeric_limits<TextOffset>::max();
+  const grammar::AbstractElement *firstEditElement = nullptr;
 };
 
 [[nodiscard]] constexpr bool is_better_editable_recovery_candidate(
@@ -103,6 +121,79 @@ struct EditableRecoveryCandidate {
   }
   return false;
 }
+
+[[nodiscard]] constexpr bool is_better_choice_recovery_candidate(
+    const EditableRecoveryCandidate &lhs,
+    const EditableRecoveryCandidate &rhs) noexcept {
+  if (lhs.matched != rhs.matched) {
+    return lhs.matched && !rhs.matched;
+  }
+  if (!lhs.matched) {
+    return false;
+  }
+  if (lhs.postSkipCursorOffset != rhs.postSkipCursorOffset) {
+    return lhs.postSkipCursorOffset > rhs.postSkipCursorOffset;
+  }
+  if (lhs.editCost != rhs.editCost) {
+    return lhs.editCost < rhs.editCost;
+  }
+  if (lhs.editCount != rhs.editCount) {
+    return lhs.editCount < rhs.editCount;
+  }
+  if (lhs.firstEditOffset != rhs.firstEditOffset) {
+    return lhs.firstEditOffset > rhs.firstEditOffset;
+  }
+  if (lhs.cursorOffset != rhs.cursorOffset) {
+    return lhs.cursorOffset > rhs.cursorOffset;
+  }
+  return false;
+}
+
+[[nodiscard]] constexpr bool
+is_better_choice_recovery_candidate_for_element(
+    const EditableRecoveryCandidate &lhs,
+    const EditableRecoveryCandidate &rhs,
+    const grammar::AbstractElement *preferredFirstEditElement) noexcept {
+  if (is_better_choice_recovery_candidate(lhs, rhs)) {
+    return true;
+  }
+  if (is_better_choice_recovery_candidate(rhs, lhs)) {
+    return false;
+  }
+  if (preferredFirstEditElement == nullptr) {
+    return false;
+  }
+  const bool lhsEditsCurrent = lhs.firstEditElement == preferredFirstEditElement;
+  const bool rhsEditsCurrent = rhs.firstEditElement == preferredFirstEditElement;
+  if (lhsEditsCurrent != rhsEditsCurrent) {
+    return lhsEditsCurrent;
+  }
+  return false;
+}
+
+struct RecoveryProbeProgress {
+  TextOffset committedOffset = 0;
+  TextOffset exploredOffset = 0;
+
+  [[nodiscard]] constexpr bool
+  committedProgressed(TextOffset startOffset) const noexcept {
+    return committedOffset > startOffset;
+  }
+
+  [[nodiscard]] constexpr bool
+  exploredBeyond(TextOffset offset) const noexcept {
+    return exploredOffset > offset;
+  }
+
+  [[nodiscard]] constexpr bool deferred() const noexcept {
+    return exploredOffset > committedOffset;
+  }
+
+  [[nodiscard]] constexpr bool
+  reachedEndOfInput(TextOffset endOffset) const noexcept {
+    return exploredOffset == endOffset;
+  }
+};
 
 struct ProgressRecoveryCandidate {
   bool matched = false;

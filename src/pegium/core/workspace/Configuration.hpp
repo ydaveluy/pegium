@@ -14,7 +14,7 @@
 #include <pegium/core/validation/ValidationOptions.hpp>
 #include <pegium/core/workspace/WorkspaceProtocol.hpp>
 
-namespace pegium::services {
+namespace pegium {
 class ServiceRegistry;
 }
 
@@ -27,11 +27,11 @@ struct WorkspaceConfiguration {
 
 /// Reads full validation options from one configuration object.
 [[nodiscard]] bool
-readValidationOptions(const services::JsonValue &configuration,
+readValidationOptions(const pegium::JsonValue &configuration,
                       validation::ValidationOptions &target);
 /// Reads either a boolean or detailed validation options from one configuration object.
 [[nodiscard]] bool
-readValidationOption(const services::JsonValue &configuration,
+readValidationOption(const pegium::JsonValue &configuration,
                      validation::BuildValidationOption &target);
 
 /// Provides language and workspace configuration to core services.
@@ -50,13 +50,13 @@ public:
   /// Applies a configuration change notification from the client.
   virtual void updateConfiguration(const ConfigurationChangeParams &params) = 0;
   /// Returns one configuration section value for `languageId` and `key`.
-  [[nodiscard]] virtual std::optional<services::JsonValue>
+  [[nodiscard]] virtual std::optional<pegium::JsonValue>
   getConfiguration(std::string_view languageId, std::string_view key) const = 0;
 
   /// One emitted configuration section update.
   struct ConfigurationSectionUpdate {
     std::string section;
-    services::JsonValue configuration;
+    pegium::JsonValue configuration;
   };
   /// Subscribes to configuration section updates.
   [[nodiscard]] virtual utils::ScopedDisposable onConfigurationSectionUpdate(
@@ -83,7 +83,7 @@ public:
   [[nodiscard]] bool isReady() const noexcept override;
 
   void updateConfiguration(const ConfigurationChangeParams &params) override;
-  [[nodiscard]] std::optional<services::JsonValue>
+  [[nodiscard]] std::optional<pegium::JsonValue>
   getConfiguration(std::string_view languageId,
                    std::string_view key) const override;
 

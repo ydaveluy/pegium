@@ -37,7 +37,7 @@ void register_requirements_benchmarks(BenchmarkRegistry &registry) {
       {.name = "requirements",
        .languageId = "requirements-lang",
        .extension = ".req",
-       .registerLanguages = requirements::services::register_language_services,
+       .registerLanguages = requirements::register_language_services,
        .makeSource = make_source});
 }
 

@@ -8,7 +8,6 @@
 #include <string_view>
 
 #include <pegium/core/syntax-tree/AbstractReference.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
 
 namespace pegium::bench {
 namespace {
@@ -77,24 +76,19 @@ std::shared_ptr<BenchmarkFixture> build_scope_fixture(std::string source) {
       .name = "scope",
       .languageId = "arithmetics",
       .extension = ".calc",
-      .registerLanguages = arithmetics::services::register_language_services,
+      .registerLanguages = arithmetics::register_language_services,
       .makeSource = [](std::size_t) { return std::string{}; },
   };
 
   auto fixture = create_fixture(spec, std::move(source));
-  pegium::services::installDefaultSharedCoreServices(*fixture->sharedServices);
+  pegium::installDefaultSharedCoreServices(*fixture->sharedServices);
   pegium::installDefaultSharedLspServices(*fixture->sharedServices);
   if (!spec.registerLanguages(*fixture->sharedServices)) {
     throw std::runtime_error("Failed to register language services for " +
                              spec.name + ".");
   }
-  const auto *coreServices =
+  fixture->services =
       &fixture->sharedServices->serviceRegistry->getServices(fixture->uri);
-  fixture->services = pegium::as_services(coreServices);
-  if (fixture->services == nullptr) {
-    throw std::runtime_error("Registered services for '" + spec.languageId +
-                             "' are not full services.");
-  }
   create_changed_document(*fixture);
 
   workspace::BuildOptions options;

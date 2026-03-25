@@ -20,9 +20,8 @@
 
 #include <pegium/lsp/workspace/TextDocuments.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/core/services/ServiceRegistry.hpp>
-#include <pegium/lsp/services/Services.hpp>
+#include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 #include <pegium/core/utils/Disposable.hpp>
@@ -168,13 +167,13 @@ struct ExampleBenchSpec {
   std::string name;
   std::string languageId;
   std::string extension;
-  bool (*registerLanguages)(pegium::SharedServices &) = nullptr;
+  bool (*registerLanguages)(pegium::SharedCoreServices &) = nullptr;
   std::function<std::string(std::size_t targetBytes)> makeSource;
 };
 
 struct BenchmarkFixture {
   std::shared_ptr<pegium::SharedServices> sharedServices;
-  const pegium::Services *services = nullptr;
+  const pegium::CoreServices *services = nullptr;
   std::shared_ptr<workspace::Document> document;
   std::string uri;
   std::string languageId;
@@ -288,19 +287,14 @@ inline void register_full_build_benchmark(BenchmarkRegistry &registry,
 
   registry.add(spec.name, bytes, [spec, source] {
     auto fixture = create_fixture(spec, source);
-    pegium::services::installDefaultSharedCoreServices(*fixture->sharedServices);
+    pegium::installDefaultSharedCoreServices(*fixture->sharedServices);
     pegium::installDefaultSharedLspServices(*fixture->sharedServices);
     if (!spec.registerLanguages(*fixture->sharedServices)) {
       throw std::runtime_error("Failed to register language services for " +
                                spec.name + ".");
     }
-    const auto *coreServices =
+    fixture->services =
         &fixture->sharedServices->serviceRegistry->getServices(fixture->uri);
-    fixture->services = pegium::as_services(coreServices);
-    if (fixture->services == nullptr) {
-      throw std::runtime_error("Registered services for '" + spec.languageId +
-                               "' are not full services.");
-    }
     create_changed_document(*fixture);
     return measure_full_build_iteration(fixture);
   });

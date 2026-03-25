@@ -1,17 +1,40 @@
 #include <gtest/gtest.h>
 
 #include <arithmetics/parser/Parser.hpp>
-#include <arithmetics/services/Module.hpp>
+#include <arithmetics/lsp/Module.hpp>
 
-#include <pegium/ExampleTestSupport.hpp>
+#include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <lsp/json/json.h>
 #include <lsp/serialization.h>
+
+#include <sstream>
 
 namespace arithmetics::tests {
 namespace {
 
 using pegium::as_services;
+
+std::string dump_parse_diagnostics(
+    const std::vector<pegium::parser::ParseDiagnostic> &diagnostics) {
+  std::string dump;
+  for (const auto &diagnostic : diagnostics) {
+    if (!dump.empty()) {
+      dump += " | ";
+    }
+    std::ostringstream current;
+    current << diagnostic.kind;
+    if (diagnostic.element != nullptr) {
+      current << ":" << *diagnostic.element;
+    }
+    if (!diagnostic.message.empty()) {
+      current << ":" << diagnostic.message;
+    }
+    current << "@" << diagnostic.beginOffset << "-" << diagnostic.endOffset;
+    dump += current.str();
+  }
+  return dump;
+}
 
 TEST(ArithmeticsLanguageTest, ParsesAndEvaluatesModule) {
   parser::ArithmeticParser parser;
@@ -197,6 +220,155 @@ TEST(ArithmeticsLanguageTest, RecoveryDeletesUnexpectedTokenAfterOperator) {
   EXPECT_DOUBLE_EQ(results.front(), 16.0);
 }
 
+TEST(ArithmeticsLanguageTest, EmptyDocumentPublishesSingleGrammarDiagnosticDirectParse) {
+  parser::ArithmeticParser parser;
+  auto document = pegium::test::parse_document(
+      parser, "", pegium::test::make_file_uri("empty-direct.calc"), "arithmetics");
+
+  const auto &parsed = document->parseResult;
+  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
+  EXPECT_EQ(parsed.parseDiagnostics.size(), 1u) << parseDump;
+  if (!parsed.parseDiagnostics.empty()) {
+    EXPECT_EQ(parsed.parseDiagnostics.front().offset, 0u) << parseDump;
+  }
+}
+
+TEST(ArithmeticsLanguageTest, RecoveryKeepsValidFunctionArgumentPrefixDirectParse) {
+  parser::ArithmeticParser parser;
+  auto document = pegium::test::parse_document(
+      parser,
+      "module basicMath\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "Sqrt(81/);\n",
+      pegium::test::make_file_uri("recovered-call-prefix-direct.calc"),
+      "arithmetics");
+
+  const auto &parsed = document->parseResult;
+  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
+  ASSERT_TRUE(parsed.value);
+  EXPECT_TRUE(parsed.fullMatch);
+  EXPECT_TRUE(parsed.recoveryReport.hasRecovered);
+  EXPECT_TRUE(std::ranges::any_of(parsed.parseDiagnostics, [](const auto &diag) {
+    return diag.kind == pegium::parser::ParseDiagnosticKind::Deleted &&
+           diag.offset == 85u;
+  })) << parseDump;
+
+  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  ASSERT_NE(module, nullptr);
+  ASSERT_EQ(module->statements.size(), 3u);
+
+  auto *evaluation = dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+  ASSERT_NE(evaluation, nullptr);
+  auto *call = dynamic_cast<ast::FunctionCall *>(evaluation->expression.get());
+  ASSERT_NE(call, nullptr);
+  ASSERT_EQ(call->args.size(), 1u);
+
+  auto *argument = dynamic_cast<ast::NumberLiteral *>(call->args.front().get());
+  ASSERT_NE(argument, nullptr);
+  EXPECT_DOUBLE_EQ(argument->value, 81.0);
+}
+
+TEST(ArithmeticsLanguageTest,
+     RecoveryKeepsFunctionCallShapeForEmptyArgumentListDirectParse) {
+  parser::ArithmeticParser parser;
+  auto document = pegium::test::parse_document(
+      parser,
+      "module basicMath\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "Sqrt(); // 9\n",
+      pegium::test::make_file_uri("empty-call-direct.calc"), "arithmetics");
+
+  const auto &parsed = document->parseResult;
+  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
+  ASSERT_TRUE(parsed.value);
+  EXPECT_TRUE(parsed.fullMatch);
+  EXPECT_TRUE(parsed.recoveryReport.hasRecovered);
+  EXPECT_TRUE(std::ranges::any_of(parsed.parseDiagnostics, [](const auto &diag) {
+    if (diag.kind != pegium::parser::ParseDiagnosticKind::Inserted ||
+        diag.element == nullptr) {
+      return false;
+    }
+    const auto *element = diag.element;
+    if (element->getKind() == pegium::grammar::ElementKind::Assignment) {
+      element =
+          static_cast<const pegium::grammar::Assignment *>(element)->getElement();
+    }
+    const auto *expectedRule =
+        dynamic_cast<const pegium::grammar::AbstractRule *>(element);
+    return expectedRule != nullptr && expectedRule->getName() == "Expression";
+  })) << parseDump;
+
+  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  ASSERT_NE(module, nullptr);
+  ASSERT_EQ(module->statements.size(), 3u);
+
+  auto *evaluation = dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+  ASSERT_NE(evaluation, nullptr);
+  auto *call = dynamic_cast<ast::FunctionCall *>(evaluation->expression.get());
+  ASSERT_NE(call, nullptr);
+  EXPECT_EQ(call->func.getRefText(), "sqrt");
+}
+
+TEST(ArithmeticsLanguageTest,
+     RecoveryKeepsFunctionCallShapeForEmptyArgumentListWithoutSemicolonDirectParse) {
+  parser::ArithmeticParser parser;
+  auto document = pegium::test::parse_document(
+      parser,
+      "module basicMath\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "Sqrt() // 9\n",
+      pegium::test::make_file_uri("empty-call-no-semicolon-direct.calc"),
+      "arithmetics");
+
+  const auto &parsed = document->parseResult;
+  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
+  ASSERT_TRUE(parsed.value);
+  EXPECT_TRUE(parsed.fullMatch);
+  EXPECT_TRUE(parsed.recoveryReport.hasRecovered);
+  EXPECT_TRUE(std::ranges::any_of(parsed.parseDiagnostics, [](const auto &diag) {
+    if (diag.kind != pegium::parser::ParseDiagnosticKind::Inserted ||
+        diag.element == nullptr) {
+      return false;
+    }
+    const auto *element = diag.element;
+    if (element->getKind() == pegium::grammar::ElementKind::Assignment) {
+      element =
+          static_cast<const pegium::grammar::Assignment *>(element)->getElement();
+    }
+    const auto *expectedRule =
+        dynamic_cast<const pegium::grammar::AbstractRule *>(element);
+    return expectedRule != nullptr && expectedRule->getName() == "Expression";
+  })) << parseDump;
+
+  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  ASSERT_NE(module, nullptr);
+  ASSERT_EQ(module->statements.size(), 3u);
+
+  auto *evaluation = dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+  ASSERT_NE(evaluation, nullptr);
+  auto *call = dynamic_cast<ast::FunctionCall *>(evaluation->expression.get());
+  ASSERT_NE(call, nullptr);
+  EXPECT_EQ(call->func.getRefText(), "sqrt");
+}
+
 TEST(ArithmeticsLanguageTest, CommentProviderReturnsLeadingBlockComment) {
   parser::ArithmeticParser parser;
   auto document = pegium::test::parse_document(
@@ -207,11 +379,11 @@ TEST(ArithmeticsLanguageTest, CommentProviderReturnsLeadingBlockComment) {
       pegium::test::make_file_uri("comments.calc"), "arithmetics");
 
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
-      arithmetics::services::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::create_language_services(*shared, "arithmetics");
 
   auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
   ASSERT_NE(module, nullptr);
@@ -236,11 +408,11 @@ TEST(ArithmeticsLanguageTest, DocumentationProviderRendersJSDocMarkdown) {
       pegium::test::make_file_uri("documentation.calc"), "arithmetics");
 
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
-      arithmetics::services::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::create_language_services(*shared, "arithmetics");
 
   auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
   ASSERT_NE(module, nullptr);
@@ -256,10 +428,10 @@ TEST(ArithmeticsLanguageTest, DocumentationProviderRendersJSDocMarkdown) {
 
 TEST(ArithmeticsLanguageTest, HoverReturnsNoContentWithoutDocumentation) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::services::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
 
   const auto uri = pegium::test::make_file_uri("hover.calc");
   auto document = pegium::test::open_and_build_document(
@@ -294,10 +466,10 @@ TEST(ArithmeticsLanguageTest, HoverReturnsNoContentWithoutDocumentation) {
 
 TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForModuleName) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::services::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
 
   const auto uri = pegium::test::make_file_uri("root-hover.calc");
   auto document = pegium::test::open_and_build_document(
@@ -331,10 +503,10 @@ TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForModuleName) {
 
 TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForDefinitionName) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::services::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
 
   const auto uri = pegium::test::make_file_uri("definition-hover.calc");
   auto document = pegium::test::open_and_build_document(
@@ -367,10 +539,10 @@ TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForDefinitionName) {
 
 TEST(ArithmeticsLanguageTest, HoverResultSerializesForDocumentedRootAndReference) {
   auto shared = pegium::test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::services::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
 
   const auto uri = pegium::test::make_file_uri("documented-hover.calc");
   auto document = pegium::test::open_and_build_document(

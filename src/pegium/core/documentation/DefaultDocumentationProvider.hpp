@@ -12,9 +12,9 @@ namespace pegium::documentation {
 
 /// Default documentation renderer for JSDoc-style comments.
 class DefaultDocumentationProvider : public DocumentationProvider,
-                                     protected services::DefaultCoreService {
+                                     protected pegium::DefaultCoreService {
 public:
-  using services::DefaultCoreService::DefaultCoreService;
+  using pegium::DefaultCoreService::DefaultCoreService;
 
   ~DefaultDocumentationProvider() override = default;
   /// Returns the Markdown documentation derived from the comment attached to `node`.

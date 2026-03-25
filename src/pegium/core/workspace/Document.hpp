@@ -48,7 +48,7 @@ struct Document {
   /// null and always point to reference objects owned by this document AST.
   std::vector<ReferenceHandle> references;
 
-  std::vector<services::Diagnostic> diagnostics;
+  std::vector<pegium::Diagnostic> diagnostics;
 
   /// Returns whether parsing reached a full grammar match.
   [[nodiscard]] bool parseSucceeded() const noexcept {

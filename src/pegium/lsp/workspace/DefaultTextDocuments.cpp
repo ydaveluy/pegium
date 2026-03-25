@@ -269,17 +269,19 @@ utils::ScopedDisposable DefaultTextDocuments::onWillSave(
 utils::ScopedDisposable DefaultTextDocuments::onWillSaveWaitUntil(
     std::function<std::vector<TextEdit>(const TextDocumentWillSaveEvent &)>
         listener) {
+  const auto state = _onWillSaveWaitUntil;
   std::size_t id = 0;
   {
-    std::scoped_lock lock(_mutex);
-    id = _nextWillSaveWaitUntilId++;
-    _onWillSaveWaitUntil = std::move(listener);
+    std::scoped_lock lock(state->mutex);
+    id = state->nextId++;
+    state->activeId = id;
+    state->listener = std::move(listener);
   }
 
-  return utils::ScopedDisposable([this, id]() {
-    std::scoped_lock lock(_mutex);
-    if (_nextWillSaveWaitUntilId == id + 1) {
-      _onWillSaveWaitUntil = {};
+  return utils::ScopedDisposable([state, id]() {
+    std::scoped_lock lock(state->mutex);
+    if (state->activeId == id) {
+      state->listener = {};
     }
   });
 }
@@ -323,8 +325,8 @@ std::vector<TextEdit> DefaultTextDocuments::emitWillSaveWaitUntil(
   std::function<std::vector<TextEdit>(const TextDocumentWillSaveEvent &)>
       listener;
   {
-    std::scoped_lock lock(_mutex);
-    listener = _onWillSaveWaitUntil;
+    std::scoped_lock lock(_onWillSaveWaitUntil->mutex);
+    listener = _onWillSaveWaitUntil->listener;
   }
   if (!listener) {
     return {};

@@ -19,7 +19,7 @@ public:
   registerCapability(::lsp::RegistrationParams params) = 0;
 
   /// Requests configuration sections from the client.
-  [[nodiscard]] virtual std::future<std::vector<services::JsonValue>>
+  [[nodiscard]] virtual std::future<std::vector<pegium::JsonValue>>
   fetchConfiguration(::lsp::ConfigurationParams params) = 0;
 };
 

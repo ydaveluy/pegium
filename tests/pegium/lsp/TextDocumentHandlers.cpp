@@ -4,7 +4,7 @@
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/workspace/DefaultTextDocuments.hpp>
 
 namespace pegium {

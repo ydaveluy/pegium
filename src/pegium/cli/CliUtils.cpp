@@ -43,7 +43,7 @@ std::string join_values(const std::vector<std::string> &values) {
 
 bool matches_language_path(
     const std::filesystem::path &path,
-    const pegium::services::LanguageMetaData &languageMetaData) {
+    const pegium::LanguageMetaData &languageMetaData) {
   if (languageMetaData.fileExtensions.empty() &&
       languageMetaData.fileNames.empty()) {
     return true;
@@ -65,7 +65,7 @@ bool matches_language_path(
 
 void validate_language_path(
     const std::filesystem::path &path,
-    const pegium::services::LanguageMetaData &languageMetaData) {
+    const pegium::LanguageMetaData &languageMetaData) {
   if (matches_language_path(path, languageMetaData)) {
     return;
   }
@@ -94,9 +94,9 @@ void validate_language_path(
 
 namespace pegium::cli {
 
-SharedServices make_shared_services() {
-  SharedServices sharedServices;
-  services::installDefaultSharedCoreServices(sharedServices);
+pegium::SharedCoreServices make_shared_services() {
+  pegium::SharedCoreServices sharedServices;
+  pegium::installDefaultSharedCoreServices(sharedServices);
   sharedServices.workspace.configurationProvider->initialize(
       workspace::InitializeParams{});
   auto initialized =
@@ -108,7 +108,7 @@ SharedServices make_shared_services() {
 
 std::shared_ptr<workspace::Document>
 build_document_from_path(std::string_view path,
-                         const services::CoreServices &services,
+                         const pegium::CoreServices &services,
                          bool validation) {
   const auto absolutePath = std::filesystem::absolute(std::filesystem::path(path));
   const auto absolutePathString = absolutePath.string();
@@ -147,14 +147,14 @@ build_document_from_path(std::string_view path,
 bool has_error_diagnostics(const workspace::Document &document) noexcept {
   return std::ranges::any_of(
       document.diagnostics, [](const auto &diagnostic) {
-        return diagnostic.severity == services::DiagnosticSeverity::Error;
+        return diagnostic.severity == pegium::DiagnosticSeverity::Error;
       });
 }
 
 void print_error_diagnostics(const workspace::Document &document,
                              std::ostream &out) {
   for (const auto &diagnostic : document.diagnostics) {
-    if (diagnostic.severity != services::DiagnosticSeverity::Error) {
+    if (diagnostic.severity != pegium::DiagnosticSeverity::Error) {
       continue;
     }
 

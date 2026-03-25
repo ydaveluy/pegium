@@ -2,8 +2,8 @@
 
 Pegium exposes editor features through `pegium::Services`.
 
-Core service containers live in `pegium::services`; the LSP aggregate
-containers live directly in `pegium`.
+The main idea is simple: one language service container owns both the semantic
+layer and the editor-facing layer for a language.
 
 ## Default providers
 
@@ -22,10 +22,10 @@ The built-in defaults cover:
 - rename
 - code actions
 
-Other slots such as formatter, selection ranges, signature help, semantic
-tokens, call hierarchy, type hierarchy, inlay hints, and code lens are
-available on `services->lsp`, but they stay empty until your language installs
-an implementation.
+Other slots such as formatter, semantic tokens, signature help, selection
+ranges, call hierarchy, type hierarchy, code lens, and inlay hints are
+available too, but they stay empty until your language installs an
+implementation.
 
 Shared runtime services under `sharedServices.lsp` also get a default baseline:
 
@@ -36,20 +36,8 @@ Shared runtime services under `sharedServices.lsp` also get a default baseline:
 - `nodeKindProvider`
 - `workspaceSymbolProvider`
 
-The default `languageServer` already owns the standard initialization flow for
-configuration and workspace services. The runtime layer just forwards protocol
-messages and keeps transport concerns out of language modules.
-
-During an active session, `sharedServices.lsp.languageClient` gives shared
-services a narrow way to talk back to the editor for:
-
-- capability registration
-- configuration fetches
-
-The raw transport object stays internal to the runtime layer.
-
-In practice, one `Services` object gives you both the semantic layer and the
-editor layer for a language.
+For most languages, that default baseline is already enough to get an editor
+session running.
 
 ## Customization strategy
 
@@ -60,7 +48,7 @@ completion, formatting, hover, or navigation logic where needed.
 Typical setup:
 
 ```cpp
-auto services = pegium::services::makeDefaultServices(
+auto services = pegium::makeDefaultServices(
     sharedServices, "my-language");
 
 services->parser = std::make_unique<const my::parser::MyParser>(*services);
@@ -68,62 +56,22 @@ services->lsp.formatter = std::make_unique<lsp::MyFormatter>(*services);
 services->lsp.hoverProvider = std::make_unique<lsp::MyHoverProvider>(*services);
 ```
 
-For completion, start from `lsp::DefaultCompletionProvider` and override its
-protected hooks instead of replacing the whole feature pipeline. The API is
-documented in the [completion provider reference](../reference/completion-provider.md).
-
-Code lens providers can stay single-phase by only implementing
-`provideCodeLens(...)`. If a language wants deferred resolution, override
-`supportsResolveCodeLens()` and `resolveCodeLens(...)`. Pegium restores the
-original `CodeLens::data` before calling the resolve hook and preserves it
-across repeated resolve requests.
-
-When you override completion options, only advertise fields Pegium supports:
-
-- `triggerCharacters`
-- `allCommitCharacters`
-
-For many languages, the defaults are already good enough for document symbols,
-document highlights, folding ranges, and most navigation features. Formatter,
-hover, completion, and rename are the first features that typically need
-language-specific behavior.
+In practice, formatter, hover, completion, and rename are the first features
+that most languages customize. Many navigation features work well from the
+default services as soon as references and scopes are correct.
 
 ## File operations
 
 Install a custom `sharedServices->lsp.fileOperationHandler` only when your
 language server needs workspace file create/rename/delete hooks.
 
-Registration comes exclusively from
-`FileOperationHandler::fileOperationOptions()`. If an operation is absent from
-that object, Pegium does not announce it and does not wire its callback.
-
 ## Document update contract
 
 `sharedServices->lsp.documentUpdateHandler` is the public hook for text
 document lifecycle events and watched-files updates.
 
-Capability advertisement is derived only from these methods:
-
-- `supportsDidSaveDocument()`
-- `supportsWillSaveDocument()`
-- `supportsWillSaveDocumentWaitUntil()`
-
-If you return `true`, implement the matching callback. If you leave the support
-method at its default `false`, Pegium does not announce the capability and does
-not wire the callback.
-
-The default handler also performs watched-files dynamic registration when the
-client supports it, then forwards `workspace/didChangeWatchedFiles` into the
-workspace rebuild pipeline.
-
-If you need custom watcher patterns, derive from
-`DefaultDocumentUpdateHandler` and override the protected `getWatchers()`
-hook. The default implementation registers a single workspace-wide `**/*`
-watcher, and returning an empty list skips registration entirely.
-
-Lifecycle work triggered during `initialized(...)` stays asynchronous and
-non-blocking. Failures are reported through the shared observability sink
-instead of being silently ignored.
+Most languages can keep the default handler. Override it only when save hooks
+or watched-file patterns are really part of your language behavior.
 
 ## Practical approach
 
@@ -134,9 +82,6 @@ it. A safer order is:
 2. hover or completion
 3. definition/references/rename only if the default behavior is not enough
 
-Keep runtime internals out of language modules. The supported extension points
-are the service slots and shared handlers, not the internal request dispatch
-helpers used by the language server runtime.
-
-For the executable itself, prefer `runLanguageServerMain(...)` over open-coded
-connection/bootstrap logic in every example `main`.
+For completion, prefer extending `lsp::DefaultCompletionProvider` rather than
+rewriting completion from scratch. The relevant hooks are documented in the
+[completion provider reference](../reference/completion-provider.md).

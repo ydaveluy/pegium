@@ -1,65 +1,25 @@
 # References and Scoping
 
-Pegium separates name computation, scope computation, scope lookup, and linking.
+References are what turn a parsed tree into a usable language model. They let a
+written name point to a real declaration, possibly in another file.
 
-## Main services
+Pegium splits that job into a few small services so the same information can be
+reused by linking, completion, rename, and navigation.
 
-- `NameProvider`
-- `ScopeComputation`
-- `ScopeProvider`
-- `Linker`
+## The main roles
 
-These services answer different questions:
+- `NameProvider` decides how declarations are named.
+- `ScopeComputation` decides what symbols a document exports and what local
+  symbols should be precomputed.
+- `ScopeProvider` decides what is visible from one concrete reference site.
+- `Linker` resolves the written reference text to one target.
 
-- what names does this document export?
-- what names are visible from this reference site?
-- which candidate matches the current reference text?
-- how is the resolved target written back into the reference object?
+These are separate on purpose. Most languages only need to customize one or two
+of them.
 
-`NameProvider` itself is intentionally split in two:
+## Model references explicitly in the AST
 
-- `getName(...)` returns the exported symbol name
-- `getNameNode(...)` returns the CST node that should be used for declaration-site navigation
-
-That split lets scoping use canonicalized names while editor features still
-point at the exact source range of the declaration.
-
-For editor-facing code, Pegium also exposes small helpers on top of that split:
-
-- `named_node_info(...)` when a feature needs the name plus both relevant CST ranges
-- `declaration_site_node(...)` / `required_declaration_site_node(...)` when a feature only needs the declaration-site range
-
-## Recommended naming pattern
-
-When your language has several declaration nodes with the same `name` property,
-it is recommended to inherit them from the built-in `pegium::NamedAstNode`.
-
-```cpp
-struct Entity : pegium::NamedAstNode {};
-struct DataType : pegium::NamedAstNode {};
-struct PackageDeclaration : pegium::NamedAstNode {};
-```
-
-The default naming service reads `pegium::NamedAstNode::name` directly from the
-AST. This is usually the best default because:
-
-- names come from the semantic model instead of being re-read from the CST
-- one shared base avoids duplicating the same `name` field across declarations
-- declaration-site navigation still points at the original source text
-
-## Typical flow
-
-1. describe exported symbols for the current document
-2. enumerate visible symbols from `ScopeProvider`
-3. resolve `ReferenceInfo` entries against those visible symbols
-4. keep reference text and target tracking available for later editor features
-
-`ReferenceInfo` is assignment-backed: it keeps the reference text plus the
-grammar `Assignment` that defines the feature name and expected target type.
-
-## What a reference looks like in the AST
-
-References are explicit AST fields:
+A cross-reference should be a reference field in the AST, not just a string:
 
 ```cpp
 struct Feature : pegium::AstNode {
@@ -68,91 +28,96 @@ struct Feature : pegium::AstNode {
 };
 ```
 
-The parser usually assigns string-like text to that field. Pegium stores the
-reference text first, then resolves it later through the linker and scopes.
+During parsing, Pegium records the written text. Later, the linker resolves that
+text to a real target node.
 
-This is an important distinction:
+This is the key mental model:
 
 - parsing records what the user wrote
-- linking decides what it means
+- linking decides what it refers to
 
-## Exported symbols vs visible symbols
+## Recommended naming pattern
 
-Two ideas are easy to mix up:
+For many languages, the default naming pattern is already the right one.
 
-- exported symbols: what a document contributes to the workspace index
-- visible symbols: what a specific reference can see from its current location
+## Start with the default naming pattern
 
-`DefaultScopeComputation` is concerned with the first part. `ScopeProvider` is
-concerned with the second part.
+If your declarations all have a `name`, the easiest setup is to derive them
+from `pegium::NamedAstNode`:
 
-## `AstNodeDescription` contract
+```cpp
+struct Entity : pegium::NamedAstNode {};
+struct DataType : pegium::NamedAstNode {};
+struct PackageDeclaration : pegium::NamedAstNode {};
+```
 
-Runtime symbol descriptions are not partial records.
+That keeps naming in the AST, where it usually belongs, and works well with the
+default naming service.
 
-- exported and local descriptions must carry a valid `documentId`
-- they must also carry a valid `symbolId`
-- they must carry a non-zero `nameLength` covering the visible symbol name
-- that pair must be sufficient to resolve the description back to the target AST node
-- real providers must only emit descriptions that still resolve to a live node
-  in a managed workspace document
+## Exported symbols and visible symbols are different
 
-If a node should not be visible, do not emit a description for it. Do not emit
-placeholder descriptions with missing ids.
+Two questions are easy to mix up:
 
-## `ScopeProvider`
+- what does this document contribute to the workspace?
+- what may this specific reference see right here?
 
-`ScopeProvider` exposes two operations:
+The first question is about exported symbols. The second is about visible
+symbols.
 
-- `getScopeEntry(...)` for exact lookup of the current reference text
-- `visitScopeEntries(...)` to enumerate all visible candidates in lexical order
+This is why many scoping problems are best debugged in this order:
 
-That order is important. Pegium visits nearer local scopes first, then outer
-locals, then global exports.
-
-## `References` contract
-
-`References::findDeclarations(...)` and
-`References::findDeclarationNodes(...)` return concrete matches only.
-
-- the input CST node must already come from a managed workspace document
-- declaration AST pointers are never null
-- declaration CST nodes are always valid
-- returned declarations always come from managed workspace documents
-
-If there is no match, return an empty vector. Do not return placeholder or
-partially resolved entries.
-
-## Where to customize
-
-- override the name provider if symbol naming is not a single property
-- override scope computation when symbols become visible through nesting,
-  imports, or custom visibility rules
-- override the scope provider when lookup itself needs special logic
-- keep the default linker unless the actual resolution policy must change
-
-## Practical order of customization
-
-In most projects, the safest order is:
-
-1. make sure names are exported correctly
+1. make sure the declaration is exported with the right name
 2. make sure the current scope contains the right candidates
-3. only then customize the linker if the default resolution still is not enough
+3. only then question the linker
 
-That avoids debugging three moving parts at once.
+## Most customizations start in scope computation
 
-## Start from examples
+In many projects, the default linker and default scope provider are already
+enough. The first real customization is usually `ScopeComputation`.
 
-- `domainmodel` shows qualified naming and structured scoping
-- `requirements` shows multi-document and multi-language workspace behavior
+That is where you typically implement:
 
-## What this unlocks later
+- qualified names
+- package-like nesting
+- imported symbols added to local scopes
+- precomputed local visibility rules
 
-Once references and scopes are correct, several editor features become much
-easier:
+This is also a good performance trade-off, because the work happens once per
+document rebuild instead of on every completion or linking request.
+
+## Customize the scope provider only when visibility depends on context
+
+Override `ScopeProvider` when lookup itself depends on the reference site in a
+way that precomputed symbols cannot express cleanly.
+
+Typical cases:
+
+- visibility that depends on imports or modifiers
+- context-sensitive filtering
+- rules that differ significantly across reference sites
+
+Keep the linker default unless the resolution policy itself needs to change.
+
+## What this unlocks
+
+Once references and scopes are correct, a large part of the editor experience
+starts working from the same model:
 
 - go to definition
 - find references
 - rename
-- hover over referenced targets
-- diagnostics on unresolved names
+- completion on references
+- diagnostics for unresolved names
+
+## Start from examples
+
+- `domainmodel` is the best starting point for nested declarations and
+  qualified names
+- `requirements` is the best starting point for cross-file and multi-language
+  scenarios
+
+## Related pages
+
+- [5. Resolve Cross-References](../learn/workflow/resolve_cross_references.md)
+- [Qualified Names](../recipes/scoping/qualified-names.md)
+- [Custom Scope Provider](../recipes/custom-scope-provider.md)

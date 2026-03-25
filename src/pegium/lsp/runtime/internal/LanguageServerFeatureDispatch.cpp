@@ -88,14 +88,14 @@ Result with_item_provider(pegium::SharedServices &sharedServices,
 }
 
 ::lsp::CodeLens wrap_code_lens(std::string_view uri, ::lsp::CodeLens codeLens) {
-  services::JsonValue::Object metadata;
+  pegium::JsonValue::Object metadata;
   metadata.try_emplace(std::string(kCodeLensMetadataKey), true);
   metadata.try_emplace(std::string(kCodeLensUriKey), std::string(uri));
   if (codeLens.data.has_value()) {
     metadata.try_emplace(std::string(kCodeLensDataKey),
                          from_lsp_any(*codeLens.data));
   }
-  codeLens.data = to_lsp_any(services::JsonValue(std::move(metadata)));
+  codeLens.data = to_lsp_any(pegium::JsonValue(std::move(metadata)));
   return codeLens;
 }
 

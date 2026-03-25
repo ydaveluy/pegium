@@ -8,7 +8,7 @@
 #include <thread>
 #include <variant>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
 #include <pegium/lsp/runtime/LanguageServerHandlerContext.hpp>
 #include <pegium/lsp/runtime/LanguageServerRequestHandlerUtils.hpp>
@@ -21,20 +21,20 @@ void set_validation_configuration(
     workspace::ConfigurationProvider &configurationProvider,
     std::string_view languageId, bool enabled,
     std::vector<std::string> categories) {
-  services::JsonValue::Array categoryValues;
+  pegium::JsonValue::Array categoryValues;
   categoryValues.reserve(categories.size());
   for (auto &category : categories) {
     categoryValues.emplace_back(std::move(category));
   }
 
   workspace::ConfigurationChangeParams params;
-  params.settings = services::JsonValue(services::JsonValue::Object{
+  params.settings = pegium::JsonValue(pegium::JsonValue::Object{
       {std::string(languageId),
-       services::JsonValue(services::JsonValue::Object{
+       pegium::JsonValue(pegium::JsonValue::Object{
            {"validation",
-            services::JsonValue(services::JsonValue::Object{
-                {"enabled", services::JsonValue(enabled)},
-                {"categories", services::JsonValue(std::move(categoryValues))},
+            pegium::JsonValue(pegium::JsonValue::Object{
+                {"enabled", pegium::JsonValue(enabled)},
+                {"categories", pegium::JsonValue(std::move(categoryValues))},
             })},
        })},
   });
@@ -156,7 +156,7 @@ protected:
   test::RecordingDocumentBuilder *builder = nullptr;
 
   LanguageServerRequestHandlerUtilsTest() {
-    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedCoreServices(*shared);
     pegium::installDefaultSharedLspServices(*shared);
     pegium::test::initialize_shared_workspace_for_tests(*shared);
   }
@@ -170,7 +170,7 @@ protected:
     {
       auto registeredServices = 
         test::make_uninstalled_services(*shared, "test", {".test"});
-      pegium::services::installDefaultCoreServices(*registeredServices);
+      pegium::installDefaultCoreServices(*registeredServices);
       pegium::installDefaultLspServices(*registeredServices);
       shared->serviceRegistry->registerServices(std::move(registeredServices));
     }

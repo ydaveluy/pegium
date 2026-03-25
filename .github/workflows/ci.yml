@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - master
   pull_request:
   workflow_dispatch:
 
@@ -22,15 +21,27 @@ jobs:
           - compiler: gcc
             cxx: g++
             build_type: Debug
+            build_fuzz_targets: OFF
+            fuzztest_fuzzing_mode: OFF
+            run_guided_fuzz: false
           - compiler: gcc
             cxx: g++
             build_type: Release
+            build_fuzz_targets: OFF
+            fuzztest_fuzzing_mode: OFF
+            run_guided_fuzz: false
           - compiler: clang
             cxx: clang++
             build_type: Debug
+            build_fuzz_targets: OFF
+            fuzztest_fuzzing_mode: OFF
+            run_guided_fuzz: false
           - compiler: clang
             cxx: clang++
             build_type: Release
+            build_fuzz_targets: ON
+            fuzztest_fuzzing_mode: ON
+            run_guided_fuzz: true
     steps:
       - uses: actions/checkout@v6
       - name: Configure
@@ -40,37 +51,37 @@ jobs:
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DPEGIUM_BUILD_EXAMPLES=ON
+            -DPEGIUM_BUILD_EXAMPLES=ON \
+            -DPEGIUM_BUILD_FUZZ_TARGETS=${{ matrix.build_fuzz_targets }} \
+            -DFUZZTEST_FUZZING_MODE=${{ matrix.fuzztest_fuzzing_mode }}
       - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }} -j 2
-      - name: Run core tests
-        run: ./build/PegiumCoreUnitTest
-      - name: Run LSP tests
-        run: ./build/PegiumLspUnitTest
-      - name: Run integration tests
-        run: ./build/PegiumIntegrationTest
-      - name: Run legacy tests
-        run: ./build/PegiumLegacyLanguagesTest
-      - name: Run example tests
-        run: ./build/PegiumExamplesTest
-
-  fuzz-smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Configure
-        env:
-          CC: clang
-          CXX: clang++
         run: |
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DPEGIUM_BUILD_EXAMPLES=OFF \
-            -DPEGIUM_BUILD_FUZZ_TARGETS=ON
-      - name: Build
-        run: cmake --build build --config Release -j 2 --target PegiumParserFuzzTarget
-      - name: Run fuzz smoke test
-        run: ctest --test-dir build -R PegiumParserFuzzSmoke --output-on-failure
+          targets=(
+            PegiumCoreUnitTest
+            PegiumLspUnitTest
+            PegiumIntegrationTest
+            pegium-example-arithmetics-test
+            pegium-example-domainmodel-test
+            pegium-example-requirements-test
+            pegium-example-statemachine-test
+          )
+          if [ "${{ matrix.build_fuzz_targets }}" = "ON" ]; then
+            targets+=(
+              PegiumWorkspaceFuzzTest
+            )
+          fi
+          cmake --build build --config ${{ matrix.build_type }} -j4 --target "${targets[@]}"
+      - name: Run core tests
+        run: ctest --test-dir build -L core --output-on-failure
+      - name: Run LSP tests
+        run: ctest --test-dir build -L lsp --output-on-failure
+      - name: Run integration tests
+        run: ctest --test-dir build -L integration --output-on-failure
+      - name: Run example tests
+        run: ctest --test-dir build -L example --output-on-failure
+      - name: Run guided fuzz sanity
+        if: ${{ matrix.run_guided_fuzz }}
+        run: ctest --test-dir build -L fuzz-guided --output-on-failure
 
   sanitizers:
     runs-on: ubuntu-latest
@@ -96,12 +107,9 @@ jobs:
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DPEGIUM_BUILD_EXAMPLES=OFF \
-            -DPEGIUM_BUILD_FUZZ_TARGETS=ON \
+            -DPEGIUM_BUILD_FUZZ_TARGETS=OFF \
             ${{ matrix.flags }}
       - name: Build
-        run: cmake --build build --config Debug -j 2 --target PegiumCoreUnitTest PegiumParserFuzzTarget
-      - name: Run parser-focused tests
-        run: |
-          ./build/PegiumCoreUnitTest --gtest_filter='AssignmentTest.*:DataTypeRuleTest.*:DocumentTest.*:InfixRuleTest.*:ParserRuleTest.*:ParserTest.*:Recovery*:*TerminalRuleTest.*:DefaultDocumentBuilderTest.Parse*:DefaultDocumentFactoryTest.*'
-      - name: Run fuzz smoke corpus
-        run: ./build/PegiumParserFuzzTarget --corpus tests/fuzz/corpus
+        run: cmake --build build --config Debug -j4 --target PegiumCoreUnitTest PegiumLspUnitTest
+      - name: Run sanitizer-focused tests
+        run: ctest --test-dir build -R 'PegiumCoreParserFocusedSanitizer|PegiumLspSemanticTokenSanitizer' --output-on-failure

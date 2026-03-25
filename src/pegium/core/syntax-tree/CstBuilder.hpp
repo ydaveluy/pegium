@@ -36,6 +36,16 @@ public:
   };
 
   /// Snapshot of the builder state suitable for speculative rewind.
+  ///
+  /// Contract:
+  /// - a checkpoint is only valid while the parent that was open at
+  ///   `frames[depth].parent` during `mark()` is still open
+  /// - callers may parse and rewind deeper descendants below that depth
+  /// - callers must not keep a checkpoint across an `exit()` that closes that
+  ///   parent, otherwise sibling linkage at that depth becomes ambiguous
+  ///
+  /// Root-level checkpoints (`depth == 0`) do not have this restriction because
+  /// they are anchored on the synthetic root frame.
   struct Checkpoint {
     NodeCount nodeCount;
     NodeId current;
@@ -60,6 +70,9 @@ public:
   }
 
   /// Returns a checkpoint that can later be passed to `rewind(...)`.
+  ///
+  /// Checkpoints are intended for short-lived speculation inside the same open
+  /// parent node. They must not outlive that parent.
   [[nodiscard]] Checkpoint mark() const noexcept {
     assert(_depth < _frames.size());
     return {
@@ -73,10 +86,15 @@ public:
 
   /// Restores the CST builder state to the given checkpoint.
   ///
-  /// If no node was created since `mark()`, this function is a no-op.
+  /// `rewind()` assumes that the parent open at the checkpoint depth is still
+  /// the same one. In other words, rewinding after that parent has been
+  /// exited is invalid.
   inline void rewind(const Checkpoint &cp) noexcept {
-    if (_root._nodeCount == cp.nodeCount)
-      return;
+    assert((cp.depth == 0 ||
+            (_depth >= cp.depth &&
+             _frames[cp.depth].parent == cp.parentAtLevel)) &&
+           "Cannot rewind to a checkpoint whose open node was already exited");
+
     _root._nodeCount = cp.nodeCount;
     _current = cp.current;
     _depth = cp.depth;
@@ -106,7 +124,7 @@ public:
   /// Opens a new non-leaf node at the current cursor position.
   ///
   /// The node remains incomplete until the matching `exit(...)`.
-  inline void enter() noexcept {
+  inline void enter() {
     const NodeId id = _root.alloc_node_uninitialized();
     _current = id;
 
@@ -158,7 +176,7 @@ public:
 
   inline void leaf(TextOffset beginOffset, TextOffset endOffset,
                    const grammar::AbstractElement *ge, bool hidden = false,
-                   bool recovered = false) noexcept {
+                   bool recovered = false) {
     assert(ge);
     assert(_depth < _frames.size());
 

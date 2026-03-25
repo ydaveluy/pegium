@@ -41,7 +41,7 @@ FilePathData extract_destination_and_name(
 
 ExtractedRequirementModelWithTests extract_requirement_model_with_test_models(
     std::string_view fileName,
-    const pegium::services::CoreServices &services) {
+    const pegium::CoreServices &services) {
   const auto absoluteFilePath = std::filesystem::absolute(std::string(fileName));
   const auto workspaceRoot = absoluteFilePath.parent_path();
   const std::vector<pegium::workspace::WorkspaceFolder> workspaceFolders{{

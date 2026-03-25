@@ -18,7 +18,7 @@ setup looks like this:
 
 ```cpp
 auto services =
-    pegium::services::makeDefaultServices(sharedServices, "domain-model");
+    pegium::makeDefaultServices(sharedServices, "domain-model");
 services->parser =
     std::make_unique<const domainmodel::parser::DomainModelParser>(*services);
 services->lsp.renameProvider =

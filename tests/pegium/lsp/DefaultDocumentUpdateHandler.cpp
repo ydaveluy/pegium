@@ -13,7 +13,7 @@
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/runtime/LanguageClient.hpp>
 #include <pegium/lsp/runtime/internal/LanguageClientFactory.hpp>
 #include <pegium/lsp/workspace/DefaultDocumentUpdateHandler.hpp>
@@ -27,20 +27,20 @@ void set_validation_configuration(
     workspace::ConfigurationProvider &configurationProvider,
     std::string_view languageId, bool enabled,
     std::vector<std::string> categories) {
-  services::JsonValue::Array categoryValues;
+  pegium::JsonValue::Array categoryValues;
   categoryValues.reserve(categories.size());
   for (auto &category : categories) {
     categoryValues.emplace_back(std::move(category));
   }
 
   workspace::ConfigurationChangeParams params;
-  params.settings = services::JsonValue(services::JsonValue::Object{
+  params.settings = pegium::JsonValue(pegium::JsonValue::Object{
       {std::string(languageId),
-       services::JsonValue(services::JsonValue::Object{
+       pegium::JsonValue(pegium::JsonValue::Object{
            {"validation",
-            services::JsonValue(services::JsonValue::Object{
-                {"enabled", services::JsonValue(enabled)},
-                {"categories", services::JsonValue(std::move(categoryValues))},
+            pegium::JsonValue(pegium::JsonValue::Object{
+                {"enabled", pegium::JsonValue(enabled)},
+                {"categories", pegium::JsonValue(std::move(categoryValues))},
             })},
        })},
   });
@@ -51,9 +51,9 @@ void clear_language_configuration(
     workspace::ConfigurationProvider &configurationProvider,
     std::string_view languageId) {
   workspace::ConfigurationChangeParams params;
-  params.settings = services::JsonValue(services::JsonValue::Object{
+  params.settings = pegium::JsonValue(pegium::JsonValue::Object{
       {std::string(languageId),
-       services::JsonValue(services::JsonValue::Object{})},
+       pegium::JsonValue(pegium::JsonValue::Object{})},
   });
   configurationProvider.updateConfiguration(params);
 }
@@ -173,7 +173,7 @@ protected:
   std::unique_ptr<DefaultDocumentUpdateHandler> handler;
 
   DefaultDocumentUpdateHandlerTest() {
-    pegium::services::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedCoreServices(*shared);
     shared->observabilitySink = recordingSink;
     pegium::installDefaultSharedLspServices(*shared);
     pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -294,10 +294,10 @@ public:
     return make_ready_future();
   }
 
-  std::future<std::vector<services::JsonValue>>
+  std::future<std::vector<pegium::JsonValue>>
   fetchConfiguration(::lsp::ConfigurationParams params) override {
     configurationRequests.push_back(std::move(params));
-    return make_ready_future(std::vector<services::JsonValue>{});
+    return make_ready_future(std::vector<pegium::JsonValue>{});
   }
 
   std::vector<::lsp::RegistrationParams> registrations;
@@ -312,9 +312,9 @@ public:
     });
   }
 
-  std::future<std::vector<services::JsonValue>>
+  std::future<std::vector<pegium::JsonValue>>
   fetchConfiguration(::lsp::ConfigurationParams) override {
-    return make_ready_future(std::vector<services::JsonValue>{});
+    return make_ready_future(std::vector<pegium::JsonValue>{});
   }
 };
 

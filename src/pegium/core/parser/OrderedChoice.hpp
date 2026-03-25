@@ -92,12 +92,16 @@ private:
                             " allowI=", ctx.allowInsert,
                             " allowD=", ctx.allowDelete);
 
-      if (run_no_edit_probe(ctx, entryCheckpoint)) {
+      const auto noEditResult = run_no_edit_probe(ctx, entryCheckpoint);
+      if (noEditResult == NoEditChoiceResult::Accepted) {
         return true;
       }
 
       if (run_editable_choice(ctx, entryCheckpoint)) {
         return true;
+      }
+      if (noEditResult == NoEditChoiceResult::Deferred) {
+        return replay_no_edit_choice(ctx, entryCheckpoint);
       }
 
       PEGIUM_RECOVERY_TRACE("[choice rule] fail offset=", ctx.cursorOffset());
@@ -226,31 +230,58 @@ public:
 private:
   using BranchResult = ExpectBranchResult;
   using EditableRecoveryCandidate = detail::EditableRecoveryCandidate;
+  enum class NoEditChoiceResult : std::uint8_t {
+    None,
+    Accepted,
+    Deferred,
+  };
 
   template <typename Checkpoint>
-  bool run_no_edit_probe(RecoveryContext &ctx,
-                         const Checkpoint &entryCheckpoint) const {
+  NoEditChoiceResult run_no_edit_probe(RecoveryContext &ctx,
+                                       const Checkpoint &entryCheckpoint) const {
+    const char *const savedMaxCursor = ctx.maxCursor();
+    ctx.restoreMaxCursor(ctx.cursor());
     if (match_choice_no_edits(ctx)) {
       detail::stepTraceInc(detail::StepCounter::ChoiceStrictPasses);
+      const auto probe = detail::capture_recovery_probe_progress(ctx);
+      if (savedMaxCursor > ctx.maxCursor()) {
+        ctx.restoreMaxCursor(savedMaxCursor);
+      }
+      if (probe.deferred()) {
+        PEGIUM_RECOVERY_TRACE(
+            "[choice rule] strict success deferred offset=",
+            probe.committedOffset, " localMax=", probe.exploredOffset);
+        ctx.rewind(entryCheckpoint);
+        ctx.restoreMaxCursor(savedMaxCursor);
+        return NoEditChoiceResult::Deferred;
+      }
       PEGIUM_RECOVERY_TRACE("[choice rule] strict success offset=",
                             ctx.cursorOffset());
-      return true;
+      return NoEditChoiceResult::Accepted;
     }
     detail::stepTraceInc(detail::StepCounter::ChoiceStrictPasses);
     ctx.rewind(entryCheckpoint);
-    return false;
+    ctx.restoreMaxCursor(savedMaxCursor);
+    return NoEditChoiceResult::None;
   }
 
-  bool run_delete_retry_choice(RecoveryContext &ctx) const {
-    return detail::recover_by_delete_retry(ctx, [this, &ctx]() {
-      ctx.skip();
-      if (!match_choice(ctx)) {
+  template <typename Checkpoint>
+  bool replay_no_edit_choice(RecoveryContext &ctx,
+                             const Checkpoint &entryCheckpoint) const {
+    if (match_choice_no_edits(ctx)) {
+      const auto probe = detail::capture_recovery_probe_progress(ctx);
+      if (probe.deferred() &&
+          probe.committedOffset >= ctx.pendingRecoveryWindowBeginOffset() &&
+          probe.committedOffset < ctx.pendingRecoveryWindowMaxCursorOffset()) {
+        ctx.rewind(entryCheckpoint);
         return false;
       }
-      PEGIUM_RECOVERY_TRACE("[choice rule] editable delete-retry success offset=",
+      PEGIUM_RECOVERY_TRACE("[choice rule] deferred strict success offset=",
                             ctx.cursorOffset());
       return true;
-    });
+    }
+    ctx.rewind(entryCheckpoint);
+    return false;
   }
 
   template <typename Checkpoint>
@@ -260,30 +291,24 @@ private:
     const auto baseEditCost = ctx.currentEditCost();
     const auto baseEditCount = ctx.currentEditCount();
     const auto baseRecoveryEditCount = ctx.recoveryEditCount();
+    std::optional<std::size_t> bestIndex;
+    EditableRecoveryCandidate bestCandidate;
+    bool bestUsesDeleteRetry = false;
 
-    const auto editableCandidate = detail::evaluate_editable_recovery_candidate(
-        ctx, entryCheckpoint, baseEditCost, baseEditCount, baseRecoveryEditCount,
-        [this, &ctx]() { return match_choice(ctx); });
-
-    EditableRecoveryCandidate deleteRetryCandidate;
-    if (ctx.isInRecoveryPhase()) {
-      deleteRetryCandidate = detail::evaluate_editable_recovery_candidate(
-          ctx, entryCheckpoint, baseEditCost, baseEditCount,
-          baseRecoveryEditCount,
-          [this, &ctx]() { return run_delete_retry_choice(ctx); });
-    }
+    collect_editable_choice_candidates(
+        ctx, entryCheckpoint, parseStartOffset, baseEditCost, baseEditCount,
+        baseRecoveryEditCount, bestIndex, bestCandidate, bestUsesDeleteRetry,
+        std::make_index_sequence<sizeof...(Elements)>{});
 
     detail::stepTraceInc(detail::StepCounter::ChoiceEditablePasses);
-    if (!editableCandidate.matched && !deleteRetryCandidate.matched) {
+    if (!bestIndex.has_value()) {
       return false;
     }
 
-    if (detail::prefer_efficiency_weighted_delete_retry_candidate(
-            deleteRetryCandidate, editableCandidate, parseStartOffset)) {
-      return run_delete_retry_choice(ctx);
+    if (bestUsesDeleteRetry) {
+      return replay_delete_retry_choice_by_index(ctx, *bestIndex);
     }
-
-    if (match_choice(ctx)) {
+    if (replay_editable_choice_by_index(ctx, *bestIndex)) {
       PEGIUM_RECOVERY_TRACE("[choice rule] editable success offset=",
                             ctx.cursorOffset());
       return true;
@@ -376,6 +401,96 @@ private:
       return false;
     } else {
       return match_choice_no_edits<I + 1>(ctx);
+    }
+  }
+
+  template <std::size_t I>
+  bool run_delete_retry_choice(RecoveryContext &ctx) const {
+    return detail::recover_by_delete_retry(ctx, [this, &ctx]() {
+      ctx.skip();
+      if (!attempt_parse_editable(ctx, std::get<I>(choices))) {
+        return false;
+      }
+      PEGIUM_RECOVERY_TRACE("[choice rule] editable delete-retry success offset=",
+                            ctx.cursorOffset());
+      return true;
+    });
+  }
+
+  template <std::size_t I = 0>
+  bool replay_editable_choice_by_index(RecoveryContext &ctx,
+                                       std::size_t bestIndex) const {
+    if constexpr (I == sizeof...(Elements)) {
+      return false;
+    } else {
+      if (bestIndex == I) {
+        return attempt_parse_editable(ctx, std::get<I>(choices));
+      }
+      return replay_editable_choice_by_index<I + 1>(ctx, bestIndex);
+    }
+  }
+
+  template <std::size_t I = 0>
+  bool replay_delete_retry_choice_by_index(RecoveryContext &ctx,
+                                           std::size_t bestIndex) const {
+    if constexpr (I == sizeof...(Elements)) {
+      return false;
+    } else {
+      if (bestIndex == I) {
+        return run_delete_retry_choice<I>(ctx);
+      }
+      return replay_delete_retry_choice_by_index<I + 1>(ctx, bestIndex);
+    }
+  }
+
+  template <std::size_t... Is, typename Checkpoint>
+  void collect_editable_choice_candidates(
+      RecoveryContext &ctx, const Checkpoint &entryCheckpoint,
+      TextOffset parseStartOffset, std::uint32_t baseEditCost,
+      std::uint32_t baseEditCount, std::size_t baseRecoveryEditCount,
+      std::optional<std::size_t> &bestIndex,
+      EditableRecoveryCandidate &bestCandidate, bool &bestUsesDeleteRetry,
+      std::index_sequence<Is...>) const {
+    (collect_editable_choice_candidate<Is>(
+         ctx, entryCheckpoint, parseStartOffset, baseEditCost, baseEditCount,
+         baseRecoveryEditCount, bestIndex, bestCandidate, bestUsesDeleteRetry),
+     ...);
+  }
+
+  template <std::size_t I, typename Checkpoint>
+  void collect_editable_choice_candidate(
+      RecoveryContext &ctx, const Checkpoint &entryCheckpoint,
+      TextOffset parseStartOffset, std::uint32_t baseEditCost,
+      std::uint32_t baseEditCount, std::size_t baseRecoveryEditCount,
+      std::optional<std::size_t> &bestIndex,
+      EditableRecoveryCandidate &bestCandidate,
+      bool &bestUsesDeleteRetry) const {
+    const auto editableCandidate = detail::evaluate_editable_recovery_candidate(
+        ctx, entryCheckpoint, baseEditCost, baseEditCount,
+        baseRecoveryEditCount,
+        [this, &ctx]() { return attempt_parse_editable(ctx, std::get<I>(choices)); });
+
+    EditableRecoveryCandidate selectedCandidate = editableCandidate;
+    bool selectedUsesDeleteRetry = false;
+    if (ctx.isInRecoveryPhase()) {
+      const auto deleteRetryCandidate =
+          detail::evaluate_editable_recovery_candidate(
+              ctx, entryCheckpoint, baseEditCost, baseEditCount,
+              baseRecoveryEditCount,
+              [this, &ctx]() { return run_delete_retry_choice<I>(ctx); });
+      if (detail::is_better_efficiency_weighted_editable_candidate(
+              deleteRetryCandidate, editableCandidate, parseStartOffset)) {
+        selectedCandidate = deleteRetryCandidate;
+        selectedUsesDeleteRetry = true;
+      }
+    }
+
+    if (!bestIndex.has_value() ||
+        detail::is_better_choice_recovery_candidate(selectedCandidate,
+                                                    bestCandidate)) {
+      bestIndex = I;
+      bestCandidate = selectedCandidate;
+      bestUsesDeleteRetry = selectedUsesDeleteRetry;
     }
   }
 

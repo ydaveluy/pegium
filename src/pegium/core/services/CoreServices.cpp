@@ -13,7 +13,7 @@
 #include <pegium/core/workspace/DefaultAstNodeLocator.hpp>
 #include <pegium/core/workspace/DefaultReferenceDescriptionProvider.hpp>
 
-namespace pegium::services {
+namespace pegium {
 
 bool CoreServices::isComplete() const noexcept {
   return parser && references.nameProvider && workspace.astNodeLocator &&
@@ -78,4 +78,4 @@ void installDefaultCoreServices(CoreServices &services) {
   }
 }
 
-} // namespace pegium::services
+} // namespace pegium

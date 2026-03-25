@@ -231,20 +231,20 @@ void append_semantic_token(
 AbstractSemanticTokenProvider::AbstractSemanticTokenProvider(
     const pegium::Services &services)
     : DefaultLanguageService(services) {
-  auto *languageServer =
-      const_cast<LanguageServer *>(services.shared.lsp.languageServer.get());
+  auto *languageServer = services.shared.lsp.languageServer.get();
   assert(languageServer != nullptr);
   _languageServerInitializeSubscription =
       languageServer->onInitialize([this](const ::lsp::InitializeParams &params) {
-        _supportsMultilineTokens =
+        _supportsMultilineTokens.store(
             params.capabilities.textDocument.has_value() &&
-            params.capabilities.textDocument->semanticTokens.has_value() &&
-            params.capabilities.textDocument->semanticTokens
-                ->multilineTokenSupport.value_or(false);
+                    params.capabilities.textDocument->semanticTokens.has_value() &&
+                    params.capabilities.textDocument->semanticTokens
+                        ->multilineTokenSupport.value_or(false)
+                ? std::uint8_t{1}
+                : std::uint8_t{0});
       });
 
-  const auto documents =
-      services.shared.lsp.textDocuments;
+  const auto documents = services.shared.lsp.textDocuments;
   assert(documents != nullptr);
   _textDocumentCloseSubscription =
       documents->onDidClose([this](const workspace::TextDocumentChangeEvent &event) {
@@ -431,7 +431,8 @@ AbstractSemanticTokenProvider::buildSemanticTokens(
 
   std::vector<EncodedSemanticToken> tokens;
   const SemanticTokenAcceptor acceptor =
-      [&document, &range, supportsMultilineTokens = _supportsMultilineTokens.load(),
+      [&document, &range,
+       supportsMultilineTokens = _supportsMultilineTokens.load() != 0,
        &tokens](SemanticTokenInfo token) {
     append_semantic_token(document, range, std::move(token),
                           supportsMultilineTokens, tokens);

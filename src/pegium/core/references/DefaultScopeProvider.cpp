@@ -41,7 +41,7 @@ using DescriptionVisitor =
 }
 
 [[nodiscard]] bool accepts_bucket(
-    const services::SharedCoreServices &shared, std::type_index referenceType,
+    const pegium::SharedCoreServices &shared, std::type_index referenceType,
     const ScopeEntryBucket &bucket) {
   if (referenceType == std::type_index(typeid(void)) ||
       bucket.type == std::type_index(typeid(void))) {
@@ -54,7 +54,7 @@ using DescriptionVisitor =
 }
 
 [[nodiscard]] const AstNodeDescription *
-find_scope_entry(const services::SharedCoreServices &shared,
+find_scope_entry(const pegium::SharedCoreServices &shared,
                  const workspace::BucketedScopeEntries &entries,
                  std::type_index referenceType, std::string_view name) noexcept {
   for (const auto &bucket : entries.buckets) {
@@ -71,7 +71,7 @@ find_scope_entry(const services::SharedCoreServices &shared,
   return nullptr;
 }
 
-[[nodiscard]] bool visit_entries(const services::SharedCoreServices &shared,
+[[nodiscard]] bool visit_entries(const pegium::SharedCoreServices &shared,
                                  const workspace::BucketedScopeEntries &entries,
                                  std::type_index referenceType,
                                  std::string_view name,
@@ -117,8 +117,8 @@ bool visit_local_scope_levels(const Levels &levels, const AstNode *container,
 } // namespace
 
 DefaultScopeProvider::DefaultScopeProvider(
-    const services::CoreServices &services)
-    : services::DefaultCoreService(services), _localScopeCache(services.shared),
+    const pegium::CoreServices &services)
+    : pegium::DefaultCoreService(services), _localScopeCache(services.shared),
       _globalScopeCache(services.shared) {}
 
 const workspace::AstNodeDescription *DefaultScopeProvider::getScopeEntry(

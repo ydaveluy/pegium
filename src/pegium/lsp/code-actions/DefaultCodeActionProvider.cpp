@@ -35,7 +35,7 @@ bool accepts_quick_fix_only(const ::lsp::CodeActionContext &context) {
 }
 
 std::optional<std::string> get_string_field(
-    const services::JsonValue::Object &object, std::string_view key) {
+    const pegium::JsonValue::Object &object, std::string_view key) {
   const auto it = object.find(std::string(key));
   if (it == object.end() || !it->second.isString()) {
     return std::nullopt;
@@ -44,7 +44,7 @@ std::optional<std::string> get_string_field(
 }
 
 std::optional<std::uint32_t> get_uint_field(
-    const services::JsonValue::Object &object, std::string_view key) {
+    const pegium::JsonValue::Object &object, std::string_view key) {
   const auto it = object.find(std::string(key));
   if (it == object.end() || !it->second.isInteger()) {
     return std::nullopt;

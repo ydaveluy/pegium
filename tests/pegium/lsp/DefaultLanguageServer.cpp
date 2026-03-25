@@ -10,7 +10,7 @@
 
 #include <lsp/connection.h>
 #include <lsp/messagehandler.h>
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/hierarchy/CallHierarchyProvider.hpp>
 #include <pegium/lsp/code-actions/CodeLensProvider.hpp>
 #include <pegium/lsp/navigation/DeclarationProvider.hpp>
@@ -101,7 +101,7 @@ public:
 
   void updateConfiguration(const workspace::ConfigurationChangeParams &) override {}
 
-  std::optional<services::JsonValue>
+  std::optional<pegium::JsonValue>
   getConfiguration(std::string_view, std::string_view) const override {
     return std::nullopt;
   }
@@ -199,7 +199,7 @@ public:
 
   void updateConfiguration(const workspace::ConfigurationChangeParams &) override {}
 
-  std::optional<services::JsonValue>
+  std::optional<pegium::JsonValue>
   getConfiguration(std::string_view, std::string_view) const override {
     return std::nullopt;
   }
@@ -290,7 +290,7 @@ public:
 
   void updateConfiguration(const workspace::ConfigurationChangeParams &) override {}
 
-  std::optional<services::JsonValue>
+  std::optional<pegium::JsonValue>
   getConfiguration(std::string_view, std::string_view) const override {
     return std::nullopt;
   }
@@ -645,13 +645,13 @@ private:
 
 TEST(DefaultLanguageServerTest, InitializeAdvertisesCapabilitiesFromRegisteredServices) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   {
     auto registeredServices = 
       test::make_uninstalled_services(*shared, "test", {".test"});
-    pegium::services::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultCoreServices(*registeredServices);
     pegium::installDefaultLspServices(*registeredServices);
     shared->serviceRegistry->registerServices(std::move(registeredServices));
   }
@@ -707,11 +707,11 @@ TEST(DefaultLanguageServerTest, InitializeAdvertisesCapabilitiesFromRegisteredSe
 
 TEST(DefaultLanguageServerTest, OptInServicesAdvertiseCapabilitiesWhenInstalledExplicitly) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   services->lsp.selectionRangeProvider =
       std::make_unique<TestSelectionRangeProvider>();
@@ -824,7 +824,7 @@ TEST(DefaultLanguageServerTest, OptInServicesAdvertiseCapabilitiesWhenInstalledE
 
 TEST(DefaultLanguageServerTest, InitializeAndInitializedEmitCallbacks) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   DefaultLanguageServer server(*shared);
@@ -851,7 +851,7 @@ TEST(DefaultLanguageServerTest, InitializeAndInitializedEmitCallbacks) {
 TEST(DefaultLanguageServerTest,
      InitializeCallsDefaultServicesBeforeOnInitialize) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
 
@@ -879,7 +879,7 @@ TEST(DefaultLanguageServerTest,
 TEST(DefaultLanguageServerTest,
      InitializedStartsDefaultServicesBeforeEventAndDoesNotBlock) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
 
@@ -926,7 +926,7 @@ TEST(DefaultLanguageServerTest,
 
 TEST(DefaultLanguageServerTest, LifecycleEventsAreOneShot) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
 
@@ -953,7 +953,7 @@ TEST(DefaultLanguageServerTest, LifecycleEventsAreOneShot) {
 TEST(DefaultLanguageServerTest,
      InitializedPublishesObservationsForBackgroundFailuresAndDoesNotBlock) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   auto recordingSink = std::make_shared<test::RecordingObservabilitySink>();
   shared->observabilitySink = recordingSink;
   pegium::installDefaultSharedLspServices(*shared);
@@ -1002,11 +1002,11 @@ TEST(DefaultLanguageServerTest,
 TEST(DefaultLanguageServerTest,
      InitializeAdvertisesOnTypeFormattingWhenFormatterProvidesOptions) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   services->lsp.formatter = std::make_unique<TestOnTypeFormatter>();
   shared->serviceRegistry->registerServices(std::move(services));
@@ -1034,14 +1034,14 @@ TEST(DefaultLanguageServerTest,
 TEST(DefaultLanguageServerTest,
      InitializeRejectsConflictingSemanticTokenLegendIndexes) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto first = test::make_uninstalled_services(*shared, "first", {".first"});
-  pegium::services::installDefaultCoreServices(*first);
+  pegium::installDefaultCoreServices(*first);
   pegium::installDefaultLspServices(*first);
   auto second = test::make_uninstalled_services(*shared, "second", {".second"});
-  pegium::services::installDefaultCoreServices(*second);
+  pegium::installDefaultCoreServices(*second);
   pegium::installDefaultLspServices(*second);
   first->lsp.semanticTokenProvider =
       std::make_unique<TestSemanticTokenProvider>("type");
@@ -1058,7 +1058,7 @@ TEST(DefaultLanguageServerTest,
 TEST(DefaultLanguageServerTest,
      DoesNotAdvertiseConcreteFileOperationsWhenNoOperationsAreDeclared) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   shared->lsp.fileOperationHandler =
@@ -1074,7 +1074,7 @@ TEST(DefaultLanguageServerTest,
 TEST(DefaultLanguageServerTest,
      TextDocumentSyncSaveDependsOnDocumentUpdateHandlerSupport) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   shared->lsp.documentUpdateHandler =
@@ -1102,7 +1102,7 @@ TEST(DefaultLanguageServerTest,
 TEST(DefaultLanguageServerTest,
      TextDocumentSyncReflectsExplicitDocumentSaveLifecycleSupport) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   shared->lsp.documentUpdateHandler =

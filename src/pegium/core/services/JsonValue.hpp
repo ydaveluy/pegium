@@ -10,7 +10,7 @@
 
 #include <pegium/core/utils/TransparentStringHash.hpp>
 
-namespace pegium::services {
+namespace pegium {
 
 /// Lightweight owned JSON value used by configuration and protocol helpers.
 class JsonValue {
@@ -74,4 +74,4 @@ private:
   Storage _value;
 };
 
-} // namespace pegium::services
+} // namespace pegium

@@ -1,4 +1,5 @@
 #include <pegium/core/grammar/InfixRule.hpp>
+#include <pegium/core/grammar/PrintUtils.hpp>
 
 #include <ostream>
 
@@ -15,12 +16,14 @@ void InfixOperator::print(std::ostream &os) const {
     break;
   }
 
-  os << " assoc " << *getOperator();
+  os << " assoc ";
+  detail::print_element_reference(os, *getOperator());
 }
 
 void InfixRule::print(std::ostream &os) const {
   os << "infix " << getName() << " returns " << getTypeName() << " on ";
-  os << *getElement() << ": ";
+  detail::print_element_reference(os, *getElement());
+  os << ": ";
   for (std::size_t i = 0; i < operatorCount(); ++i) {
     if (i > 0)
       os << " > ";

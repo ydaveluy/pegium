@@ -21,23 +21,23 @@ namespace pegium::parser {
 namespace {
 
 struct StandaloneCoreServices {
-  services::SharedCoreServices shared;
-  services::CoreServices core;
+  pegium::SharedCoreServices shared;
+  pegium::CoreServices core;
 
   StandaloneCoreServices() : core(shared) {}
 };
 
-const services::CoreServices &standalone_core_services() noexcept {
+const pegium::CoreServices &standalone_core_services() noexcept {
   static const StandaloneCoreServices services = [] {
     StandaloneCoreServices services;
-    services::installDefaultSharedCoreServices(services.shared);
-    services::installDefaultCoreServices(services.core);
+    pegium::installDefaultSharedCoreServices(services.shared);
+    pegium::installDefaultCoreServices(services.core);
     return services;
   }();
   return services.core;
 }
 
-void trace_recovery_json(const char *label, const services::JsonValue &value) {
+void trace_recovery_json(const char *label, const pegium::JsonValue &value) {
   PEGIUM_RECOVERY_TRACE(label, " ",
                         value.toJsonString({.pretty = false}));
 }
@@ -121,7 +121,7 @@ is_near_eof_tail_failure(const detail::FailureSnapshot &snapshot,
 } // namespace
 
 PegiumParser::PegiumParser() noexcept
-    : services::DefaultCoreService(standalone_core_services()) {}
+    : pegium::DefaultCoreService(standalone_core_services()) {}
 
 ParseResult PegiumParser::parse(text::TextSnapshot text,
                                 const utils::CancellationToken &cancelToken) const {
@@ -384,6 +384,8 @@ ParseResult PegiumParser::parse(text::TextSnapshot text,
       result.value = entryRule.getValue(*matchedNode, context);
     }
   }
+
+  result.parseDiagnostics = normalizeParseDiagnostics(result.parseDiagnostics);
 
   detail::stepTraceDumpSummary(entryRule.getName(), result.fullMatch,
                                !result.parseDiagnostics.empty(),

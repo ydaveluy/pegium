@@ -12,7 +12,7 @@
 #include <pegium/core/workspace/WorkspaceProtocol.hpp>
 #include <pegium/core/utils/Cancellation.hpp>
 
-namespace pegium::services {
+namespace pegium {
 class SharedServices;
 }
 

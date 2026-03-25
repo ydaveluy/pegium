@@ -4,7 +4,7 @@
 
 #include <pegium/lsp/formatting/AbstractFormatter.hpp>
 
-namespace requirements::services::lsp {
+namespace requirements::lsp {
 
 class RequirementsFormatter : public pegium::AbstractFormatter {
 public:
@@ -34,4 +34,4 @@ protected:
                           const ast::Test *test) const;
 };
 
-} // namespace requirements::services::lsp
+} // namespace requirements::lsp

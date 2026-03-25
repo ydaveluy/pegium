@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <pegium/LspTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/code-actions/CodeLensProvider.hpp>
 #include <pegium/lsp/code-actions/CodeActionProvider.hpp>
 #include <pegium/lsp/navigation/DeclarationProvider.hpp>
@@ -19,7 +19,7 @@ constexpr std::string_view kDefaultCodeActionsKey = "pegiumDefaultCodeActions";
 ::lsp::Diagnostic make_default_code_action_diagnostic(
     std::string title, std::uint32_t begin, std::uint32_t end,
     std::string newText) {
-  services::JsonValue::Object action;
+  pegium::JsonValue::Object action;
   action.try_emplace("kind", "quickfix");
   action.try_emplace("editKind", end > begin ? "replace" : "insert");
   action.try_emplace("title", std::move(title));
@@ -27,15 +27,15 @@ constexpr std::string_view kDefaultCodeActionsKey = "pegiumDefaultCodeActions";
   action.try_emplace("end", static_cast<std::int64_t>(end));
   action.try_emplace("newText", std::move(newText));
 
-  services::JsonValue::Array actions;
+  pegium::JsonValue::Array actions;
   actions.emplace_back(std::move(action));
 
-  services::JsonValue::Object data;
+  pegium::JsonValue::Object data;
   data.try_emplace(std::string(kDefaultCodeActionsKey), std::move(actions));
 
   ::lsp::Diagnostic diagnostic{};
   diagnostic.message = "recovery";
-  diagnostic.data = to_lsp_any(services::JsonValue(std::move(data)));
+  diagnostic.data = to_lsp_any(pegium::JsonValue(std::move(data)));
   return diagnostic;
 }
 
@@ -125,7 +125,7 @@ class RecordingCodeLensProvider final : public ::pegium::CodeLensProvider {
 public:
   bool resolveSupported = false;
   mutable std::string lastUri;
-  mutable std::optional<services::JsonValue> lastResolveData;
+  mutable std::optional<pegium::JsonValue> lastResolveData;
 
   std::vector<::lsp::CodeLens>
   provideCodeLens(const workspace::Document &document,
@@ -136,7 +136,7 @@ public:
     ::lsp::CodeLens codeLens{};
     codeLens.range.start = document.textDocument().positionAt(0);
     codeLens.range.end = document.textDocument().positionAt(0);
-    codeLens.data = to_lsp_any(services::JsonValue(services::JsonValue::Object{
+    codeLens.data = to_lsp_any(pegium::JsonValue(pegium::JsonValue::Object{
         {"seed", "alpha"},
     }));
     return {std::move(codeLens)};
@@ -265,11 +265,11 @@ public:
 
 TEST(LanguageServerFeaturesTest, DispatchesDeclarationRequestsToLanguageService) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   auto provider = std::make_unique<RecordingDeclarationProvider>();
   auto *recording = provider.get();
@@ -293,11 +293,11 @@ TEST(LanguageServerFeaturesTest, DispatchesDeclarationRequestsToLanguageService)
 
 TEST(LanguageServerFeaturesTest, DispatchesCodeLensRequestsToLanguageService) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   auto provider = std::make_unique<RecordingCodeLensProvider>();
   auto *recording = provider.get();
@@ -319,11 +319,11 @@ TEST(LanguageServerFeaturesTest, DispatchesCodeLensRequestsToLanguageService) {
 TEST(LanguageServerFeaturesTest,
      ResolvesCodeLensRequestsAndPreservesOriginalProviderData) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   auto provider = std::make_unique<RecordingCodeLensProvider>();
   provider->resolveSupported = true;
@@ -363,11 +363,11 @@ TEST(LanguageServerFeaturesTest,
 TEST(LanguageServerFeaturesTest,
      DispatchesCodeActionRequestsToLanguageService) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   auto provider = std::make_unique<RecordingCodeActionProvider>();
   auto *recording = provider.get();
@@ -394,11 +394,11 @@ TEST(LanguageServerFeaturesTest,
 TEST(LanguageServerFeaturesTest,
      DefaultCodeActionProviderBuildsRecoveryQuickFixes) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   shared->serviceRegistry->registerServices(std::move(services));
 
@@ -424,11 +424,11 @@ TEST(LanguageServerFeaturesTest,
 TEST(LanguageServerFeaturesTest,
      DefaultCodeActionProviderCanBeExtendedViaHook) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   auto provider = std::make_unique<HookAppendingCodeActionProvider>();
   auto *recording = provider.get();
@@ -457,11 +457,11 @@ TEST(LanguageServerFeaturesTest,
 TEST(LanguageServerFeaturesTest,
      DefaultCodeActionProviderCanBeOverriddenWhileCallingBase) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   auto provider = std::make_unique<OverrideCallingBaseCodeActionProvider>();
   auto *recording = provider.get();
@@ -491,11 +491,11 @@ TEST(LanguageServerFeaturesTest,
 TEST(LanguageServerFeaturesTest,
      DefaultCodeActionProviderRespectsRequestedKinds) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   shared->serviceRegistry->registerServices(std::move(services));
 
@@ -518,11 +518,11 @@ TEST(LanguageServerFeaturesTest,
 TEST(LanguageServerFeaturesTest,
      DispatchesDocumentLinkRequestsToLanguageService) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   auto provider = std::make_unique<RecordingDocumentLinkProvider>();
   auto *recording = provider.get();
@@ -547,7 +547,7 @@ TEST(LanguageServerFeaturesTest,
 TEST(LanguageServerFeaturesTest,
      DispatchesWorkspaceSymbolResolveRequestsToSharedService) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto provider = std::make_unique<RecordingWorkspaceSymbolProvider>();
@@ -576,11 +576,11 @@ TEST(LanguageServerFeaturesTest,
 
 TEST(LanguageServerFeaturesTest, DispatchesFormattingRequestsToLanguageService) {
   auto shared = test::make_empty_shared_services();
-  pegium::services::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services = test::make_uninstalled_services(*shared, "test", {".test"});
-  pegium::services::installDefaultCoreServices(*services);
+  pegium::installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   auto provider = std::make_unique<RecordingFormatter>();
   auto *recording = provider.get();
