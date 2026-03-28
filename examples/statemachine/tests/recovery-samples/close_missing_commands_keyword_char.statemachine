@@ -1,0 +1,4 @@
+statemachine Light
+commnds Open Close
+initialState Idle
+state Idle end

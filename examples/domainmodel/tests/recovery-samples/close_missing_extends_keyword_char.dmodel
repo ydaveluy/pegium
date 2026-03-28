@@ -1,0 +1,2 @@
+entity Blog {}
+entity Post extnds Blog {}

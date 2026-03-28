@@ -57,6 +57,40 @@ run_strict_parse_with_context(const grammar::ParserRule &entryRule,
   return result;
 }
 
+[[nodiscard]] bool
+has_committed_visible_prefix(const FailureSnapshot &snapshot,
+                             TextOffset parsedLength) noexcept {
+  if (parsedLength == 0) {
+    return false;
+  }
+  return std::ranges::any_of(snapshot.failureLeafHistory,
+                             [parsedLength](const FailureLeaf &leaf) {
+                               return leaf.endOffset <= parsedLength;
+                             });
+}
+
+[[nodiscard]] bool
+should_fallback_to_parsed_length_snapshot(const FailureSnapshot &snapshot,
+                                          TextOffset parsedLength) noexcept {
+  if (!has_committed_visible_prefix(snapshot, parsedLength)) {
+    return false;
+  }
+  if (!snapshot.hasFailureToken ||
+      snapshot.failureTokenIndex >= snapshot.failureLeafHistory.size()) {
+    return false;
+  }
+  const auto &failureLeaf =
+      snapshot.failureLeafHistory[snapshot.failureTokenIndex];
+  if (failureLeaf.beginOffset <= parsedLength ||
+      snapshot.failureTokenIndex == 0) {
+    return false;
+  }
+  const auto &previousLeaf =
+      snapshot.failureLeafHistory[snapshot.failureTokenIndex - 1];
+  return previousLeaf.endOffset == failureLeaf.beginOffset &&
+         previousLeaf.beginOffset > parsedLength;
+}
+
 } // namespace
 
 void FailureHistoryRecorder::rewind(Checkpoint checkpoint) noexcept {
@@ -106,11 +140,11 @@ void FailureHistoryRecorder::updateFurthest(const char *cursor) noexcept {
   _furthestVisibleLeafCount = _currentVisibleLeafCount;
 }
 
-StrictParseResult run_strict_parse(const grammar::ParserRule &entryRule,
-                                   const Skipper &skipper,
-                                   const text::TextSnapshot &text,
-                                   const utils::CancellationToken &cancelToken,
-                                   FailureHistoryRecorder *failureRecorder) {
+StrictParseResult StrictFailureEngine::runStrictParse(
+    const grammar::ParserRule &entryRule, const Skipper &skipper,
+    const text::TextSnapshot &text,
+    const utils::CancellationToken &cancelToken,
+    FailureHistoryRecorder *failureRecorder) const {
   if (failureRecorder == nullptr) {
     return run_strict_parse_with_context(
         entryRule, skipper, text, cancelToken,
@@ -128,17 +162,24 @@ StrictParseResult run_strict_parse(const grammar::ParserRule &entryRule,
       });
 }
 
-FailureAnalysisResult analyze_failure(const grammar::ParserRule &entryRule,
-                                      const Skipper &skipper,
-                                      const text::TextSnapshot &text,
-                                      const StrictParseSummary &strictSummary,
-                                      const utils::CancellationToken &cancelToken) {
+StrictFailureEngineResult StrictFailureEngine::inspectFailure(
+    const grammar::ParserRule &entryRule, const Skipper &skipper,
+    const text::TextSnapshot &text, const StrictParseSummary &strictSummary,
+    const utils::CancellationToken &cancelToken) const {
   FailureHistoryRecorder recorder(text.view().data());
-  FailureAnalysisResult result;
+  StrictFailureEngineResult result;
   result.strictResult =
-      run_strict_parse(entryRule, skipper, text, cancelToken, &recorder);
+      runStrictParse(entryRule, skipper, text, cancelToken, &recorder);
   result.strictResult.summary = strictSummary;
-  result.snapshot = recorder.snapshot(strictSummary.maxCursorOffset);
+  const auto trackedMaxCursorOffset =
+      std::max(strictSummary.maxCursorOffset, recorder.furthestOffset());
+  auto failureSnapshot = recorder.snapshot(trackedMaxCursorOffset);
+  if (strictSummary.parsedLength < trackedMaxCursorOffset &&
+      should_fallback_to_parsed_length_snapshot(failureSnapshot,
+                                                strictSummary.parsedLength)) {
+    failureSnapshot = recorder.snapshot(strictSummary.parsedLength);
+  }
+  result.snapshot = std::move(failureSnapshot);
   return result;
 }
 
@@ -188,13 +229,22 @@ void finalize_failure_token_index(FailureSnapshot &snapshot) noexcept {
 }
 
 RecoveryWindow compute_recovery_window(const FailureSnapshot &snapshot,
-                                       std::uint32_t tokenCount) noexcept {
+                                       std::uint32_t backwardTokenCount,
+                                       std::uint32_t forwardTokenCount,
+                                       TextOffset stablePrefixFloorOffset) noexcept {
+  const auto effectiveMaxCursorOffset =
+      snapshot.failureLeafHistory.empty()
+          ? snapshot.maxCursorOffset
+          : std::max(snapshot.maxCursorOffset,
+                     snapshot.failureLeafHistory.back().endOffset);
   RecoveryWindow window{
-      .beginOffset = snapshot.maxCursorOffset,
-      .maxCursorOffset = snapshot.maxCursorOffset,
-      .tokenCount = tokenCount,
+      .beginOffset = effectiveMaxCursorOffset,
+      .editFloorOffset = effectiveMaxCursorOffset,
+      .maxCursorOffset = effectiveMaxCursorOffset,
+      .tokenCount = backwardTokenCount,
+      .forwardTokenCount = forwardTokenCount,
   };
-  if (snapshot.failureLeafHistory.empty() || tokenCount == 0 ||
+  if (snapshot.failureLeafHistory.empty() || backwardTokenCount == 0 ||
       !snapshot.hasFailureToken) {
     return window;
   }
@@ -202,14 +252,25 @@ RecoveryWindow compute_recovery_window(const FailureSnapshot &snapshot,
   const auto beginIndex =
       snapshot.hasFailureToken
           ? static_cast<std::uint32_t>(
-                snapshot.failureTokenIndex > tokenCount
-                    ? snapshot.failureTokenIndex - tokenCount
+                snapshot.failureTokenIndex > backwardTokenCount
+                    ? snapshot.failureTokenIndex - backwardTokenCount
                     : 0)
           : 0u;
+  const auto clampedStablePrefixFloorOffset =
+      std::min(stablePrefixFloorOffset, effectiveMaxCursorOffset);
+  const auto activationBeginOffset =
+      snapshot.failureLeafHistory[beginIndex].beginOffset;
 
   window.visibleLeafBeginIndex = beginIndex;
-  window.beginOffset = snapshot.failureLeafHistory[beginIndex].beginOffset;
+  window.beginOffset = activationBeginOffset;
+  window.editFloorOffset =
+      std::max(activationBeginOffset, clampedStablePrefixFloorOffset);
   return window;
+}
+
+RecoveryWindow compute_recovery_window(const FailureSnapshot &snapshot,
+                                       std::uint32_t tokenCount) noexcept {
+  return compute_recovery_window(snapshot, tokenCount, tokenCount, 0);
 }
 
 std::optional<std::uint32_t>

@@ -32,15 +32,13 @@ concept LocalRecoveryProbeCapableExpression =
       { expression.probeRecoverable(ctx) } -> std::same_as<bool>;
     };
 
-template <typename Expr, typename Context>
-concept HasFastProbeImpl = requires(const Expr &expression, Context &ctx) {
-  { expression.fast_probe_impl(ctx) } -> std::same_as<bool>;
-};
-
 struct FastProbeAccess {
   template <typename Expr, typename Context>
-    requires HasFastProbeImpl<Expr, Context>
-  static bool probe(const Expr &expression, Context &ctx) {
+  static bool probe(const Expr &expression, Context &ctx)
+    requires requires {
+      { expression.fast_probe_impl(ctx) } -> std::same_as<bool>;
+    }
+  {
     return expression.fast_probe_impl(ctx);
   }
 };
@@ -121,6 +119,10 @@ template <Expression E>
 inline bool attempt_fast_probe(RecoveryContext &ctx, const E &expression) {
   if constexpr (detail::FastProbeCapableExpression<E, RecoveryContext>) {
     return detail::FastProbeAccess::probe(expression, ctx);
+  } else if constexpr (detail::FastProbeCapableExpression<E,
+                                                          TrackedParseContext>) {
+    TrackedParseContext &strictCtx = ctx;
+    return detail::FastProbeAccess::probe(expression, strictCtx);
   } else {
     TrackedParseContext &strictCtx = ctx;
     return probe(expression, strictCtx);
@@ -141,6 +143,41 @@ inline bool probe_locally_recoverable(const E &expression, RecoveryContext &ctx)
     (void)ctx;
     return false;
   }
+}
+
+template <Expression E>
+inline bool probe_recoverable_at_entry(const E &expression,
+                                       RecoveryContext &ctx) {
+  if constexpr (requires {
+                  { expression.probeRecoverableAtEntry(ctx) } ->
+                      std::same_as<bool>;
+                }) {
+    return expression.probeRecoverableAtEntry(ctx);
+  } else {
+    return false;
+  }
+}
+
+template <Expression E>
+inline bool probe_started_without_edits(RecoveryContext &ctx,
+                                        const E &expression) {
+  const auto checkpoint = ctx.mark();
+  const char *const savedFurthestExploredCursor =
+      ctx.furthestExploredCursor();
+  ctx.restoreFurthestExploredCursor(ctx.cursor());
+  const auto startOffset = ctx.cursorOffset();
+  if (attempt_fast_probe(ctx, expression)) {
+    ctx.rewind(checkpoint);
+    ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+    return true;
+  }
+  (void)attempt_parse_no_edits(ctx, expression);
+  const bool started =
+      ctx.cursorOffset() > startOffset ||
+      ctx.furthestExploredOffset() > startOffset;
+  ctx.rewind(checkpoint);
+  ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+  return started;
 }
 
 } // namespace pegium::parser

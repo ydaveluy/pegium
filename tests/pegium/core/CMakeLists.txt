@@ -23,6 +23,15 @@ target_link_libraries(PegiumCoreUnitTest PRIVATE
 
 pegium_register_gtest_target(PegiumCoreUnitTest LABELS core)
 
+add_test(
+    NAME PegiumRecoveryCore
+    COMMAND $<TARGET_FILE:PegiumCoreUnitTest>
+        --gtest_filter=Recovery*:*GroupTest.*:*RepetitionTest.*:*TerminalRuleTest.*:*LiteralFuzzyMatcherTest.*
+)
+set_tests_properties(PegiumRecoveryCore PROPERTIES
+    LABELS "recovery-core"
+)
+
 if(PEGIUM_ENABLE_ASAN OR PEGIUM_ENABLE_UBSAN)
     add_test(
         NAME PegiumCoreParserFocusedSanitizer

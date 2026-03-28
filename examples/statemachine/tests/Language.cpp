@@ -69,47 +69,5 @@ TEST(StatemachineLanguageTest, LinksInitialStateTransitionAndActionReferences) {
   EXPECT_EQ(transition->state->name, "Running");
 }
 
-TEST(StatemachineLanguageTest, RecoversMissingArrowCharacterInsideTransition) {
-  parser::StateMachineParser parser;
-  auto document = pegium::test::parse_document(
-      parser,
-      "statemachine TrafficLight\n"
-      "\n"
-      "events\n"
-      "    switchCapacity\n"
-      "    next\n"
-      "\n"
-      "initialState PowerOff\n"
-      "\n"
-      "state PowerOff\n"
-      "    switchCapacity > RedLight\n"
-      "end\n"
-      "\n"
-      "state RedLight\n"
-      "    switchCapacity => PowerOff\n"
-      "    next => GreenLight\n"
-      "end\n"
-      "\n"
-      "state YellowLight\n"
-      "    switchCapacity => PowerOff\n"
-      "    next => RedLight\n"
-      "end\n"
-      "\n"
-      "state GreenLight\n"
-      "    switchCapacity => PowerOff\n"
-      "    next => YellowLight\n"
-      "end\n",
-      pegium::test::make_file_uri("recovery-arrow.statemachine"),
-      "statemachine");
-
-  ASSERT_NE(document, nullptr);
-  auto *model =
-      dynamic_cast<ast::Statemachine *>(document->parseResult.value.get());
-  ASSERT_NE(model, nullptr);
-  EXPECT_EQ(model->states.size(), 4u);
-  EXPECT_TRUE(document->parseResult.recoveryReport.hasRecovered);
-  EXPECT_FALSE(document->parseResult.parseDiagnostics.empty());
-}
-
 } // namespace
 } // namespace statemachine::tests

@@ -159,6 +159,12 @@ protected:
     addFileOperationHandler(harness->handler, fileOperationHandler, [] {});
     return harness;
   }
+
+  std::unique_ptr<MessageHarness> makeHarnessWithDiagnosticsHandler() {
+    auto harness = std::make_unique<MessageHarness>();
+    addDiagnosticsHandler(harness->handler, *shared, harness->disposables);
+    return harness;
+  }
 };
 
 TEST_F(LanguageServerRuntimeTest,
@@ -262,6 +268,53 @@ TEST_F(LanguageServerRuntimeTest,
             std::vector<std::size_t>{1u});
   EXPECT_EQ(fileOperationHandler.willDeleteCalls,
             std::vector<std::size_t>{1u});
+}
+
+TEST_F(LanguageServerRuntimeTest,
+       AddDiagnosticsHandlerSkipsStaleValidatedSnapshotsAndPublishesVersionedOnes) {
+  auto builder = std::make_unique<test::RecordingEventDocumentBuilder>();
+  auto *builderPtr = builder.get();
+  shared->workspace.documentBuilder = std::move(builder);
+
+  auto harness = makeHarnessWithDiagnosticsHandler();
+  const auto uri = fileUri("runtime-diagnostics.test");
+  ASSERT_NE(test::set_text_document(*shared->lsp.textDocuments, uri, "test",
+                                    "beta", 2),
+            nullptr);
+
+  auto staleDocument = std::make_shared<workspace::Document>(
+      test::make_text_document(uri, "test", "alpha", 1));
+  staleDocument->diagnostics.push_back({
+      .message = "stale",
+      .begin = 0,
+      .end = 5,
+  });
+
+  builderPtr->emitDocumentPhase(workspace::DocumentState::Validated,
+                                staleDocument);
+  EXPECT_TRUE(harness->stream.written().empty());
+
+  auto currentDocument = std::make_shared<workspace::Document>(
+      test::make_text_document(uri, "test", "beta", 2));
+  currentDocument->diagnostics.push_back({
+      .message = "current",
+      .begin = 0,
+      .end = 4,
+  });
+
+  builderPtr->emitDocumentPhase(workspace::DocumentState::Validated,
+                                currentDocument);
+
+  const auto message = test::parse_last_written_message(harness->stream.written())
+                           .object();
+  EXPECT_EQ(message.get("method").string(),
+            ::lsp::notifications::TextDocument_PublishDiagnostics::Method);
+  const auto &params = message.get("params").object();
+  EXPECT_EQ(params.get("uri").string(), uri);
+  EXPECT_EQ(params.get("version").integer(), 2);
+  const auto &diagnostics = params.get("diagnostics").array();
+  ASSERT_EQ(diagnostics.size(), 1u);
+  EXPECT_EQ(diagnostics.front().object().get("message").string(), "current");
 }
 
 TEST_F(LanguageServerRuntimeTest,

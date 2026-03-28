@@ -52,10 +52,10 @@ template <Expression E>
 [[nodiscard]] inline bool
 attempt_parse_without_side_effects(RecoveryContext &ctx, const E &expression) {
   const auto checkpoint = ctx.mark();
-  const auto maxCursor = ctx.maxCursor();
+  const auto savedFurthestExploredCursor = ctx.furthestExploredCursor();
   const bool matched = attempt_parse_no_edits(ctx, expression);
   ctx.rewind(checkpoint);
-  ctx.restoreMaxCursor(maxCursor);
+  ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
   return matched;
 }
 

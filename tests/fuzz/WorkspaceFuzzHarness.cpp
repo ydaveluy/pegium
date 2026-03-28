@@ -7,13 +7,17 @@
 #include <array>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <cstdio>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -115,6 +119,39 @@ struct DocumentSnapshot {
 
 [[nodiscard]] std::string quoted_text(std::string_view text) {
   return testing::PrintToString(std::string{text});
+}
+
+[[nodiscard]] bool fuzz_trace_enabled() noexcept {
+  static const bool enabled = [] {
+    if (const char *value = std::getenv("PEGIUM_FUZZ_TRACE"); value != nullptr) {
+      return value[0] != '\0' && value[0] != '0';
+    }
+    return false;
+  }();
+  return enabled;
+}
+
+void trace_snapshot(std::string_view label, const DocumentSnapshot &snapshot) {
+  if (!fuzz_trace_enabled()) {
+    return;
+  }
+  std::fprintf(stderr,
+               "[fuzz-trace] %.*s uri=%s state=%d fullMatch=%d "
+               "parseRecovered=%d fullRecovered=%d recoveryCount=%u "
+               "windows=%u strictRuns=%u attemptRuns=%u edits=%u "
+               "parsed=%u lastVisible=%u failureVisible=%u maxCursor=%u "
+               "parseDiagnostics=%zu diagnostics=%zu refs=%zu/%zu errRefs=%zu\n",
+               static_cast<int>(label.size()), label.data(), snapshot.uri.c_str(),
+               static_cast<int>(snapshot.state), snapshot.fullMatch,
+               snapshot.parseRecovered, snapshot.fullRecovered,
+               snapshot.recoveryCount, snapshot.recoveryWindowsTried,
+               snapshot.strictParseRuns, snapshot.recoveryAttemptRuns,
+               snapshot.recoveryEdits, snapshot.parsedLength,
+               snapshot.lastVisibleCursorOffset,
+               snapshot.failureVisibleCursorOffset, snapshot.maxCursorOffset,
+               snapshot.parseDiagnostics.size(), snapshot.diagnostics.size(),
+               snapshot.resolvedReferenceCount, snapshot.referenceCount,
+               snapshot.errorReferenceCount);
 }
 
 constexpr auto kInterestingTokens = std::to_array<std::string_view>({
@@ -689,6 +726,8 @@ void mutate_text(std::string &text, std::string_view mutationProgram) {
 
 [[nodiscard]] DocumentSnapshot snapshot_document(
     const workspace::Document &document) {
+  using Clock = std::chrono::steady_clock;
+  const auto snapshotStart = Clock::now();
   const auto text = std::string(document.textDocument().getText());
   const auto textSize = static_cast<TextOffset>(text.size());
 
@@ -700,7 +739,18 @@ void mutate_text(std::string &text, std::string_view mutationProgram) {
   EXPECT_LE(document.parseResult.maxCursorOffset, textSize);
 
   if (document.parseResult.cst != nullptr) {
-    EXPECT_EQ(document.parseResult.cst->getText(), text);
+    const auto cstTextStart = Clock::now();
+    const auto cstText = document.parseResult.cst->getText();
+    const auto cstTextElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - cstTextStart);
+    EXPECT_EQ(cstText, text);
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] cstText uri=%s ms=%lld size=%zu\n",
+                   document.uri.c_str(),
+                   static_cast<long long>(cstTextElapsed.count()), cstText.size());
+    }
   }
 
   bool hasSyntaxDiagnostic = false;
@@ -719,6 +769,14 @@ void mutate_text(std::string &text, std::string_view mutationProgram) {
         .end = diagnostic.endOffset,
         .message = diagnostic.message,
     });
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] parseDiagnostic uri=%s kind=%d offset=%u "
+                   "range=%u-%u message=%s\n",
+                   document.uri.c_str(), static_cast<int>(diagnostic.kind),
+                   diagnostic.offset, diagnostic.beginOffset,
+                   diagnostic.endOffset, diagnostic.message.c_str());
+    }
   }
   std::ranges::sort(parseDiagnostics, [](const auto &left, const auto &right) {
     return std::tie(left.offset, left.begin, left.end, left.kind, left.message) <
@@ -740,6 +798,15 @@ void mutate_text(std::string &text, std::string_view mutationProgram) {
         .begin = diagnostic.begin,
         .end = diagnostic.end,
     });
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] diagnostic uri=%s severity=%d range=%u-%u "
+                   "source=%s code=%s message=%s\n",
+                   document.uri.c_str(), static_cast<int>(diagnostic.severity),
+                   diagnostic.begin, diagnostic.end, diagnostic.source.c_str(),
+                   diagnostic_code_text(diagnostic.code).c_str(),
+                   diagnostic.message.c_str());
+    }
   }
   std::ranges::sort(diagnostics, [](const auto &left, const auto &right) {
     return std::tie(left.begin, left.end, left.severity, left.source,
@@ -773,7 +840,7 @@ void mutate_text(std::string &text, std::string_view mutationProgram) {
     EXPECT_FALSE(document.diagnostics.empty());
   }
 
-  return DocumentSnapshot{
+  auto snapshot = DocumentSnapshot{
       .uri = document.uri,
       .text = text,
       .state = document.state,
@@ -801,6 +868,17 @@ void mutate_text(std::string &text, std::string_view mutationProgram) {
       .parseDiagnostics = std::move(parseDiagnostics),
       .diagnostics = std::move(diagnostics),
   };
+
+  if (fuzz_trace_enabled()) {
+    const auto snapshotElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - snapshotStart);
+    std::fprintf(stderr, "[fuzz-trace] snapshotDocument uri=%s ms=%lld\n",
+                 snapshot.uri.c_str(),
+                 static_cast<long long>(snapshotElapsed.count()));
+  }
+
+  return snapshot;
 }
 
 class WorkspaceScenarioRunner {
@@ -838,8 +916,15 @@ public:
     if (targetIndex >= _scenario.documents.size()) {
       return {};
     }
+    if (_currentTexts[targetIndex] == text) {
+      return snapshot_all();
+    }
     _currentTexts[targetIndex] = std::move(text);
     apply_changes(std::span<const std::size_t>(&targetIndex, 1u));
+    return snapshot_all();
+  }
+
+  [[nodiscard]] std::vector<DocumentSnapshot> current_snapshots() const {
     return snapshot_all();
   }
 
@@ -862,6 +947,8 @@ private:
   }
 
   void apply_changes(std::span<const std::size_t> changedIndices) {
+    using Clock = std::chrono::steady_clock;
+    const auto applyStart = Clock::now();
     auto documents = test::text_documents(*_shared);
     ASSERT_NE(documents, nullptr);
 
@@ -881,6 +968,11 @@ private:
 
     (void)_shared->workspace.documentBuilder->update(changedDocumentIds, {});
 
+    const auto updateElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - applyStart);
+
+    const auto waitStart = Clock::now();
     for (const auto &document : _scenario.documents) {
       const auto documentId =
           _shared->workspace.documents->getDocumentId(document.uri);
@@ -888,9 +980,23 @@ private:
       (void)_shared->workspace.documentBuilder->waitUntil(
           workspace::DocumentState::Validated, documentId);
     }
+
+    if (fuzz_trace_enabled()) {
+      const auto waitElapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              Clock::now() - waitStart);
+      std::fprintf(stderr,
+                   "[fuzz-trace] applyChanges scenario=%s changed=%zu "
+                   "updateMs=%lld waitMs=%lld\n",
+                   _scenario.name.c_str(), changedIndices.size(),
+                   static_cast<long long>(updateElapsed.count()),
+                   static_cast<long long>(waitElapsed.count()));
+    }
   }
 
   [[nodiscard]] std::vector<DocumentSnapshot> snapshot_all() const {
+    using Clock = std::chrono::steady_clock;
+    const auto snapshotStart = Clock::now();
     std::vector<DocumentSnapshot> snapshots;
     snapshots.reserve(_scenario.documents.size());
     for (std::size_t index = 0; index < _scenario.documents.size(); ++index) {
@@ -904,6 +1010,14 @@ private:
       EXPECT_EQ(document->textDocument().getText(), _currentTexts[index]);
       snapshots.push_back(snapshot_document(*document));
     }
+    if (fuzz_trace_enabled()) {
+      const auto snapshotElapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              Clock::now() - snapshotStart);
+      std::fprintf(stderr, "[fuzz-trace] snapshotAll scenario=%s ms=%lld\n",
+                   _scenario.name.c_str(),
+                   static_cast<long long>(snapshotElapsed.count()));
+    }
     return snapshots;
   }
 
@@ -912,6 +1026,41 @@ private:
   std::vector<std::int64_t> _versions;
   std::vector<std::string> _currentTexts;
 };
+
+struct CachedWorkspaceRoundTripState {
+  std::unique_ptr<WorkspaceScenarioRunner> runner;
+  std::vector<DocumentSnapshot> baselineSnapshots;
+};
+
+[[nodiscard]] CachedWorkspaceRoundTripState &
+cached_workspace_round_trip_state(const WorkspaceScenarioSpec &scenario) {
+  static std::unordered_map<const WorkspaceScenarioSpec *,
+                            CachedWorkspaceRoundTripState>
+      cache;
+  return cache[std::addressof(scenario)];
+}
+
+void reset_cached_workspace_round_trip_state(
+    const WorkspaceScenarioSpec &scenario,
+    CachedWorkspaceRoundTripState &state) {
+  state = {};
+  state.runner = std::make_unique<WorkspaceScenarioRunner>(scenario);
+  state.runner->initialize();
+  state.baselineSnapshots = state.runner->build_initial();
+}
+
+[[nodiscard]] CachedWorkspaceRoundTripState &
+ensure_cached_workspace_round_trip_state(const WorkspaceScenarioSpec &scenario) {
+  auto &state = cached_workspace_round_trip_state(scenario);
+  if (!state.runner) {
+    reset_cached_workspace_round_trip_state(scenario, state);
+    return state;
+  }
+  if (state.runner->current_snapshots() != state.baselineSnapshots) {
+    reset_cached_workspace_round_trip_state(scenario, state);
+  }
+  return state;
+}
 
 [[nodiscard]] WorkspaceScenarioSpec make_single_document_scenario(
     std::string name, std::string fileName, std::string languageId,
@@ -1829,6 +1978,7 @@ const std::vector<WorkspaceScenarioSpec> &adversarial_workspace_scenarios() {
 void expect_workspace_round_trip(const WorkspaceScenarioSpec &scenario,
                                  std::size_t targetIndex,
                                  std::string_view mutationProgram) {
+  using Clock = std::chrono::steady_clock;
   ASSERT_LT(targetIndex, scenario.documents.size());
   SCOPED_TRACE(scenario.name);
   SCOPED_TRACE("target=" + scenario.documents[targetIndex].uri);
@@ -1839,22 +1989,78 @@ void expect_workspace_round_trip(const WorkspaceScenarioSpec &scenario,
   mutate_text(mutatedText, mutationProgram);
 
   try {
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] roundTrip scenario=%s stage=before-initialize "
+                   "target=%zu mutationHex=%s\n",
+                   scenario.name.c_str(), targetIndex,
+                   hex_string(mutationProgram).c_str());
+    }
     WorkspaceScenarioRunner runner(scenario);
     runner.initialize();
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] roundTrip scenario=%s stage=after-initialize\n",
+                   scenario.name.c_str());
+    }
 
+    const auto baselineStart = Clock::now();
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] roundTrip scenario=%s stage=before-build-initial\n",
+                   scenario.name.c_str());
+    }
     const auto baselineSnapshots = runner.build_initial();
+    const auto baselineElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - baselineStart);
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] roundTrip scenario=%s stage=after-build-initial "
+                   "ms=%lld\n",
+                   scenario.name.c_str(),
+                   static_cast<long long>(baselineElapsed.count()));
+    }
     ASSERT_EQ(baselineSnapshots.size(), scenario.documents.size());
+    trace_snapshot("baseline", baselineSnapshots[targetIndex]);
 
+    const auto mutatedStart = Clock::now();
     const auto mutatedSnapshots = runner.update_document(targetIndex, mutatedText);
+    const auto mutatedElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - mutatedStart);
     ASSERT_EQ(mutatedSnapshots.size(), scenario.documents.size());
+    trace_snapshot("mutated", mutatedSnapshots[targetIndex]);
 
+    const auto rebuiltStart = Clock::now();
     const auto rebuiltSnapshots =
         runner.update_document(targetIndex, mutatedSnapshots[targetIndex].text);
+    const auto rebuiltElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - rebuiltStart);
+    trace_snapshot("rebuilt", rebuiltSnapshots[targetIndex]);
     EXPECT_EQ(rebuiltSnapshots, mutatedSnapshots);
 
+    const auto restoredStart = Clock::now();
     const auto restoredSnapshots =
         runner.update_document(targetIndex, scenario.documents[targetIndex].text);
+    const auto restoredElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - restoredStart);
+    trace_snapshot("restored", restoredSnapshots[targetIndex]);
     EXPECT_EQ(restoredSnapshots, baselineSnapshots);
+
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] scenario=%s baselineMs=%lld mutatedMs=%lld "
+                   "rebuiltMs=%lld restoredMs=%lld mutationHex=%s\n",
+                   scenario.name.c_str(),
+                   static_cast<long long>(baselineElapsed.count()),
+                   static_cast<long long>(mutatedElapsed.count()),
+                   static_cast<long long>(rebuiltElapsed.count()),
+                   static_cast<long long>(restoredElapsed.count()),
+                   hex_string(mutationProgram).c_str());
+    }
   } catch (const std::exception &exception) {
     FAIL() << "scenario=" << scenario.name << "\n"
            << "target_uri=" << scenario.documents[targetIndex].uri << "\n"
@@ -1870,7 +2076,82 @@ void expect_workspace_round_trip(const WorkspaceScenarioSpec &scenario,
   }
 }
 
+void expect_cached_workspace_round_trip(const WorkspaceScenarioSpec &scenario,
+                                        std::size_t targetIndex,
+                                        std::string_view mutationProgram) {
+  using Clock = std::chrono::steady_clock;
+  ASSERT_LT(targetIndex, scenario.documents.size());
+  SCOPED_TRACE(scenario.name);
+  SCOPED_TRACE("target=" + scenario.documents[targetIndex].uri);
+  SCOPED_TRACE("mutation_size=" + std::to_string(mutationProgram.size()));
+  SCOPED_TRACE("mutation_hex=" + hex_summary(mutationProgram));
+
+  auto mutatedText = scenario.documents[targetIndex].text;
+  mutate_text(mutatedText, mutationProgram);
+
+  try {
+    auto &state = ensure_cached_workspace_round_trip_state(scenario);
+    ASSERT_NE(state.runner, nullptr);
+    auto &runner = *state.runner;
+    const auto &baselineSnapshots = state.baselineSnapshots;
+    ASSERT_EQ(baselineSnapshots.size(), scenario.documents.size());
+    trace_snapshot("baseline", baselineSnapshots[targetIndex]);
+
+    const auto mutatedStart = Clock::now();
+    const auto mutatedSnapshots = runner.update_document(targetIndex, mutatedText);
+    const auto mutatedElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - mutatedStart);
+    ASSERT_EQ(mutatedSnapshots.size(), scenario.documents.size());
+    trace_snapshot("mutated", mutatedSnapshots[targetIndex]);
+
+    const auto rebuiltStart = Clock::now();
+    const auto rebuiltSnapshots =
+        runner.update_document(targetIndex, mutatedSnapshots[targetIndex].text);
+    const auto rebuiltElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - rebuiltStart);
+    trace_snapshot("rebuilt", rebuiltSnapshots[targetIndex]);
+    EXPECT_EQ(rebuiltSnapshots, mutatedSnapshots);
+
+    const auto restoredStart = Clock::now();
+    const auto restoredSnapshots =
+        runner.update_document(targetIndex, scenario.documents[targetIndex].text);
+    const auto restoredElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - restoredStart);
+    trace_snapshot("restored", restoredSnapshots[targetIndex]);
+    EXPECT_EQ(restoredSnapshots, baselineSnapshots);
+
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] cachedScenario=%s mutatedMs=%lld "
+                   "rebuiltMs=%lld restoredMs=%lld mutationHex=%s\n",
+                   scenario.name.c_str(),
+                   static_cast<long long>(mutatedElapsed.count()),
+                   static_cast<long long>(rebuiltElapsed.count()),
+                   static_cast<long long>(restoredElapsed.count()),
+                   hex_string(mutationProgram).c_str());
+    }
+  } catch (const std::exception &exception) {
+    FAIL() << "scenario=" << scenario.name << "\n"
+           << "target_index=" << targetIndex << "\n"
+           << "target_uri=" << scenario.documents[targetIndex].uri << "\n"
+           << "mutation_hex=" << hex_summary(mutationProgram) << "\n"
+           << "mutated_text=" << quoted_text(mutatedText) << "\n"
+           << "what=" << exception.what();
+  } catch (...) {
+    FAIL() << "scenario=" << scenario.name << "\n"
+           << "target_index=" << targetIndex << "\n"
+           << "target_uri=" << scenario.documents[targetIndex].uri << "\n"
+           << "mutation_hex=" << hex_summary(mutationProgram) << "\n"
+           << "mutated_text=" << quoted_text(mutatedText) << "\n"
+           << "what=non-std exception";
+  }
+}
+
 void expect_stress_document_build(std::string_view text) {
+  using Clock = std::chrono::steady_clock;
   auto scenario = make_single_document_scenario(
       "stress/generated.stress", "fuzz-generated.stress", "stress-language",
       std::string(text));
@@ -1878,11 +2159,29 @@ void expect_stress_document_build(std::string_view text) {
   runner.initialize();
 
   try {
+    const auto baselineStart = Clock::now();
     const auto baselineSnapshots = runner.build_initial();
+    const auto baselineElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - baselineStart);
     ASSERT_EQ(baselineSnapshots.size(), 1u);
+    trace_snapshot("baseline", baselineSnapshots.front());
 
+    const auto rebuiltStart = Clock::now();
     const auto rebuiltSnapshots = runner.update_document(0u, std::string(text));
+    const auto rebuiltElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - rebuiltStart);
+    trace_snapshot("rebuilt", rebuiltSnapshots.front());
     EXPECT_EQ(rebuiltSnapshots, baselineSnapshots);
+
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] scenario=%s baselineMs=%lld rebuiltMs=%lld\n",
+                   scenario.name.c_str(),
+                   static_cast<long long>(baselineElapsed.count()),
+                   static_cast<long long>(rebuiltElapsed.count()));
+    }
   } catch (const std::exception &exception) {
     FAIL() << "scenario=" << scenario.name << "\n"
            << "document_text=" << quoted_text(text) << "\n"

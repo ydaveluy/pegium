@@ -146,6 +146,7 @@ void addDiagnosticsHandler(::lsp::MessageHandler &messageHandler,
                               workspace::DocumentDiagnosticsSnapshot{
                                   .uri = uri,
                                   .text = {},
+                                  .version = std::nullopt,
                                   .diagnostics = {},
                               });
         }
@@ -153,13 +154,22 @@ void addDiagnosticsHandler(::lsp::MessageHandler &messageHandler,
 
   disposables.add(sharedServices.workspace.documentBuilder->onDocumentPhase(
       workspace::DocumentState::Validated,
-      [&messageHandler](const std::shared_ptr<workspace::Document> &document,
-                        utils::CancellationToken) {
+      [&messageHandler, textDocuments = sharedServices.lsp.textDocuments](
+          const std::shared_ptr<workspace::Document> &document,
+          utils::CancellationToken) {
         assert(document != nullptr);
+        if (textDocuments != nullptr) {
+          if (const auto latest = textDocuments->get(document->uri);
+              latest != nullptr &&
+              latest->version() != document->textDocument().version()) {
+            return;
+          }
+        }
         publish_diagnostics(&messageHandler,
                             workspace::DocumentDiagnosticsSnapshot{
                                 .uri = document->uri,
                                 .text = std::string(document->textDocument().getText()),
+                                .version = document->textDocument().version(),
                                 .diagnostics = document->diagnostics,
                             });
       }));

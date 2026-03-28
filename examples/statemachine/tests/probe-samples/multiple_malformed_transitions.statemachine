@@ -1,0 +1,8 @@
+statemachine Light
+events Start Stop
+initialState Idle
+state Idle
+Start ==> Running
+Stop > Idle
+end
+state Running end

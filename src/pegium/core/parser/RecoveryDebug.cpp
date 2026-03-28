@@ -257,13 +257,13 @@ element_to_json(const grammar::AbstractElement *element) {
 }
 
 [[nodiscard]] pegium::JsonValue
-parse_diagnostic_to_json(const ParseDiagnostic &diagnostic) {
+syntax_entry_to_json(const auto &entry) {
   std::ostringstream stream;
-  stream << diagnostic.kind;
+  stream << entry.kind;
   return pegium::JsonValue::Object{
-      {"element", element_to_json(diagnostic.element)},
+      {"element", element_to_json(entry.element)},
       {"kind", stream.str()},
-      {"offset", json_int(diagnostic.offset)},
+      {"offset", json_int(entry.offset)},
   };
 }
 
@@ -281,7 +281,7 @@ edit_trace_to_json(const EditTrace &trace) {
   return pegium::JsonValue::Object{
       {"codepointDeleteCount", json_int(trace.codepointDeleteCount)},
       {"deleteCount", json_int(trace.deleteCount)},
-      {"diagnosticCount", json_int(trace.diagnosticCount)},
+      {"entryCount", json_int(trace.entryCount)},
       {"editCost", json_int(trace.editCost)},
       {"editCount", json_int(trace.editCount)},
       {"editSpan", json_int(trace.editSpan)},
@@ -298,16 +298,69 @@ edit_trace_to_json(const EditTrace &trace) {
 [[nodiscard]] pegium::JsonValue
 score_to_json(const RecoveryScore &score) {
   return pegium::JsonValue::Object{
-      {"credible", score.credible},
-      {"diagnosticCount", json_int(score.diagnosticCount)},
-      {"editCost", json_int(score.editCost)},
-      {"editSpan", json_int(score.editSpan)},
-      {"entryRuleMatched", score.entryRuleMatched},
-      {"firstEditOffset", json_int(score.firstEditOffset)},
-      {"fullMatch", score.fullMatch},
-      {"maxCursorOffset", json_int(score.maxCursorOffset)},
-      {"parsedLength", json_int(score.parsedLength)},
-      {"stable", score.stable},
+      {"credible", score.selection.credible},
+      {"entryCount", json_int(score.edits.entryCount)},
+      {"editCost", json_int(score.edits.editCost)},
+      {"editSpan", json_int(score.edits.editSpan)},
+      {"entryRuleMatched", score.selection.entryRuleMatched},
+      {"firstEditOffset", json_int(score.edits.firstEditOffset)},
+      {"fullMatch", score.selection.fullMatch},
+      {"maxCursorOffset", json_int(score.progress.maxCursorOffset)},
+      {"parsedLength", json_int(score.progress.parsedLength)},
+      {"stable", score.selection.stable},
+  };
+}
+
+[[nodiscard]] pegium::JsonValue
+order_key_to_json(const NormalizedRecoveryOrderKey &key) {
+  return pegium::JsonValue::Object{
+      {"prefix",
+       pegium::JsonValue::Object{
+           {"credible", key.prefix.credible},
+           {"entryRuleMatched", key.prefix.entryRuleMatched},
+           {"firstEditOffset", json_int(key.prefix.firstEditOffset)},
+           {"fullMatch", key.prefix.fullMatch},
+           {"stable", key.prefix.stable},
+       }},
+      {"continuation",
+       pegium::JsonValue::Object{
+           {"anchorQuality", json_int(static_cast<std::uint32_t>(
+                                 key.continuation.anchorQuality))},
+           {"consumedVisible", json_int(key.continuation.consumedVisible)},
+           {"continuesAfterFirstEdit",
+            key.continuation.continuesAfterFirstEdit},
+           {"cursorOffset", json_int(key.continuation.cursorOffset)},
+           {"postSkipCursorOffset",
+            json_int(key.continuation.postSkipCursorOffset)},
+           {"strength",
+            json_int(static_cast<TextOffset>(key.continuation.strength))},
+       }},
+      {"safety",
+       pegium::JsonValue::Object{
+           {"matched", key.safety.matched},
+           {"overflowed", key.safety.overflowed},
+           {"replaySafe", key.safety.replaySafe},
+           {"strategyPriority",
+            json_int(static_cast<TextOffset>(key.safety.strategyPriority))},
+       }},
+      {"edits",
+       pegium::JsonValue::Object{
+           {"entryCount", json_int(key.edits.entryCount)},
+           {"distance", json_int(key.edits.distance)},
+           {"editCost", json_int(key.edits.editCost)},
+           {"editCount", json_int(key.edits.editCount)},
+           {"editSpan", json_int(key.edits.editSpan)},
+           {"operationCount", json_int(key.edits.operationCount)},
+           {"primaryRankCost", json_int(key.edits.primaryRankCost)},
+           {"secondaryRankCost", json_int(key.edits.secondaryRankCost)},
+           {"substitutionCount", json_int(key.edits.substitutionCount)},
+       }},
+      {"progress",
+       pegium::JsonValue::Object{
+           {"cursorOffset", json_int(key.progress.cursorOffset)},
+           {"maxCursorOffset", json_int(key.progress.maxCursorOffset)},
+           {"parsedLength", json_int(key.progress.parsedLength)},
+       }},
   };
 }
 
@@ -333,8 +386,6 @@ recovery_attempt_status_name(RecoveryAttemptStatus status) noexcept {
     return "Credible";
   case Stable:
     return "Stable";
-  case Selected:
-    return "Selected";
   }
   return "Unknown";
 }
@@ -378,8 +429,11 @@ pegium::JsonValue recovery_window_to_json(const RecoveryWindow &window) {
   return pegium::JsonValue::Object{
       {"backwardTokenCount", json_int(window.tokenCount)},
       {"beginOffset", json_int(window.beginOffset)},
-      {"forwardTokenCount", json_int(window.tokenCount)},
+      {"editFloorOffset", json_int(window.editFloorOffset)},
+      {"forwardTokenCount", json_int(window.forwardTokenCount)},
+      {"hasStablePrefix", window.hasStablePrefix},
       {"maxCursorOffset", json_int(window.maxCursorOffset)},
+      {"stablePrefixOffset", json_int(window.stablePrefixOffset)},
       {"visibleLeafBeginIndex", json_int(window.visibleLeafBeginIndex)},
   };
 }
@@ -397,17 +451,24 @@ recovery_windows_to_json(std::span<const RecoveryWindow> windows) {
 pegium::JsonValue
 recovery_attempt_to_json(const RecoveryAttempt &attempt,
                          const RecoveryAttemptSpec *spec) {
+  pegium::JsonValue::Array recoveryEdits;
+  recoveryEdits.reserve(attempt.recoveryEdits.size());
+  for (const auto &edit : attempt.recoveryEdits) {
+    recoveryEdits.emplace_back(syntax_entry_to_json(edit));
+  }
+
+  const auto parseDiagnostics =
+      materialize_syntax_diagnostics(attempt.recoveryEdits);
   pegium::JsonValue::Array diagnostics;
-  diagnostics.reserve(attempt.parseDiagnostics.size());
-  for (const auto &diagnostic : attempt.parseDiagnostics) {
-    diagnostics.emplace_back(parse_diagnostic_to_json(diagnostic));
+  diagnostics.reserve(parseDiagnostics.size());
+  for (const auto &diagnostic : parseDiagnostics) {
+    diagnostics.emplace_back(syntax_entry_to_json(diagnostic));
   }
 
   pegium::JsonValue::Object object{
       {"completedRecoveryWindows", json_int(attempt.completedRecoveryWindows)},
       {"editCost", json_int(attempt.editCost)},
       {"editCount", json_int(attempt.editCount)},
-      {"editFloorOffset", json_int(attempt.editFloorOffset)},
       {"editTrace", edit_trace_to_json(attempt.editTrace)},
       {"entryRuleMatched", attempt.entryRuleMatched},
       {"failureSnapshot",
@@ -416,17 +477,38 @@ recovery_attempt_to_json(const RecoveryAttempt &attempt,
            : pegium::JsonValue(nullptr)},
       {"fullMatch", attempt.fullMatch},
       {"maxCursorOffset", json_int(attempt.maxCursorOffset)},
+      {"orderKey",
+       order_key_to_json(recovery_attempt_order_key(attempt.score))},
       {"parseDiagnostics", std::move(diagnostics)},
+      {"recoveryEdits", std::move(recoveryEdits)},
       {"parsedLength", json_int(attempt.parsedLength)},
       {"reachedRecoveryTarget", attempt.reachedRecoveryTarget},
       {"score", score_to_json(attempt.score)},
+      {"hasStablePrefix", attempt.hasStablePrefix},
       {"stableAfterRecovery", attempt.stableAfterRecovery},
+      {"stablePrefixOffset", json_int(attempt.stablePrefixOffset)},
       {"status", std::string(recovery_attempt_status_name(attempt.status))},
   };
+  if (!attempt.replayWindows.empty()) {
+    object.try_emplace("replayWindows",
+                      recovery_windows_to_json(attempt.replayWindows));
+  }
   if (spec != nullptr) {
     object.try_emplace("spec", attempt_spec_to_json(*spec));
   }
   return object;
+}
+
+pegium::JsonValue
+recovery_search_run_to_json(const RecoverySearchRunResult &run) {
+  return pegium::JsonValue::Object{
+      {"failureVisibleCursorOffset", json_int(run.failureVisibleCursorOffset)},
+      {"recoveryAttemptRuns", json_int(run.recoveryAttemptRuns)},
+      {"recoveryWindowsTried", json_int(run.recoveryWindowsTried)},
+      {"selectedAttempt", recovery_attempt_to_json(run.selectedAttempt)},
+      {"selectedWindows", recovery_windows_to_json(run.selectedWindows)},
+      {"strictParseRuns", json_int(run.strictParseRuns)},
+  };
 }
 
 } // namespace pegium::parser::detail

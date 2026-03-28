@@ -28,22 +28,59 @@ parse_diagnostic_kind_name(ParseDiagnosticKind kind) noexcept {
   return "Unknown";
 }
 
-[[nodiscard]] constexpr bool
-can_merge_inserted(const ParseDiagnostic &current,
-                   const ParseDiagnostic &next) noexcept {
+template <typename Diagnostic>
+[[nodiscard]] bool can_merge_inserted(const Diagnostic &current,
+                                      const Diagnostic &next) noexcept {
   return current.kind == ParseDiagnosticKind::Inserted &&
          next.kind == ParseDiagnosticKind::Inserted &&
-         current.offset == next.offset && current.message.empty() &&
-         next.message.empty();
+         current.offset == next.offset && current.message == next.message;
 }
 
-[[nodiscard]] constexpr bool
-can_merge_deleted(const ParseDiagnostic &current,
-                  const ParseDiagnostic &next) noexcept {
+template <typename Diagnostic>
+[[nodiscard]] bool can_merge_deleted(const Diagnostic &current,
+                                     const Diagnostic &next) noexcept {
   return current.kind == ParseDiagnosticKind::Deleted &&
          next.kind == ParseDiagnosticKind::Deleted &&
-         next.offset == current.endOffset && current.message.empty() &&
-         next.message.empty();
+         next.beginOffset == current.endOffset &&
+         current.message == next.message;
+}
+
+template <typename Diagnostic>
+void merge_inserted(Diagnostic &current, const Diagnostic &next) {
+  current.beginOffset = std::min(current.beginOffset, next.beginOffset);
+  current.endOffset = std::max(current.endOffset, next.endOffset);
+  if (current.element == nullptr) {
+    current.element = next.element;
+  }
+}
+
+template <typename Diagnostic>
+void merge_deleted(Diagnostic &current, const Diagnostic &next) {
+  current.endOffset = std::max(current.endOffset, next.endOffset);
+}
+
+template <typename Diagnostic>
+[[nodiscard]] std::vector<Diagnostic>
+normalize_diagnostics_impl(std::span<const Diagnostic> diagnostics) {
+  std::vector<Diagnostic> normalized;
+  normalized.reserve(diagnostics.size());
+
+  for (const auto &diagnostic : diagnostics) {
+    if (!normalized.empty()) {
+      auto &current = normalized.back();
+      if (can_merge_inserted(current, diagnostic)) {
+        merge_inserted(current, diagnostic);
+        continue;
+      }
+      if (can_merge_deleted(current, diagnostic)) {
+        merge_deleted(current, diagnostic);
+        continue;
+      }
+    }
+    normalized.push_back(diagnostic);
+  }
+
+  return normalized;
 }
 
 } // namespace
@@ -52,31 +89,30 @@ std::ostream &operator<<(std::ostream &os, ParseDiagnosticKind kind) {
   return os << parse_diagnostic_kind_name(kind);
 }
 
+std::vector<detail::SyntaxScriptEntry>
+detail::normalize_syntax_script(std::span<const SyntaxScriptEntry> entries) {
+  return normalize_diagnostics_impl(entries);
+}
+
+std::vector<ParseDiagnostic>
+detail::materialize_syntax_diagnostics(
+    std::span<const SyntaxScriptEntry> entries) {
+  std::vector<ParseDiagnostic> materialized;
+  materialized.reserve(entries.size());
+  for (const auto &entry : entries) {
+    materialized.push_back({.kind = entry.kind,
+                            .offset = entry.offset,
+                            .beginOffset = entry.beginOffset,
+                            .endOffset = entry.endOffset,
+                            .element = entry.element,
+                            .message = entry.message});
+  }
+  return materialized;
+}
+
 std::vector<ParseDiagnostic>
 normalizeParseDiagnostics(std::span<const ParseDiagnostic> diagnostics) {
-  std::vector<ParseDiagnostic> normalized;
-  normalized.reserve(diagnostics.size());
-
-  for (const auto &diagnostic : diagnostics) {
-    if (!normalized.empty()) {
-      auto &current = normalized.back();
-      if (can_merge_inserted(current, diagnostic)) {
-        current.beginOffset = std::min(current.beginOffset, diagnostic.beginOffset);
-        current.endOffset = std::max(current.endOffset, diagnostic.endOffset);
-        if (current.element != diagnostic.element) {
-          current.element = nullptr;
-        }
-        continue;
-      }
-      if (can_merge_deleted(current, diagnostic)) {
-        current.endOffset = std::max(current.endOffset, diagnostic.endOffset);
-        continue;
-      }
-    }
-    normalized.push_back(diagnostic);
-  }
-
-  return normalized;
+  return normalize_diagnostics_impl(diagnostics);
 }
 
 } // namespace pegium::parser

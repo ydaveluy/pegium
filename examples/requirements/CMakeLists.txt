@@ -112,4 +112,12 @@ if(BUILD_TESTING)
         example
         requirements
     )
+    add_test(
+        NAME PegiumRecoveryCorpusRequirements
+        COMMAND $<TARGET_FILE:pegium-example-requirements-test>
+            --gtest_filter=*RecoverySample*:*RecoveryProbe*
+    )
+    set_tests_properties(PegiumRecoveryCorpusRequirements PROPERTIES
+        LABELS "recovery-corpus"
+    )
 endif()

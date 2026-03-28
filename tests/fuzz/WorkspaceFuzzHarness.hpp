@@ -31,6 +31,10 @@ void expect_workspace_round_trip(const WorkspaceScenarioSpec &scenario,
                                  std::size_t targetIndex,
                                  std::string_view mutationProgram);
 
+void expect_cached_workspace_round_trip(const WorkspaceScenarioSpec &scenario,
+                                        std::size_t targetIndex,
+                                        std::string_view mutationProgram);
+
 void expect_stress_document_build(std::string_view text);
 
 void expect_adversarial_document_build(std::string_view text);

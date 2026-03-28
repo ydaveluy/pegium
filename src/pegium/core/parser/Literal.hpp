@@ -2,21 +2,24 @@
 /// Parser terminal matching a fixed literal.
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <pegium/core/grammar/Literal.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/LiteralFuzzyMatcher.hpp>
-#include <pegium/core/parser/ParseMode.hpp>
-#include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/ParseExpression.hpp>
+#include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
 #include <pegium/core/parser/RecoveryTrace.hpp>
 #include <pegium/core/parser/TerminalRecoverySupport.hpp>
 #include <pegium/core/parser/TextUtils.hpp>
 #include <ranges>
-#include <optional>
 #include <string>
 
 namespace pegium::parser {
+
+template <Expression... Elements> struct Group;
+template <Expression... Elements> struct GroupWithSkipper;
 
 template <auto literal, bool case_sensitive = true>
 struct Literal final : grammar::Literal {
@@ -24,6 +27,10 @@ struct Literal final : grammar::Literal {
                 "Literal cannot contain '\\0'.");
   static constexpr bool nullable = literal.empty();
   static constexpr bool isFailureSafe = true;
+  static constexpr bool isWordLike = []() constexpr noexcept {
+    constexpr std::string_view literalValue{literal.begin(), literal.size()};
+    return detail::is_word_like_terminal(literalValue);
+  }();
   using type = std::string_view;
   using grammar::Literal::getValue;
   std::string_view getValue() const noexcept override {
@@ -43,67 +50,42 @@ struct Literal final : grammar::Literal {
 private:
   friend struct detail::ParseAccess;
   friend struct detail::ProbeAccess;
+  template <Expression... Elements> friend struct Group;
+  template <Expression... Elements> friend struct GroupWithSkipper;
 
   using LocalRecoveryChoice = detail::TerminalRecoveryCandidate;
-  using LocalRecoveryChoiceKind = detail::TerminalRecoveryChoiceKind;
 
-  [[nodiscard]] static std::size_t
-  wordContinuationLength(const char *cursor) noexcept {
-    std::size_t length = 0u;
-    while (isWord(*cursor)) {
-      ++length;
-      ++cursor;
-    }
-    return length;
-  }
-
-  [[nodiscard]] static constexpr std::uint32_t
-  wordBoundarySplitPenalty(std::size_t continuationLength) noexcept {
-    if (continuationLength <= 1u) {
-      return 2u;
-    }
-    if (continuationLength == 2u) {
-      return 1u;
-    }
-    return 0u;
-  }
-
-  [[nodiscard]] static const char *
-  fuzzyInputEnd(const char *cursor, const char *limit) noexcept {
+  template <EditableParseModeContext Context>
+  [[nodiscard]] static const char *fuzzyInputEnd(const Context &ctx,
+                                                 const char *cursor,
+                                                 const char *limit) noexcept {
     if (cursor == nullptr || cursor >= limit) {
       return cursor;
     }
 
-    if constexpr (recover_word_boundary_split) {
+    if constexpr (requires { ctx.skip_without_builder(cursor); }) {
       const char *it = cursor;
-      while (it < limit && isWord(*it)) {
+      while (it < limit) {
+        if (ctx.skip_without_builder(it) > it) {
+          return it;
+        }
         ++it;
       }
-      return it;
+      return limit;
     } else {
       constexpr std::size_t kExtraWindow = 4u;
       const auto span = static_cast<std::size_t>(limit - cursor);
-      return cursor +
-             std::min(span, static_cast<std::size_t>(literal.size() +
-                                                     kExtraWindow));
+      return cursor + std::min(span, static_cast<std::size_t>(literal.size() +
+                                                              kExtraWindow));
     }
   }
 
+  template <EditableParseModeContext Context>
   [[nodiscard]] static std::string_view
-  fuzzyInputView(const char *cursor, const char *limit) noexcept {
-    const auto *viewEnd = fuzzyInputEnd(cursor, limit);
+  fuzzyInputView(const Context &ctx, const char *cursor,
+                 const char *limit) noexcept {
+    const auto *viewEnd = fuzzyInputEnd(ctx, cursor, limit);
     return {cursor, static_cast<std::size_t>(viewEnd - cursor)};
-  }
-
-  [[nodiscard]] static constexpr std::uint32_t
-  maxAcceptableFuzzyCost() noexcept {
-    return static_cast<std::uint32_t>(literal.size() + 3u);
-  }
-
-  [[nodiscard]] static constexpr bool
-  shouldConsiderFuzzyCandidate(
-      const detail::LiteralFuzzyCandidate &candidate) noexcept {
-    return candidate.normalizedEditCost <= maxAcceptableFuzzyCost();
   }
 
   template <EditableParseModeContext Context>
@@ -117,70 +99,73 @@ private:
   }
 
   template <EditableParseModeContext Context>
-  [[nodiscard]] std::optional<detail::LiteralFuzzyCandidate>
-  findFuzzyCandidate(Context &ctx, const char *cursorStart) const noexcept {
-    if constexpr (!recover_fuzzy_literal) {
+  [[nodiscard]] detail::LiteralFuzzyCandidates findReplaceCandidates(
+      Context &ctx, const char *cursorStart,
+      detail::TerminalRecoveryFacts terminalRecoveryFacts = {}) const noexcept {
+    detail::LiteralFuzzyCandidates filteredCandidates;
+    if constexpr (!allow_replace) {
       (void)ctx;
       (void)cursorStart;
-      return std::nullopt;
+      return filteredCandidates;
     } else {
-      if (auto candidate = detail::find_best_literal_fuzzy_candidate(
-              getValue(), fuzzyInputView(cursorStart, fuzzyInputLimit(ctx)),
-              case_sensitive);
-          candidate.has_value() && shouldConsiderFuzzyCandidate(*candidate)) {
-        return candidate;
-      }
-      return std::nullopt;
+      constexpr auto lexicalProfile = detail::classify_literal_recovery_profile(
+          std::string_view{literal.begin(), literal.size()});
+      return detail::collect_literal_replace_candidates(
+          ctx, cursorStart, getValue(), case_sensitive, lexicalProfile,
+          terminalRecoveryFacts);
     }
   }
 
-  template <EditableParseModeContext Context,
-            typename HasWordBoundaryViolation>
-  [[nodiscard]] LocalRecoveryChoice
-  selectLocalRecoveryChoice(
+  template <EditableParseModeContext Context, typename HasWordBoundaryViolation>
+  [[nodiscard]] LocalRecoveryChoice selectLocalRecoveryChoice(
       Context &ctx, const char *cursorStart, const char *matchedEnd,
-      const std::optional<detail::LiteralFuzzyCandidate> &fuzzyCandidate,
+      const detail::LiteralFuzzyCandidates &fuzzyCandidates,
+      detail::TerminalRecoveryFacts terminalRecoveryFacts,
       HasWordBoundaryViolation &&hasWordBoundaryViolation) const {
+    constexpr auto lexicalRecoveryProfile =
+        detail::classify_literal_recovery_profile(
+            std::string_view{literal.begin(), literal.size()});
     LocalRecoveryChoice bestChoice;
     auto considerChoice = [&bestChoice](const LocalRecoveryChoice &choice) {
-      if (detail::is_better_terminal_recovery_candidate(choice, bestChoice)) {
+      if (detail::is_better_normalized_recovery_order_key(
+              detail::terminal_recovery_order_key(choice),
+              detail::terminal_recovery_order_key(bestChoice),
+              detail::RecoveryOrderProfile::Terminal)) {
         bestChoice = choice;
       }
     };
 
-    if constexpr (recover_word_boundary_split) {
+    if constexpr (allow_matched_insert) {
       if (matchedEnd != nullptr && hasWordBoundaryViolation(matchedEnd)) {
         considerChoice(detail::evaluate_insert_synthetic_gap_terminal_candidate(
-            ctx, cursorStart, matchedEnd, this,
-            wordBoundarySplitPenalty(wordContinuationLength(matchedEnd))));
+            ctx, cursorStart, matchedEnd, this, 3u, 3u));
       }
     }
 
-    if constexpr (recover_fuzzy_literal) {
-      if (fuzzyCandidate.has_value()) {
-        const char *const fuzzyEnd = cursorStart + fuzzyCandidate->consumed;
+    if constexpr (allow_replace) {
+      for (const auto &fuzzyCandidate : fuzzyCandidates) {
+        const char *const fuzzyEnd = cursorStart + fuzzyCandidate.consumed;
         if (detail::can_apply_recovery_match(ctx, fuzzyEnd) &&
             !hasWordBoundaryViolation(fuzzyEnd)) {
           considerChoice(detail::evaluate_replace_leaf_terminal_candidate(
-              ctx, cursorStart, fuzzyEnd, this,
-              detail::literal_fuzzy_replacement_cost(*fuzzyCandidate),
-              fuzzyCandidate->distance, fuzzyCandidate->substitutionCount,
-              fuzzyCandidate->distance));
+              ctx, cursorStart, fuzzyEnd, this, fuzzyCandidate.cost,
+              fuzzyCandidate.distance, fuzzyCandidate.substitutionCount,
+              fuzzyCandidate.operationCount,
+              detail::terminal_anchor_quality(
+                  terminalRecoveryFacts.triviaGap)));
         }
       }
     }
 
-    if constexpr (recover_insertable) {
-      const auto insertChoice =
-          detail::evaluate_insert_synthetic_terminal_candidate(ctx, cursorStart,
-                                                               this);
-      considerChoice(insertChoice);
-    }
-
-    considerChoice(detail::evaluate_delete_scan_terminal_candidate(
-        ctx, cursorStart,
-        [this, &ctx, &hasWordBoundaryViolation](
-            const char *scanStart) noexcept -> const char * {
+    return detail::complete_terminal_recovery_choice(
+        ctx, cursorStart, this, terminalRecoveryFacts, lexicalRecoveryProfile,
+        allow_insert, bestChoice,
+        [this, &ctx, &hasWordBoundaryViolation,
+         cursorStart](const char *scanStart) noexcept -> const char * {
+          if (!detail::allows_extended_terminal_delete_scan_match(
+                  ctx, cursorStart, scanStart)) {
+            return nullptr;
+          }
           const char *const scanEnd = terminal(scanStart);
           if (scanEnd == nullptr ||
               !detail::can_apply_recovery_match(ctx, scanEnd) ||
@@ -189,88 +174,83 @@ private:
           }
           return scanEnd;
         },
-        [this, &ctx](const char *scanEnd) { ctx.leaf(scanEnd, this); }));
-
-    return bestChoice;
+        [this, &ctx, cursorStart](const char *scanEnd) {
+          ctx.leaf(cursorStart, scanEnd, this, false, true);
+        });
   }
 
-  template <EditableParseModeContext Context,
-            typename HasWordBoundaryViolation>
+  template <EditableParseModeContext Context, typename HasWordBoundaryViolation>
   bool applyLocalRecoveryChoice(
-      Context &ctx, const LocalRecoveryChoice &choice,
-      const std::optional<detail::LiteralFuzzyCandidate> &fuzzyCandidate,
-      const char *cursorStart, const char *matchedEnd,
+      Context &ctx, const LocalRecoveryChoice &choice, const char *cursorStart,
+      const char *matchedEnd,
+      detail::TerminalRecoveryFacts terminalRecoveryFacts,
       HasWordBoundaryViolation &&hasWordBoundaryViolation) const {
-    using enum LocalRecoveryChoiceKind;
-    switch (choice.kind) {
-    case WordBoundarySplit:
-      if (matchedEnd != nullptr && hasWordBoundaryViolation(matchedEnd) &&
-          detail::apply_insert_synthetic_gap_and_match_recovery_edit(
-              ctx, matchedEnd, this, "Expecting separator")) {
-        if constexpr (RecoveryParseModeContext<Context>) {
-          PEGIUM_RECOVERY_TRACE("[literal rule] split word boundary for '",
-                                getValue(), "' at ",
-                                static_cast<TextOffset>(matchedEnd - ctx.begin));
-        }
-        return true;
-      }
-      return false;
-    case Fuzzy: {
-      if (!fuzzyCandidate.has_value()) {
-        return false;
-      }
-      if (const char *const fuzzyEnd = cursorStart + fuzzyCandidate->consumed;
-          detail::can_apply_recovery_match(ctx, fuzzyEnd) &&
-          !hasWordBoundaryViolation(fuzzyEnd) &&
-          detail::apply_replace_leaf_recovery_edit(
-              ctx, fuzzyEnd, this,
-              detail::literal_fuzzy_replacement_cost(*fuzzyCandidate))) {
-        if constexpr (RecoveryParseModeContext<Context>) {
-          PEGIUM_RECOVERY_TRACE("[literal rule] fuzzy match '", getValue(),
-                                "' at ", ctx.cursorOffset(),
-                                " distance=", fuzzyCandidate->distance,
-                                " cost=", fuzzyCandidate->normalizedEditCost);
-        }
-        return true;
-      }
-      return false;
-    }
-    case InsertSynthetic:
-      if constexpr (recover_insertable) {
-        if (detail::apply_insert_synthetic_recovery_edit(ctx, this)) {
-          ctx.leaf(ctx.cursor(), this, false, true);
+    return detail::apply_terminal_recovery_choice(
+        ctx, choice, this,
+        [this, &ctx, matchedEnd, &hasWordBoundaryViolation]() {
+          if (matchedEnd == nullptr || !hasWordBoundaryViolation(matchedEnd) ||
+              !detail::apply_insert_synthetic_gap_and_match_recovery_edit(
+                  ctx, matchedEnd, this, "Expecting separator")) {
+            return false;
+          }
+          if constexpr (RecoveryParseModeContext<Context>) {
+            PEGIUM_RECOVERY_TRACE(
+                "[literal rule] split word boundary for '", getValue(), "' at ",
+                static_cast<TextOffset>(matchedEnd - ctx.begin));
+          }
+          return true;
+        },
+        [this, &ctx, cursorStart, &choice, &hasWordBoundaryViolation]() {
+          const char *const fuzzyEnd = cursorStart + choice.consumed;
+          if (!detail::can_apply_recovery_match(ctx, fuzzyEnd) ||
+              hasWordBoundaryViolation(fuzzyEnd) ||
+              !detail::apply_replace_leaf_recovery_edit(
+                  ctx, fuzzyEnd, this, choice.cost.budgetCost)) {
+            return false;
+          }
+          if constexpr (RecoveryParseModeContext<Context>) {
+            PEGIUM_RECOVERY_TRACE("[literal rule] fuzzy match '", getValue(),
+                                  "' at ", ctx.cursorOffset(),
+                                  " distance=", choice.distance,
+                                  " cost=", choice.cost.budgetCost,
+                                  " rank=", choice.cost.primaryRankCost);
+          }
+          return true;
+        },
+        [this, &ctx]() {
           if constexpr (RecoveryParseModeContext<Context>) {
             PEGIUM_RECOVERY_TRACE("[literal rule] inserted '", getValue(),
                                   "' at ", ctx.cursorOffset());
           }
-          return true;
-        }
-      }
-      return false;
-    case DeleteScan:
-      return detail::recover_by_delete_scan(
-          ctx,
-          [this, &ctx, &hasWordBoundaryViolation](
-              const char *scanStart) noexcept -> const char * {
-            const char *const scanEnd = terminal(scanStart);
-            if (scanEnd == nullptr ||
-                !detail::can_apply_recovery_match(ctx, scanEnd) ||
-                hasWordBoundaryViolation(scanEnd)) {
-              return nullptr;
-            }
-            return scanEnd;
-          },
-          [this, &ctx](const char *scanEnd) {
-            if constexpr (RecoveryParseModeContext<Context>) {
-              PEGIUM_RECOVERY_TRACE("[literal rule] delete-scan match '",
-                                    getValue(), "' at ", ctx.cursorOffset());
-            }
-            ctx.leaf(scanEnd, this);
-          });
-    case None:
-      return false;
-    }
-    return false;
+        },
+        [this, &ctx, &hasWordBoundaryViolation, cursorStart,
+         terminalRecoveryFacts]() {
+          return detail::apply_delete_scan_terminal_candidate(
+              ctx,
+              [this, &ctx, &hasWordBoundaryViolation,
+               cursorStart](const char *scanStart) noexcept -> const char * {
+                if (!detail::allows_extended_terminal_delete_scan_match(
+                        ctx, cursorStart, scanStart)) {
+                  return nullptr;
+                }
+                const char *const scanEnd = terminal(scanStart);
+                if (scanEnd == nullptr ||
+                    !detail::can_apply_recovery_match(ctx, scanEnd) ||
+                    hasWordBoundaryViolation(scanEnd)) {
+                  return nullptr;
+                }
+                return scanEnd;
+              },
+              [this, &ctx, cursorStart](const char *scanEnd) {
+                if constexpr (RecoveryParseModeContext<Context>) {
+                  PEGIUM_RECOVERY_TRACE("[literal rule] delete-scan match '",
+                                        getValue(), "' at ",
+                                        ctx.cursorOffset());
+                }
+                ctx.leaf(cursorStart, scanEnd, this, false, true);
+              },
+              terminalRecoveryFacts, lexicalRecoveryProfile);
+        });
   }
 
   bool probe_impl(const ParseContext &ctx) const noexcept {
@@ -278,35 +258,32 @@ private:
     if (matchEnd == nullptr) {
       return false;
     }
-    if constexpr (isWord(literal.back())) {
-      if (isWord(*matchEnd)) {
-        return false;
-      }
-    }
-    return true;
+    return !detail::literal_has_word_boundary_violation(getValue(), matchEnd);
   }
 
-  template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
+  template <EditableParseModeContext Context>
+  bool parse_terminal_recovery_impl(
+      Context &ctx,
+      const detail::TerminalRecoveryFacts &terminalRecoveryFacts) const {
     const char *const cursorStart = ctx.cursor();
+    const bool hasHadEdits = []<typename Ctx>(const Ctx &currentCtx) constexpr
+                                 noexcept {
+                                   if constexpr (requires {
+                                                   currentCtx.hasHadEdits();
+                                                 }) {
+                                     return currentCtx.hasHadEdits();
+                                   }
+                                   return false;
+                                 }(ctx);
     const char *const matchedEnd = terminal(cursorStart);
+    constexpr auto lexicalRecoveryProfile =
+        detail::classify_literal_recovery_profile(
+            std::string_view{literal.begin(), literal.size()});
     const auto hasWordBoundaryViolation = [this](const char *end) noexcept {
-      if constexpr (!literal.empty() && isWord(literal.back())) {
-        return end != nullptr && isWord(*end);
-      } else {
-        (void)end;
-        return false;
-      }
+      return detail::literal_has_word_boundary_violation(getValue(), end);
     };
 
-    if constexpr (StrictParseModeContext<Context>) {
-      if (matchedEnd == nullptr || hasWordBoundaryViolation(matchedEnd)) {
-        return false;
-      }
-      PEGIUM_RECOVERY_TRACE("[literal rule] direct match '", getValue(), "' at ",
-                            ctx.cursorOffset());
-      ctx.leaf(matchedEnd, this);
-      return true;
-    } else if constexpr (RecoveryParseModeContext<Context>) {
+    if constexpr (RecoveryParseModeContext<Context>) {
       if (matchedEnd != nullptr && !hasWordBoundaryViolation(matchedEnd)) {
         PEGIUM_RECOVERY_TRACE("[literal rule] direct match '", getValue(),
                               "' at ", ctx.cursorOffset());
@@ -316,12 +293,18 @@ private:
       if (!ctx.canEdit()) {
         return false;
       }
-      const auto fuzzyCandidate = findFuzzyCandidate(ctx, cursorStart);
+      const auto fuzzyCandidates =
+          (hasHadEdits &&
+           !detail::allows_fuzzy_replace_after_prior_edits(
+               lexicalRecoveryProfile))
+              ? detail::LiteralFuzzyCandidates{}
+              : findReplaceCandidates(ctx, cursorStart, terminalRecoveryFacts);
       if (const auto bestChoice = selectLocalRecoveryChoice(
-              ctx, cursorStart, matchedEnd, fuzzyCandidate,
-              hasWordBoundaryViolation);
-          applyLocalRecoveryChoice(ctx, bestChoice, fuzzyCandidate, cursorStart,
-                                   matchedEnd, hasWordBoundaryViolation)) {
+              ctx, cursorStart, matchedEnd, fuzzyCandidates,
+              terminalRecoveryFacts, hasWordBoundaryViolation);
+          applyLocalRecoveryChoice(ctx, bestChoice, cursorStart, matchedEnd,
+                                   terminalRecoveryFacts,
+                                   hasWordBoundaryViolation)) {
         return true;
       }
 
@@ -366,28 +349,106 @@ private:
         return false;
       }
 
-      const auto fuzzyCandidate = findFuzzyCandidate(ctx, cursorStart);
+      const auto fuzzyCandidates =
+          (hasHadEdits &&
+           !detail::allows_fuzzy_replace_after_prior_edits(
+               lexicalRecoveryProfile))
+              ? detail::LiteralFuzzyCandidates{}
+              : findReplaceCandidates(ctx, cursorStart, terminalRecoveryFacts);
       const auto bestChoice = selectLocalRecoveryChoice(
-          ctx, cursorStart, matchedEnd, fuzzyCandidate,
+          ctx, cursorStart, matchedEnd, fuzzyCandidates, terminalRecoveryFacts,
           hasWordBoundaryViolation);
-      return applyLocalRecoveryChoice(ctx, bestChoice, fuzzyCandidate,
-                                      cursorStart, matchedEnd,
+      return applyLocalRecoveryChoice(ctx, bestChoice, cursorStart, matchedEnd,
+                                      terminalRecoveryFacts,
                                       hasWordBoundaryViolation);
+    }
+  }
+
+  template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
+    if constexpr (StrictParseModeContext<Context>) {
+      const char *const matchedEnd = terminal(ctx.cursor());
+      const auto hasWordBoundaryViolation = [this](const char *end) noexcept {
+        return detail::literal_has_word_boundary_violation(getValue(), end);
+      };
+      if (matchedEnd == nullptr || hasWordBoundaryViolation(matchedEnd)) {
+        return false;
+      }
+      PEGIUM_RECOVERY_TRACE("[literal rule] direct match '", getValue(),
+                            "' at ", ctx.cursorOffset());
+      ctx.leaf(matchedEnd, this);
+      return true;
+    } else {
+      return parse_terminal_recovery_impl(ctx, {});
     }
   }
 
 public:
   bool probeRecoverable(RecoveryContext &ctx) const noexcept {
+    constexpr auto lexicalRecoveryProfile =
+        detail::classify_literal_recovery_profile(
+            std::string_view{literal.begin(), literal.size()});
     const char *const cursorStart = ctx.cursor();
-    if constexpr (recover_word_boundary_split) {
+    if constexpr (allow_matched_insert) {
+      const auto hasWordBoundaryViolation = [](const char *end) noexcept {
+        return detail::literal_has_word_boundary_violation(literalValue, end);
+      };
       if (const char *const matchedEnd = terminal(cursorStart);
-          matchedEnd != nullptr && isWord(*matchedEnd)) {
+          matchedEnd != nullptr && hasWordBoundaryViolation(matchedEnd)) {
         return true;
       }
     }
-    if constexpr (recover_fuzzy_literal) {
-      const auto fuzzyCandidate = findFuzzyCandidate(ctx, cursorStart);
-      return fuzzyCandidate.has_value();
+    if (ctx.hasHadEdits() &&
+        !detail::allows_fuzzy_replace_after_prior_edits(
+            lexicalRecoveryProfile)) {
+      return false;
+    }
+    if constexpr (allow_replace) {
+      const auto fuzzyCandidates = findReplaceCandidates(ctx, cursorStart);
+      if (!fuzzyCandidates.empty()) {
+        return true;
+      }
+    }
+    return detail::probe_nearby_delete_scan_match(
+        ctx,
+        [this](const char *scanCursor) noexcept {
+          return terminal(scanCursor);
+        },
+        {}, lexicalRecoveryProfile);
+  }
+
+  bool probeRecoverableAtEntry(RecoveryContext &ctx) const noexcept {
+    constexpr auto lexicalRecoveryProfile =
+        detail::classify_literal_recovery_profile(
+            std::string_view{literal.begin(), literal.size()});
+    if constexpr (allow_insert) {
+      if (detail::allows_terminal_entry_probe(ctx, lexicalRecoveryProfile)) {
+        return true;
+      }
+    }
+    if (ctx.hasHadEdits() &&
+        !detail::allows_fuzzy_replace_after_prior_edits(
+            lexicalRecoveryProfile)) {
+      return false;
+    }
+    if (!detail::allows_compact_local_gap_terminal_recovery(ctx)) {
+      return false;
+    }
+    const char *const cursorStart = ctx.cursor();
+    if constexpr (allow_matched_insert) {
+      const auto hasWordBoundaryViolation = [](const char *end) noexcept {
+        return detail::literal_has_word_boundary_violation(literalValue, end);
+      };
+      if (const char *const matchedEnd = terminal(cursorStart);
+          matchedEnd != nullptr && hasWordBoundaryViolation(matchedEnd)) {
+        return true;
+      }
+    }
+    if constexpr (allow_replace) {
+      const auto fuzzyCandidates = findReplaceCandidates(ctx, cursorStart);
+      return std::ranges::any_of(
+          fuzzyCandidates, [](const auto &candidate) constexpr noexcept {
+            return detail::allows_entry_probe_fuzzy_candidate(candidate);
+          });
     }
     return false;
   }
@@ -417,18 +478,19 @@ public:
     return Literal<toLower(), isCaseSensitive(literal)>{};
   }
 
-  constexpr bool isNullable() const noexcept override {
-    return nullable;
-  }
+  constexpr bool isNullable() const noexcept override { return nullable; }
 
 private:
-  // Keep generic recovery able to synthesize simple punctuation, but avoid
-  // inventing multi-character tokens.
-  static constexpr bool recover_insertable =
-      literal.size() == 1 && !isWord(literal.back());
-  static constexpr bool recover_word_boundary_split =
-      literal.size() > 0 && isWord(literal.back());
-  static constexpr bool recover_fuzzy_literal = literal.size() > 1;
+  static constexpr std::string_view literalValue{literal.data(),
+                                                 literal.size()};
+  // Keep generic recovery able to synthesize only compact literals and avoid
+  // inventing long multi-character tokens.
+  static constexpr auto lexicalRecoveryProfile =
+      detail::classify_literal_recovery_profile(literalValue);
+  static constexpr bool allow_insert = lexicalRecoveryProfile.allowsInsert();
+  static constexpr bool allow_matched_insert =
+      lexicalRecoveryProfile.allowsMatchedInsert();
+  static constexpr bool allow_replace = lexicalRecoveryProfile.allowsReplace();
 
   static constexpr auto toLower() {
     decltype(literal) newLiteral;

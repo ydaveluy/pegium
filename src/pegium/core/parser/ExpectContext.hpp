@@ -35,7 +35,6 @@ struct ExpectContext {
 
   using EditStateGuard = detail::EditStateGuard<ExpectContext>;
   using SkipperGuard = detail::SkipperGuard<ExpectContext>;
-
   struct ScopeGuard {
     ScopeGuard(const ScopeGuard &) = delete;
     ScopeGuard &operator=(const ScopeGuard &) = delete;
@@ -157,6 +156,14 @@ struct ExpectContext {
   }
 
   void leaf(const char *endPtr, const grammar::AbstractElement *,
+            bool = false, bool = false) {
+    _cursor = endPtr;
+    if (_cursor > _maxCursor) {
+      _maxCursor = _cursor;
+    }
+  }
+
+  void leaf(const char *, const char *endPtr, const grammar::AbstractElement *,
             bool = false, bool = false) {
     _cursor = endPtr;
     if (_cursor > _maxCursor) {

@@ -1,0 +1,3 @@
+environment prod: "Production"
+environment staging: "Staging"
+req login "Users can login" applicable for prod staging

@@ -233,9 +233,9 @@ DefaultDocumentBuilder::snapshotListeners(
 }
 
 template <typename Listener>
-std::array<std::shared_ptr<DefaultDocumentBuilder::ListenerState<Listener>>,
-           DefaultDocumentBuilder::kDocumentStateCount>
-DefaultDocumentBuilder::makeListenerStates() {
+auto DefaultDocumentBuilder::makeListenerStates()
+    -> std::array<std::shared_ptr<ListenerState<Listener>>,
+                  kDocumentStateCount> {
   std::array<std::shared_ptr<ListenerState<Listener>>, kDocumentStateCount>
       states;
   for (auto &state : states) {

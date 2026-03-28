@@ -25,19 +25,18 @@ void observe_background_task(const pegium::SharedCoreServices &sharedServices,
     return;
   }
 
-  auto *shared = &sharedServices;
+  auto sink = sharedServices.observabilitySink;
   std::string ownedCategory(category);
-  std::thread([shared, category = std::move(ownedCategory),
+  std::thread([sink = std::move(sink), category = std::move(ownedCategory),
                future = std::move(future)]() mutable {
     try {
       future.get();
     } catch (const std::exception &error) {
       publish_lsp_runtime_failure(
-          *shared->observabilitySink, std::move(category),
+          *sink, std::move(category),
           "LSP background task failed: " + std::string(error.what()));
     } catch (...) {
-      publish_lsp_runtime_failure(*shared->observabilitySink,
-                                  std::move(category),
+      publish_lsp_runtime_failure(*sink, std::move(category),
                                   "LSP background task failed.");
     }
   }).detach();

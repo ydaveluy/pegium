@@ -834,6 +834,54 @@ TEST(ParserTest, ParseDiagnosticStreamSerializesFields) {
             "message=\"missing token\"}");
 }
 
+TEST(ParserTest, NormalizeParseDiagnosticsMergesContiguousDeletes) {
+  const std::vector<ParseDiagnostic> diagnostics{
+      {.kind = ParseDiagnosticKind::Deleted,
+       .offset = 4,
+       .beginOffset = 4,
+       .endOffset = 6,
+       .element = nullptr,
+       .message = {}},
+      {.kind = ParseDiagnosticKind::Deleted,
+       .offset = 6,
+       .beginOffset = 6,
+       .endOffset = 9,
+       .element = nullptr,
+       .message = {}},
+  };
+
+  const auto normalized = normalizeParseDiagnostics(diagnostics);
+
+  ASSERT_EQ(normalized.size(), 1u);
+  EXPECT_EQ(normalized.front().kind, ParseDiagnosticKind::Deleted);
+  EXPECT_EQ(normalized.front().beginOffset, 4u);
+  EXPECT_EQ(normalized.front().endOffset, 9u);
+}
+
+TEST(ParserTest, NormalizeParseDiagnosticsMergesCompatibleInsertsAtSameOffset) {
+  const std::vector<ParseDiagnostic> diagnostics{
+      {.kind = ParseDiagnosticKind::Inserted,
+       .offset = 7,
+       .beginOffset = 7,
+       .endOffset = 7,
+       .element = nullptr,
+       .message = "expected terminator"},
+      {.kind = ParseDiagnosticKind::Inserted,
+       .offset = 7,
+       .beginOffset = 7,
+       .endOffset = 7,
+       .element = nullptr,
+       .message = "expected terminator"},
+  };
+
+  const auto normalized = normalizeParseDiagnostics(diagnostics);
+
+  ASSERT_EQ(normalized.size(), 1u);
+  EXPECT_EQ(normalized.front().kind, ParseDiagnosticKind::Inserted);
+  EXPECT_EQ(normalized.front().offset, 7u);
+  EXPECT_EQ(normalized.front().message, "expected terminator");
+}
+
 TEST(ParserTest, GrammarElementStreamPrintsRuleCallsByName) {
   RecursivePrintRule rule;
   RecursivePrintGroup group;

@@ -1,0 +1,7 @@
+entity Blog {
+  author Person
+  many comments:: Comment
+  body::: Text
+}
+
+entity Comment {}

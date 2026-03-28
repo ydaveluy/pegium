@@ -194,3 +194,17 @@ TEST(InfixRuleTest, FastProbeMatchesStrictParseOutcome) {
     EXPECT_EQ(attempt_fast_probe(fastCtx, op), parse(op, parseCtx));
   }
 }
+
+TEST(InfixRuleTest, FastProbeOnlyNeedsPrimaryToStart) {
+  InfixParser parser;
+  auto builderHarness = pegium::test::makeCstBuilderHarness("a +");
+  auto &builder = builderHarness.builder;
+  const auto input = builder.getText();
+  const auto skipper = NoOpSkipper();
+  detail::FailureHistoryRecorder recorder(input.begin());
+  TrackedParseContext ctx{builder, skipper, recorder,
+                          pegium::utils::default_cancel_token};
+
+  EXPECT_TRUE(attempt_fast_probe(ctx, parser.Binary));
+  EXPECT_EQ(ctx.cursorOffset(), 0u);
+}

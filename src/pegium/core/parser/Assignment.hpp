@@ -76,9 +76,19 @@ public:
   constexpr bool isNullable() const noexcept override {
     return nullable;
   }
+  [[nodiscard]] constexpr bool isWordLike() const noexcept {
+    return detail::element_is_word_like_terminal(_element);
+  }
   bool probeRecoverable(RecoveryContext &ctx) const {
     return attempt_fast_probe(ctx, _element) ||
            probe_locally_recoverable(_element, ctx);
+  }
+
+  bool probeRecoverableAtEntry(RecoveryContext &ctx) const {
+    if (attempt_fast_probe(ctx, _element)) {
+      return true;
+    }
+    return probe_recoverable_at_entry(_element, ctx);
   }
 
   void execute(AstNode *current, const CstNodeView &node,
@@ -92,6 +102,7 @@ public:
 
 private:
   friend struct detail::ParseAccess;
+  friend struct detail::FastProbeAccess;
   friend struct detail::InitAccess;
 
   [[nodiscard]] static const detail::AssignmentReflectionInfo &
@@ -111,6 +122,11 @@ private:
 
   ExpressionHolder<Element> _element;
   AssignmentOperator _operator;
+
+  template <StrictParseModeContext Context>
+  bool fast_probe_impl(Context &ctx) const {
+    return attempt_fast_probe(ctx, _element);
+  }
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     return detail::AssignmentParseSupport<feature, Element>::parse(ctx, this,

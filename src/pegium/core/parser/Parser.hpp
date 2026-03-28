@@ -101,7 +101,10 @@ normalizeParseDiagnostics(std::span<const ParseDiagnostic> diagnostics);
 
 /// Heuristics and limits controlling recovery and expectation search.
 struct ParseOptions {
-  /// Maximum number of codepoints that one attempt may delete consecutively.
+  /// Preferred limit for one contiguous delete run during normal recovery.
+  ///
+  /// Delete-scan recovery may temporarily continue past this limit when the
+  /// normal budget still allows more deletions and no earlier match was found.
   std::uint32_t maxConsecutiveCodepointDeletes = 8;
 
   /// Initial number of visible tokens included before the failure point.
@@ -111,16 +114,21 @@ struct ParseOptions {
   std::uint32_t maxRecoveryWindowTokenCount = 64;
 
   /// Maximum number of candidate attempts explored inside one recovery window.
-  std::uint32_t maxRecoveryAttempts = 32;
+  std::uint32_t maxRecoveryAttempts = 64;
 
-  /// Maximum number of edit operations allowed in a single recovery attempt.
-  std::uint32_t maxRecoveryEditsPerAttempt = 8;
+  /// Maximum number of edit operations allowed while replaying one active
+  /// recovery window.
+  std::uint32_t maxRecoveryEditsPerAttempt = 64;
 
-  /// Maximum cumulative edit cost allowed in a single recovery attempt.
-  std::uint32_t maxRecoveryEditCost = 64;
+  /// Preferred cumulative edit-cost budget for one recovery attempt.
+  ///
+  /// Some delete-scan retries may briefly exceed this while searching for a
+  /// later resynchronization point. Such attempts are only considered
+  /// selectable when they keep a stable prefix before the first edit.
+  std::uint32_t maxRecoveryEditCost = 256;
 
   /// Maximum number of recovery windows tried for one parse.
-  std::uint32_t maxRecoveryWindows = 4;
+  std::uint32_t maxRecoveryWindows = 32;
 
   /// Enables recovery-aware parsing and expectation tracing after strict failure.
   bool recoveryEnabled = true;

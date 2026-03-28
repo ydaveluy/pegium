@@ -11,6 +11,10 @@
 
 namespace pegium::parser {
 
+namespace detail {
+struct FastProbeAccess;
+}
+
 template <typename T>
   requires DefaultConstructibleAstNode<T>
 struct Create final : grammar::Create {
@@ -32,6 +36,8 @@ struct Create final : grammar::Create {
 
 private:
   friend struct detail::ParseAccess;
+  friend struct detail::ProbeAccess;
+  friend struct detail::FastProbeAccess;
   friend struct detail::InitAccess;
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
@@ -42,6 +48,20 @@ private:
       ctx.leaf(ctx.cursor(), this);
       return true;
     }
+  }
+
+  template <StrictParseModeContext Context>
+  bool probe_impl(Context &ctx) const noexcept {
+    (void)ctx;
+    // `Create` never consumes input and therefore does not prove that a branch
+    // actually starts at the current cursor.
+    return false;
+  }
+
+  template <StrictParseModeContext Context>
+  bool fast_probe_impl(Context &ctx) const noexcept {
+    (void)ctx;
+    return false;
   }
 
   void init_impl(AstReflectionInitContext &ctx) const {

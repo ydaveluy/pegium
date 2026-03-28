@@ -1,0 +1,4 @@
+statemachine Light
+events Start
+initialSate Idle
+state Idle end

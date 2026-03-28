@@ -170,9 +170,10 @@ utils::ScopedDisposable DefaultTextDocuments::listen(
           if (it == _documents.end()) {
             return;
           }
-          document = it->second;
+          document = std::make_shared<TextDocument>(*it->second);
           (void)TextDocument::update(*document, changes,
                                      params.textDocument.version);
+          it->second = document;
         }
         emitDidChangeContent(document);
       });

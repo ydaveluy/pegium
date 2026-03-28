@@ -49,9 +49,11 @@ TEST(TextDocumentHandlersTest, NotificationsUpdateTextDocumentsStore) {
 
   auto changed = documents.get(uri);
   ASSERT_NE(changed, nullptr);
-  EXPECT_EQ(changed.get(), opened.get());
+  EXPECT_NE(changed.get(), opened.get());
   EXPECT_EQ(changed->getText(), "beta");
   EXPECT_EQ(changed->version(), 2);
+  EXPECT_EQ(opened->getText(), "alpha");
+  EXPECT_EQ(opened->version(), 1);
 
   ::lsp::DidSaveTextDocumentParams saveParams{};
   saveParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
