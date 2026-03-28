@@ -30,4 +30,7 @@ recovery_windows_to_json(std::span<const RecoveryWindow> windows);
 recovery_attempt_to_json(const RecoveryAttempt &attempt,
                          const RecoveryAttemptSpec *spec = nullptr);
 
+[[nodiscard]] pegium::JsonValue
+recovery_search_run_to_json(const RecoverySearchRunResult &run);
+
 } // namespace pegium::parser::detail

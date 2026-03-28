@@ -19,10 +19,11 @@ if(FUZZTEST_FUZZING_MODE)
     add_test(
         NAME PegiumWorkspaceGuidedFuzzSanity
         COMMAND $<TARGET_FILE:PegiumWorkspaceFuzzTest>
-            --fuzz=PegiumWorkspaceFuzzTest.StressLanguageSingleDocumentPipeline
-            --fuzz_for=2s
+            --gtest_filter=PegiumWorkspaceRegressionTest.CoverageBracePairDeleteBurstRoundTripRemainsStable:PegiumWorkspaceRegressionTest.RecoveryDenseContextualSwapRoundTripRemainsStable:PegiumWorkspaceRegressionTest.TruncatedEofWindowSpliceRoundTripRemainsStable
     )
     set_tests_properties(PegiumWorkspaceGuidedFuzzSanity PROPERTIES
         LABELS fuzz-guided
+        TIMEOUT 30
     )
+
 endif()

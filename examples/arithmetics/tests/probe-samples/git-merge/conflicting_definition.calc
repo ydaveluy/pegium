@@ -1,0 +1,7 @@
+module Demo
+<<<<<<< HEAD
+def value: 1;
+=======
+def value: 2;
+>>>>>>> feature/value
+value;

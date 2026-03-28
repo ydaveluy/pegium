@@ -2,8 +2,9 @@
 
 /// Parser expression representing prioritized alternatives.
 
-#include <concepts>
+#include <algorithm>
 #include <array>
+#include <concepts>
 #include <limits>
 #include <pegium/core/grammar/OrderedChoice.hpp>
 #include <pegium/core/parser/CompletionSupport.hpp>
@@ -21,6 +22,7 @@
 #include <pegium/core/parser/SkipperBuilder.hpp>
 #include <pegium/core/parser/StepTrace.hpp>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -63,6 +65,16 @@ private:
   friend struct detail::InitAccess;
 
 public:
+  bool probeRecoverable(RecoveryContext &ctx) const {
+    return probe_recoverable_choices(
+        ctx, std::make_index_sequence<sizeof...(Elements)>{});
+  }
+
+  bool probeRecoverableAtEntry(RecoveryContext &ctx) const {
+    return probe_recoverable_entry_choices(
+        ctx, std::make_index_sequence<sizeof...(Elements)>{});
+  }
+
   void init_impl(AstReflectionInitContext &ctx) const {
     init_choices<0>(ctx);
   }
@@ -82,26 +94,22 @@ private:
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     if constexpr (StrictParseModeContext<Context>) {
-      detail::stepTraceInc(detail::StepCounter::ChoiceStrictPasses);
+      PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceStrictPasses);
       return match_choice(ctx);
     } else if constexpr (RecoveryParseModeContext<Context>) {
-      detail::stepTraceInc(detail::StepCounter::ChoiceRecoverCalls);
+      PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceRecoverCalls);
 
       const auto entryCheckpoint = ctx.mark();
+      const char *const entryFurthestExploredCursor =
+          ctx.furthestExploredCursor();
       PEGIUM_RECOVERY_TRACE("[choice rule] enter offset=", ctx.cursorOffset(),
                             " allowI=", ctx.allowInsert,
                             " allowD=", ctx.allowDelete);
 
-      const auto noEditResult = run_no_edit_probe(ctx, entryCheckpoint);
-      if (noEditResult == NoEditChoiceResult::Accepted) {
+      const auto bestAttempt = evaluate_choice_attempts(ctx, entryCheckpoint);
+      if (replay_choice_attempt(ctx, entryCheckpoint, bestAttempt,
+                                entryFurthestExploredCursor)) {
         return true;
-      }
-
-      if (run_editable_choice(ctx, entryCheckpoint)) {
-        return true;
-      }
-      if (noEditResult == NoEditChoiceResult::Deferred) {
-        return replay_no_edit_choice(ctx, entryCheckpoint);
       }
 
       PEGIUM_RECOVERY_TRACE("[choice rule] fail offset=", ctx.cursorOffset());
@@ -230,52 +238,101 @@ public:
 private:
   using BranchResult = ExpectBranchResult;
   using EditableRecoveryCandidate = detail::EditableRecoveryCandidate;
-  enum class NoEditChoiceResult : std::uint8_t {
+  enum class ChoiceAttemptKind : std::uint8_t {
     None,
-    Accepted,
-    Deferred,
+    NoEditReplay,
+    Editable,
+    RestartReplay,
   };
 
-  template <typename Checkpoint>
-  NoEditChoiceResult run_no_edit_probe(RecoveryContext &ctx,
-                                       const Checkpoint &entryCheckpoint) const {
-    const char *const savedMaxCursor = ctx.maxCursor();
-    ctx.restoreMaxCursor(ctx.cursor());
-    if (match_choice_no_edits(ctx)) {
-      detail::stepTraceInc(detail::StepCounter::ChoiceStrictPasses);
-      const auto probe = detail::capture_recovery_probe_progress(ctx);
-      if (savedMaxCursor > ctx.maxCursor()) {
-        ctx.restoreMaxCursor(savedMaxCursor);
+  enum class RestartReplayMode : std::uint8_t {
+    Editable,
+    NoEdit,
+  };
+
+  struct ChoiceAttempt {
+    std::size_t branchIndex = 0;
+    ChoiceAttemptKind kind = ChoiceAttemptKind::None;
+    detail::EditableRecoveryCandidate recovery{};
+    TextOffset restartRetryCursorOffset = 0;
+    RestartReplayMode restartReplayMode = RestartReplayMode::Editable;
+    bool startedWithoutEdits = false;
+  };
+
+  [[nodiscard]] detail::EditableRecoveryCandidate capture_choice_candidate(
+      RecoveryContext &ctx, std::uint32_t baseEditCost,
+      std::size_t baseRecoveryEditCount) const {
+    detail::EditableRecoveryCandidate candidate{.matched = true,
+                                                .cursorOffset = ctx.cursorOffset()};
+    candidate.postSkipCursorOffset = detail::post_skip_cursor_offset(ctx);
+    candidate.editCost = ctx.currentEditCost() - baseEditCost;
+    candidate.editCount = static_cast<std::uint32_t>(ctx.recoveryEditCount() -
+                                                     baseRecoveryEditCount);
+    if (ctx.recoveryEditCount() > baseRecoveryEditCount) {
+      const auto edits = ctx.recoveryEditsView();
+      const auto &firstEdit = edits[baseRecoveryEditCount];
+      candidate.firstEditOffset = firstEdit.beginOffset;
+      candidate.firstEditElement = firstEdit.element;
+      candidate.hasDeleteEdit =
+          firstEdit.kind == ParseDiagnosticKind::Deleted;
+      TextOffset maxEndOffset = firstEdit.endOffset;
+      for (std::size_t i = baseRecoveryEditCount + 1u; i < edits.size(); ++i) {
+        candidate.hasDeleteEdit =
+            candidate.hasDeleteEdit ||
+            edits[i].kind == ParseDiagnosticKind::Deleted;
+        maxEndOffset = std::max(maxEndOffset, edits[i].endOffset);
       }
-      if (probe.deferred()) {
-        PEGIUM_RECOVERY_TRACE(
-            "[choice rule] strict success deferred offset=",
-            probe.committedOffset, " localMax=", probe.exploredOffset);
-        ctx.rewind(entryCheckpoint);
-        ctx.restoreMaxCursor(savedMaxCursor);
-        return NoEditChoiceResult::Deferred;
-      }
-      PEGIUM_RECOVERY_TRACE("[choice rule] strict success offset=",
-                            ctx.cursorOffset());
-      return NoEditChoiceResult::Accepted;
+      candidate.editSpan = maxEndOffset > firstEdit.beginOffset
+                               ? maxEndOffset - firstEdit.beginOffset
+                               : 0;
     }
-    detail::stepTraceInc(detail::StepCounter::ChoiceStrictPasses);
-    ctx.rewind(entryCheckpoint);
-    ctx.restoreMaxCursor(savedMaxCursor);
-    return NoEditChoiceResult::None;
+    return candidate;
+  }
+
+  static void consider_choice_attempt(ChoiceAttempt &bestAttempt,
+                                      const ChoiceAttempt &candidate,
+                                      TextOffset parseStartOffset) noexcept {
+    if (!candidate.recovery.matched) {
+      return;
+    }
+    if (!bestAttempt.recovery.matched ||
+        detail::is_better_choice_recovery_candidate(
+            candidate.recovery, bestAttempt.recovery,
+            {.parseStartOffset = parseStartOffset})) {
+      bestAttempt = candidate;
+    }
+  }
+
+  template <std::size_t I>
+  [[nodiscard]] bool
+  branch_starts_without_edits(RecoveryContext &ctx) const {
+    const auto checkpoint = ctx.mark();
+    const char *const savedFurthestExploredCursor =
+        ctx.furthestExploredCursor();
+    ctx.restoreFurthestExploredCursor(ctx.cursor());
+    const auto startOffset = ctx.cursorOffset();
+    const auto advanced_without_edits = [&]() noexcept {
+      return ctx.cursorOffset() > startOffset ||
+             ctx.furthestExploredOffset() > startOffset;
+    };
+    bool started = false;
+    if (attempt_fast_probe(ctx, std::get<I>(choices))) {
+      started = advanced_without_edits();
+    }
+    if (!started) {
+      (void)attempt_parse_no_edits(ctx, std::get<I>(choices));
+      started = advanced_without_edits();
+    }
+    ctx.rewind(checkpoint);
+    ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+    return started;
   }
 
   template <typename Checkpoint>
   bool replay_no_edit_choice(RecoveryContext &ctx,
-                             const Checkpoint &entryCheckpoint) const {
-    if (match_choice_no_edits(ctx)) {
-      const auto probe = detail::capture_recovery_probe_progress(ctx);
-      if (probe.deferred() &&
-          probe.committedOffset >= ctx.pendingRecoveryWindowBeginOffset() &&
-          probe.committedOffset < ctx.pendingRecoveryWindowMaxCursorOffset()) {
-        ctx.rewind(entryCheckpoint);
-        return false;
-      }
+                             const Checkpoint &entryCheckpoint,
+                             std::size_t branchIndex) const {
+    if (replay_no_edit_choice_by_index(ctx, branchIndex)) {
       PEGIUM_RECOVERY_TRACE("[choice rule] deferred strict success offset=",
                             ctx.cursorOffset());
       return true;
@@ -285,36 +342,24 @@ private:
   }
 
   template <typename Checkpoint>
-  bool run_editable_choice(RecoveryContext &ctx,
-                           const Checkpoint &entryCheckpoint) const {
+  ChoiceAttempt evaluate_choice_attempts(RecoveryContext &ctx,
+                                         const Checkpoint &entryCheckpoint) const {
     const auto parseStartOffset = ctx.cursorOffset();
     const auto baseEditCost = ctx.currentEditCost();
-    const auto baseEditCount = ctx.currentEditCount();
     const auto baseRecoveryEditCount = ctx.recoveryEditCount();
-    std::optional<std::size_t> bestIndex;
-    EditableRecoveryCandidate bestCandidate;
-    bool bestUsesDeleteRetry = false;
+    const char *const savedFurthestExploredCursor =
+        ctx.furthestExploredCursor();
+    ctx.restoreFurthestExploredCursor(ctx.cursor());
+    const auto bestAttempt = collect_choice_attempts(
+        ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
+        parseStartOffset, std::make_index_sequence<sizeof...(Elements)>{});
 
-    collect_editable_choice_candidates(
-        ctx, entryCheckpoint, parseStartOffset, baseEditCost, baseEditCount,
-        baseRecoveryEditCount, bestIndex, bestCandidate, bestUsesDeleteRetry,
-        std::make_index_sequence<sizeof...(Elements)>{});
-
-    detail::stepTraceInc(detail::StepCounter::ChoiceEditablePasses);
-    if (!bestIndex.has_value()) {
-      return false;
+    PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceStrictPasses);
+    PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceEditablePasses);
+    if (savedFurthestExploredCursor > ctx.furthestExploredCursor()) {
+      ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
     }
-
-    if (bestUsesDeleteRetry) {
-      return replay_delete_retry_choice_by_index(ctx, *bestIndex);
-    }
-    if (replay_editable_choice_by_index(ctx, *bestIndex)) {
-      PEGIUM_RECOVERY_TRACE("[choice rule] editable success offset=",
-                            ctx.cursorOffset());
-      return true;
-    }
-    ctx.rewind(entryCheckpoint);
-    return false;
+    return bestAttempt;
   }
 
 public:
@@ -355,6 +400,22 @@ private:
     return (... || parser::attempt_fast_probe(ctx, std::get<Is>(choices)));
   }
 
+  template <std::size_t... Is>
+  bool probe_recoverable_choices(RecoveryContext &ctx,
+                                 std::index_sequence<Is...>) const {
+    return (... ||
+            (parser::attempt_fast_probe(ctx, std::get<Is>(choices)) ||
+             probe_locally_recoverable(std::get<Is>(choices), ctx)));
+  }
+
+  template <std::size_t... Is>
+  bool probe_recoverable_entry_choices(RecoveryContext &ctx,
+                                       std::index_sequence<Is...>) const {
+    return (... || [&ctx](const auto &choice) {
+             return probe_recoverable_at_entry(choice, ctx);
+           }(std::get<Is>(choices)));
+  }
+
   template <std::size_t I = 0>
   constexpr const char *terminal_impl(const char *inputBegin) const noexcept
     requires(... && TerminalCapableExpression<Elements>)
@@ -381,40 +442,49 @@ private:
   }
 
   template <std::size_t I = 0>
-  bool match_choice(RecoveryContext &ctx) const {
-    if (attempt_parse_editable(ctx, std::get<I>(choices))) {
-      return true;
-    }
-    if constexpr (I + 1 == sizeof...(Elements)) {
+  bool replay_no_edit_choice_by_index(RecoveryContext &ctx,
+                                      std::size_t bestIndex) const {
+    if constexpr (I == sizeof...(Elements)) {
       return false;
     } else {
-      return match_choice<I + 1>(ctx);
-    }
-  }
-
-  template <std::size_t I = 0>
-  bool match_choice_no_edits(RecoveryContext &ctx) const {
-    if (attempt_parse_no_edits(ctx, std::get<I>(choices))) {
-      return true;
-    }
-    if constexpr (I + 1 == sizeof...(Elements)) {
-      return false;
-    } else {
-      return match_choice_no_edits<I + 1>(ctx);
+      if (bestIndex == I) {
+        return attempt_parse_no_edits(ctx, std::get<I>(choices));
+      }
+      return replay_no_edit_choice_by_index<I + 1>(ctx, bestIndex);
     }
   }
 
   template <std::size_t I>
-  bool run_delete_retry_choice(RecoveryContext &ctx) const {
-    return detail::recover_by_delete_retry(ctx, [this, &ctx]() {
-      ctx.skip();
-      if (!attempt_parse_editable(ctx, std::get<I>(choices))) {
+  bool run_restart_choice(RecoveryContext &ctx, TextOffset retryCursorOffset,
+                          RestartReplayMode replayMode) const {
+    const auto recoveryCheckpoint = ctx.mark();
+    detail::DeleteRetryReplayScope restartScanScope{ctx};
+    while (ctx.cursorOffset() < retryCursorOffset) {
+      if (!ctx.deleteOneCodepoint()) {
+        if (restartScanScope.tryEnableExtendedDeleteScan()) {
+          continue;
+        }
+        ctx.rewind(recoveryCheckpoint);
         return false;
       }
-      PEGIUM_RECOVERY_TRACE("[choice rule] editable delete-retry success offset=",
-                            ctx.cursorOffset());
-      return true;
-    });
+    }
+    const bool usedExtendedDeleteScan = restartScanScope.overflowBudgetScope.enabled;
+    restartScanScope.restoreExtendedDeleteScan();
+    ctx.skip();
+    const bool matchedAfterRestart =
+        replayMode == RestartReplayMode::NoEdit
+            ? attempt_parse_no_edits(ctx, std::get<I>(choices))
+            : attempt_parse_editable(ctx, std::get<I>(choices));
+    if (!matchedAfterRestart) {
+      ctx.rewind(recoveryCheckpoint);
+      return false;
+    }
+    if (usedExtendedDeleteScan) {
+      detail::enable_budget_overflow_edits_for_attempt(ctx);
+    }
+    PEGIUM_RECOVERY_TRACE("[choice rule] restart success offset=",
+                          ctx.cursorOffset());
+    return true;
   }
 
   template <std::size_t I = 0>
@@ -431,67 +501,334 @@ private:
   }
 
   template <std::size_t I = 0>
-  bool replay_delete_retry_choice_by_index(RecoveryContext &ctx,
-                                           std::size_t bestIndex) const {
+  bool replay_restart_choice_by_index(RecoveryContext &ctx,
+                                      std::size_t bestIndex,
+                                      TextOffset retryCursorOffset,
+                                      RestartReplayMode replayMode) const {
     if constexpr (I == sizeof...(Elements)) {
       return false;
     } else {
       if (bestIndex == I) {
-        return run_delete_retry_choice<I>(ctx);
+        return run_restart_choice<I>(ctx, retryCursorOffset, replayMode);
       }
-      return replay_delete_retry_choice_by_index<I + 1>(ctx, bestIndex);
+      return replay_restart_choice_by_index<I + 1>(ctx, bestIndex,
+                                                   retryCursorOffset,
+                                                   replayMode);
     }
+  }
+
+  template <std::size_t I>
+  ChoiceAttempt evaluate_restart_choice_attempt(
+      RecoveryContext &ctx, std::uint32_t baseEditCost,
+      std::size_t baseRecoveryEditCount, TextOffset parseStartOffset) const {
+    ChoiceAttempt bestAttempt;
+    if (!ctx.allowDeleteRetry || !ctx.canDelete()) {
+      return bestAttempt;
+    }
+
+    const auto recoveryCheckpoint = ctx.mark();
+    detail::DeleteRetryReplayScope restartScanScope{ctx};
+    while (true) {
+      while (ctx.deleteOneCodepoint()) {
+        const auto candidateRetryCursorOffset = ctx.cursorOffset();
+        const auto retryCheckpoint = ctx.mark();
+        ctx.skip();
+        const bool matchedAfterRetry =
+            restartScanScope.overflowBudgetScope.enabled
+                ? attempt_parse_no_edits(ctx, std::get<I>(choices))
+                : attempt_parse_editable(ctx, std::get<I>(choices));
+        if (matchedAfterRetry) {
+          ChoiceAttempt candidateAttempt{
+              .branchIndex = I,
+              .kind = ChoiceAttemptKind::RestartReplay,
+              .recovery = capture_choice_candidate(ctx, baseEditCost,
+                                                   baseRecoveryEditCount),
+          };
+          candidateAttempt.restartRetryCursorOffset = candidateRetryCursorOffset;
+          candidateAttempt.restartReplayMode =
+              restartScanScope.overflowBudgetScope.enabled
+                  ? RestartReplayMode::NoEdit
+                  : RestartReplayMode::Editable;
+          if (!bestAttempt.recovery.matched ||
+              detail::is_better_choice_recovery_candidate(
+                  candidateAttempt.recovery, bestAttempt.recovery,
+                  {.parseStartOffset = parseStartOffset})) {
+            bestAttempt = candidateAttempt;
+          }
+        }
+        ctx.rewind(retryCheckpoint);
+        if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
+          if (ctx.skip_without_builder(ctx.cursor()) > ctx.cursor()) {
+            if (matchedAfterRetry) {
+              break;
+            }
+            if constexpr (requires { ctx.extendLastDeleteThroughHiddenTrivia(); }) {
+              if (ctx.extendLastDeleteThroughHiddenTrivia()) {
+                continue;
+              }
+            }
+            break;
+          }
+        }
+      }
+      if (!restartScanScope.tryEnableExtendedDeleteScan()) {
+        break;
+      }
+    }
+    ctx.rewind(recoveryCheckpoint);
+    return bestAttempt;
+  }
+
+  template <typename Checkpoint>
+  bool replay_choice_attempt(RecoveryContext &ctx,
+                             const Checkpoint &entryCheckpoint,
+                             const ChoiceAttempt &attempt,
+                             const char *entryFurthestExploredCursor) const {
+    switch (attempt.kind) {
+    case ChoiceAttemptKind::NoEditReplay:
+      return replay_no_edit_choice(ctx, entryCheckpoint, attempt.branchIndex);
+    case ChoiceAttemptKind::RestartReplay:
+      return replay_restart_choice_by_index(ctx, attempt.branchIndex,
+                                            attempt.restartRetryCursorOffset,
+                                            attempt.restartReplayMode);
+    case ChoiceAttemptKind::Editable:
+      ctx.restoreFurthestExploredCursor(entryFurthestExploredCursor);
+      if (replay_editable_choice_by_index(ctx, attempt.branchIndex)) {
+        PEGIUM_RECOVERY_TRACE("[choice rule] editable success offset=",
+                              ctx.cursorOffset());
+        return true;
+      }
+      ctx.rewind(entryCheckpoint);
+      return false;
+    case ChoiceAttemptKind::None:
+      return false;
+    }
+    return false;
   }
 
   template <std::size_t... Is, typename Checkpoint>
-  void collect_editable_choice_candidates(
+  std::array<ChoiceAttempt, sizeof...(Elements)> observe_no_edit_choice_attempts(
       RecoveryContext &ctx, const Checkpoint &entryCheckpoint,
-      TextOffset parseStartOffset, std::uint32_t baseEditCost,
-      std::uint32_t baseEditCount, std::size_t baseRecoveryEditCount,
-      std::optional<std::size_t> &bestIndex,
-      EditableRecoveryCandidate &bestCandidate, bool &bestUsesDeleteRetry,
-      std::index_sequence<Is...>) const {
-    (collect_editable_choice_candidate<Is>(
-         ctx, entryCheckpoint, parseStartOffset, baseEditCost, baseEditCount,
-         baseRecoveryEditCount, bestIndex, bestCandidate, bestUsesDeleteRetry),
+      std::uint32_t baseEditCost, std::size_t baseRecoveryEditCount,
+      TextOffset parseStartOffset, std::index_sequence<Is...>) const {
+    std::array<ChoiceAttempt, sizeof...(Elements)> noEditAttempts{};
+    ((noEditAttempts[Is] = evaluate_branch_no_edit_choice_attempt<Is>(
+          ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
+          parseStartOffset)),
      ...);
+    return noEditAttempts;
+  }
+
+  [[nodiscard]] static bool any_choice_branch_has_strict_start_signal(
+      const std::array<ChoiceAttempt, sizeof...(Elements)> &noEditAttempts) noexcept {
+    return std::ranges::any_of(
+        noEditAttempts, [](const ChoiceAttempt &attempt) noexcept {
+          return attempt.recovery.matched || attempt.startedWithoutEdits;
+        });
+  }
+
+  [[nodiscard]] static ChoiceAttempt select_best_no_edit_choice_attempt(
+      const std::array<ChoiceAttempt, sizeof...(Elements)> &noEditAttempts,
+      TextOffset parseStartOffset) noexcept {
+    ChoiceAttempt bestAttempt;
+    for (const auto &noEditAttempt : noEditAttempts) {
+      consider_choice_attempt(bestAttempt, noEditAttempt, parseStartOffset);
+    }
+    return bestAttempt;
+  }
+
+  template <std::size_t... Is, typename Checkpoint>
+  ChoiceAttempt select_choice_attempt(
+      RecoveryContext &ctx, const Checkpoint &entryCheckpoint,
+      std::uint32_t baseEditCost, std::size_t baseRecoveryEditCount,
+      TextOffset parseStartOffset,
+      const std::array<ChoiceAttempt, sizeof...(Elements)> &noEditAttempts,
+      bool hasStrictStartSignal,
+      ChoiceAttempt bestAttempt, std::index_sequence<Is...>) const {
+    const bool bestAttemptPreservesCleanBoundary =
+        hasStrictStartSignal &&
+        detail::preserves_clean_no_edit_choice_boundary(bestAttempt.recovery,
+                                                        parseStartOffset);
+    (([&]() {
+       const bool branchHasStrictStartSignal =
+           noEditAttempts[Is].recovery.matched ||
+           noEditAttempts[Is].startedWithoutEdits;
+       if (bestAttemptPreservesCleanBoundary && !branchHasStrictStartSignal) {
+         return;
+       }
+       const auto attempt = evaluate_branch_choice_attempt<Is>(
+           ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
+           parseStartOffset, noEditAttempts[Is],
+           /*allowRestartRetry=*/true, hasStrictStartSignal,
+           branchHasStrictStartSignal);
+       consider_choice_attempt(bestAttempt, attempt, parseStartOffset);
+     }()),
+     ...);
+    return bestAttempt;
+  }
+
+  template <std::size_t... Is, typename Checkpoint>
+  ChoiceAttempt collect_choice_attempts(
+      RecoveryContext &ctx, const Checkpoint &entryCheckpoint,
+      std::uint32_t baseEditCost, std::size_t baseRecoveryEditCount,
+      TextOffset parseStartOffset, std::index_sequence<Is...>) const {
+    const auto noEditAttempts = observe_no_edit_choice_attempts(
+        ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
+        parseStartOffset, std::index_sequence<Is...>{});
+    const bool hasStrictStartSignal =
+        any_choice_branch_has_strict_start_signal(noEditAttempts);
+    const auto bestNoEditAttempt = select_best_no_edit_choice_attempt(
+        noEditAttempts, parseStartOffset);
+    return select_choice_attempt(
+        ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
+        parseStartOffset, noEditAttempts, hasStrictStartSignal,
+        bestNoEditAttempt,
+        std::index_sequence<Is...>{});
   }
 
   template <std::size_t I, typename Checkpoint>
-  void collect_editable_choice_candidate(
+  ChoiceAttempt evaluate_branch_no_edit_choice_attempt(
       RecoveryContext &ctx, const Checkpoint &entryCheckpoint,
-      TextOffset parseStartOffset, std::uint32_t baseEditCost,
-      std::uint32_t baseEditCount, std::size_t baseRecoveryEditCount,
-      std::optional<std::size_t> &bestIndex,
-      EditableRecoveryCandidate &bestCandidate,
-      bool &bestUsesDeleteRetry) const {
-    const auto editableCandidate = detail::evaluate_editable_recovery_candidate(
-        ctx, entryCheckpoint, baseEditCost, baseEditCount,
-        baseRecoveryEditCount,
-        [this, &ctx]() { return attempt_parse_editable(ctx, std::get<I>(choices)); });
+      std::uint32_t baseEditCost, std::size_t baseRecoveryEditCount,
+      TextOffset parseStartOffset) const {
+    const auto visibleLeafCountBefore = ctx.failureHistorySize();
+    if (!attempt_parse_no_edits(ctx, std::get<I>(choices))) {
+      ctx.rewind(entryCheckpoint);
+      return {.branchIndex = I,
+              .startedWithoutEdits = branch_starts_without_edits<I>(ctx)};
+    }
+    const auto candidate =
+        capture_choice_candidate(ctx, baseEditCost, baseRecoveryEditCount);
+    const auto probe = detail::capture_recovery_probe_progress(
+        ctx, visibleLeafCountBefore);
+    if (probe.deferred()) {
+      const bool preserveCleanSuffix =
+          baseRecoveryEditCount != 0u &&
+          detail::preserves_clean_no_edit_choice_boundary(
+              candidate, parseStartOffset);
+      if (probe.committedOffset >= ctx.pendingRecoveryWindowBeginOffset() &&
+          probe.committedOffset < ctx.pendingRecoveryWindowMaxCursorOffset() &&
+          !preserveCleanSuffix) {
+        PEGIUM_RECOVERY_TRACE("[choice rule] strict deferred blocked offset=",
+                              probe.committedOffset,
+                              " furthest=", probe.furthestExploredOffset);
+        ctx.rewind(entryCheckpoint);
+        return {};
+      }
+      PEGIUM_RECOVERY_TRACE("[choice rule] strict success deferred offset=",
+                            probe.committedOffset,
+                            " furthest=", probe.furthestExploredOffset);
+    } else {
+      PEGIUM_RECOVERY_TRACE("[choice rule] strict success offset=",
+                            ctx.cursorOffset());
+    }
+    ctx.rewind(entryCheckpoint);
+    return {
+        .branchIndex = I,
+        .kind = ChoiceAttemptKind::NoEditReplay,
+        .recovery = candidate,
+    };
+  }
 
-    EditableRecoveryCandidate selectedCandidate = editableCandidate;
-    bool selectedUsesDeleteRetry = false;
-    if (ctx.isInRecoveryPhase()) {
-      const auto deleteRetryCandidate =
-          detail::evaluate_editable_recovery_candidate(
-              ctx, entryCheckpoint, baseEditCost, baseEditCount,
-              baseRecoveryEditCount,
-              [this, &ctx]() { return run_delete_retry_choice<I>(ctx); });
-      if (detail::is_better_efficiency_weighted_editable_candidate(
-              deleteRetryCandidate, editableCandidate, parseStartOffset)) {
-        selectedCandidate = deleteRetryCandidate;
-        selectedUsesDeleteRetry = true;
+  template <std::size_t I, typename Checkpoint>
+  ChoiceAttempt evaluate_branch_choice_attempt(
+      RecoveryContext &ctx, const Checkpoint &entryCheckpoint,
+      std::uint32_t baseEditCost, std::size_t baseRecoveryEditCount,
+      TextOffset parseStartOffset,
+      const ChoiceAttempt &noEditAttempt,
+      bool allowRestartRetry = true,
+      bool hasStrictStartSignal = false,
+      bool branchHasStrictStartSignal = false) const {
+    bool branchHasEntryStartSignal = false;
+    if (hasStrictStartSignal && !branchHasStrictStartSignal) {
+      const auto checkpoint = ctx.mark();
+      const char *const savedFurthestExploredCursor =
+          ctx.furthestExploredCursor();
+      branchHasEntryStartSignal =
+          probe_recoverable_at_entry(std::get<I>(choices), ctx);
+      ctx.rewind(checkpoint);
+      ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+      if (!branchHasEntryStartSignal) {
+        return {};
       }
     }
-
-    if (!bestIndex.has_value() ||
-        detail::is_better_choice_recovery_candidate(selectedCandidate,
-                                                    bestCandidate)) {
-      bestIndex = I;
-      bestCandidate = selectedCandidate;
-      bestUsesDeleteRetry = selectedUsesDeleteRetry;
+    auto bestAttempt = noEditAttempt;
+    const auto editableAttempt = evaluate_branch_local_editable_choice_attempt<I>(
+        ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
+        parseStartOffset, allowRestartRetry);
+    if (editableAttempt.recovery.matched &&
+        (!bestAttempt.recovery.matched ||
+         detail::is_better_choice_recovery_candidate(
+             editableAttempt.recovery, bestAttempt.recovery,
+             {.parseStartOffset = parseStartOffset}))) {
+      bestAttempt = editableAttempt;
     }
+    if (!hasStrictStartSignal) {
+      const bool matched = bestAttempt.recovery.matched;
+      const bool noEditAttempt = matched && bestAttempt.recovery.editCount == 0u;
+      const bool continuesAfterFirstEdit =
+          matched && detail::continues_after_first_edit(bestAttempt.recovery);
+      const bool forbiddenWithoutStrictStartSignal =
+          matched && bestAttempt.recovery.hasDeleteEdit &&
+          !continuesAfterFirstEdit;
+      const bool requiresEntryStartSignal =
+          matched && !noEditAttempt &&
+          bestAttempt.recovery.firstEditOffset <= parseStartOffset &&
+          !(bestAttempt.recovery.firstEditOffset == parseStartOffset &&
+            !bestAttempt.recovery.hasDeleteEdit &&
+            continuesAfterFirstEdit);
+      if (requiresEntryStartSignal) {
+        const auto checkpoint = ctx.mark();
+        const char *const savedFurthestExploredCursor =
+            ctx.furthestExploredCursor();
+        branchHasEntryStartSignal =
+            probe_recoverable_at_entry(std::get<I>(choices), ctx);
+        ctx.rewind(checkpoint);
+        ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+      }
+      const bool legalWithoutStrictStartSignal =
+          matched && (noEditAttempt ||
+                      (!forbiddenWithoutStrictStartSignal &&
+                       (branchHasEntryStartSignal ||
+                        bestAttempt.recovery.firstEditOffset >
+                            parseStartOffset ||
+                        (bestAttempt.recovery.firstEditOffset ==
+                             parseStartOffset &&
+                         !bestAttempt.recovery.hasDeleteEdit &&
+                         continuesAfterFirstEdit))));
+      if (!legalWithoutStrictStartSignal) {
+        return {};
+      }
+    }
+    return bestAttempt;
+  }
+
+  template <std::size_t I, typename Checkpoint>
+  ChoiceAttempt evaluate_branch_local_editable_choice_attempt(
+      RecoveryContext &ctx, const Checkpoint &entryCheckpoint,
+      std::uint32_t baseEditCost, std::size_t baseRecoveryEditCount,
+      TextOffset parseStartOffset, bool allowRestartRetry = true) const {
+    const auto editableCandidate = detail::evaluate_editable_recovery_candidate(
+        ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
+        [this, &ctx]() { return attempt_parse_editable(ctx, std::get<I>(choices)); });
+    const ChoiceAttempt editableAttempt{
+        .branchIndex = I,
+        .kind = ChoiceAttemptKind::Editable,
+        .recovery = editableCandidate,
+    };
+    const ChoiceAttempt restartAttempt =
+        (allowRestartRetry && ctx.isInRecoveryPhase() && ctx.allowDeleteRetry)
+            ? evaluate_restart_choice_attempt<I>(
+                  ctx, baseEditCost, baseRecoveryEditCount, parseStartOffset)
+            : ChoiceAttempt{};
+    if (restartAttempt.recovery.matched &&
+        (!editableAttempt.recovery.matched ||
+         detail::is_better_choice_recovery_candidate(
+             restartAttempt.recovery, editableAttempt.recovery,
+             {.parseStartOffset = parseStartOffset}))) {
+      return restartAttempt;
+    }
+    return editableAttempt;
   }
 
   template <std::size_t... Is>

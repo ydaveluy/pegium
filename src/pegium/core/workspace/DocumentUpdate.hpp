@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -11,6 +13,7 @@ namespace pegium::workspace {
 struct DocumentDiagnosticsSnapshot {
   std::string uri;
   std::string text;
+  std::optional<std::int64_t> version;
   std::vector<pegium::Diagnostic> diagnostics;
 };
 

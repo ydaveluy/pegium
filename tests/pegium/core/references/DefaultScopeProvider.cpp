@@ -56,7 +56,7 @@ protected:
   Rule<BaseTargetNode> BaseRule{"Base", DerivedRule};
 };
 
-template <typename TargetType>
+template <typename OwnerType, typename TargetType>
 struct TestReferenceAssignment final : grammar::Assignment {
   explicit TestReferenceAssignment(std::string_view feature) noexcept
       : feature(feature) {}
@@ -262,7 +262,7 @@ ScopedDocumentFixture make_scoped_document(pegium::SharedCoreServices &shared,
   auto *innerPtr = inner.get();
   innerPtr->setCstNode(cst->get(0));
 
-  static const TestReferenceAssignment<TargetNode> assignment("ref");
+  static const TestReferenceAssignment<RefHolder, TargetNode> assignment("ref");
   auto holder = std::make_unique<RefHolder>();
   auto *holderPtr = holder.get();
   holderPtr->setCstNode(cst->get(0));
@@ -304,7 +304,7 @@ make_attached_reference_holder(pegium::SharedCoreServices &shared,
   CstBuilder builder(*cst);
   builder.leaf(0, static_cast<TextOffset>(refText.size()), &literal);
 
-  static const TestReferenceAssignment<TargetType> assignment("ref");
+  static const TestReferenceAssignment<Holder, TargetType> assignment("ref");
   auto holder = std::make_unique<Holder>();
   auto *holderPtr = holder.get();
   holderPtr->setCstNode(cst->get(0));
@@ -457,7 +457,7 @@ TEST(DefaultScopeProviderTest,
       *shared, *linker, test::make_file_uri("scope-provider-synthetic.test"),
       "visible");
   const auto documentId = fixture.document->id;
-  TestReferenceAssignment<TargetNode> assignment("ref");
+  TestReferenceAssignment<RefHolder, TargetNode> assignment("ref");
 
   indexManager->setExports(
       documentId,
@@ -626,7 +626,7 @@ TEST(DefaultScopeProviderTest, AllowsDerivedProviderToOverrideGlobalEntriesHook)
   auto fixture = make_attached_reference_holder<RefHolder, TargetNode>(
       *shared, *linker, test::make_file_uri("scope-provider-hooked.test"),
       "hooked");
-  TestReferenceAssignment<TargetNode> assignment("ref");
+  TestReferenceAssignment<RefHolder, TargetNode> assignment("ref");
   const ReferenceInfo info{fixture.holder, {}, assignment};
 
   EXPECT_EQ(collect_names(*scopeProvider, info),

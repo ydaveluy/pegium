@@ -4,6 +4,7 @@
 #include <domainmodel/parser/Parser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
+#include <pegium/examples/RecoverySampleTestSupport.hpp>
 
 namespace domainmodel::tests {
 namespace {
@@ -56,31 +57,41 @@ TEST(DomainModelLanguageTest, ResolvesTypeReferenceToEntitySubtype) {
 }
 
 TEST(DomainModelLanguageTest,
-     RecoveryKeepsBuildingModelAfterDuplicateFeatureColon) {
+     RecoversMissingFeatureColonInFirstEntityWithoutDiscardingTheEntity) {
   parser::DomainModelParser parser;
   auto document = pegium::test::parse_document(
       parser,
-      "entity Blog {\n"
-      "    title: String\n"
-      "}\n"
-      "\n"
       "entity Post {\n"
-      "    title: String\n"
-      "    content:: String\n"
-      "    many comments: Comment\n"
+      "  many comments Comment\n"
+      "  title: String\n"
       "}\n"
       "\n"
-      "entity Comment {\n"
-      "    content: String\n"
-      "}\n",
-      pegium::test::make_file_uri("recovery-blog.dmodel"), "domain-model");
+      "entity Comment {}\n",
+      pegium::test::make_file_uri("missing-many-colon.dmodel"),
+      "domain-model");
 
-  ASSERT_NE(document, nullptr);
-  auto *model =
-      dynamic_cast<ast::DomainModel *>(document->parseResult.value.get());
+  const auto &parsed = document->parseResult;
+  ASSERT_TRUE(parsed.value);
+  EXPECT_TRUE(parsed.fullMatch);
+  EXPECT_TRUE(parsed.recoveryReport.hasRecovered);
+  EXPECT_FALSE(pegium::test::has_parse_diagnostic_kind(
+      parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete));
+
+  auto *model = dynamic_cast<ast::DomainModel *>(parsed.value.get());
   ASSERT_NE(model, nullptr);
-  EXPECT_GE(model->elements.size(), 3u);
-  EXPECT_FALSE(document->parseResult.parseDiagnostics.empty());
+  ASSERT_EQ(model->elements.size(), 2u);
+
+  auto *post = dynamic_cast<ast::Entity *>(model->elements[0].get());
+  auto *comment = dynamic_cast<ast::Entity *>(model->elements[1].get());
+  ASSERT_NE(post, nullptr);
+  ASSERT_NE(comment, nullptr);
+  EXPECT_EQ(post->name, "Post");
+  EXPECT_EQ(comment->name, "Comment");
+  ASSERT_EQ(post->features.size(), 2u);
+  ASSERT_NE(post->features[0], nullptr);
+  EXPECT_TRUE(post->features[0]->many);
+  EXPECT_EQ(post->features[0]->name, "comments");
+  EXPECT_EQ(post->features[0]->type.getRefText(), "Comment");
 }
 
 } // namespace

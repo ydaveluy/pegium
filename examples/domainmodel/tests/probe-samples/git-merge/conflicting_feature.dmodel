@@ -1,0 +1,10 @@
+entity Blog {
+<<<<<<< HEAD
+  title: String
+=======
+  title: Text
+>>>>>>> feature/title
+  author: Person
+}
+
+entity Person {}

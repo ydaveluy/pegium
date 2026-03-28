@@ -75,12 +75,14 @@ public:
   /// parent node. They must not outlive that parent.
   [[nodiscard]] Checkpoint mark() const noexcept {
     assert(_depth < _frames.size());
+    const auto *const frames = _frames.data();
+    const Frame &frame = frames[_depth];
     return {
         .nodeCount = _root._nodeCount,
         .current = _current,
         .depth = _depth,
-        .lastAtLevel = _frames[_depth].last,
-        .parentAtLevel = _frames[_depth].parent,
+        .lastAtLevel = frame.last,
+        .parentAtLevel = frame.parent,
     };
   }
 
@@ -90,9 +92,9 @@ public:
   /// the same one. In other words, rewinding after that parent has been
   /// exited is invalid.
   inline void rewind(const Checkpoint &cp) noexcept {
+    const auto *const frames = _frames.data();
     assert((cp.depth == 0 ||
-            (_depth >= cp.depth &&
-             _frames[cp.depth].parent == cp.parentAtLevel)) &&
+            (_depth >= cp.depth && frames[cp.depth].parent == cp.parentAtLevel)) &&
            "Cannot rewind to a checkpoint whose open node was already exited");
 
     _root._nodeCount = cp.nodeCount;
@@ -108,8 +110,9 @@ public:
     }
 
     assert(_depth < _frames.size());
-    _frames[_depth].parent = cp.parentAtLevel;
-    _frames[_depth].last = cp.lastAtLevel;
+    Frame &frame = _frames.data()[_depth];
+    frame.parent = cp.parentAtLevel;
+    frame.last = cp.lastAtLevel;
   }
 
   // --------------------------------------------------------------------------
@@ -131,7 +134,7 @@ public:
     // Descend: set up next depth for children of this node
     ++_depth;
     if (_depth < _frames.size()) [[likely]] {
-      _frames[_depth] = {id, kNoNode};
+      _frames.data()[_depth] = {id, kNoNode};
     } else {
       _frames.emplace_back(id, kNoNode);
     }
@@ -147,7 +150,8 @@ public:
     assert(_current != kNoNode);
     assert(_depth > 0); // must have a parent depth to link into
 
-    const bool hasChildren = _frames[_depth].last != kNoNode;
+    auto *const frames = _frames.data();
+    const bool hasChildren = frames[_depth].last != kNoNode;
 
     // Finalize node created by enter()
     _root.node(_current) = {
@@ -164,14 +168,14 @@ public:
     --_depth;
 
     // Link current among siblings at parent depth
-    NodeId &last = _frames[_depth].last;
+    NodeId &last = frames[_depth].last;
     if (last != kNoNode) [[likely]] {
       _root.node(last).nextSiblingId = _current;
     }
     last = _current;
 
     // Restore current to parent node at this depth
-    _current = _frames[_depth].parent;
+    _current = frames[_depth].parent;
   }
 
   inline void leaf(TextOffset beginOffset, TextOffset endOffset,
@@ -192,7 +196,7 @@ public:
     };
 
     // Link leaf among siblings at current depth
-    NodeId &last = _frames[_depth].last;
+    NodeId &last = _frames.data()[_depth].last;
     if (last != kNoNode) [[likely]] {
       _root.node(last).nextSiblingId = id;
     }

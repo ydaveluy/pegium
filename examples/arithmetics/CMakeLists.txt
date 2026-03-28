@@ -114,4 +114,12 @@ if(BUILD_TESTING)
         example
         arithmetics
     )
+    add_test(
+        NAME PegiumRecoveryCorpusArithmetics
+        COMMAND $<TARGET_FILE:pegium-example-arithmetics-test>
+            --gtest_filter=*RecoverySample*:*RecoveryProbe*
+    )
+    set_tests_properties(PegiumRecoveryCorpusArithmetics PROPERTIES
+        LABELS "recovery-corpus"
+    )
 endif()

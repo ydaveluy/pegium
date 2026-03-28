@@ -157,8 +157,10 @@ struct InfixRule final : grammar::InfixRule {
                                          const ValueBuildContext &);
     bool (*rule)(const void *, ParseContext &);
     bool (*ruleTracked)(const void *, TrackedParseContext &);
+    bool (*fastProbeTracked)(const void *, TrackedParseContext &);
     bool (*recover)(const void *, RecoveryContext &);
     bool (*expect)(const void *, ExpectContext &);
+    bool (*probeRecoverable)(const void *, RecoveryContext &);
     void (*init)(const void *, AstReflectionInitContext &);
     const grammar::AbstractElement *(*elem)(const void *) noexcept;
     const grammar::InfixOperator *(*getOperator)(const void *,
@@ -255,8 +257,15 @@ struct InfixRule final : grammar::InfixRule {
     assert(_obj && _ops.getValue && "Missing element wrapper!");
     return _ops.getValue(_obj, node, std::move(lhsNode), context);
   }
+
+  bool probeRecoverable(RecoveryContext &ctx) const {
+    assert(_obj && _ops.probeRecoverable && "Missing recovery probe wrapper!");
+    return _ops.probeRecoverable(_obj, ctx);
+  }
+
 private:
   friend struct detail::ParseAccess;
+  friend struct detail::FastProbeAccess;
   friend struct detail::InitAccess;
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
@@ -274,6 +283,11 @@ private:
       assert(_obj && _ops.expect && "Missing element wrapper!");
       return _ops.expect(_obj, ctx);
     }
+  }
+
+  bool fast_probe_impl(TrackedParseContext &ctx) const {
+    assert(_obj && _ops.fastProbeTracked && "Missing tracked infix fast-probe wrapper!");
+    return _ops.fastProbeTracked(_obj, ctx);
   }
 
   void init_impl(AstReflectionInitContext &ctx) const {
@@ -338,11 +352,30 @@ private:
     static bool ruleTracked(const void *self, TrackedParseContext &ctx) {
       return ParseEngine::rule(static_cast<const Model *>(self), ctx);
     }
+    static bool fastProbeTracked(const void *self, TrackedParseContext &ctx) {
+      const auto *model = static_cast<const Model *>(self);
+      return parser::attempt_fast_probe(ctx, model->primary);
+    }
     static bool recover(const void *self, RecoveryContext &ctx) {
       return ParseEngine::recover(static_cast<const Model *>(self), ctx);
     }
     static bool expect(const void *self, ExpectContext &ctx) {
       return ParseEngine::expect(static_cast<const Model *>(self), ctx);
+    }
+    static bool probeRecoverable(const void *self, RecoveryContext &ctx) {
+      const auto *model = static_cast<const Model *>(self);
+      const auto checkpoint = ctx.mark();
+      const auto savedFurthestExploredCursor =
+          ctx.furthestExploredCursor();
+      const auto startOffset = ctx.cursorOffset();
+      ctx.restoreFurthestExploredCursor(ctx.cursor());
+      const bool matchedPrimary =
+          parser::attempt_parse_no_edits(ctx, model->primary);
+      const bool startedPrimary =
+          matchedPrimary || ctx.furthestExploredOffset() > startOffset;
+      ctx.rewind(checkpoint);
+      ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+      return startedPrimary;
     }
     static void init(const void *self, AstReflectionInitContext &ctx) {
       const auto *model = static_cast<const Model *>(self);
@@ -381,8 +414,10 @@ private:
           .getValue = &Model::getValue,
           .rule = &Model::rule,
           .ruleTracked = &Model::ruleTracked,
+          .fastProbeTracked = &Model::fastProbeTracked,
           .recover = &Model::recover,
           .expect = &Model::expect,
+          .probeRecoverable = &Model::probeRecoverable,
           .init = &Model::init,
           .elem = &Model::elem,
           .getOperator = &Model::getOperator,
@@ -413,8 +448,10 @@ private:
           return false;
         }
         ctx.skip();
-        return parse_tail_editable(model, ctx, /*minPrecedence=*/0,
-                                   expressionStart);
+        const bool matched =
+            parse_tail_editable(model, ctx, /*minPrecedence=*/0, expressionStart);
+        ctx.stopInfixTailAfterRecovery = false;
+        return matched;
       }
 
       static bool expect(const Model *model, ExpectContext &ctx) {
@@ -469,6 +506,9 @@ private:
         if (minPrecedence > kMaxPrecedence) {
           return true;
         }
+        if (ctx.stopInfixTailAfterRecovery) {
+          return true;
+        }
         while (true) {
           if (!has_operator_fast_probe(model, ctx, minPrecedence)) {
             return true;
@@ -482,9 +522,55 @@ private:
             return true;
           }
           ctx.skip();
-          const auto rhsStart = ctx.cursor();
-          if (!parse(model->primary, ctx)) {
+          if (has_operator_fast_probe(model, ctx, /*minPrecedence=*/0) &&
+              !consume_prefix_operator_noise_before_rhs_primary(model, ctx)) {
             ctx.rewind(nodeCheckpoint);
+            return recover_stray_operator_run(model, ctx, minPrecedence);
+          }
+          const auto rhsStart = ctx.cursor();
+          const auto rhsStartOffset = ctx.cursorOffset();
+          const auto baseRecoveryEditCount = ctx.recoveryEditCount();
+          const bool previousAllowExtendedDeleteScan =
+              ctx.allowExtendedDeleteScan;
+          ctx.allowExtendedDeleteScan = false;
+          const bool matchedPrimary = parse(model->primary, ctx);
+          ctx.allowExtendedDeleteScan = previousAllowExtendedDeleteScan;
+          if (!matchedPrimary) {
+            ctx.rewind(nodeCheckpoint);
+            return recover_stray_operator_run(model, ctx, minPrecedence);
+          }
+          if (ctx.cursor() == rhsStart) {
+            ctx.rewind(nodeCheckpoint);
+            return recover_stray_operator_run(model, ctx, minPrecedence);
+          }
+          if (ctx.recoveryEditCount() > baseRecoveryEditCount) {
+            const auto edits = ctx.recoveryEditsView();
+            const auto immediateEditCount =
+                ctx.recoveryEditCount() - baseRecoveryEditCount;
+            const bool crossedSkippedTrivia = [&ctx, rhsStart]() {
+              const char *cursor = rhsStart;
+              while (cursor < ctx.cursor()) {
+                const char *const skipped = ctx.skip_without_builder(cursor);
+                if (skipped > cursor) {
+                  return true;
+                }
+                ++cursor;
+              }
+              return false;
+            }();
+            if (crossedSkippedTrivia) {
+              ctx.rewind(nodeCheckpoint);
+              return recover_stray_operator_run(model, ctx, minPrecedence);
+            }
+            if (immediateEditCount > 1u &&
+                edits[baseRecoveryEditCount].offset == rhsStartOffset) {
+              ctx.rewind(nodeCheckpoint);
+              return recover_stray_operator_run(model, ctx, minPrecedence);
+            }
+          }
+          if (ctx.stopInfixTailAfterRecovery) {
+            assert(model->_owner && "The owner must be set");
+            ctx.exit(lhsStart, model->_owner);
             return true;
           }
           ctx.skip();
@@ -607,6 +693,68 @@ private:
           return try_match_operator_editable<I + 1>(model, ctx, minPrecedence,
                                                     nextMinPrecedence);
         }
+      }
+
+      static bool recover_stray_operator_run(const Model *model,
+                                             RecoveryContext &ctx,
+                                             std::int32_t minPrecedence) {
+        const auto recoveryCheckpoint = ctx.mark();
+        const auto savedMaxConsecutiveDeletes =
+            ctx.maxConsecutiveCodepointDeletes;
+        const auto savedMaxEditCost = ctx.maxEditCost;
+        const bool previousSkipAfterDelete = ctx.skipAfterDelete;
+        ctx.maxConsecutiveCodepointDeletes =
+            std::numeric_limits<std::uint32_t>::max();
+        ctx.maxEditCost = std::numeric_limits<std::uint32_t>::max();
+        ctx.skipAfterDelete = false;
+        bool deletedAny = false;
+        while (ctx.cursor() != ctx.end &&
+               has_operator_fast_probe(model, ctx, minPrecedence)) {
+          if (!ctx.deleteOneCodepoint()) {
+            break;
+          }
+          deletedAny = true;
+        }
+        ctx.maxConsecutiveCodepointDeletes = savedMaxConsecutiveDeletes;
+        ctx.maxEditCost = savedMaxEditCost;
+        ctx.skipAfterDelete = previousSkipAfterDelete;
+        if (!deletedAny || ctx.cursor() == ctx.end ||
+            has_operator_fast_probe(model, ctx, minPrecedence)) {
+          ctx.rewind(recoveryCheckpoint);
+          return false;
+        }
+        ctx.stopInfixTailAfterRecovery =
+            ctx.skip_without_builder(ctx.cursor()) > ctx.cursor();
+        detail::enable_budget_overflow_edits_for_attempt(ctx);
+        return true;
+      }
+
+      static bool consume_prefix_operator_noise_before_rhs_primary(
+          const Model *model, RecoveryContext &ctx) {
+        const auto checkpoint = ctx.mark();
+        const bool previousSkipAfterDelete = ctx.skipAfterDelete;
+        ctx.skipAfterDelete = false;
+        const auto maxProbeDeletes =
+            std::min<std::uint32_t>(ctx.maxConsecutiveCodepointDeletes, 4u);
+        bool exposedPrimary = false;
+        for (std::uint32_t deleted = 0;
+             deleted < maxProbeDeletes && ctx.cursor() != ctx.end; ++deleted) {
+          if (!has_operator_fast_probe(model, ctx, /*minPrecedence=*/0) ||
+              !ctx.deleteOneCodepoint()) {
+            break;
+          }
+          ctx.skip();
+          if (parser::attempt_fast_probe(ctx, model->primary) ||
+              parser::probe_locally_recoverable(model->primary, ctx)) {
+            exposedPrimary = true;
+            break;
+          }
+        }
+        ctx.skipAfterDelete = previousSkipAfterDelete;
+        if (!exposedPrimary) {
+          ctx.rewind(checkpoint);
+        }
+        return exposedPrimary;
       }
 
     };

@@ -1,0 +1,5 @@
+entity Post {
+  many comments Comment
+}
+
+entity Comment {}

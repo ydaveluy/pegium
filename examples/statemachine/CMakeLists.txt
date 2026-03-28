@@ -109,4 +109,12 @@ if(BUILD_TESTING)
         example
         statemachine
     )
+    add_test(
+        NAME PegiumRecoveryCorpusStatemachine
+        COMMAND $<TARGET_FILE:pegium-example-statemachine-test>
+            --gtest_filter=*RecoverySample*:*RecoveryProbe*
+    )
+    set_tests_properties(PegiumRecoveryCorpusStatemachine PROPERTIES
+        LABELS "recovery-corpus"
+    )
 endif()

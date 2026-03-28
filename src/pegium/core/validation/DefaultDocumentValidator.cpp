@@ -32,6 +32,22 @@ struct FoundToken {
   std::string_view image;
 };
 
+[[nodiscard]] std::optional<CstNodeView>
+next_visible_leaf_at_or_after(const workspace::Document &document,
+                              TextOffset offset) {
+  if (document.parseResult.cst == nullptr) {
+    return std::nullopt;
+  }
+  for (auto leaf = find_first_leaf(*document.parseResult.cst); leaf.has_value();
+       leaf = find_next_leaf(*leaf)) {
+    if (leaf->isHidden() || leaf->getEnd() <= offset) {
+      continue;
+    }
+    return leaf;
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] FoundToken find_found_token(const workspace::Document &document,
                                           TextOffset offset);
 
@@ -221,17 +237,8 @@ format_expect_frontier(std::span<const parser::ExpectPath> frontier) {
 
   const auto failureOffset =
       std::min(document.parseResult.failureVisibleCursorOffset, textSize);
-  if (document.parseResult.cst == nullptr) {
-    return failureOffset;
-  }
-  for (auto leaf = find_first_leaf(*document.parseResult.cst); leaf.has_value();
-       leaf = find_next_leaf(*leaf)) {
-    if (leaf->isHidden()) {
-      continue;
-    }
-    if (leaf->getEnd() <= failureOffset) {
-      continue;
-    }
+  if (const auto leaf = next_visible_leaf_at_or_after(document, failureOffset);
+      leaf.has_value()) {
     return leaf->getBegin() > failureOffset ? failureOffset : offset;
   }
   return failureOffset;
@@ -239,19 +246,9 @@ format_expect_frontier(std::span<const parser::ExpectPath> frontier) {
 
 [[nodiscard]] FoundToken find_found_token(const workspace::Document &document,
                                           TextOffset offset) {
-  if (document.parseResult.cst != nullptr) {
-    for (auto leaf = find_first_leaf(*document.parseResult.cst); leaf.has_value();
-         leaf = find_next_leaf(*leaf)) {
-      if (leaf->isHidden()) {
-        continue;
-      }
-      if (leaf->getEnd() <= offset) {
-        continue;
-      }
-      return {.begin = leaf->getBegin(),
-              .end = leaf->getEnd(),
-              .image = leaf->getText()};
-    }
+  if (const auto leaf = next_visible_leaf_at_or_after(document, offset);
+      leaf.has_value()) {
+    return {.begin = leaf->getBegin(), .end = leaf->getEnd(), .image = leaf->getText()};
   }
 
   const auto text = std::string_view{document.textDocument().getText()};
@@ -296,6 +293,70 @@ previous_visible_leaf_end(const workspace::Document &document,
   return previousVisible->getEnd();
 }
 
+[[nodiscard]] constexpr bool is_ascii_whitespace(char c) noexcept {
+  switch (c) {
+  case ' ':
+  case '\t':
+  case '\n':
+  case '\r':
+  case '\f':
+  case '\v':
+    return true;
+  default:
+    return false;
+  }
+}
+
+[[nodiscard]] bool raw_text_gap_is_whitespace(const workspace::Document &document,
+                                              TextOffset begin,
+                                              TextOffset end) {
+  if (begin >= end) {
+    return true;
+  }
+  const auto text = std::string_view{document.textDocument().getText()};
+  const auto safeBegin = std::min(begin, static_cast<TextOffset>(text.size()));
+  const auto safeEnd = std::min(std::max(safeBegin, end),
+                                static_cast<TextOffset>(text.size()));
+  return std::ranges::all_of(
+      text.substr(static_cast<std::size_t>(safeBegin),
+                  static_cast<std::size_t>(safeEnd - safeBegin)),
+      [](char c) { return is_ascii_whitespace(c); });
+}
+
+[[nodiscard]] bool gap_is_hidden_or_whitespace(const workspace::Document &document,
+                                               TextOffset begin,
+                                               TextOffset end) {
+  if (begin >= end) {
+    return true;
+  }
+  if (document.parseResult.cst == nullptr) {
+    return raw_text_gap_is_whitespace(document, begin, end);
+  }
+
+  TextOffset coveredUntil = begin;
+  for (auto leaf = find_first_leaf(*document.parseResult.cst); leaf.has_value();
+       leaf = find_next_leaf(*leaf)) {
+    if (leaf->getEnd() <= coveredUntil) {
+      continue;
+    }
+    if (leaf->getBegin() >= end) {
+      break;
+    }
+    if (leaf->getBegin() > coveredUntil &&
+        !raw_text_gap_is_whitespace(document, coveredUntil, leaf->getBegin())) {
+      return false;
+    }
+    if (!leaf->isHidden()) {
+      return false;
+    }
+    coveredUntil = std::max(coveredUntil, std::min(leaf->getEnd(), end));
+    if (coveredUntil >= end) {
+      return true;
+    }
+  }
+  return raw_text_gap_is_whitespace(document, coveredUntil, end);
+}
+
 [[nodiscard]] TextOffset zero_width_diagnostic_offset(
     const workspace::Document &document, TextOffset offset,
     const FoundToken &foundToken) {
@@ -303,19 +364,13 @@ previous_visible_leaf_end(const workspace::Document &document,
       static_cast<TextOffset>(document.textDocument().getText().size());
   const auto safeOffset = std::min(offset, textSize);
   if (document.parseResult.cst == nullptr) {
-    return foundToken.image.empty() ? safeOffset : std::min(foundToken.begin, safeOffset);
+    return foundToken.image.empty() ? safeOffset
+                                    : std::min(foundToken.begin, safeOffset);
   }
-  for (auto leaf = find_first_leaf(*document.parseResult.cst); leaf.has_value();
-       leaf = find_next_leaf(*leaf)) {
-    if (leaf->isHidden()) {
-      continue;
-    }
-    if (leaf->getEnd() <= safeOffset) {
-      continue;
-    }
-    return safeOffset;
-  }
-  return previous_visible_leaf_end(document, safeOffset);
+  const auto previousVisibleEnd = previous_visible_leaf_end(document, safeOffset);
+  return gap_is_hidden_or_whitespace(document, previousVisibleEnd, safeOffset)
+             ? previousVisibleEnd
+             : safeOffset;
 }
 
 [[nodiscard]] TextOffset gap_insert_diagnostic_end(
@@ -422,6 +477,36 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
     maybe_attach_delete_code_action(diagnostic);
     break;
   case Replaced:
+    if (parseDiagnostic.endOffset > parseDiagnostic.beginOffset) {
+      const auto text = std::string_view{document.textDocument().getText()};
+      const auto safeBegin = std::min(parseDiagnostic.beginOffset,
+                                      static_cast<TextOffset>(text.size()));
+      const auto safeEnd = std::min(std::max(safeBegin, parseDiagnostic.endOffset),
+                                    static_cast<TextOffset>(text.size()));
+      diagnostic =
+          make_base_diagnostic(safeBegin, safeEnd, "parse.replaced");
+      const auto replacedText =
+          safeBegin < safeEnd
+              ? text.substr(static_cast<std::size_t>(safeBegin),
+                            static_cast<std::size_t>(safeEnd - safeBegin))
+              : std::string_view{};
+      if (!parseDiagnostic.message.empty()) {
+        diagnostic.message = parseDiagnostic.message;
+      } else if (!expected.empty() && !replacedText.empty()) {
+        diagnostic.message = "Expecting " + expected + " but found `" +
+                             std::string(replacedText) + "`.";
+      } else if (!expected.empty()) {
+        diagnostic.message = "Expecting " + expected;
+      } else if (!replacedText.empty()) {
+        diagnostic.message =
+            "Unexpected token `" + std::string(replacedText) + "`.";
+      } else {
+        diagnostic.message = unexpectedMessage;
+      }
+      maybe_attach_replace_code_action(diagnostic, parseDiagnostic, safeBegin,
+                                       safeEnd);
+      break;
+    }
     diagnostic =
         make_base_diagnostic(foundToken.begin, foundToken.end, "parse.replaced");
     if (!parseDiagnostic.message.empty()) {
@@ -438,6 +523,15 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
                                      foundToken.end);
     break;
   case Incomplete:
+    if (parseDiagnostic.endOffset > parseDiagnostic.beginOffset) {
+      const auto text = std::string_view{document.textDocument().getText()};
+      const auto safeBegin = std::min(parseDiagnostic.beginOffset,
+                                      static_cast<TextOffset>(text.size()));
+      const auto safeEnd = std::min(std::max(safeBegin, parseDiagnostic.endOffset),
+                                    static_cast<TextOffset>(text.size()));
+      diagnostic =
+          make_base_diagnostic(safeBegin, safeEnd, "parse.incomplete");
+    }
     diagnostic.code = pegium::DiagnosticCode(std::string("parse.incomplete"));
     diagnostic.message =
         !parseDiagnostic.message.empty()
@@ -458,12 +552,10 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
 [[nodiscard]] std::vector<pegium::Diagnostic> extract_parse_diagnostics(
     const workspace::Document &document, const parser::Parser &parserImpl,
     const utils::CancellationToken &cancelToken) {
-  auto parseDiagnostics =
-      parser::normalizeParseDiagnostics(document.parseResult.parseDiagnostics);
   std::vector<pegium::Diagnostic> diagnostics;
-  diagnostics.reserve(parseDiagnostics.size());
+  diagnostics.reserve(document.parseResult.parseDiagnostics.size());
 
-  for (const auto &parseDiagnostic : parseDiagnostics) {
+  for (const auto &parseDiagnostic : document.parseResult.parseDiagnostics) {
     diagnostics.push_back(from_parse_diagnostic(document, parserImpl,
                                                 parseDiagnostic, cancelToken));
   }

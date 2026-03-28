@@ -37,6 +37,11 @@ public:
   explicit(false) JsonValue(const char *value);
   explicit(false) JsonValue(Array value) noexcept;
   explicit(false) JsonValue(Object value) noexcept;
+  JsonValue(const JsonValue &) = default;
+  JsonValue(JsonValue &&) = default;
+  JsonValue &operator=(const JsonValue &other);
+  JsonValue &operator=(JsonValue &&) = default;
+  ~JsonValue() = default;
 
   /// Returns whether the value stores `null`.
   [[nodiscard]] bool isNull() const noexcept;

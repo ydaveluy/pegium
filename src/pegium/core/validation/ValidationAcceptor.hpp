@@ -265,16 +265,16 @@ inline void ValidationDiagnosticBuilderBase<Derived>::emit() {
     return;
   }
 
-  pegium::Diagnostic diagnostic;
-  diagnostic.severity = _severity;
-  diagnostic.message = _message;
-  diagnostic.code = _code;
-  diagnostic.codeDescription = _codeDescription;
-  diagnostic.tags = _tags;
-  diagnostic.relatedInformation = _relatedInformation;
-  diagnostic.data = _data;
-  diagnostic.begin = _begin;
-  diagnostic.end = _end >= _begin ? _end : _begin;
+  pegium::Diagnostic diagnostic{
+      .severity = _severity,
+      .message = std::move(_message),
+      .code = std::move(_code),
+      .codeDescription = std::move(_codeDescription),
+      .tags = std::move(_tags),
+      .relatedInformation = std::move(_relatedInformation),
+      .data = std::move(_data),
+      .begin = _begin,
+      .end = _end >= _begin ? _end : _begin};
   _pending = false;
   _acceptor->operator()(std::move(diagnostic));
 }

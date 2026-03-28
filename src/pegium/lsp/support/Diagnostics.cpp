@@ -48,6 +48,9 @@ void publish_diagnostics(
   ::lsp::notifications::TextDocument_PublishDiagnostics::Params params{};
   params.uri = ::lsp::Uri::parse(snapshot.uri);
   params.diagnostics.reserve(snapshot.diagnostics.size());
+  if (snapshot.version.has_value()) {
+    params.version = clamp_to_lsp_integer(*snapshot.version);
+  }
   auto positionDocument =
       workspace::TextDocument::create(snapshot.uri, "", 0, snapshot.text);
 

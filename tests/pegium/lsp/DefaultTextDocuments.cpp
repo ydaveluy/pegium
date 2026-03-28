@@ -4,7 +4,12 @@
 #include <string>
 #include <vector>
 
+#include <lsp/connection.h>
+#include <lsp/messagehandler.h>
+#include <lsp/messages.h>
+
 #include <pegium/core/CoreTestSupport.hpp>
+#include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/workspace/DefaultTextDocuments.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 
@@ -73,6 +78,50 @@ TEST(DefaultTextDocumentsTest, SetExistingUriReturnsFalseAndReemitsOpenAndChange
   EXPECT_EQ(stored->getText(), "beta");
   EXPECT_EQ(events, (std::vector<std::string>{
                         "open:alpha", "change:alpha", "open:beta", "change:beta"}));
+}
+
+TEST(DefaultTextDocumentsTest,
+     ListenReplacesStoredSnapshotInsteadOfMutatingExistingOpenDocument) {
+  DefaultTextDocuments documents;
+  test::MemoryStream stream;
+  ::lsp::Connection connection(stream);
+  ::lsp::MessageHandler handler(connection);
+  auto subscription = documents.listen(handler);
+  (void)subscription;
+
+  const auto uri = std::string("file:///default-text-documents-listen.test");
+
+  ::lsp::DidOpenTextDocumentParams openParams{};
+  openParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  openParams.textDocument.languageId = "test";
+  openParams.textDocument.version = 1;
+  openParams.textDocument.text = "alpha";
+  stream.pushInput(test::make_notification_message(
+      ::lsp::notifications::TextDocument_DidOpen::Method, std::move(openParams)));
+  handler.processIncomingMessages();
+
+  auto original = documents.get(uri);
+  ASSERT_NE(original, nullptr);
+  EXPECT_EQ(original->getText(), "alpha");
+  EXPECT_EQ(original->version(), 1);
+
+  ::lsp::DidChangeTextDocumentParams changeParams{};
+  changeParams.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(uri));
+  changeParams.textDocument.version = 2;
+  changeParams.contentChanges.push_back(
+      ::lsp::TextDocumentContentChangeEvent_Text{.text = "beta"});
+  stream.pushInput(test::make_notification_message(
+      ::lsp::notifications::TextDocument_DidChange::Method,
+      std::move(changeParams)));
+  handler.processIncomingMessages();
+
+  auto updated = documents.get(uri);
+  ASSERT_NE(updated, nullptr);
+  EXPECT_NE(updated.get(), original.get());
+  EXPECT_EQ(updated->getText(), "beta");
+  EXPECT_EQ(updated->version(), 2);
+  EXPECT_EQ(original->getText(), "alpha");
+  EXPECT_EQ(original->version(), 1);
 }
 
 TEST(DefaultTextDocumentsTest, RemoveRemovesSnapshotAndEmitsCloseEvent) {

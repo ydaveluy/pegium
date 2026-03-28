@@ -1,0 +1,7 @@
+module Demo
+def base: 2;
+<<<<<<< HEAD
+base + 2;
+=======
+base * 2;
+>>>>>>> feature/eval

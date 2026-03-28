@@ -3,6 +3,7 @@
 /// Shared parser-context guards and editable-state utilities.
 
 #include <algorithm>
+#include <concepts>
 #include <cstdint>
 #include <limits>
 #include <pegium/core/grammar/AbstractElement.hpp>
@@ -10,9 +11,57 @@
 #include <pegium/core/parser/Skipper.hpp>
 #include <pegium/core/parser/TextUtils.hpp>
 #include <ranges>
+#include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace pegium::parser::detail {
+
+[[nodiscard]] constexpr bool
+is_identifier_like_codepoint(unsigned char codepoint) noexcept {
+  return (codepoint >= static_cast<unsigned char>('a') &&
+          codepoint <= static_cast<unsigned char>('z')) ||
+         (codepoint >= static_cast<unsigned char>('A') &&
+          codepoint <= static_cast<unsigned char>('Z')) ||
+         (codepoint >= static_cast<unsigned char>('0') &&
+          codepoint <= static_cast<unsigned char>('9')) ||
+         codepoint == static_cast<unsigned char>('_');
+}
+
+[[nodiscard]] constexpr bool
+is_word_like_terminal(std::string_view value) noexcept {
+  if (value.empty()) {
+    return false;
+  }
+  for (const char ch : value) {
+    if (!is_identifier_like_codepoint(static_cast<unsigned char>(ch))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <typename Element>
+[[nodiscard]] constexpr bool
+element_is_word_like_terminal(const Element &element) noexcept {
+  using ElementType = std::remove_cvref_t<Element>;
+  if constexpr (requires {
+                  { ElementType::isWordLike } -> std::convertible_to<bool>;
+                }) {
+    return ElementType::isWordLike;
+  } else if constexpr (requires {
+                         { element.isWordLike() } -> std::convertible_to<bool>;
+                       }) {
+    return element.isWordLike();
+  } else if constexpr (requires {
+                         { element.getValue() } ->
+                             std::convertible_to<std::string_view>;
+                       }) {
+    return is_word_like_terminal(element.getValue());
+  } else {
+    return false;
+  }
+}
 
 struct EditCheckpointState {
   bool allowInsert = true;
@@ -221,6 +270,19 @@ next_codepoint_cursor(const char *cursor) noexcept {
              : advanceOneCodepointLossy(cursor);
 }
 
+[[nodiscard]] inline const char *
+previous_codepoint_cursor(const char *begin, const char *cursor) noexcept {
+  if (cursor <= begin) {
+    return begin;
+  }
+  const char *previous = cursor - 1;
+  while (previous > begin &&
+         (static_cast<unsigned char>(*previous) & 0xC0u) == 0x80u) {
+    --previous;
+  }
+  return previous;
+}
+
 inline void apply_insert_edit_state(std::uint32_t cost,
                                     std::uint32_t &editCost,
                                     std::uint32_t &editCount,
@@ -238,7 +300,9 @@ inline void apply_delete_edit_state(std::uint32_t cost,
                                     bool &hadEdits,
                                     std::uint32_t &consecutiveDeletes) noexcept {
   editCost += cost;
-  ++editCount;
+  if (consecutiveDeletes == 0u) {
+    ++editCount;
+  }
   hadEdits = true;
   ++consecutiveDeletes;
 }

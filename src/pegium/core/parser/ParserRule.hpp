@@ -1,5 +1,6 @@
 #pragma once
 /// Parser rule template producing concrete AST nodes.
+#include <algorithm>
 #include <concepts>
 #include <optional>
 #include <pegium/core/parser/AbstractRule.hpp>
@@ -9,7 +10,6 @@
 #include <pegium/core/parser/NodeParseHelpers.hpp>
 #include <pegium/core/parser/Parser.hpp>
 #include <pegium/core/parser/ParserRuleSupport.hpp>
-#include <pegium/core/parser/ParseAttemptRanking.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/RecoveryTrace.hpp>
@@ -91,6 +91,22 @@ struct ParserRule final : AbstractRule<grammar::ParserRule>,
     }
     return _wrapper.probe_recoverable(ctx);
   }
+
+  bool probeRecoverableAtEntry(RecoveryContext &ctx) const {
+    const auto probeAtEntry = [this, &ctx]() {
+      if (_wrapper.fast_probe(ctx)) {
+        return true;
+      }
+      return _wrapper.probe_recoverable_at_entry(ctx);
+    };
+    if (_localSkipper.has_value()) {
+      auto localSkipperGuard = ctx.with_skipper(*_localSkipper);
+      (void)localSkipperGuard;
+      return probeAtEntry();
+    }
+    return probeAtEntry();
+  }
+
   [[nodiscard]] const Skipper *
   getCompletionSkipper() const noexcept override {
     return _localSkipper.has_value() ? std::addressof(*_localSkipper) : nullptr;
@@ -99,9 +115,20 @@ struct ParserRule final : AbstractRule<grammar::ParserRule>,
 
 private:
   friend struct detail::ParseAccess;
+  friend struct detail::FastProbeAccess;
   friend struct detail::InitAccess;
 
   std::optional<Skipper> _localSkipper;
+
+  template <StrictParseModeContext Context>
+  bool fast_probe_impl(Context &ctx) const {
+    if (_localSkipper.has_value()) {
+      auto localSkipperGuard = ctx.with_skipper(*_localSkipper);
+      (void)localSkipperGuard;
+      return _wrapper.fast_probe(ctx);
+    }
+    return _wrapper.fast_probe(ctx);
+  }
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     if constexpr (StrictParseModeContext<Context>) {
@@ -149,10 +176,17 @@ private:
         matched = parse(_wrapper, ctx);
       }
       if (!matched) {
-        if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows() &&
-            ctx.allowTopLevelPartialSuccess &&
-            ctx.completedRecoveryWindowCount() > 0 &&
-            ctx.activeRecoveryDepth() == 1) {
+        bool canCommitPartialTopLevelRecovery = false;
+        if (ctx.allowTopLevelPartialSuccess && ctx.activeRecoveryDepth() == 1 &&
+            ctx.hasHadEdits()) {
+          TextOffset lastEditOffset = 0;
+          for (const auto &edit : ctx.snapshotRecoveryEdits()) {
+            lastEditOffset = std::max(lastEditOffset, edit.endOffset);
+          }
+          canCommitPartialTopLevelRecovery =
+              ctx.maxCursorOffset() > lastEditOffset;
+        }
+        if (canCommitPartialTopLevelRecovery) {
           ctx.exit(nodeStartCheckpoint, this);
           return true;
         }

@@ -1,0 +1,7 @@
+module basicMath
+
+def a: 5; // comment
+
+2*7+++++++++++++++++++++++++++++++++++;
+
+def b: 5;

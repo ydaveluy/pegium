@@ -67,6 +67,13 @@ concept RecoveryProbeCapableExpression =
       { expression.probeRecoverable(ctx) } -> std::same_as<bool>;
     };
 
+template <typename E>
+concept EntryRecoveryProbeCapableExpression =
+    Expression<E> &&
+    requires(const std::remove_cvref_t<E> &expression, RecoveryContext &ctx) {
+      { expression.probeRecoverableAtEntry(ctx) } -> std::same_as<bool>;
+    };
+
 template <Expression E>
 using ExpressionHolder = std::conditional_t<std::is_lvalue_reference_v<E>, E,
                                             std::remove_cvref_t<E>>;
@@ -83,13 +90,18 @@ template <typename E>
 concept TerminalAtom =
     TerminalCapableExpression<E> && detail::IsTerminalAtom_v<E>;
 
+template <Expression E, StrictParseModeContext Context>
+bool attempt_fast_probe(Context &ctx, const E &expression);
+
 struct Wrapper {
   struct Ops {
     using ParseFn = bool (*)(const void *, ParseContext &);
     using TrackedParseFn = bool (*)(const void *, TrackedParseContext &);
+    using TrackedFastProbeFn = bool (*)(const void *, TrackedParseContext &);
     using RecoveryParseFn = bool (*)(const void *, RecoveryContext &);
     using ExpectParseFn = bool (*)(const void *, ExpectContext &);
     using RecoveryProbeFn = bool (*)(const void *, RecoveryContext &);
+    using RecoveryEntryProbeFn = bool (*)(const void *, RecoveryContext &);
     using TerminalFn = const char *(*)(const void *, const char *) noexcept;
     using ElemFn = const grammar::AbstractElement *(*)(const void *) noexcept;
     using InitFn = void (*)(const void *, AstReflectionInitContext &);
@@ -98,9 +110,11 @@ struct Wrapper {
 
     ParseFn parse = nullptr;
     TrackedParseFn parseTracked = nullptr;
+    TrackedFastProbeFn fastProbeTracked = nullptr;
     RecoveryParseFn parseRecover = nullptr;
     ExpectParseFn parseExpect = nullptr;
     RecoveryProbeFn probeRecoverable = nullptr;
+    RecoveryEntryProbeFn probeRecoverableAtEntry = nullptr;
     TerminalFn terminal = nullptr;
     ElemFn elem = nullptr;
     InitFn init = nullptr;
@@ -159,6 +173,14 @@ struct Wrapper {
     return _obj != nullptr && _ops.probeRecoverable != nullptr;
   }
 
+  bool has_entry_recovery_probe() const noexcept {
+    return _obj != nullptr && _ops.probeRecoverableAtEntry != nullptr;
+  }
+
+  bool has_fast_probe() const noexcept {
+    return _obj != nullptr && _ops.fastProbeTracked != nullptr;
+  }
+
   const char *try_terminal(const char *begin) const noexcept {
     return has_terminal() ? _ops.terminal(_obj, begin) : nullptr;
   }
@@ -169,6 +191,16 @@ struct Wrapper {
 
   bool probe_recoverable(RecoveryContext &ctx) const {
     return has_recovery_probe() ? _ops.probeRecoverable(_obj, ctx) : false;
+  }
+
+  bool probe_recoverable_at_entry(RecoveryContext &ctx) const {
+    return has_entry_recovery_probe() ? _ops.probeRecoverableAtEntry(_obj, ctx)
+                                      : false;
+  }
+
+  bool fast_probe(TrackedParseContext &ctx) const {
+    return has_fast_probe() ? _ops.fastProbeTracked(_obj, ctx)
+                            : probe(*this, ctx);
   }
 
   const grammar::AbstractElement *element() const noexcept {
@@ -232,6 +264,10 @@ private:
     static bool parseTracked(const void *self, TrackedParseContext &ctx) {
       return parser::parse(static_cast<const Model *>(self)->value, ctx);
     }
+    static bool fastProbeTracked(const void *self, TrackedParseContext &ctx) {
+      return parser::attempt_fast_probe(ctx,
+                                        static_cast<const Model *>(self)->value);
+    }
     static bool parseRecover(const void *self, RecoveryContext &ctx) {
       return parser::parse(static_cast<const Model *>(self)->value, ctx);
     }
@@ -242,6 +278,11 @@ private:
       requires RecoveryProbeCapableExpression<T>
     {
       return static_cast<const Model *>(self)->value.probeRecoverable(ctx);
+    }
+    static bool probeRecoverableAtEntry(const void *self, RecoveryContext &ctx)
+      requires EntryRecoveryProbeCapableExpression<T>
+    {
+      return static_cast<const Model *>(self)->value.probeRecoverableAtEntry(ctx);
     }
     static const char *terminal(const void *self, const char *b) noexcept
       requires TerminalCapableExpression<T>
@@ -265,6 +306,7 @@ private:
       Ops ops{
           .parse = &Model::parse,
           .parseTracked = &Model::parseTracked,
+          .fastProbeTracked = &Model::fastProbeTracked,
           .parseRecover = &Model::parseRecover,
           .parseExpect = &Model::parseExpect,
           .elem = &Model::elem,
@@ -274,6 +316,9 @@ private:
       };
       if constexpr (RecoveryProbeCapableExpression<T>) {
         ops.probeRecoverable = &Model::probeRecoverable;
+      }
+      if constexpr (EntryRecoveryProbeCapableExpression<T>) {
+        ops.probeRecoverableAtEntry = &Model::probeRecoverableAtEntry;
       }
       if constexpr (TerminalCapableExpression<T>) {
         ops.terminal = &Model::terminal;

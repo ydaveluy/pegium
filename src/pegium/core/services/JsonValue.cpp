@@ -192,6 +192,12 @@ JsonValue::JsonValue(const char *value)
 JsonValue::JsonValue(Array value) noexcept : _value(std::move(value)) {}
 JsonValue::JsonValue(Object value) noexcept : _value(std::move(value)) {}
 
+JsonValue &JsonValue::operator=(const JsonValue &other) {
+  Storage copy(other._value);
+  _value = std::move(copy);
+  return *this;
+}
+
 bool JsonValue::isNull() const noexcept {
   return std::holds_alternative<std::nullptr_t>(_value);
 }

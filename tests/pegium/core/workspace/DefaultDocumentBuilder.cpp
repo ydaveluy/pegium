@@ -67,7 +67,7 @@ const grammar::Literal &dummy_literal() noexcept {
   return literal;
 }
 
-template <typename TargetType>
+template <typename OwnerType, typename TargetType>
 struct TestReferenceAssignment final : grammar::Assignment {
   explicit TestReferenceAssignment(std::string_view feature) noexcept
       : feature(feature) {}
@@ -130,7 +130,8 @@ make_unresolved_reference_parser(const references::Linker *&linkerRef) {
   auto parser = std::make_unique<test::FakeParser>();
   parser->callback =
       [&linkerRef](parser::ParseResult &result, std::string_view text) {
-    static const TestReferenceAssignment<RelinkNode> assignment("node");
+    static const TestReferenceAssignment<RelinkReferrer, RelinkNode> assignment(
+        "node");
     static const grammar::Literal &literal = dummy_literal();
     assert(linkerRef != nullptr);
 
@@ -425,6 +426,48 @@ TEST(DefaultDocumentBuilderTest,
 }
 
 TEST(DefaultDocumentBuilderTest,
+     ParseReplacedLiteralDiagnosticUsesReportedSourceRangeAndText) {
+  using namespace pegium::parser;
+
+  auto parser = std::make_unique<test::FakeParser>();
+  parser->fullMatch = true;
+  static constexpr auto moduleKeyword = "module"_kw;
+  parser->parseDiagnostics.push_back(
+      {.kind = ParseDiagnosticKind::Replaced,
+       .offset = 0,
+       .beginOffset = 0,
+       .endOffset = 5,
+       .element = std::addressof(moduleKeyword)});
+
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("builder-parse-replaced-range.test"),
+      "test", "modle name");
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_EQ(document->diagnostics.size(), 1u);
+  const auto &diagnostic = document->diagnostics.front();
+  EXPECT_EQ(diagnostic.begin, 0u);
+  EXPECT_EQ(diagnostic.end, 5u);
+  EXPECT_EQ(diagnostic.message, "Expecting 'module' but found `modle`.");
+  const auto &actions = default_code_actions(diagnostic);
+  ASSERT_EQ(actions.size(), 1u);
+  const auto &action = actions.front().object();
+  EXPECT_EQ(action.at("title").string(), "Replace with 'module'");
+  EXPECT_EQ(action.at("newText").string(), "module");
+  EXPECT_EQ(action.at("begin").integer(), 0);
+  EXPECT_EQ(action.at("end").integer(), 5);
+}
+
+TEST(DefaultDocumentBuilderTest,
      ParseInsertedRuleDiagnosticDoesNotAddDefaultCodeActionData) {
   using namespace pegium::parser;
 
@@ -551,6 +594,39 @@ TEST(DefaultDocumentBuilderTest,
 }
 
 TEST(DefaultDocumentBuilderTest,
+     ParseIncompleteDiagnosticWithTrailingRecoveredSuffixUsesReportedRange) {
+  using namespace pegium::parser;
+
+  auto parser = std::make_unique<test::FakeParser>();
+  parser->fullMatch = false;
+  parser->parseDiagnostics.push_back({.kind = ParseDiagnosticKind::Incomplete,
+                                      .offset = 7,
+                                      .beginOffset = 4,
+                                      .endOffset = 11,
+                                      .element = nullptr,
+                                      .message = "Unexpected input."});
+
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_core_services(
+        *shared, "test", {".test"}, {}, std::move(parser));
+    pegium::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("builder-parse-incomplete-recovered-tail.test"),
+      "test", "abcd   tail");
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_FALSE(document->diagnostics.empty());
+  EXPECT_EQ(document->diagnostics.front().message, "Unexpected input.");
+  EXPECT_EQ(document->diagnostics.front().begin, 4u);
+  EXPECT_EQ(document->diagnostics.front().end, 11u);
+}
+
+TEST(DefaultDocumentBuilderTest,
      EmptyDocumentUsesDirectFrontierInsteadOfEmptyFoundToken) {
   using namespace pegium::parser;
 
@@ -618,7 +694,7 @@ TEST(DefaultDocumentBuilderTest,
   EXPECT_EQ(document->diagnostics.front().message, "Expecting MODULE_ID");
   EXPECT_EQ(document->diagnostics.front().begin, 10u);
   EXPECT_EQ(document->diagnostics.front().end, 10u);
-  ASSERT_TRUE(document->parseResult.value != nullptr);
+  ASSERT_EQ(document->parseResult.value, nullptr);
 }
 
 TEST(DefaultDocumentBuilderTest,

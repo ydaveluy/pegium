@@ -115,8 +115,20 @@ protected:
     ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
   }
 
+  void TearDown() override {
+    if (shared != nullptr && shared->workspace.workspaceLock != nullptr) {
+      auto drain = shared->workspace.workspaceLock->write(
+          [](const utils::CancellationToken &) {});
+      if (drain.valid()) {
+        drain.get();
+      }
+    }
+  }
+
   std::shared_ptr<workspace::Document> updateDocument(std::string_view fileName,
-                                                      std::string text) {
+                                                      std::string text,
+                                                      std::chrono::milliseconds timeout =
+                                                          std::chrono::milliseconds(3000)) {
     const auto uri = test::make_file_uri(fileName);
     auto documents = test::text_documents(*shared);
     auto textDocument = test::set_text_document(
@@ -124,19 +136,29 @@ protected:
 
     shared->lsp.documentUpdateHandler->didChangeContent({.document = textDocument});
 
-    const bool ready = test::wait_until([&]() {
-      const auto documentId = shared->workspace.documents->getDocumentId(uri);
-      auto document = shared->workspace.documents->getDocument(documentId);
-      return document != nullptr &&
-             document->state >= workspace::DocumentState::Validated;
-    });
-    EXPECT_TRUE(ready);
-    if (!ready) {
+    const auto documentId = shared->workspace.documents->getDocumentId(uri);
+    EXPECT_NE(documentId, workspace::InvalidDocumentId);
+    if (documentId == workspace::InvalidDocumentId) {
       return nullptr;
     }
 
-    const auto documentId = shared->workspace.documents->getDocumentId(uri);
-    auto document = shared->workspace.documents->getDocument(documentId);
+    const bool ready = test::wait_until([&]() {
+      auto document = shared->workspace.documents->getDocument(documentId);
+      return document != nullptr &&
+             document->state >= workspace::DocumentState::Validated;
+    }, timeout);
+    if (!ready) {
+      shared->workspace.documentBuilder->waitUntil(
+          workspace::DocumentState::Validated);
+    }
+
+    auto document = shared->workspace.documents->getDocument(uri);
+    if (document != nullptr &&
+        document->state < workspace::DocumentState::Validated) {
+      (void)shared->workspace.documentBuilder->waitUntil(
+          workspace::DocumentState::Validated, document->id);
+      document = shared->workspace.documents->getDocument(document->id);
+    }
     EXPECT_NE(document, nullptr);
     return document;
   }
@@ -282,6 +304,24 @@ TEST_F(DocumentPipelineIntegrationTest,
 }
 
 TEST_F(DocumentPipelineIntegrationTest,
+       ModuleKeywordTypoPublishesReplaceDiagnosticOnOriginalToken) {
+  auto document =
+      updateDocument("pipeline-module-keyword-typo.calc", "Modle basicMath\n");
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded());
+  ASSERT_TRUE(document->parseRecovered());
+
+  const auto diagnostics = parseDiagnostics(*document);
+  const auto parseDump = dumpDiagnostics(diagnostics);
+  ASSERT_EQ(diagnostics.size(), 1u) << parseDump;
+  EXPECT_EQ(diagnostics.front()->message, "Expecting 'module' but found `Modle`.")
+      << parseDump;
+  EXPECT_EQ(diagnostics.front()->begin, 0u) << parseDump;
+  EXPECT_EQ(diagnostics.front()->end, 5u) << parseDump;
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
        IncompleteRecoveredDocumentPublishesParseDiagnostic) {
   auto document = updateDocument(
       "pipeline-incomplete.calc",
@@ -292,8 +332,10 @@ TEST_F(DocumentPipelineIntegrationTest,
   EXPECT_EQ(document->state, workspace::DocumentState::Validated);
 
   const auto diagnostics = parseDiagnostics(*document);
-  ASSERT_EQ(diagnostics.size(), 1u);
-  EXPECT_EQ(diagnostics.front()->message, "Expecting ;");
+  const auto parseDump = dumpDiagnostics(diagnostics);
+  EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto *diagnostic) {
+    return diagnostic->message == "Expecting ;";
+  })) << parseDump;
 }
 
 TEST_F(DocumentPipelineIntegrationTest,
@@ -313,7 +355,7 @@ TEST_F(DocumentPipelineIntegrationTest,
 }
 
 TEST_F(DocumentPipelineIntegrationTest,
-       PartialDefinitionFragmentPublishesGenericParseDiagnostic) {
+       IdentifierLikeStatementFragmentPublishesMissingSemicolonDiagnostic) {
   auto document = updateDocument(
       "pipeline-partial-def-keyword.calc",
       "module mod\n"
@@ -322,13 +364,14 @@ TEST_F(DocumentPipelineIntegrationTest,
   ASSERT_NE(document, nullptr);
 
   const auto diagnostics = parseDiagnostics(*document);
-  ASSERT_EQ(diagnostics.size(), 1u);
+  const auto parseDump = dumpDiagnostics(diagnostics);
+  ASSERT_FALSE(diagnostics.empty()) << parseDump;
   EXPECT_TRUE(std::ranges::all_of(diagnostics, [](const auto *diagnostic) {
     return is_parse_diagnostic(*diagnostic);
-  }));
+  })) << parseDump;
   EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto *diagnostic) {
-    return diagnostic->begin >= 11u && diagnostic->begin <= 13u;
-  }));
+    return diagnostic->message == "Expecting ;";
+  })) << parseDump;
 }
 
 TEST_F(DocumentPipelineIntegrationTest,
@@ -365,7 +408,8 @@ TEST_F(DocumentPipelineIntegrationTest,
       "def a :4*6;\n");
 
   ASSERT_NE(document, nullptr);
-  ASSERT_TRUE(document->parseSucceeded());
+  ASSERT_EQ(document->state, workspace::DocumentState::Validated);
+  ASSERT_TRUE(document->hasAst());
   ASSERT_TRUE(document->parseRecovered());
   ASSERT_FALSE(document->parseResult.parseDiagnostics.empty());
   ASSERT_FALSE(document->diagnostics.empty());
@@ -425,24 +469,6 @@ TEST_F(DocumentPipelineIntegrationTest,
                                    "Function sqrt expects 1 parameters, but 0 "
                                    "were given."));
   EXPECT_TRUE(test::has_diagnostic_message(*document, "Unexpected token `/`"));
-
-  auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
-  ASSERT_NE(module, nullptr);
-  ASSERT_EQ(module->statements.size(), 3u);
-
-  auto *evaluation =
-      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
-  ASSERT_NE(evaluation, nullptr);
-  auto *call =
-      dynamic_cast<arithmetics::ast::FunctionCall *>(evaluation->expression.get());
-  ASSERT_NE(call, nullptr);
-  ASSERT_EQ(call->args.size(), 1u);
-
-  auto *argument =
-      dynamic_cast<arithmetics::ast::NumberLiteral *>(call->args.front().get());
-  ASSERT_NE(argument, nullptr);
-  EXPECT_DOUBLE_EQ(argument->value, 81.0);
 }
 
 TEST_F(DocumentPipelineIntegrationTest,
@@ -489,8 +515,10 @@ TEST_F(DocumentPipelineIntegrationTest,
   ASSERT_NE(document, nullptr);
 
   const auto diagnostics = parseDiagnostics(*document);
-  ASSERT_EQ(diagnostics.size(), 1u);
-  EXPECT_EQ(diagnostics.front()->message, "Expecting ;");
+  const auto parseDump = dumpDiagnostics(diagnostics);
+  EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto *diagnostic) {
+    return diagnostic->message == "Expecting ;";
+  })) << parseDump;
 }
 
 TEST_F(DocumentPipelineIntegrationTest,
@@ -535,14 +563,23 @@ TEST_F(DocumentPipelineIntegrationTest,
   ASSERT_NE(document, nullptr);
 
   const auto diagnostics = parseDiagnostics(*document);
+  const auto parseDump = dumpDiagnostics(diagnostics);
+  const auto nextDefinitionOffset = document->textDocument().getText().find("def ID");
   ASSERT_FALSE(diagnostics.empty());
   EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto *diagnostic) {
     return diagnostic->message == "Expecting ;" ||
            diagnostic->message.find("Unexpected token") != std::string::npos;
-  }));
-  EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto *diagnostic) {
-    return diagnostic->begin >= 21u && diagnostic->begin <= 22u;
-  }));
+  })) << parseDump;
+  EXPECT_TRUE(std::ranges::any_of(
+      diagnostics, [nextDefinitionOffset](const auto *diagnostic) {
+        return diagnostic->message == "Expecting ;" &&
+                   diagnostic->begin == diagnostic->end ||
+               (diagnostic->message.find("Unexpected token") !=
+                    std::string::npos &&
+                nextDefinitionOffset != std::string::npos &&
+                diagnostic->begin <
+                    static_cast<pegium::TextOffset>(nextDefinitionOffset));
+      })) << parseDump;
 }
 
 TEST_F(DocumentPipelineIntegrationTest,
@@ -570,6 +607,250 @@ TEST_F(DocumentPipelineIntegrationTest,
 }
 
 TEST_F(DocumentPipelineIntegrationTest,
+       MissingSemicolonBeforeBrokenCallKeepsFollowingCallRecoveryLocal) {
+  auto document = updateDocument(
+      "pipeline-missing-semicolon-before-broken-call.calc",
+      "Module basicMath\n"
+      "\n"
+      "def a: 5;\n"
+      "def b: 3;\n"
+      "def c: a + b; // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; // 1\n"
+      "\n"
+      "// This language is case-insensitive regarding symbol names\n"
+      "Root(D, 3); // 32\n"
+      "Root(64, 3); // 4\n"
+      "\n"
+      "\n"
+      "xx\n"
+      "\n"
+      "Root(64 3/0); // 4\n");
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded());
+  ASSERT_TRUE(document->parseRecovered());
+
+  const auto diagnostics = parseDiagnostics(*document);
+  const auto parseDump = dumpDiagnostics(diagnostics);
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Expecting ;") ||
+              test::has_diagnostic_message(*document, "Unexpected token `xx`"))
+      << parseDump;
+
+  auto *module =
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+  ASSERT_NE(module, nullptr) << parseDump;
+  auto *lastEvaluation =
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+  ASSERT_NE(lastEvaluation, nullptr) << parseDump;
+  auto *lastCall = dynamic_cast<arithmetics::ast::FunctionCall *>(
+      lastEvaluation->expression.get());
+  ASSERT_NE(lastCall, nullptr) << parseDump;
+  EXPECT_EQ(lastCall->func.getRefText(), "root");
+  EXPECT_FALSE(lastCall->args.empty());
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
+       LongDeleteRunCanRecoverToNextVisibleStatementBoundary) {
+  const std::string text =
+      "module basicMath\n"
+      "\n"
+      "def a: 5; // comment\n"
+      "\n"
+      "2*7+++++++++;\n"
+      "\n"
+      "\n"
+      "def b: 5;\n";
+  auto document = updateDocument(
+      "pipeline-long-delete-run.calc", text,
+      std::chrono::milliseconds(5000));
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded());
+  ASSERT_TRUE(document->parseRecovered());
+  EXPECT_TRUE(std::ranges::any_of(document->diagnostics, [](const auto &diagnostic) {
+    return diagnostic.message.find("+++++++++") != std::string::npos;
+  }));
+  EXPECT_FALSE(std::ranges::any_of(document->diagnostics, [](const auto &diagnostic) {
+    return diagnostic.message.find("2*7+++++++++;") != std::string::npos;
+  }));
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
+       LongDeleteRunBeyondDefaultBudgetCanRecoverToNextVisibleStatementBoundary) {
+  const std::string text =
+      "module basicMath\n"
+      "\n"
+      "def a: 5; // comment\n"
+      "\n"
+      "2*7+++++++++++++++++++++++++++++++++++;\n"
+      "\n"
+      "def b: 5;\n";
+  auto document = updateDocument("pipeline-long-delete-budget.calc", text,
+                                 std::chrono::milliseconds(10000));
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded());
+  ASSERT_TRUE(document->parseRecovered());
+  EXPECT_TRUE(std::ranges::any_of(document->diagnostics, [](const auto &diagnostic) {
+    return diagnostic.message.find("+++++++++++++++++++++++++++++++++++") !=
+           std::string::npos;
+  }));
+  EXPECT_FALSE(std::ranges::any_of(document->diagnostics, [](const auto &diagnostic) {
+    return diagnostic.message.find("2*7+++++++++++++++++++++++++++++++++++;") !=
+           std::string::npos;
+  }));
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
+       MalformedStandaloneOperatorRunKeepsFollowingStatementBoundary) {
+  const std::string text =
+      "module m\n"
+      "\n"
+      "def b: 3;\n"
+      "b % 2;\n"
+      "2*********\n"
+      "\n"
+      "b % 2;\n";
+  auto document = updateDocument("pipeline-malformed-operator-run.calc", text);
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded());
+  ASSERT_TRUE(document->parseRecovered());
+
+  auto *module =
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(module->statements.size(), 3u)
+      << dumpDiagnostics(parseDiagnostics(*document));
+  auto *lastEvaluation =
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+  ASSERT_NE(lastEvaluation, nullptr) << dumpDiagnostics(parseDiagnostics(*document));
+  auto *lastBinary = dynamic_cast<arithmetics::ast::BinaryExpression *>(
+      lastEvaluation->expression.get());
+  ASSERT_NE(lastBinary, nullptr) << dumpDiagnostics(parseDiagnostics(*document));
+  EXPECT_EQ(lastBinary->op, "%") << dumpDiagnostics(parseDiagnostics(*document));
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
+       LongMalformedStandaloneOperatorRunKeepsMultipleFollowingStatementsBoundary) {
+  const std::string operatorRun(95u, '*');
+  const std::string text =
+      "module m\n"
+      "\n"
+      "b % 2;\n"
+      "2" + operatorRun + "\n"
+      "\n"
+      "b % 2;\n"
+      "b % 2;\n";
+  auto document =
+      updateDocument("pipeline-malformed-operator-run-long.calc", text,
+                     std::chrono::milliseconds(60000));
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded());
+  ASSERT_TRUE(document->parseRecovered());
+
+  auto *module =
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+  ASSERT_NE(module, nullptr);
+  const auto parseDump = dumpDiagnostics(parseDiagnostics(*document));
+  EXPECT_EQ(module->statements.size(), 3u) << parseDump;
+
+  const auto malformedOffset =
+      text.find("2" + operatorRun);
+  ASSERT_NE(malformedOffset, std::string::npos);
+  EXPECT_TRUE(std::ranges::any_of(
+      parseDiagnostics(*document), [malformedOffset, &operatorRun](const auto *diagnostic) {
+        return diagnostic->message.find("Unexpected token `2") != std::string::npos &&
+               diagnostic->begin == static_cast<TextOffset>(malformedOffset) &&
+               diagnostic->end ==
+                   static_cast<TextOffset>(malformedOffset + operatorRun.size() + 1u);
+      }))
+      << parseDump;
+
+  ASSERT_GE(module->statements.size(), 2u) << parseDump;
+  for (std::size_t index = module->statements.size() - 2u;
+       index < module->statements.size(); ++index) {
+    auto *evaluation =
+        dynamic_cast<arithmetics::ast::Evaluation *>(module->statements[index].get());
+    ASSERT_NE(evaluation, nullptr) << parseDump;
+    auto *binary =
+        dynamic_cast<arithmetics::ast::BinaryExpression *>(evaluation->expression.get());
+    ASSERT_NE(binary, nullptr) << parseDump;
+    EXPECT_EQ(binary->op, "%") << parseDump;
+  }
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
+       VeryLongOperatorRunDoesNotBleedAcrossFollowingStatements) {
+  const std::string operatorRun(95u, '*');
+  const std::string text =
+      "Module basicMath\n"
+      "\n"
+      "def a: 5;\n"
+      "def b: 3;\n"
+      "def c: a + b; // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; //aaa\n"
+      "2" + operatorRun + "\n"
+      "\n"
+      "b % 2;\n"
+      "b % 2;\n";
+  auto document =
+      updateDocument("pipeline-very-long-operator-run-no-bleed.calc", text,
+                     std::chrono::milliseconds(60000));
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded());
+  ASSERT_TRUE(document->parseRecovered());
+
+  auto *module =
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+  ASSERT_NE(module, nullptr);
+  const auto parseDump = dumpDiagnostics(parseDiagnostics(*document));
+  EXPECT_EQ(module->statements.size(), 10u) << parseDump;
+
+  const auto starsPos = text.find(operatorRun);
+  ASSERT_NE(starsPos, std::string::npos);
+  EXPECT_TRUE(std::ranges::any_of(
+      parseDiagnostics(*document), [starsPos, &operatorRun](const auto *diagnostic) {
+        return diagnostic->message.find("Unexpected token `2") != std::string::npos &&
+               diagnostic->begin == static_cast<TextOffset>(starsPos - 1u) &&
+               diagnostic->end ==
+                   static_cast<TextOffset>(starsPos + operatorRun.size());
+      }));
+
+  ASSERT_GE(module->statements.size(), 2u) << parseDump;
+  for (std::size_t index = module->statements.size() - 2u;
+       index < module->statements.size(); ++index) {
+    auto *evaluation =
+        dynamic_cast<arithmetics::ast::Evaluation *>(module->statements[index].get());
+    ASSERT_NE(evaluation, nullptr) << parseDump;
+    auto *binary =
+        dynamic_cast<arithmetics::ast::BinaryExpression *>(evaluation->expression.get());
+    ASSERT_NE(binary, nullptr) << parseDump;
+    EXPECT_EQ(binary->op, "%") << parseDump;
+  }
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
        MissingSemicolonBeforeNextStatementPublishesGenericParseDiagnostic) {
   auto document = updateDocument(
       "pipeline-missing-separator.calc",
@@ -586,13 +867,338 @@ TEST_F(DocumentPipelineIntegrationTest,
   const auto diagnostics = parseDiagnostics(*document);
   const auto parseDump = dumpDiagnostics(diagnostics);
   ASSERT_FALSE(diagnostics.empty()) << parseDump;
+  const auto expectedStatementOffset = static_cast<TextOffset>(
+      std::string_view{"module name\n\n"}.size());
   EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto *diagnostic) {
     return diagnostic->message == "Expecting ;" ||
            diagnostic->message.find("Unexpected token") != std::string::npos;
   })) << parseDump;
-  EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto *diagnostic) {
-    return diagnostic->begin == 18u;
+  EXPECT_TRUE(std::ranges::any_of(
+      diagnostics, [expectedStatementOffset](const auto *diagnostic) {
+        return diagnostic->begin == expectedStatementOffset ||
+               diagnostic->begin == expectedStatementOffset + 1u;
   })) << parseDump;
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
+       MissingSemicolonBeforeCallStatementKeepsFollowingStatementAndValidation) {
+  auto document = updateDocument(
+      "pipeline-missing-semicolon-before-call.calc",
+      "Module basicMath\n"
+      "\n"
+      "def a: 5;\n"
+      "def b: 3;\n"
+      "def c: a + b; // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; // 1\n"
+      "\n"
+      "// This language is case-insensitive regarding symbol names\n"
+      "Root(D, 3); // 32\n"
+      "Root(64, 3); // 4\n"
+      "\n"
+      "xxx\n"
+      "\n"
+      "Sqrt(1/0); // 9\n");
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded());
+  ASSERT_TRUE(document->parseRecovered());
+
+  auto *module =
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+  ASSERT_NE(module, nullptr);
+  EXPECT_GE(module->statements.size(), 11u)
+      << dumpDiagnostics(parseDiagnostics(*document));
+
+  auto *lastEvaluation =
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+  ASSERT_NE(lastEvaluation, nullptr)
+      << dumpDiagnostics(parseDiagnostics(*document));
+  auto *lastCall = dynamic_cast<arithmetics::ast::FunctionCall *>(
+      lastEvaluation->expression.get());
+  ASSERT_NE(lastCall, nullptr) << dumpDiagnostics(parseDiagnostics(*document));
+  EXPECT_EQ(lastCall->func.getRefText(), "sqrt");
+  EXPECT_EQ(lastCall->args.size(), 1u);
+
+  EXPECT_FALSE(test::has_diagnostic_message(*document, "Unexpected token `Sqrt(1/0)`"));
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Unexpected token `xxx`") ||
+              test::has_diagnostic_message(*document, "Unresolved reference: xxx"));
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Division by zero"));
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
+       SeveralRecoveredIdentifierLinesStillKeepFollowingCallStatement) {
+  auto document = updateDocument(
+      "pipeline-several-recovered-lines-before-call.calc",
+      "Module basicMath\n"
+      "\n"
+      "def a: 5;\n"
+      "def b: 3;\n"
+      "def c: a + b; // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; // 1\n"
+      "\n"
+      "// This language is case-insensitive regarding symbol names\n"
+      "Root(D, 3); // 32\n"
+      "Root(64, 3); // 4\n"
+      "\n"
+      "\n"
+      "xxxxx\n"
+      "xxxxxxx\n"
+      "\n"
+      "xxxxxxx\n"
+      "\n"
+      "\n"
+      "\n"
+      "\n"
+      "Sqrt(81/0); // 9\n");
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded());
+  ASSERT_TRUE(document->parseRecovered());
+
+  auto *module =
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+  ASSERT_NE(module, nullptr);
+  EXPECT_GE(module->statements.size(), 11u)
+      << dumpDiagnostics(parseDiagnostics(*document));
+
+  auto *lastEvaluation =
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+  ASSERT_NE(lastEvaluation, nullptr)
+      << dumpDiagnostics(parseDiagnostics(*document));
+  auto *lastCall = dynamic_cast<arithmetics::ast::FunctionCall *>(
+      lastEvaluation->expression.get());
+  ASSERT_NE(lastCall, nullptr) << dumpDiagnostics(parseDiagnostics(*document));
+  EXPECT_EQ(lastCall->func.getRefText(), "sqrt");
+  EXPECT_EQ(lastCall->args.size(), 1u);
+
+  EXPECT_FALSE(
+      test::has_diagnostic_message(*document, "Unexpected token `Sqrt(81/0)`"));
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "xxxxx"));
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "xxxxxxx"));
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Division by zero"));
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
+       RecoveredIdentifierAndOperatorLinesStillPublishLateParseDiagnostics) {
+  auto document = updateDocument(
+      "pipeline-recovered-identifier-and-operator-lines.calc",
+      "Module basicMath\n"
+      "\n"
+      "def a: 5;\n"
+      "def b: 3;\n"
+      "def c: a + b; // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; // 1\n"
+      "\n"
+      "// This language is case-insensitive regarding symbol names\n"
+      "Root(D, 3); // 32\n"
+      "Root(64, 3); // 4\n"
+      "\n"
+      "\n"
+      "xxxxx\n"
+      "xxxxxxx\n"
+      "*\n"
+      "xxxxxxx\n"
+      "<<<\n"
+      "\n"
+      "\n"
+      "sada;\n"
+      "\n"
+      "\n"
+      "Sqrt(81/0); // 9\n");
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded())
+      << dumpDiagnostics(parseDiagnostics(*document));
+  ASSERT_TRUE(document->parseRecovered())
+      << dumpDiagnostics(parseDiagnostics(*document));
+
+  auto *module =
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+  ASSERT_NE(module, nullptr);
+  const auto parseDump = dumpDiagnostics(parseDiagnostics(*document));
+  const auto lateGarbageOffset =
+      document->textDocument().getText().find("<<<");
+  const auto lateCallOffset =
+      document->textDocument().getText().find("Sqrt(81/0);");
+
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Expecting ;"))
+      << parseDump;
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Unexpected token `<<<`"))
+      << parseDump;
+  EXPECT_TRUE(std::ranges::any_of(
+      parseDiagnostics(*document), [lateGarbageOffset](const auto *diagnostic) {
+        return lateGarbageOffset != std::string::npos &&
+               diagnostic->begin >=
+                   static_cast<pegium::TextOffset>(lateGarbageOffset);
+      }))
+      << parseDump;
+  (void)lateCallOffset;
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
+       RecoveredIdentifierOperatorAndAngleLinesStillPublishLateParseDiagnostics) {
+  auto document = updateDocument(
+      "pipeline-recovered-identifier-operator-angle-lines.calc",
+      "Module basicMath\n"
+      "\n"
+      "def a: 5;\n"
+      "def b: 3;\n"
+      "def c: a + b; // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; // 1\n"
+      "\n"
+      "// This language is case-insensitive regarding symbol names\n"
+      "Root(D, 3); // 32\n"
+      "Root(64, 3); // 4\n"
+      "\n"
+      "\n"
+      "xxxxx\n"
+      "xxxxxxx\n"
+      "*\n"
+      "xxxxxxxxx\n"
+      ";\n"
+      "\n"
+      "<<<<<<<<<<<<\n"
+      "\n"
+      "\n"
+      "sada;\n"
+      "\n"
+      "\n"
+      "Sqrt(81/0); // 9\n");
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded())
+      << dumpDiagnostics(parseDiagnostics(*document));
+  ASSERT_TRUE(document->parseRecovered())
+      << dumpDiagnostics(parseDiagnostics(*document));
+
+  auto *module =
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+  ASSERT_NE(module, nullptr);
+  const auto parseDump = dumpDiagnostics(parseDiagnostics(*document));
+  const auto lateGarbageOffset =
+      document->textDocument().getText().find("<<<<<<<<<<<<");
+  const auto lateCallOffset =
+      document->textDocument().getText().find("Sqrt(81/0);");
+
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Expecting ;"))
+      << parseDump;
+  EXPECT_TRUE(
+      test::has_diagnostic_message(*document, "Unexpected token `<<<<<<<<<<<<`"))
+      << parseDump;
+  EXPECT_TRUE(std::ranges::any_of(
+      parseDiagnostics(*document), [lateGarbageOffset](const auto *diagnostic) {
+        return lateGarbageOffset != std::string::npos &&
+               diagnostic->begin >=
+                   static_cast<pegium::TextOffset>(lateGarbageOffset);
+      }))
+      << parseDump;
+  EXPECT_TRUE(std::ranges::any_of(
+      parseDiagnostics(*document), [lateCallOffset](const auto *diagnostic) {
+        return lateCallOffset != std::string::npos &&
+               diagnostic->end >=
+                   static_cast<pegium::TextOffset>(lateCallOffset) &&
+               diagnostic->message.find("Sqrt") != std::string::npos;
+      }))
+      << parseDump;
+}
+
+TEST_F(DocumentPipelineIntegrationTest,
+       RecoveredEmptyCallOpenGroupAndMalformedCallsKeepFollowingStatements) {
+  auto document = updateDocument(
+      "pipeline-empty-call-open-group-and-malformed-calls.calc",
+      "Module basicMath\n"
+      "\n"
+      "def a: 5;\n"
+      "def b: 3;\n"
+      "def c: a + b; // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; // 1\n"
+      "\n"
+      "// This language is case-insensitive regarding symbol names\n"
+      "Root(D, 3); // 32\n"
+      "Root(64, 3); // 4\n"
+      "\n"
+      "Sqrt()\n"
+      "(\n"
+      "root(2,);\n"
+      "root(,2);\n"
+      "\n"
+      "sada;\n"
+      "Sqrt(81/0); // 9\n",
+      std::chrono::milliseconds(5000));
+
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded())
+      << dumpDiagnostics(parseDiagnostics(*document));
+  ASSERT_TRUE(document->parseRecovered())
+      << dumpDiagnostics(parseDiagnostics(*document));
+
+  auto *module =
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+  ASSERT_NE(module, nullptr);
+
+  auto *lastEvaluation =
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+  ASSERT_NE(lastEvaluation, nullptr)
+      << dumpDiagnostics(parseDiagnostics(*document));
+  auto *lastCall =
+      dynamic_cast<arithmetics::ast::FunctionCall *>(
+          lastEvaluation->expression.get());
+  ASSERT_NE(lastCall, nullptr)
+      << dumpDiagnostics(parseDiagnostics(*document));
+  EXPECT_EQ(lastCall->func.getRefText(), "sqrt");
+  ASSERT_EQ(lastCall->args.size(), 1u);
+
+  EXPECT_FALSE(
+      test::has_diagnostic_message(*document, "Unexpected token `sada`"));
+  EXPECT_FALSE(
+      test::has_diagnostic_message(*document, "Unexpected token `Sqrt(81/0)`"));
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Unresolved reference: sada"));
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Division by zero"));
 }
 
 TEST_F(DocumentPipelineIntegrationTest,

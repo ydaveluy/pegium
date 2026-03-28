@@ -30,7 +30,7 @@ struct RootNode final : AstNode {
   vector<pointer<RefNode>> refs;
 };
 
-template <typename TargetType>
+template <typename OwnerType, typename TargetType>
 struct TestReferenceAssignment final : grammar::Assignment {
   explicit TestReferenceAssignment(std::string_view feature) noexcept
       : feature(feature) {}
@@ -114,7 +114,7 @@ TEST(DefaultReferenceDescriptionProviderTest,
   auto *provider = services->workspace.referenceDescriptionProvider.get();
   ASSERT_NE(linker, nullptr);
   ASSERT_NE(provider, nullptr);
-  TestReferenceAssignment<TargetNode> assignment("target");
+  TestReferenceAssignment<RefNode, TargetNode> assignment("target");
 
   auto textDocument = std::make_shared<TextDocument>(TextDocument::create(
       test::make_file_uri("reference-description-provider.test"), "", 0,

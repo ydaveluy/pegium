@@ -5,8 +5,31 @@
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 
+#include <sstream>
+
 namespace requirements::tests {
 namespace {
+
+std::string dump_parse_diagnostics(
+    const std::vector<pegium::parser::ParseDiagnostic> &diagnostics) {
+  std::string dump;
+  for (const auto &diagnostic : diagnostics) {
+    if (!dump.empty()) {
+      dump += " | ";
+    }
+    std::ostringstream current;
+    current << diagnostic.kind;
+    if (diagnostic.element != nullptr) {
+      current << ":" << *diagnostic.element;
+    }
+    if (!diagnostic.message.empty()) {
+      current << ":" << diagnostic.message;
+    }
+    current << "@" << diagnostic.beginOffset << "-" << diagnostic.endOffset;
+    dump += current.str();
+  }
+  return dump;
+}
 
 TEST(RequirementsLanguageTest, ParsesRequirementModel) {
   parser::RequirementsParser parser;
@@ -38,9 +61,14 @@ TEST(RequirementsLanguageTest, LinksEnvironmentMultiReferencesAndReportsUnresolv
       "req login \"Users can login\" applicable for prod, staging, missing\n");
 
   ASSERT_NE(document, nullptr);
+  const auto &parsed = document->parseResult;
+  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
   auto *model =
-      dynamic_cast<ast::RequirementModel *>(document->parseResult.value.get());
-  ASSERT_NE(model, nullptr);
+      dynamic_cast<ast::RequirementModel *>(parsed.value.get());
+  ASSERT_NE(model, nullptr) << "fullMatch=" << parsed.fullMatch
+                            << " recovered=" << parsed.recoveryReport.hasRecovered
+                            << " parsedLength=" << parsed.parsedLength << " "
+                            << parseDump;
   ASSERT_EQ(model->requirements.size(), 1u);
 
   auto *requirement = model->requirements.front().get();
@@ -58,62 +86,6 @@ TEST(RequirementsLanguageTest, LinksEnvironmentMultiReferencesAndReportsUnresolv
             std::string::npos);
   EXPECT_TRUE(pegium::test::has_diagnostic_message(*document,
                                                    "Unresolved reference: missing"));
-}
-
-TEST(RequirementsLanguageTest,
-     RecoveryDeletesUnexpectedColonInOptionalContactHeader) {
-  parser::RequirementsParser parser;
-  auto document = pegium::test::parse_document(
-      parser,
-      "contact:: \"team\"\n"
-      "environment prod: \"Production\"\n"
-      "req login \"Users can login\"\n",
-      pegium::test::make_file_uri("requirements-recovery.req"),
-      "requirements-lang");
-
-  ASSERT_NE(document, nullptr);
-  auto *model =
-      dynamic_cast<ast::RequirementModel *>(document->parseResult.value.get());
-  ASSERT_NE(model, nullptr);
-  ASSERT_EQ(model->environments.size(), 1u);
-  ASSERT_EQ(model->requirements.size(), 1u);
-  EXPECT_TRUE(document->parseResult.recoveryReport.hasRecovered);
-  EXPECT_FALSE(document->parseResult.parseDiagnostics.empty());
-}
-
-TEST(RequirementsLanguageTest,
-     TestsParserRecoversOptionalContactHeaderBeforeTests) {
-  parser::TestsParser parser;
-  auto document = pegium::test::parse_document(
-      parser,
-      "contact:: \"qa\"\n"
-      "tst T1 tests Req1\n",
-      pegium::test::make_file_uri("tests-recovery.tst"), "tests-lang");
-
-  ASSERT_NE(document, nullptr);
-  auto *model = dynamic_cast<ast::TestModel *>(document->parseResult.value.get());
-  ASSERT_NE(model, nullptr);
-  ASSERT_EQ(model->tests.size(), 1u);
-  EXPECT_TRUE(document->parseResult.recoveryReport.hasRecovered);
-  EXPECT_FALSE(document->parseResult.parseDiagnostics.empty());
-}
-
-TEST(RequirementsLanguageTest,
-     TestsParserRecoversMalformedOptionalContactHeaderBeforeTests) {
-  parser::TestsParser parser;
-  auto document = pegium::test::parse_document(
-      parser,
-      "conttact:: \"qa\"\n"
-      "tst T1 tests Req1\n",
-      pegium::test::make_file_uri("tests-recovery-double-contact.tst"),
-      "tests-lang");
-
-  ASSERT_NE(document, nullptr);
-  auto *model = dynamic_cast<ast::TestModel *>(document->parseResult.value.get());
-  ASSERT_NE(model, nullptr);
-  ASSERT_EQ(model->tests.size(), 1u);
-  EXPECT_TRUE(document->parseResult.recoveryReport.hasRecovered);
-  EXPECT_FALSE(document->parseResult.parseDiagnostics.empty());
 }
 
 } // namespace

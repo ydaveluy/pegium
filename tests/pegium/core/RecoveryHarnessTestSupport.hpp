@@ -19,8 +19,7 @@ inline converter::CstJsonConversionOptions recovery_cst_json_options() {
   };
 }
 
-template <typename Result>
-struct RecoveryHarnessResult {
+template <typename Result> struct RecoveryHarnessResult {
   Result result;
 };
 
@@ -30,20 +29,22 @@ auto StrictRecoveryDocument(const RuleType &entryRule, std::string_view text,
                             const utils::CancellationToken &cancelToken = {}) {
   RecoveryHarnessResult<parser::detail::StrictParseResult> harness;
   const auto snapshot = text::TextSnapshot::copy(text);
-  harness.result = parser::detail::run_strict_parse(
-      entryRule, skipper, snapshot, cancelToken);
+  const parser::detail::StrictFailureEngine strictFailureEngine;
+  harness.result = strictFailureEngine.runStrictParse(entryRule, skipper,
+                                                      snapshot, cancelToken);
   return harness;
 }
 
 template <typename RuleType>
-auto FailureAnalysisDocument(
-    const RuleType &entryRule, std::string_view text,
-    const parser::Skipper &skipper,
-    const utils::CancellationToken &cancelToken = {}) {
+auto FailureAnalysisDocument(const RuleType &entryRule, std::string_view text,
+                             const parser::Skipper &skipper,
+                             const utils::CancellationToken &cancelToken = {}) {
   auto harness = StrictRecoveryDocument(entryRule, text, skipper, cancelToken);
-  RecoveryHarnessResult<parser::detail::FailureAnalysisResult> failureHarness;
+  RecoveryHarnessResult<parser::detail::StrictFailureEngineResult>
+      failureHarness;
   const auto snapshot = text::TextSnapshot::copy(text);
-  failureHarness.result = parser::detail::analyze_failure(
+  const parser::detail::StrictFailureEngine strictFailureEngine;
+  failureHarness.result = strictFailureEngine.inspectFailure(
       entryRule, skipper, snapshot, harness.result.summary, cancelToken);
   return failureHarness;
 }

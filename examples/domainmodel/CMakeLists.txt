@@ -114,4 +114,12 @@ if(BUILD_TESTING)
         example
         domainmodel
     )
+    add_test(
+        NAME PegiumRecoveryCorpusDomainModel
+        COMMAND $<TARGET_FILE:pegium-example-domainmodel-test>
+            --gtest_filter=*RecoverySample*:*RecoveryProbe*
+    )
+    set_tests_properties(PegiumRecoveryCorpusDomainModel PROPERTIES
+        LABELS "recovery-corpus"
+    )
 endif()

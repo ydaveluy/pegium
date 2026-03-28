@@ -31,7 +31,7 @@ struct LinkerRoot : AstNode {
   vector<pointer<LinkerMultiReferrer>> multiReferrers;
 };
 
-template <typename TargetType, bool IsMulti = false>
+template <typename OwnerType, typename TargetType, bool IsMulti = false>
 struct TestReferenceAssignment final : grammar::Assignment {
   explicit TestReferenceAssignment(std::string_view feature) noexcept
       : feature(feature) {}
@@ -257,7 +257,8 @@ make_reference_document(pegium::SharedCoreServices &shared,
   CstBuilder builder(*cst);
   builder.leaf(0, static_cast<TextOffset>(refText.size()), &literal);
 
-  static const TestReferenceAssignment<LinkerNode> assignment("node");
+  static const TestReferenceAssignment<LinkerReferrer, LinkerNode> assignment(
+      "node");
   auto referrer = std::make_unique<LinkerReferrer>();
   auto *referrerPtr = referrer.get();
   referrerPtr->setCstNode(cst->get(0));
@@ -288,7 +289,8 @@ make_multi_reference_document(pegium::SharedCoreServices &shared,
   CstBuilder builder(*cst);
   builder.leaf(0, static_cast<TextOffset>(refText.size()), &literal);
 
-  static const TestReferenceAssignment<LinkerNode, true> assignment("nodes");
+  static const TestReferenceAssignment<LinkerMultiReferrer, LinkerNode, true>
+      assignment("nodes");
   auto referrer = std::make_unique<LinkerMultiReferrer>();
   auto *referrerPtr = referrer.get();
   referrerPtr->setCstNode(cst->get(0));
@@ -318,7 +320,8 @@ make_attached_referrer(pegium::SharedCoreServices &shared,
   CstBuilder builder(*cst);
   builder.leaf(0, static_cast<TextOffset>(refText.size()), &literal);
 
-  static const TestReferenceAssignment<LinkerNode> assignment("node");
+  static const TestReferenceAssignment<LinkerReferrer, LinkerNode> assignment(
+      "node");
   auto referrer = std::make_unique<LinkerReferrer>();
   auto *referrerPtr = referrer.get();
   referrerPtr->setCstNode(cst->get(0));
@@ -346,7 +349,8 @@ make_linker_parser(const Linker *&linkerRef) {
   auto parser = std::make_unique<test::FakeParser>();
   parser->callback = [&linkerRef](parser::ParseResult &result,
                                   std::string_view text) {
-    static const TestReferenceAssignment<LinkerNode> assignment("node");
+    static const TestReferenceAssignment<LinkerReferrer, LinkerNode> assignment(
+        "node");
     static const DummyLiteral literal;
     assert(linkerRef != nullptr);
     auto root = std::make_unique<LinkerRoot>();
@@ -416,7 +420,7 @@ TEST(DefaultLinkerTest,
   pegium::installDefaultCoreServices(*services);
   auto fixture =
       make_target_document(*shared, test::make_file_uri("synthetic.link"));
-  TestReferenceAssignment<LinkerNode> assignment("node");
+  TestReferenceAssignment<LinkerReferrer, LinkerNode> assignment("node");
 
   services->references.scopeProvider = std::make_unique<StaticScopeProvider>(
       std::vector<workspace::AstNodeDescription>{
@@ -459,7 +463,8 @@ TEST(DefaultLinkerTest, UnresolvedCandidateMessageIncludesReferenceType) {
   auto *linker = services->references.linker.get();
   ASSERT_NE(linker, nullptr);
 
-  static const TestReferenceAssignment<LinkerNode> assignment("node");
+  static const TestReferenceAssignment<LinkerReferrer, LinkerNode> assignment(
+      "node");
   auto refFixture = make_attached_referrer(
       *shared, *linker, test::make_file_uri("missing-referrer.link"),
       "missing");
@@ -496,7 +501,8 @@ TEST(DefaultLinkerTest, GetCandidatesDeduplicatesDescriptionsByNodeKey) {
   auto *linker = services->references.linker.get();
   ASSERT_NE(linker, nullptr);
 
-  static const TestReferenceAssignment<LinkerNode> assignment("node");
+  static const TestReferenceAssignment<LinkerReferrer, LinkerNode> assignment(
+      "node");
   auto refFixture = make_attached_referrer(
       *shared, *linker, test::make_file_uri("duplicate-referrer.link"), "a");
   const ReferenceInfo info{refFixture.referrer, "a", assignment};
@@ -597,7 +603,8 @@ TEST(DefaultLinkerTest, InitializedReferenceResolvesAfterMoveConstruction) {
   auto *linker = services->references.linker.get();
   ASSERT_NE(linker, nullptr);
 
-  static const TestReferenceAssignment<LinkerNode> assignment("node");
+  static const TestReferenceAssignment<LinkerReferrer, LinkerNode> assignment(
+      "node");
   auto refFixture = make_attached_referrer(
       *shared, *linker, test::make_file_uri("move-referrer.link"), "a");
   Reference<LinkerNode> reference;
@@ -647,7 +654,8 @@ TEST(DefaultLinkerTest, ReinitializingReferenceResetsCachedResolution) {
   auto *linker = services->references.linker.get();
   ASSERT_NE(linker, nullptr);
 
-  static const TestReferenceAssignment<LinkerNode> assignment("node");
+  static const TestReferenceAssignment<LinkerReferrer, LinkerNode> assignment(
+      "node");
   auto refFixture = make_attached_referrer(
       *shared, *linker, test::make_file_uri("reinitialize-referrer.link"), "a");
   Reference<LinkerNode> reference;

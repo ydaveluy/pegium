@@ -1,0 +1,5 @@
+entity Blog {
+  author Person
+}
+
+entity Person {}

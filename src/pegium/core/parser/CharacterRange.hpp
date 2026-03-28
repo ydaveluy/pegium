@@ -26,6 +26,20 @@ struct CharacterRange final : grammar::CharacterRange,
       createCharacterRange({range.data(), range.size()});
   static_assert(!lookup[0],
                 "CharacterRange cannot include '\\0'.");
+  static constexpr bool isWordLike = []() constexpr noexcept {
+    bool hasVisibleCodepoint = false;
+    for (std::size_t codepoint = 0; codepoint < lookup.size(); ++codepoint) {
+      if (!lookup[codepoint]) {
+        continue;
+      }
+      hasVisibleCodepoint = true;
+      if (!detail::is_identifier_like_codepoint(
+              static_cast<unsigned char>(codepoint))) {
+        return false;
+      }
+    }
+    return hasVisibleCodepoint;
+  }();
   static constexpr bool nullable = false;
   static constexpr bool isFailureSafe = true;
   using type = std::string_view;

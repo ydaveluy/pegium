@@ -50,17 +50,17 @@ private:
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     using enum detail::StepCounter;
     if constexpr (StrictParseModeContext<Context>) {
-      detail::stepTraceInc(UnorderedStrictPasses);
+      PEGIUM_STEP_TRACE_INC(UnorderedStrictPasses);
       return parse_group(ctx);
     } else if constexpr (RecoveryParseModeContext<Context>) {
-      detail::stepTraceInc(UnorderedRecoverCalls);
+      PEGIUM_STEP_TRACE_INC(UnorderedRecoverCalls);
 
       const auto entryCheckpoint = ctx.mark();
 
       if (!ctx.isInRecoveryPhase()) {
         const bool strictMatched =
             parse_group(static_cast<TrackedParseContext &>(ctx));
-        detail::stepTraceInc(UnorderedStrictPasses);
+        PEGIUM_STEP_TRACE_INC(UnorderedStrictPasses);
         if (strictMatched) {
           return true;
         }
@@ -68,10 +68,10 @@ private:
       }
 
       if (parse_group(ctx)) {
-        detail::stepTraceInc(UnorderedEditablePasses);
+        PEGIUM_STEP_TRACE_INC(UnorderedEditablePasses);
         return true;
       }
-      detail::stepTraceInc(UnorderedEditablePasses);
+      PEGIUM_STEP_TRACE_INC(UnorderedEditablePasses);
       ctx.rewind(entryCheckpoint);
       return false;
     } else {

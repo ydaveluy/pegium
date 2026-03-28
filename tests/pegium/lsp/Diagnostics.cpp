@@ -18,6 +18,7 @@ TEST(DiagnosticsTest, PublishDiagnosticsSerializesExtendedDiagnosticFields) {
   workspace::DocumentDiagnosticsSnapshot snapshot{
       .uri = test::make_file_uri("diagnostics.test"),
       .text = "alpha\nbeta\n",
+      .version = 7,
       .diagnostics =
           {{
               .severity = pegium::DiagnosticSeverity::Warning,
@@ -53,7 +54,8 @@ TEST(DiagnosticsTest, PublishDiagnosticsSerializesExtendedDiagnosticFields) {
 
   const auto &params = message.get("params").object();
   EXPECT_EQ(params.get("uri").string(), snapshot.uri);
-  EXPECT_FALSE(params.contains("version"));
+  ASSERT_TRUE(params.contains("version"));
+  EXPECT_EQ(params.get("version").integer(), 7);
 
   const auto &diagnostics = params.get("diagnostics").array();
   ASSERT_EQ(diagnostics.size(), 1u);
@@ -110,6 +112,7 @@ TEST(DiagnosticsTest, PublishDiagnosticsSkipsInvalidCodeDescriptionUri) {
   publish_diagnostics(&handler, snapshot);
 
   const auto message = test::parse_last_written_message(stream.written()).object();
+  EXPECT_FALSE(message.get("params").object().contains("version"));
   const auto &diagnostics =
       message.get("params").object().get("diagnostics").array();
   ASSERT_EQ(diagnostics.size(), 1u);
