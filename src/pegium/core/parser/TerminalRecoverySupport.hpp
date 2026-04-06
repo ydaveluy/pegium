@@ -744,80 +744,68 @@ template <EditableParseModeContext Context, typename MatchFn,
     }
   }
 
-  const auto recoveryCheckpoint = ctx.mark();
   const char *const cursorStart = ctx.cursor();
   bool previousSkipAfterDelete = false;
   if constexpr (requires { ctx.skipAfterDelete; }) {
     previousSkipAfterDelete = ctx.skipAfterDelete;
     ctx.skipAfterDelete = false;
   }
-  detail::ExtendedDeleteScanBudgetScope overflowBudgetScope{ctx};
   const auto restore_skip_after_delete = [&]() {
     if constexpr (requires { ctx.skipAfterDelete; }) {
       ctx.skipAfterDelete = previousSkipAfterDelete;
     }
   };
-  const auto try_delete_scan_pass = [&](bool overflowBudget) {
-    while (ctx.deleteOneCodepoint()) {
-      const char *const scanCursor = ctx.cursor();
-      auto apply_matched_end = [&](const char *matchedEnd) {
-        restore_skip_after_delete();
-        if (overflowBudget) {
-          overflowBudgetScope.commitOverflowEdits();
-        }
-        std::forward<OnMatchFn>(onMatchFn)(matchedEnd);
-        return true;
-      };
-      if constexpr (requires { ctx.skip_without_builder(scanCursor); }) {
-        const char *const skipped = ctx.skip_without_builder(scanCursor);
-        if (skipped > scanCursor) {
-          if (const char *const matchedEnd =
-                  std::forward<MatchFn>(matchFn)(skipped);
-              matchedEnd != nullptr) {
-            if constexpr (requires { ctx.skip(); }) {
-              ctx.skip();
+  auto &&match = matchFn;
+  auto &&onMatch = onMatchFn;
+  const char *matchedEnd = nullptr;
+  std::uint32_t matchedDeleteCount = 0u;
+  const auto result = detail::visit_guarded_delete_scan_positions(
+      ctx, []() noexcept { return true; },
+      [&](const detail::DeleteScanVisitState &state) {
+        const char *const scanCursor = ctx.cursor();
+        if constexpr (requires { ctx.skip_without_builder(scanCursor); }) {
+          if (state.hiddenTriviaBoundary) {
+            const char *const skipped = ctx.skip_without_builder(scanCursor);
+            if (const char *const visibleMatch =
+                    detail::invoke_delete_scan_match(match, skipped,
+                                                     state.deleteCount);
+                visibleMatch != nullptr) {
+              if constexpr (requires { ctx.skip(); }) {
+                ctx.skip();
+              }
+              matchedEnd = visibleMatch;
+              matchedDeleteCount = state.deleteCount;
+              return detail::DeleteScanVisitResult::Accept;
             }
-            return apply_matched_end(matchedEnd);
-          }
-          if (operator_like_delete_scan_crosses_identifier_gap(
-                  ctx, skipped, profile)) {
-            break;
-          }
-          if constexpr (requires {
-                          ctx.extendLastDeleteThroughHiddenTrivia();
-                        }) {
-            if (ctx.extendLastDeleteThroughHiddenTrivia()) {
-              continue;
+            if (operator_like_delete_scan_crosses_identifier_gap(ctx, skipped,
+                                                                 profile)) {
+              return detail::DeleteScanVisitResult::Stop;
             }
+            return detail::DeleteScanVisitResult::Continue;
           }
-          break;
         }
-      }
-      if (facts.previousElementIsTerminalish && scanCursor > cursorStart) {
-        continue;
-      }
-      if (const char *const matchedEnd =
-              std::forward<MatchFn>(matchFn)(scanCursor);
-          matchedEnd != nullptr) {
-        return apply_matched_end(matchedEnd);
-      }
-    }
-    return false;
-  };
-  if (try_delete_scan_pass(false)) {
-    return true;
-  }
-  if (!overflowBudgetScope.tryEnable()) {
-    restore_skip_after_delete();
-    ctx.rewind(recoveryCheckpoint);
-    return false;
-  }
-  if (try_delete_scan_pass(true)) {
-    return true;
-  }
+        if (facts.previousElementIsTerminalish && scanCursor > cursorStart) {
+          return detail::DeleteScanVisitResult::Continue;
+        }
+        if (const char *const scanMatch =
+                detail::invoke_delete_scan_match(match, scanCursor,
+                                                 state.deleteCount);
+            scanMatch != nullptr) {
+          matchedEnd = scanMatch;
+          matchedDeleteCount = state.deleteCount;
+          return detail::DeleteScanVisitResult::Accept;
+        }
+        return detail::DeleteScanVisitResult::Continue;
+      },
+      {.extendThroughHiddenTrivia = true,
+       .stopAtHiddenTriviaBoundary = true,
+       .visitAfterHiddenTriviaExtension = false});
   restore_skip_after_delete();
-  ctx.rewind(recoveryCheckpoint);
-  return false;
+  if (result != detail::DeleteScanVisitResult::Accept) {
+    return false;
+  }
+  detail::invoke_delete_scan_on_match(onMatch, matchedEnd, matchedDeleteCount);
+  return true;
 }
 
 template <EditableParseModeContext Context, typename MatchFn,

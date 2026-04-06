@@ -84,7 +84,6 @@ bestRecoveryAttempt(const RuleType &entryRule, std::string_view text,
   auto attempt =
       detail::run_recovery_attempt(entryRule, skipper, options, snapshot, spec);
   detail::classify_recovery_attempt(attempt);
-  detail::score_recovery_attempt(attempt);
   if (!harness.attempt.cst ||
       detail::is_better_recovery_attempt(attempt, harness.attempt)) {
     harness.spec = spec;
@@ -133,7 +132,7 @@ TEST(RecoveryDebugTest,
 }
 
 TEST(RecoveryDebugTest,
-     RecoveryAttemptJsonIncludesSpecEditTraceScoreAndOrderKey) {
+     RecoveryAttemptJsonIncludesSpecDerivedSummariesAndOrderKey) {
   TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
   ParserRule<RecoveryDebugNode> entry{
       "Entry", assign<&RecoveryDebugNode::first>(id) + ";"_kw};

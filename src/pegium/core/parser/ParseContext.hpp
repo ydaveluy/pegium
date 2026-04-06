@@ -375,7 +375,6 @@ struct RecoveryContext : TrackedParseContext {
   bool allowDelete = true;
   bool allowExtendedDeleteScan = true;
   bool allowDeleteRetry = true;
-  bool stopInfixTailAfterRecovery = false;
   bool skipAfterDelete = true;
   bool trackEditState = true;
   std::uint32_t maxConsecutiveCodepointDeletes =

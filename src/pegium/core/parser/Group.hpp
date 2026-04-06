@@ -5,6 +5,7 @@
 #include <array>
 #include <concepts>
 #include <cstdint>
+#include <optional>
 #include <tuple>
 #include <utility>
 
@@ -175,8 +176,10 @@ public:
           }
           return parse_elements<Context, I + 1>(ctx);
         }
-        if (try_insert_missing_element<I>(ctx)) {
-          return true;
+        if (this->template select_missing_element_insert_replay<I>(ctx)) {
+          bool matchedCleanTail = false;
+          return this->template replay_insert_missing_element_attempt<I>(
+              ctx, matchedCleanTail);
         }
         const auto checkpoint = ctx.mark();
         const auto &current = std::get<I>(elements);
@@ -265,13 +268,19 @@ public:
 private:
   struct SequenceRecoveryReplayPlan {
     bool valid = false;
-    bool insertCurrentWithCleanTail = false;
-    bool deleteThenInsertCurrent = false;
+    bool insertCurrentTerminal = false;
+    std::uint32_t currentTerminalDeleteRunCount = 0u;
+    bool currentTerminalDeleteRunEndsAfterHiddenTriviaExtension = false;
     bool reparseCurrentWithoutDelete = false;
     bool skipNullable = false;
     bool preferTailEntryInsert = false;
     bool allowDeleteRecovery = false;
     bool allowNullableTailStop = false;
+  };
+
+  struct TerminalDeleteRunObservation {
+    std::uint32_t deleteCount = 0u;
+    bool endsAfterHiddenTriviaExtension = false;
   };
 
   struct TerminalRecoveryState {
@@ -610,7 +619,7 @@ private:
     if (!plan.valid) {
       return false;
     }
-    if (plan.insertCurrentWithCleanTail || plan.deleteThenInsertCurrent) {
+    if (plan.insertCurrentTerminal) {
       return replay_terminal_current_failure_attempt<I>(ctx, plan);
     }
     if (plan.reparseCurrentWithoutDelete) {
@@ -767,54 +776,13 @@ private:
     return {};
   }
 
-  template <std::size_t I>
-  [[nodiscard]] bool current_failure_allows_skip_nullable_attempt(
-      bool nullableCurrentLooksStarted,
-      const SequenceFacts &sequenceFacts) const {
-    const auto &current = std::get<I>(elements);
-    return (!nullableCurrentLooksStarted ||
-            sequenceFacts.strictSuffixStartsAtCurrentCursor ||
-            sequenceFacts.recoverableSuffixStartsAtCurrentCursor) &&
-           current.getKind() != ElementKind::AndPredicate &&
-           current.getKind() != ElementKind::NotPredicate;
-  }
-
-  template <std::size_t I, typename Checkpoint>
-  [[nodiscard]] bool current_failure_allows_reparse_current_without_delete(
-      RecoveryContext &ctx, const Checkpoint &checkpoint,
-      bool nullableCurrentLooksStarted,
-      bool allowSkipNullableAttempt) const {
-    if (!nullableCurrentLooksStarted) {
-      return false;
-    }
-    if (!allowSkipNullableAttempt) {
-      return true;
-    }
-    return this->template current_locally_recoverable_from_entry<I>(ctx,
-                                                                    checkpoint);
-  }
-
-  template <std::size_t I, typename Checkpoint>
-  [[nodiscard]] bool tail_failure_allows_reparse_current_attempt(
-      RecoveryContext &ctx, const Checkpoint &checkpoint,
-      bool currentCommittedProgress,
-      const SequenceFacts &sequenceFacts) const {
-    const bool currentLocallyRecoverableFromEntry =
-        !currentCommittedProgress &&
-        this->template current_locally_recoverable_from_entry<I>(
-            ctx, checkpoint);
-    return currentCommittedProgress ||
-           sequenceFacts.strictSuffixStartsAtCurrentCursor ||
-           currentLocallyRecoverableFromEntry;
-  }
-
   template <RecoveryParseModeContext Context, std::size_t I,
             typename Checkpoint>
   SequenceRecoveryReplayPlan select_current_failure_sequence_attempt(
       Context &ctx, const Checkpoint &checkpoint,
       const TerminalRecoveryState &terminalRecoveryState,
-      bool allowInsertCurrentWithCleanTail,
-      bool allowDeleteThenInsertCurrent,
+      bool allowInsertCurrentTerminal,
+      bool allowInsertCurrentAfterDeleteRun,
       bool allowCurrentWithoutDeleteAttempt,
       bool allowSkipNullableAttempt,
       bool preferTailEntryInsert,
@@ -822,11 +790,11 @@ private:
     const auto &current = std::get<I>(elements);
     SequenceRecoveryReplayPlan bestPlan{};
     detail::EditableRecoveryCandidate bestCandidate{};
-    if (allowInsertCurrentWithCleanTail || allowDeleteThenInsertCurrent) {
+    if (allowInsertCurrentTerminal || allowInsertCurrentAfterDeleteRun) {
       ctx.rewind(checkpoint);
       this->template consider_terminal_current_failure_attempts<I>(
-          bestPlan, bestCandidate, ctx, allowInsertCurrentWithCleanTail,
-          allowDeleteThenInsertCurrent, allowTerminalNullableTailStop);
+          bestPlan, bestCandidate, ctx, allowInsertCurrentTerminal,
+          allowInsertCurrentAfterDeleteRun, allowTerminalNullableTailStop);
     }
     if constexpr (std::remove_cvref_t<
                       decltype(std::get<I>(elements))>::nullable) {
@@ -863,9 +831,10 @@ private:
       Context &ctx, const Checkpoint &checkpoint,
       const TerminalRecoveryState &terminalRecoveryState,
       bool nullableCurrentLooksStarted) const {
+    const auto &current = std::get<I>(elements);
     const auto sequenceFacts = build_sequence_facts<I>(ctx);
-    const auto [allowInsertCurrentWithCleanTail,
-                allowDeleteThenInsertCurrent] =
+    const auto [allowInsertCurrentTerminal,
+                allowInsertCurrentAfterDeleteRun] =
         this->template build_current_failure_terminal_legality<I>(
             ctx, checkpoint, terminalRecoveryState, sequenceFacts);
     const bool preferTailEntryInsert =
@@ -873,21 +842,26 @@ private:
     const bool allowTerminalNullableTailStop =
         terminal_allows_nullable_tail_stop(terminalRecoveryState, sequenceFacts);
     const bool allowSkipNullableAttempt =
-        this->template current_failure_allows_skip_nullable_attempt<I>(
-            nullableCurrentLooksStarted, sequenceFacts);
+        (!nullableCurrentLooksStarted ||
+         sequenceFacts.strictSuffixStartsAtCurrentCursor ||
+         sequenceFacts.recoverableSuffixStartsAtCurrentCursor) &&
+        current.getKind() != ElementKind::AndPredicate &&
+        current.getKind() != ElementKind::NotPredicate;
     bool allowCurrentWithoutDeleteAttempt = false;
     if constexpr (std::remove_cvref_t<
                       decltype(std::get<I>(elements))>::nullable) {
-      allowCurrentWithoutDeleteAttempt =
-          this->template current_failure_allows_reparse_current_without_delete<I>(
-              ctx, checkpoint, nullableCurrentLooksStarted,
-              allowSkipNullableAttempt);
+      if (nullableCurrentLooksStarted) {
+        allowCurrentWithoutDeleteAttempt =
+            !allowSkipNullableAttempt ||
+            this->template current_locally_recoverable_from_entry<I>(
+                ctx, checkpoint);
+      }
     }
     const auto bestPlan =
         this->template select_current_failure_sequence_attempt<Context, I>(
             ctx, checkpoint, terminalRecoveryState,
-            allowInsertCurrentWithCleanTail,
-            allowDeleteThenInsertCurrent,
+            allowInsertCurrentTerminal,
+            allowInsertCurrentAfterDeleteRun,
             allowCurrentWithoutDeleteAttempt,
             allowSkipNullableAttempt, preferTailEntryInsert,
             allowTerminalNullableTailStop);
@@ -952,8 +926,11 @@ private:
           sequenceFacts.recoverableSuffixStartsAtCurrentCursor;
       const bool allowDeleteRecovery = !currentCommittedProgress;
       const bool allowReparseCurrentAttempt =
-          this->template tail_failure_allows_reparse_current_attempt<I>(
-              ctx, checkpoint, currentCommittedProgress, sequenceFacts);
+          currentCommittedProgress ||
+          sequenceFacts.strictSuffixStartsAtCurrentCursor ||
+          (!currentCommittedProgress &&
+           this->template current_locally_recoverable_from_entry<I>(
+               ctx, checkpoint));
       const bool allowSkipNullableAttempt =
           sequenceFacts.recoverableSuffixStartsAtCurrentCursor ||
           (!currentCommittedProgress && !allowReparseCurrentAttempt);
@@ -1030,7 +1007,8 @@ private:
   }
 
   template <std::size_t I>
-  bool try_insert_missing_element(RecoveryContext &ctx) const {
+  [[nodiscard]] bool
+  select_missing_element_insert_replay(RecoveryContext &ctx) const {
     if constexpr (std::remove_cvref_t<
                       decltype(std::get<I>(elements))>::nullable) {
       return false;
@@ -1052,35 +1030,12 @@ private:
       const auto checkpoint = ctx.mark();
       const auto baseEditCost = ctx.currentEditCost();
       const auto baseRecoveryEditCount = ctx.recoveryEditCount();
-      const auto replayInsertAttempt =
-          [this, &ctx, &current](bool &matchedCleanTail) {
-            matchedCleanTail = false;
-            if (!detail::apply_insert_synthetic_recovery_edit(
-                    ctx, std::addressof(current))) {
-              return false;
-            }
-            if (this->template parse_clean_tail_without_edits<I + 1>(ctx)) {
-              matchedCleanTail = true;
-              return true;
-            }
-            if (!this->template tail_supports_single_terminal_recovery<I + 1>()) {
-              return false;
-            }
-            const auto tailCheckpoint = ctx.mark();
-            const char *const savedFurthestExploredCursor =
-                ctx.furthestExploredCursor();
-            const bool tailRecoverable =
-                this->template probe_recoverable_entry_elements<I + 1>(ctx);
-            ctx.rewind(tailCheckpoint);
-            ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
-            return tailRecoverable &&
-                   this->template parse_elements<RecoveryContext, I + 1>(ctx);
-          };
       bool insertMatchedCleanTail = false;
       const auto insertCandidate = detail::evaluate_editable_recovery_candidate(
           ctx, checkpoint, baseEditCost, baseRecoveryEditCount,
-          [&replayInsertAttempt, &insertMatchedCleanTail]() {
-            return replayInsertAttempt(insertMatchedCleanTail);
+          [this, &ctx, &insertMatchedCleanTail]() {
+            return this->template replay_insert_missing_element_attempt<I>(
+                ctx, insertMatchedCleanTail);
           });
       if (!insertCandidate.matched ||
           insertCandidate.postSkipCursorOffset <=
@@ -1124,10 +1079,35 @@ private:
               {.preferredBoundaryElement = std::addressof(current)})) {
         return false;
       }
-      ctx.rewind(checkpoint);
-      bool replayMatchedCleanTail = false;
-      return replayInsertAttempt(replayMatchedCleanTail);
+      return true;
     }
+  }
+
+  template <std::size_t I>
+  bool replay_insert_missing_element_attempt(RecoveryContext &ctx,
+                                             bool &matchedCleanTail) const {
+    const auto &current = std::get<I>(elements);
+    matchedCleanTail = false;
+    if (!detail::apply_insert_synthetic_recovery_edit(
+            ctx, std::addressof(current))) {
+      return false;
+    }
+    if (this->template parse_clean_tail_without_edits<I + 1>(ctx)) {
+      matchedCleanTail = true;
+      return true;
+    }
+    if (!this->template tail_supports_single_terminal_recovery<I + 1>()) {
+      return false;
+    }
+    const auto tailCheckpoint = ctx.mark();
+    const char *const savedFurthestExploredCursor =
+        ctx.furthestExploredCursor();
+    const bool tailRecoverable =
+        this->template probe_recoverable_entry_elements<I + 1>(ctx);
+    ctx.rewind(tailCheckpoint);
+    ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+    return tailRecoverable &&
+           this->template parse_elements<RecoveryContext, I + 1>(ctx);
   }
 
   template <std::size_t I>
@@ -1190,30 +1170,74 @@ private:
   }
 
   template <std::size_t I>
-  bool run_delete_then_insert_current_attempt(RecoveryContext &ctx) const {
-    const auto deleteCheckpoint = ctx.mark();
+  [[nodiscard]] std::optional<TerminalDeleteRunObservation>
+  observe_current_terminal_delete_run(RecoveryContext &ctx) const {
+    const auto checkpoint = ctx.mark();
     const bool previousSkipAfterDelete = ctx.skipAfterDelete;
     ctx.skipAfterDelete = false;
-    bool deletedAny = false;
-    while (ctx.deleteOneCodepoint()) {
-      deletedAny = true;
-      if (ctx.skip_without_builder(ctx.cursor()) > ctx.cursor()) {
-        if (ctx.extendLastDeleteThroughHiddenTrivia()) {
-          continue;
-        }
-        break;
-      }
-    }
+    std::optional<TerminalDeleteRunObservation> observation;
+    (void)detail::visit_guarded_delete_scan_positions(
+        ctx, []() noexcept { return true; },
+        [&observation](const detail::DeleteScanVisitState &state) {
+          observation = {
+              .deleteCount = state.deleteCount,
+              .endsAfterHiddenTriviaExtension = state.hiddenTriviaExtended,
+          };
+          return detail::DeleteScanVisitResult::Continue;
+        },
+        {.scan = {.allowOverflow = false},
+         .extendThroughHiddenTrivia = true,
+         .stopAtHiddenTriviaBoundary = true,
+         .visitAfterHiddenTriviaExtension = true});
     ctx.skipAfterDelete = previousSkipAfterDelete;
-    if (!deletedAny) {
-      ctx.rewind(deleteCheckpoint);
-      return false;
-    }
-    if (this->template try_insert_current_terminal_with_clean_tail<I>(ctx,
-                                                                      true)) {
+    ctx.rewind(checkpoint);
+    return observation;
+  }
+
+  template <std::size_t I>
+  bool replay_current_terminal_delete_run(
+      RecoveryContext &ctx,
+      const TerminalDeleteRunObservation &observation) const {
+    if (observation.deleteCount == 0u) {
       return true;
     }
-    ctx.rewind(deleteCheckpoint);
+    const bool previousSkipAfterDelete = ctx.skipAfterDelete;
+    ctx.skipAfterDelete = false;
+    const bool replayed =
+        detail::visit_guarded_delete_scan_positions(
+            ctx, []() noexcept { return true; },
+            [&observation](const detail::DeleteScanVisitState &state) {
+              if (state.deleteCount == observation.deleteCount &&
+                  state.hiddenTriviaExtended ==
+                      observation.endsAfterHiddenTriviaExtension) {
+                return detail::DeleteScanVisitResult::Accept;
+              }
+              return detail::DeleteScanVisitResult::Continue;
+            },
+            {.scan = {.maxDeletes = observation.deleteCount,
+                      .allowOverflow = false},
+             .extendThroughHiddenTrivia = true,
+             .stopAtHiddenTriviaBoundary = true,
+             .visitAfterHiddenTriviaExtension = true}) ==
+        detail::DeleteScanVisitResult::Accept;
+    ctx.skipAfterDelete = previousSkipAfterDelete;
+    return replayed;
+  }
+
+  template <std::size_t I>
+  bool replay_insert_current_terminal_attempt(
+      RecoveryContext &ctx, const TerminalDeleteRunObservation &deleteRun,
+      bool allowNullableTailStop) const {
+    const auto checkpoint = ctx.mark();
+    if (!this->template replay_current_terminal_delete_run<I>(ctx, deleteRun)) {
+      ctx.rewind(checkpoint);
+      return false;
+    }
+    if (this->template try_insert_current_terminal_with_clean_tail<I>(
+            ctx, allowNullableTailStop)) {
+      return true;
+    }
+    ctx.rewind(checkpoint);
     return false;
   }
 
@@ -1221,42 +1245,49 @@ private:
   void consider_terminal_current_failure_attempts(
       SequenceRecoveryReplayPlan &bestPlan,
       detail::EditableRecoveryCandidate &bestCandidate,
-      RecoveryContext &ctx, bool allowInsertCurrentWithCleanTail,
-      bool allowDeleteThenInsertCurrent,
+      RecoveryContext &ctx, bool allowInsertCurrentTerminal,
+      bool allowInsertCurrentAfterDeleteRun,
       bool allowNullableTailStop) const {
-    if (!allowInsertCurrentWithCleanTail && !allowDeleteThenInsertCurrent) {
+    if (!allowInsertCurrentTerminal && !allowInsertCurrentAfterDeleteRun) {
       return;
     }
     const auto &current = std::get<I>(elements);
     const auto checkpoint = ctx.mark();
     const auto baseEditCost = ctx.currentEditCost();
     const auto baseRecoveryEditCount = ctx.recoveryEditCount();
-    if (allowInsertCurrentWithCleanTail) {
+    if (allowInsertCurrentTerminal) {
       this->consider_sequence_recovery_candidate(
           bestPlan, bestCandidate,
           {.valid = true,
-           .insertCurrentWithCleanTail = true,
+           .insertCurrentTerminal = true,
            .allowNullableTailStop = allowNullableTailStop},
           detail::evaluate_editable_recovery_candidate(
               ctx, checkpoint, baseEditCost, baseRecoveryEditCount,
               [this, &ctx, allowNullableTailStop]() {
-                return this->template
-                    try_insert_current_terminal_with_clean_tail<I>(
-                        ctx, allowNullableTailStop);
+                return this->template replay_insert_current_terminal_attempt<I>(
+                    ctx, {}, allowNullableTailStop);
               }),
           std::addressof(current));
     }
-    if (allowDeleteThenInsertCurrent) {
+    if (allowInsertCurrentAfterDeleteRun) {
+      const auto deleteRun =
+          this->template observe_current_terminal_delete_run<I>(ctx);
+      if (!deleteRun.has_value()) {
+        return;
+      }
       this->consider_sequence_recovery_candidate(
           bestPlan, bestCandidate,
           {.valid = true,
-           .deleteThenInsertCurrent = true,
+           .insertCurrentTerminal = true,
+           .currentTerminalDeleteRunCount = deleteRun->deleteCount,
+           .currentTerminalDeleteRunEndsAfterHiddenTriviaExtension =
+               deleteRun->endsAfterHiddenTriviaExtension,
            .allowNullableTailStop = allowNullableTailStop},
           detail::evaluate_editable_recovery_candidate(
               ctx, checkpoint, baseEditCost, baseRecoveryEditCount,
-              [this, &ctx]() {
-                return this->template run_delete_then_insert_current_attempt<I>(
-                    ctx);
+              [this, &ctx, deleteRun, allowNullableTailStop]() {
+                return this->template replay_insert_current_terminal_attempt<I>(
+                    ctx, *deleteRun, allowNullableTailStop);
               }),
           std::addressof(current));
     }
@@ -1269,12 +1300,13 @@ private:
     if (!plan.valid) {
       return false;
     }
-    if (plan.insertCurrentWithCleanTail) {
-      return this->template try_insert_current_terminal_with_clean_tail<I>(
-          ctx, plan.allowNullableTailStop);
-    }
-    if (plan.deleteThenInsertCurrent) {
-      return this->template run_delete_then_insert_current_attempt<I>(ctx);
+    if (plan.insertCurrentTerminal) {
+      return this->template replay_insert_current_terminal_attempt<I>(
+          ctx,
+          {.deleteCount = plan.currentTerminalDeleteRunCount,
+           .endsAfterHiddenTriviaExtension =
+               plan.currentTerminalDeleteRunEndsAfterHiddenTriviaExtension},
+          plan.allowNullableTailStop);
     }
     return false;
   }

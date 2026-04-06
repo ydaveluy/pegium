@@ -5,6 +5,7 @@
 #include <array>
 #include <concepts>
 #include <memory>
+#include <optional>
 #include <pegium/core/grammar/Assignment.hpp>
 #include <pegium/core/grammar/InfixRule.hpp>
 #include <pegium/core/grammar/ParserRule.hpp>
@@ -18,6 +19,7 @@
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParserRule.hpp>
 #include <pegium/core/parser/RawValueTraits.hpp>
+#include <pegium/core/parser/RecoveryUtils.hpp>
 #include <pegium/core/parser/RecoveryTrace.hpp>
 #include <pegium/core/parser/StepTrace.hpp>
 #include <pegium/core/parser/AstReflectionBootstrap.hpp>
@@ -431,6 +433,36 @@ private:
 
   private:
     struct ParseEngine {
+      enum class EditableTailCandidateKind {
+        ContinueTail,
+        DeleteOperatorRun,
+      };
+
+      struct EditableTailCandidate {
+        EditableTailCandidateKind kind =
+            EditableTailCandidateKind::DeleteOperatorRun;
+        std::uint32_t order = 0;
+        std::uint32_t rhsPrefixNoiseDeleteCount = 0;
+        bool legal = false;
+      };
+
+      struct EditableTailReplayResult {
+        bool matched = true;
+        bool stopTail = false;
+      };
+
+      struct EditableTailObservation {
+        const char *rhsStart = nullptr;
+        TextOffset rhsStartOffset = 0;
+        std::size_t baseRecoveryEditCount = 0;
+        std::uint32_t rhsPrefixNoiseDeleteCount = 0;
+        bool exposedPrimary = true;
+        bool matchedPrimary = false;
+        bool advancedPrimary = false;
+        bool crossedSkippedTrivia = false;
+        bool multipleImmediateEditsAtStart = false;
+      };
+
       template <StrictParseModeContext Context>
       static bool rule(const Model *model, Context &ctx) {
         const auto expressionStart = ctx.cursor();
@@ -448,10 +480,9 @@ private:
           return false;
         }
         ctx.skip();
-        const bool matched =
+        const auto replayResult =
             parse_tail_editable(model, ctx, /*minPrecedence=*/0, expressionStart);
-        ctx.stopInfixTailAfterRecovery = false;
-        return matched;
+        return replayResult.matched;
       }
 
       static bool expect(const Model *model, ExpectContext &ctx) {
@@ -500,18 +531,15 @@ private:
         }
       }
 
-      static bool parse_tail_editable(const Model *model, RecoveryContext &ctx,
-                                      std::int32_t minPrecedence,
-                                      const char *lhsStart) {
+      static EditableTailReplayResult
+      parse_tail_editable(const Model *model, RecoveryContext &ctx,
+                          std::int32_t minPrecedence, const char *lhsStart) {
         if (minPrecedence > kMaxPrecedence) {
-          return true;
-        }
-        if (ctx.stopInfixTailAfterRecovery) {
-          return true;
+          return {};
         }
         while (true) {
           if (!has_operator_fast_probe(model, ctx, minPrecedence)) {
-            return true;
+            return {};
           }
           const auto nodeCheckpoint = ctx.mark();
           (void)ctx.enter();
@@ -519,64 +547,27 @@ private:
           if (!try_match_operator_editable(model, ctx, minPrecedence,
                                            nextMinPrecedence)) {
             ctx.rewind(nodeCheckpoint);
-            return true;
+            return {};
           }
-          ctx.skip();
-          if (has_operator_fast_probe(model, ctx, /*minPrecedence=*/0) &&
-              !consume_prefix_operator_noise_before_rhs_primary(model, ctx)) {
+          const auto observation = observe_editable_rhs_primary(model, ctx);
+          const auto candidates =
+              enumerate_editable_tail_candidates(observation, ctx);
+          const EditableTailCandidate *const selectedCandidate =
+              select_editable_tail_candidate(candidates);
+          if (selectedCandidate == nullptr) {
+            ctx.rewind(nodeCheckpoint);
+            return {.matched = false, .stopTail = false};
+          }
+          if (selectedCandidate->kind ==
+              EditableTailCandidateKind::DeleteOperatorRun) {
             ctx.rewind(nodeCheckpoint);
             return recover_stray_operator_run(model, ctx, minPrecedence);
           }
-          const auto rhsStart = ctx.cursor();
-          const auto rhsStartOffset = ctx.cursorOffset();
-          const auto baseRecoveryEditCount = ctx.recoveryEditCount();
-          const bool previousAllowExtendedDeleteScan =
-              ctx.allowExtendedDeleteScan;
-          ctx.allowExtendedDeleteScan = false;
-          const bool matchedPrimary = parse(model->primary, ctx);
-          ctx.allowExtendedDeleteScan = previousAllowExtendedDeleteScan;
-          if (!matchedPrimary) {
-            ctx.rewind(nodeCheckpoint);
-            return recover_stray_operator_run(model, ctx, minPrecedence);
+          const auto replayResult = replay_editable_rhs_primary(
+              model, ctx, *selectedCandidate, nextMinPrecedence, lhsStart);
+          if (!replayResult.matched || replayResult.stopTail) {
+            return replayResult;
           }
-          if (ctx.cursor() == rhsStart) {
-            ctx.rewind(nodeCheckpoint);
-            return recover_stray_operator_run(model, ctx, minPrecedence);
-          }
-          if (ctx.recoveryEditCount() > baseRecoveryEditCount) {
-            const auto edits = ctx.recoveryEditsView();
-            const auto immediateEditCount =
-                ctx.recoveryEditCount() - baseRecoveryEditCount;
-            const bool crossedSkippedTrivia = [&ctx, rhsStart]() {
-              const char *cursor = rhsStart;
-              while (cursor < ctx.cursor()) {
-                const char *const skipped = ctx.skip_without_builder(cursor);
-                if (skipped > cursor) {
-                  return true;
-                }
-                ++cursor;
-              }
-              return false;
-            }();
-            if (crossedSkippedTrivia) {
-              ctx.rewind(nodeCheckpoint);
-              return recover_stray_operator_run(model, ctx, minPrecedence);
-            }
-            if (immediateEditCount > 1u &&
-                edits[baseRecoveryEditCount].offset == rhsStartOffset) {
-              ctx.rewind(nodeCheckpoint);
-              return recover_stray_operator_run(model, ctx, minPrecedence);
-            }
-          }
-          if (ctx.stopInfixTailAfterRecovery) {
-            assert(model->_owner && "The owner must be set");
-            ctx.exit(lhsStart, model->_owner);
-            return true;
-          }
-          ctx.skip();
-          (void)parse_tail_editable(model, ctx, nextMinPrecedence, rhsStart);
-          assert(model->_owner && "The owner must be set");
-          ctx.exit(lhsStart, model->_owner);
         }
       }
 
@@ -695,66 +686,237 @@ private:
         }
       }
 
-      static bool recover_stray_operator_run(const Model *model,
-                                             RecoveryContext &ctx,
-                                             std::int32_t minPrecedence) {
-        const auto recoveryCheckpoint = ctx.mark();
-        const auto savedMaxConsecutiveDeletes =
-            ctx.maxConsecutiveCodepointDeletes;
-        const auto savedMaxEditCost = ctx.maxEditCost;
-        const bool previousSkipAfterDelete = ctx.skipAfterDelete;
-        ctx.maxConsecutiveCodepointDeletes =
-            std::numeric_limits<std::uint32_t>::max();
-        ctx.maxEditCost = std::numeric_limits<std::uint32_t>::max();
-        ctx.skipAfterDelete = false;
-        bool deletedAny = false;
-        while (ctx.cursor() != ctx.end &&
-               has_operator_fast_probe(model, ctx, minPrecedence)) {
-          if (!ctx.deleteOneCodepoint()) {
-            break;
-          }
-          deletedAny = true;
+      [[nodiscard]] static EditableTailObservation
+      observe_editable_rhs_primary(const Model *model,
+                                   RecoveryContext &ctx) {
+        EditableTailObservation observation;
+        const auto checkpoint = ctx.mark();
+        const char *const savedFurthestExploredCursor =
+            ctx.furthestExploredCursor();
+        ctx.restoreFurthestExploredCursor(ctx.cursor());
+        ctx.skip();
+        if (has_operator_fast_probe(model, ctx, /*minPrecedence=*/0) &&
+            !observe_rhs_prefix_operator_noise(model, ctx, observation)) {
+          observation.exposedPrimary = false;
+          ctx.rewind(checkpoint);
+          ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+          return observation;
         }
-        ctx.maxConsecutiveCodepointDeletes = savedMaxConsecutiveDeletes;
-        ctx.maxEditCost = savedMaxEditCost;
-        ctx.skipAfterDelete = previousSkipAfterDelete;
-        if (!deletedAny || ctx.cursor() == ctx.end ||
-            has_operator_fast_probe(model, ctx, minPrecedence)) {
-          ctx.rewind(recoveryCheckpoint);
-          return false;
+        observation.rhsStart = ctx.cursor();
+        observation.rhsStartOffset = ctx.cursorOffset();
+        observation.baseRecoveryEditCount = ctx.recoveryEditCount();
+        const bool previousAllowExtendedDeleteScan =
+            ctx.allowExtendedDeleteScan;
+        ctx.allowExtendedDeleteScan = false;
+        observation.matchedPrimary = parse(model->primary, ctx);
+        ctx.allowExtendedDeleteScan = previousAllowExtendedDeleteScan;
+        observation.advancedPrimary = ctx.cursor() != observation.rhsStart;
+        if (!observation.matchedPrimary || !observation.advancedPrimary) {
+          ctx.rewind(checkpoint);
+          ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+          return observation;
         }
-        ctx.stopInfixTailAfterRecovery =
-            ctx.skip_without_builder(ctx.cursor()) > ctx.cursor();
-        detail::enable_budget_overflow_edits_for_attempt(ctx);
-        return true;
+        if (ctx.recoveryEditCount() == observation.baseRecoveryEditCount) {
+          ctx.rewind(checkpoint);
+          ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+          return observation;
+        }
+        const auto edits = ctx.recoveryEditsView();
+        const auto immediateEditCount =
+            ctx.recoveryEditCount() - observation.baseRecoveryEditCount;
+        observation.crossedSkippedTrivia = rhs_primary_crossed_skipped_trivia(
+            ctx, observation.rhsStart);
+        observation.multipleImmediateEditsAtStart =
+            immediateEditCount > 1u &&
+            edits[observation.baseRecoveryEditCount].offset ==
+                observation.rhsStartOffset;
+        ctx.rewind(checkpoint);
+        ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+        return observation;
       }
 
-      static bool consume_prefix_operator_noise_before_rhs_primary(
-          const Model *model, RecoveryContext &ctx) {
+      [[nodiscard]] static bool rhs_primary_crossed_skipped_trivia(
+          RecoveryContext &ctx, const char *rhsStart) {
+        const char *cursor = rhsStart;
+        while (cursor < ctx.cursor()) {
+          const char *const skipped = ctx.skip_without_builder(cursor);
+          if (skipped > cursor) {
+            return true;
+          }
+          ++cursor;
+        }
+        return false;
+      }
+
+      [[nodiscard]] static bool
+      continue_editable_tail_candidate_is_legal(
+          const EditableTailObservation &observation) noexcept {
+        return observation.exposedPrimary && observation.matchedPrimary &&
+               observation.advancedPrimary &&
+               !observation.crossedSkippedTrivia &&
+               !observation.multipleImmediateEditsAtStart;
+      }
+
+      [[nodiscard]] static std::array<EditableTailCandidate, 2>
+      enumerate_editable_tail_candidates(const EditableTailObservation &observation,
+                                         const RecoveryContext &ctx) noexcept {
+        return {{
+            {.kind = EditableTailCandidateKind::ContinueTail,
+             .order = 0u,
+             .rhsPrefixNoiseDeleteCount =
+                 observation.rhsPrefixNoiseDeleteCount,
+             .legal = continue_editable_tail_candidate_is_legal(observation)},
+            {.kind = EditableTailCandidateKind::DeleteOperatorRun,
+             .order = 1u,
+             .legal = ctx.canDelete()},
+        }};
+      }
+
+      [[nodiscard]] static const EditableTailCandidate *
+      select_editable_tail_candidate(
+          const std::array<EditableTailCandidate, 2> &candidates) noexcept {
+        const EditableTailCandidate *bestCandidate = nullptr;
+        for (const auto &candidate : candidates) {
+          if (!candidate.legal) {
+            continue;
+          }
+          if (bestCandidate == nullptr ||
+              candidate.order < bestCandidate->order) {
+            bestCandidate = std::addressof(candidate);
+          }
+        }
+        return bestCandidate;
+      }
+
+      static EditableTailReplayResult
+      replay_editable_rhs_primary(const Model *model, RecoveryContext &ctx,
+                                  const EditableTailCandidate &candidate,
+                                  std::int32_t nextMinPrecedence,
+                                  const char *lhsStart) {
+        assert(candidate.kind == EditableTailCandidateKind::ContinueTail &&
+               "Only a ContinueTail candidate can replay an infix RHS");
+        ctx.skip();
+        const bool replayedPrefixNoise = replay_rhs_prefix_operator_noise(
+            model, ctx, candidate.rhsPrefixNoiseDeleteCount);
+        assert(replayedPrefixNoise &&
+               "Infix RHS prefix replay must match observed cleanup");
+        if (!replayedPrefixNoise) {
+          return {.matched = false, .stopTail = false};
+        }
+        const auto rhsStart = ctx.cursor();
+        const bool previousAllowExtendedDeleteScan =
+            ctx.allowExtendedDeleteScan;
+        ctx.allowExtendedDeleteScan = false;
+        const bool matchedPrimary = parse(model->primary, ctx);
+        ctx.allowExtendedDeleteScan = previousAllowExtendedDeleteScan;
+        assert(matchedPrimary && ctx.cursor() != rhsStart &&
+               "Observed editable infix RHS must replay successfully");
+        if (!matchedPrimary || ctx.cursor() == rhsStart) {
+          return {.matched = false, .stopTail = false};
+        }
+        ctx.skip();
+        const auto nestedReplayResult =
+            parse_tail_editable(model, ctx, nextMinPrecedence, rhsStart);
+        assert(model->_owner && "The owner must be set");
+        ctx.exit(lhsStart, model->_owner);
+        return {.matched = true, .stopTail = nestedReplayResult.stopTail};
+      }
+
+      static EditableTailReplayResult
+      recover_stray_operator_run(const Model *model, RecoveryContext &ctx,
+                                 std::int32_t minPrecedence) {
+        const bool previousSkipAfterDelete = ctx.skipAfterDelete;
+        ctx.skipAfterDelete = false;
+        bool stopTail = false;
+        const bool recovered =
+            has_operator_fast_probe(model, ctx, minPrecedence) &&
+            detail::recover_by_guarded_delete_scan(
+                ctx,
+                []() noexcept { return true; },
+                [&](const char *scanCursor) -> const char * {
+                  if (scanCursor == ctx.end ||
+                      has_operator_fast_probe(model, ctx, minPrecedence)) {
+                    return nullptr;
+                  }
+                  return scanCursor;
+                },
+                [&](const char *matchedCursor) {
+                  stopTail =
+                      ctx.skip_without_builder(matchedCursor) > matchedCursor;
+                });
+        ctx.skipAfterDelete = previousSkipAfterDelete;
+        return {.matched = recovered, .stopTail = recovered && stopTail};
+      }
+
+      static bool observe_rhs_prefix_operator_noise(
+          const Model *model, RecoveryContext &ctx,
+          EditableTailObservation &observation) {
+        const auto deleteCount =
+            observe_rhs_prefix_operator_noise_delete_count(model, ctx);
+        if (!deleteCount.has_value()) {
+          return false;
+        }
+        observation.rhsPrefixNoiseDeleteCount = *deleteCount;
+        const bool replayedPrefixNoise = replay_rhs_prefix_operator_noise(
+            model, ctx, observation.rhsPrefixNoiseDeleteCount);
+        assert(replayedPrefixNoise &&
+               "Observed infix RHS prefix cleanup must replay during observation");
+        return replayedPrefixNoise;
+      }
+
+      [[nodiscard]] static std::optional<std::uint32_t>
+      observe_rhs_prefix_operator_noise_delete_count(const Model *model,
+                                                     RecoveryContext &ctx) {
         const auto checkpoint = ctx.mark();
         const bool previousSkipAfterDelete = ctx.skipAfterDelete;
         ctx.skipAfterDelete = false;
         const auto maxProbeDeletes =
             std::min<std::uint32_t>(ctx.maxConsecutiveCodepointDeletes, 4u);
-        bool exposedPrimary = false;
-        for (std::uint32_t deleted = 0;
-             deleted < maxProbeDeletes && ctx.cursor() != ctx.end; ++deleted) {
-          if (!has_operator_fast_probe(model, ctx, /*minPrecedence=*/0) ||
-              !ctx.deleteOneCodepoint()) {
-            break;
-          }
-          ctx.skip();
-          if (parser::attempt_fast_probe(ctx, model->primary) ||
-              parser::probe_locally_recoverable(model->primary, ctx)) {
-            exposedPrimary = true;
-            break;
-          }
-        }
+        std::optional<std::uint32_t> observedDeleteCount;
+        (void)detail::recover_by_guarded_delete_scan(
+            ctx,
+            [&]() noexcept {
+              return ctx.cursor() != ctx.end &&
+                     has_operator_fast_probe(model, ctx, /*minPrecedence=*/0);
+            },
+            [&](const char *) -> const char * {
+              ctx.skip();
+              if (parser::attempt_fast_probe(ctx, model->primary) ||
+                  parser::probe_locally_recoverable(model->primary, ctx)) {
+                return ctx.cursor();
+              }
+              return nullptr;
+            },
+            [&](const char *, std::uint32_t deleteCount) {
+              observedDeleteCount = deleteCount;
+            },
+            {.maxDeletes = maxProbeDeletes, .allowOverflow = false});
         ctx.skipAfterDelete = previousSkipAfterDelete;
-        if (!exposedPrimary) {
-          ctx.rewind(checkpoint);
+        ctx.rewind(checkpoint);
+        return observedDeleteCount;
+      }
+
+      static bool replay_rhs_prefix_operator_noise(const Model *model,
+                                                   RecoveryContext &ctx,
+                                                   std::uint32_t deleteCount) {
+        if (deleteCount == 0u) {
+          return true;
         }
-        return exposedPrimary;
+        const bool previousSkipAfterDelete = ctx.skipAfterDelete;
+        ctx.skipAfterDelete = false;
+        const bool replayed = detail::recover_by_guarded_delete_scan(
+            ctx,
+            [&]() noexcept {
+              return has_operator_fast_probe(model, ctx, /*minPrecedence=*/0);
+            },
+            [&](const char *, std::uint32_t deletedCount) -> const char * {
+              ctx.skip();
+              return deletedCount == deleteCount ? ctx.cursor() : nullptr;
+            },
+            [](const char *) {},
+            {.maxDeletes = deleteCount, .allowOverflow = false});
+        ctx.skipAfterDelete = previousSkipAfterDelete;
+        return replayed;
       }
 
     };

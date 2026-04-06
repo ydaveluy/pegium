@@ -1,7 +1,21 @@
 #include <gtest/gtest.h>
 #include <pegium/core/TestCstBuilderHarness.hpp>
+#include <pegium/core/TestRuleParser.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 using namespace pegium::parser;
+
+namespace {
+
+struct GroupWrappedNode : pegium::AstNode {
+  string name;
+};
+
+struct GroupEntryNode : pegium::AstNode {
+  string name;
+  pointer<GroupWrappedNode> item;
+};
+
+} // namespace
 
 TEST(GroupTest, ParseTerminalConsumesElementsInSequence) {
   auto group = ":"_kw + ";"_kw;
@@ -207,4 +221,34 @@ TEST(GroupTest,
     (void)noDeleteGuard;
     EXPECT_FALSE(parse(group, ctx));
   }
+}
+
+TEST(GroupTest,
+     MissingNonTerminalElementBeforeVisibleTailLeavesRecoveredHole) {
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  ParserRule<GroupWrappedNode> wrapped{
+      "Wrapped", "("_kw + assign<&GroupWrappedNode::name>(id) + ")"_kw};
+  ParserRule<GroupEntryNode> entry{
+      "Entry", "def"_kw + assign<&GroupEntryNode::name>(id) + ":"_kw +
+                   assign<&GroupEntryNode::item>(wrapped) + ";"_kw};
+
+  const auto result =
+      pegium::test::parse_rule_result(entry, "def sample:;", NoOpSkipper());
+
+  ASSERT_TRUE(result.value);
+  EXPECT_TRUE(result.fullMatch);
+  EXPECT_TRUE(result.recoveryReport.hasRecovered);
+  EXPECT_GT(result.recoveryReport.recoveryEdits, 0u);
+  const auto delimiterOffset = std::string_view{"def sample:;"}.find(';');
+  EXPECT_TRUE(std::ranges::any_of(
+      result.parseDiagnostics, [delimiterOffset](const ParseDiagnostic &diag) {
+        return diag.kind == ParseDiagnosticKind::Inserted &&
+               diag.beginOffset == delimiterOffset &&
+               diag.endOffset == delimiterOffset;
+      }));
+
+  auto *parsedEntry = dynamic_cast<GroupEntryNode *>(result.value.get());
+  ASSERT_NE(parsedEntry, nullptr);
+  EXPECT_EQ(parsedEntry->name, "sample");
+  EXPECT_EQ(parsedEntry->item.get(), nullptr);
 }

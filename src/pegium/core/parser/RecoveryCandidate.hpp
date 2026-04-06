@@ -34,20 +34,6 @@ template <typename T, typename PreferFn>
   return prefer(lhs, rhs);
 }
 
-struct NormalizedRecoveryOrderKey;
-
-[[nodiscard]] constexpr bool compare_matched_axis(
-    const NormalizedRecoveryOrderKey &lhs,
-    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept;
-
-[[nodiscard]] constexpr bool compare_edit_cost_axis(
-    const NormalizedRecoveryOrderKey &lhs,
-    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept;
-
-[[nodiscard]] constexpr bool compare_edit_count_axis(
-    const NormalizedRecoveryOrderKey &lhs,
-    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept;
-
 enum class TerminalRecoveryChoiceKind : std::uint8_t {
   None,
   Insert,
@@ -110,6 +96,27 @@ struct NormalizedRecoveryOrderKey {
   RecoveryEditAxis edits{};
   RecoveryProgressAxis progress{};
 };
+
+[[nodiscard]] constexpr bool compare_matched_axis(
+    const NormalizedRecoveryOrderKey &lhs,
+    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept {
+  return compare_axis(lhs.safety.matched, rhs.safety.matched,
+                      prefer_higher<bool>, decided);
+}
+
+[[nodiscard]] constexpr bool compare_edit_cost_axis(
+    const NormalizedRecoveryOrderKey &lhs,
+    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept {
+  return compare_axis(lhs.edits.editCost, rhs.edits.editCost,
+                      prefer_lower<std::uint32_t>, decided);
+}
+
+[[nodiscard]] constexpr bool compare_edit_count_axis(
+    const NormalizedRecoveryOrderKey &lhs,
+    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept {
+  return compare_axis(lhs.edits.editCount, rhs.edits.editCount,
+                      prefer_lower<std::uint32_t>, decided);
+}
 
 enum class RecoveryOrderAxis : std::uint8_t {
   Matched,
@@ -259,33 +266,9 @@ template <std::size_t AxisCount>
   return false;
 }
 
-[[nodiscard]] constexpr bool compare_matched_axis(
-    const NormalizedRecoveryOrderKey &lhs,
-    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept {
-  return compare_axis(lhs.safety.matched, rhs.safety.matched,
-                      prefer_higher<bool>, decided);
-}
-
-[[nodiscard]] constexpr bool compare_edit_cost_axis(
-    const NormalizedRecoveryOrderKey &lhs,
-    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept {
-  return compare_axis(lhs.edits.editCost, rhs.edits.editCost,
-                      prefer_lower<std::uint32_t>, decided);
-}
-
-[[nodiscard]] constexpr bool compare_edit_count_axis(
-    const NormalizedRecoveryOrderKey &lhs,
-    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept {
-  return compare_axis(lhs.edits.editCount, rhs.edits.editCount,
-                      prefer_lower<std::uint32_t>, decided);
-}
-
 enum class RecoveryOrderProfile : std::uint8_t {
   Terminal,
-  Editable,
-  Choice,
-  Progress,
-  StructuralProgress,
+  Structural,
   Attempt,
 };
 
@@ -301,7 +284,20 @@ struct TerminalRecoveryCandidate {
 };
 
 [[nodiscard]] constexpr std::uint8_t
-terminal_recovery_choice_priority(TerminalRecoveryChoiceKind kind) noexcept;
+terminal_recovery_choice_priority(TerminalRecoveryChoiceKind kind) noexcept {
+  using enum TerminalRecoveryChoiceKind;
+  switch (kind) {
+  case Insert:
+    return 0u;
+  case Replace:
+    return 1u;
+  case DeleteScan:
+    return 2u;
+  case None:
+    return 3u;
+  }
+  return 3u;
+}
 
 [[nodiscard]] constexpr NormalizedRecoveryOrderKey terminal_recovery_order_key(
     const TerminalRecoveryCandidate &candidate) noexcept {
@@ -318,22 +314,6 @@ terminal_recovery_choice_priority(TerminalRecoveryChoiceKind kind) noexcept;
   key.edits.operationCount = candidate.operationCount;
   key.edits.editCost = candidate.cost.budgetCost;
   return key;
-}
-
-[[nodiscard]] constexpr std::uint8_t
-terminal_recovery_choice_priority(TerminalRecoveryChoiceKind kind) noexcept {
-  using enum TerminalRecoveryChoiceKind;
-  switch (kind) {
-  case Insert:
-    return 0u;
-  case Replace:
-    return 1u;
-  case DeleteScan:
-    return 2u;
-  case None:
-    return 3u;
-  }
-  return 3u;
 }
 
 [[nodiscard]] constexpr bool compare_terminal_recovery_order_key(
@@ -377,6 +357,12 @@ struct ChoiceRecoveryOrderConstraints {
   const grammar::AbstractElement *preferredBoundaryElement = nullptr;
 };
 
+enum class ChoiceRecoveryEntrySignalRequirement : std::uint8_t {
+  Reject,
+  Accept,
+  ProbeEntryStart,
+};
+
 [[nodiscard]] constexpr TextOffset editable_recovery_progress(
     const EditableRecoveryCandidate &candidate) noexcept {
   return candidate.postSkipCursorOffset;
@@ -389,6 +375,37 @@ struct ChoiceRecoveryOrderConstraints {
              saturating_add(candidate.firstEditOffset, candidate.editSpan);
 }
 
+[[nodiscard]] constexpr ChoiceRecoveryEntrySignalRequirement
+classify_choice_recovery_entry_signal_requirement(
+    const EditableRecoveryCandidate &candidate, TextOffset parseStartOffset,
+    bool hasStrictStartSignal,
+    bool branchHasStrictStartSignal) noexcept {
+  if (!candidate.matched) {
+    return ChoiceRecoveryEntrySignalRequirement::Reject;
+  }
+  if (hasStrictStartSignal) {
+    return branchHasStrictStartSignal
+               ? ChoiceRecoveryEntrySignalRequirement::Accept
+               : ChoiceRecoveryEntrySignalRequirement::ProbeEntryStart;
+  }
+
+  const bool noEditCandidate = candidate.editCount == 0u;
+  const bool continuesAfterFirstEdit = continues_after_first_edit(candidate);
+  const bool sameStartContinuingInsert =
+      candidate.firstEditOffset == parseStartOffset && !candidate.hasDeleteEdit &&
+      continuesAfterFirstEdit;
+  const bool autoLegalWithoutEntryStart =
+      noEditCandidate || candidate.firstEditOffset > parseStartOffset ||
+      sameStartContinuingInsert;
+  if (autoLegalWithoutEntryStart) {
+    return ChoiceRecoveryEntrySignalRequirement::Accept;
+  }
+  if (candidate.hasDeleteEdit && !continuesAfterFirstEdit) {
+    return ChoiceRecoveryEntrySignalRequirement::Reject;
+  }
+  return ChoiceRecoveryEntrySignalRequirement::ProbeEntryStart;
+}
+
 [[nodiscard]] constexpr NormalizedRecoveryOrderKey editable_recovery_order_key(
     const EditableRecoveryCandidate &candidate) noexcept {
   NormalizedRecoveryOrderKey key;
@@ -396,6 +413,10 @@ struct ChoiceRecoveryOrderConstraints {
   key.prefix.firstEditOffset = candidate.firstEditOffset;
   key.continuation.continuesAfterFirstEdit =
       continues_after_first_edit(candidate);
+  key.continuation.strength =
+      candidate.editCount == 0u
+          ? 1u
+          : (key.continuation.continuesAfterFirstEdit ? 2u : 0u);
   key.continuation.postSkipCursorOffset = editable_recovery_progress(candidate);
   key.continuation.cursorOffset = candidate.cursorOffset;
   key.edits.editCost = candidate.editCost;
@@ -405,121 +426,67 @@ struct ChoiceRecoveryOrderConstraints {
   return key;
 }
 
-[[nodiscard]] constexpr bool compare_editable_recovery_order_key(
-    const NormalizedRecoveryOrderKey &lhsKey,
-    const NormalizedRecoveryOrderKey &rhsKey) noexcept {
-  constexpr auto kAxes = std::array{
-      RecoveryOrderAxis::Matched,
-      RecoveryOrderAxis::EditCost,
-      RecoveryOrderAxis::EditCount,
-      RecoveryOrderAxis::PostSkipCursorOffset,
-      RecoveryOrderAxis::FirstEditOffset,
-      RecoveryOrderAxis::CursorOffset,
-  };
-  return compare_recovery_order_key_axes(lhsKey, rhsKey, kAxes);
-}
-
-[[nodiscard]] constexpr bool decide_choice_base_axes(
-    const NormalizedRecoveryOrderKey &lhs,
-    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept {
-  constexpr auto kBaseAxes = std::array{
-      RecoveryOrderAxis::Matched,
-      RecoveryOrderAxis::ContinuesAfterFirstEdit,
-  };
-  return decide_recovery_order_key_axes(lhs, rhs, kBaseAxes, decided);
-}
-
-[[nodiscard]] constexpr bool decide_same_start_choice_continuation_first_edit(
-    const NormalizedRecoveryOrderKey &lhs,
-    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept {
-  const bool lhsCanAffordLaterFirstEdit =
-      lhs.edits.editCost <= rhs.edits.editCost &&
-      lhs.edits.editCount <= rhs.edits.editCount;
-  const bool rhsCanAffordLaterFirstEdit =
-      rhs.edits.editCost <= lhs.edits.editCost &&
-      rhs.edits.editCount <= lhs.edits.editCount;
-  if (!lhs.continuation.continuesAfterFirstEdit ||
-      !rhs.continuation.continuesAfterFirstEdit ||
-      lhsCanAffordLaterFirstEdit != rhsCanAffordLaterFirstEdit) {
-    return false;
-  }
-  return compare_axis(lhs.prefix.firstEditOffset, rhs.prefix.firstEditOffset,
-                      prefer_higher<TextOffset>, decided);
-}
-
-[[nodiscard]] constexpr bool decide_same_start_choice_continuation_strength(
-    const NormalizedRecoveryOrderKey &lhs,
-    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept {
-  if (lhs.prefix.firstEditOffset != rhs.prefix.firstEditOffset ||
-      !lhs.continuation.continuesAfterFirstEdit ||
-      !rhs.continuation.continuesAfterFirstEdit) {
-    return false;
-  }
-  const auto lhsGain =
-      lhs.continuation.postSkipCursorOffset - lhs.prefix.firstEditOffset;
-  const auto rhsGain =
-      rhs.continuation.postSkipCursorOffset - rhs.prefix.firstEditOffset;
-  const auto lhsCost = std::max<std::uint32_t>(1u, lhs.edits.editCost);
-  const auto rhsCost = std::max<std::uint32_t>(1u, rhs.edits.editCost);
-  if (compare_axis(static_cast<std::uint64_t>(lhsGain) * rhsCost,
-                   static_cast<std::uint64_t>(rhsGain) * lhsCost,
-                   prefer_higher<std::uint64_t>, decided)) {
-    return true;
-  }
-  if (decided) {
-    return false;
-  }
-  constexpr auto kContinuationAxes = std::array{
-      RecoveryOrderAxis::PostSkipCursorOffset,
-  };
-  return decide_recovery_order_key_axes(lhs, rhs, kContinuationAxes, decided);
-}
-
-[[nodiscard]] constexpr bool decide_same_start_choice_rewrite_axes(
-    const NormalizedRecoveryOrderKey &lhs,
-    const NormalizedRecoveryOrderKey &rhs, bool &decided) noexcept {
-  if (lhs.prefix.firstEditOffset != rhs.prefix.firstEditOffset) {
-    return false;
-  }
-  constexpr auto kRewriteAxes = std::array{
-      RecoveryOrderAxis::EditSpan,
-      RecoveryOrderAxis::PostSkipCursorOffset,
-      RecoveryOrderAxis::EditCost,
-      RecoveryOrderAxis::EditCount,
-  };
-  return decide_recovery_order_key_axes(lhs, rhs, kRewriteAxes, decided);
-}
-
-[[nodiscard]] constexpr bool compare_choice_recovery_order_key(
+[[nodiscard]] constexpr bool compare_structural_recovery_order_key(
     const NormalizedRecoveryOrderKey &lhsKey,
     const NormalizedRecoveryOrderKey &rhsKey) noexcept {
   bool decided = false;
-  if (decide_choice_base_axes(lhsKey, rhsKey, decided)) {
+  constexpr auto kBaseAxes = std::array{
+      RecoveryOrderAxis::Matched,
+      RecoveryOrderAxis::ReplaySafe,
+      RecoveryOrderAxis::ContinuationStrength,
+      RecoveryOrderAxis::StrategyPriority,
+  };
+  if (decide_recovery_order_key_axes(lhsKey, rhsKey, kBaseAxes, decided)) {
     return true;
   }
   if (decided) {
     return false;
   }
-  if (decide_same_start_choice_continuation_first_edit(lhsKey, rhsKey,
-                                                       decided)) {
-    return true;
+
+  if (lhsKey.prefix.firstEditOffset == rhsKey.prefix.firstEditOffset &&
+      lhsKey.continuation.continuesAfterFirstEdit &&
+      rhsKey.continuation.continuesAfterFirstEdit) {
+    const auto lhsGain =
+        lhsKey.continuation.postSkipCursorOffset - lhsKey.prefix.firstEditOffset;
+    const auto rhsGain =
+        rhsKey.continuation.postSkipCursorOffset - rhsKey.prefix.firstEditOffset;
+    const auto lhsCost = std::max<std::uint32_t>(1u, lhsKey.edits.editCost);
+    const auto rhsCost = std::max<std::uint32_t>(1u, rhsKey.edits.editCost);
+    if (compare_axis(static_cast<std::uint64_t>(lhsGain) * rhsCost,
+                     static_cast<std::uint64_t>(rhsGain) * lhsCost,
+                     prefer_higher<std::uint64_t>, decided)) {
+      return true;
+    }
+    if (decided) {
+      return false;
+    }
+    constexpr auto kSameStartContinuationAxes = std::array{
+        RecoveryOrderAxis::PostSkipCursorOffset,
+    };
+    if (decide_recovery_order_key_axes(lhsKey, rhsKey,
+                                       kSameStartContinuationAxes, decided)) {
+      return true;
+    }
+    if (decided) {
+      return false;
+    }
   }
-  if (decided) {
-    return false;
+
+  if (lhsKey.prefix.firstEditOffset == rhsKey.prefix.firstEditOffset) {
+    constexpr auto kSameStartRewriteAxes = std::array{
+        RecoveryOrderAxis::EditSpan,
+        RecoveryOrderAxis::EditCost,
+        RecoveryOrderAxis::EditCount,
+    };
+    if (decide_recovery_order_key_axes(lhsKey, rhsKey, kSameStartRewriteAxes,
+                                       decided)) {
+      return true;
+    }
+    if (decided) {
+      return false;
+    }
   }
-  if (decide_same_start_choice_continuation_strength(lhsKey, rhsKey,
-                                                     decided)) {
-    return true;
-  }
-  if (decided) {
-    return false;
-  }
-  if (decide_same_start_choice_rewrite_axes(lhsKey, rhsKey, decided)) {
-    return true;
-  }
-  if (decided) {
-    return false;
-  }
+
   constexpr auto kFinalAxes = std::array{
       RecoveryOrderAxis::PostSkipCursorOffset,
       RecoveryOrderAxis::EditCost,
@@ -631,7 +598,7 @@ struct ChoiceRecoveryOrderConstraints {
   }
   return is_better_normalized_recovery_order_key(
       editable_recovery_order_key(lhs), editable_recovery_order_key(rhs),
-      RecoveryOrderProfile::Choice);
+      RecoveryOrderProfile::Structural);
 }
 
 struct RecoveryProbeProgress {
@@ -737,6 +704,7 @@ structural_progress_recovery_order_key(
       {.matched = candidate.matched,
        .cursorOffset = candidate.cursorOffset,
        .editCost = candidate.editCost});
+  key.prefix.firstEditOffset = candidate.firstEditOffset;
   key.safety.strategyPriority = candidate.strategyPriority;
   key.safety.replaySafe = !candidate.rewritesParseStartBoundary;
   key.continuation.continuesAfterFirstEdit =
@@ -744,32 +712,9 @@ structural_progress_recovery_order_key(
   key.continuation.strength = candidate.hadEdits
                                   ? (candidate.continuesAfterFirstEdit ? 2u : 0u)
                                   : 1u;
+  key.continuation.postSkipCursorOffset = candidate.cursorOffset;
+  key.edits.editCount = candidate.hadEdits ? 1u : 0u;
   return key;
-}
-
-[[nodiscard]] constexpr bool compare_progress_recovery_order_key(
-    const NormalizedRecoveryOrderKey &lhsKey,
-    const NormalizedRecoveryOrderKey &rhsKey) noexcept {
-  constexpr auto kAxes = std::array{
-      RecoveryOrderAxis::Matched,
-      RecoveryOrderAxis::EditCost,
-      RecoveryOrderAxis::CursorOffset,
-  };
-  return compare_recovery_order_key_axes(lhsKey, rhsKey, kAxes);
-}
-
-[[nodiscard]] constexpr bool compare_structural_progress_recovery_order_key(
-    const NormalizedRecoveryOrderKey &lhsKey,
-    const NormalizedRecoveryOrderKey &rhsKey) noexcept {
-  constexpr auto kAxes = std::array{
-      RecoveryOrderAxis::Matched,
-      RecoveryOrderAxis::ReplaySafe,
-      RecoveryOrderAxis::ContinuationStrength,
-      RecoveryOrderAxis::StrategyPriority,
-      RecoveryOrderAxis::EditCost,
-      RecoveryOrderAxis::CursorOffset,
-  };
-  return compare_recovery_order_key_axes(lhsKey, rhsKey, kAxes);
 }
 
 [[nodiscard]] constexpr bool is_better_structural_progress_recovery_candidate(
@@ -800,7 +745,7 @@ structural_progress_recovery_order_key(
   return is_better_normalized_recovery_order_key(
       structural_progress_recovery_order_key(lhs),
       structural_progress_recovery_order_key(rhs),
-      RecoveryOrderProfile::StructuralProgress);
+      RecoveryOrderProfile::Structural);
 }
 
 [[nodiscard]] constexpr bool compare_attempt_recovery_order_key(
@@ -865,14 +810,8 @@ structural_progress_recovery_order_key(
   switch (profile) {
   case RecoveryOrderProfile::Terminal:
     return compare_terminal_recovery_order_key(lhsKey, rhsKey);
-  case RecoveryOrderProfile::Editable:
-    return compare_editable_recovery_order_key(lhsKey, rhsKey);
-  case RecoveryOrderProfile::Choice:
-    return compare_choice_recovery_order_key(lhsKey, rhsKey);
-  case RecoveryOrderProfile::Progress:
-    return compare_progress_recovery_order_key(lhsKey, rhsKey);
-  case RecoveryOrderProfile::StructuralProgress:
-    return compare_structural_progress_recovery_order_key(lhsKey, rhsKey);
+  case RecoveryOrderProfile::Structural:
+    return compare_structural_recovery_order_key(lhsKey, rhsKey);
   case RecoveryOrderProfile::Attempt:
     return compare_attempt_recovery_order_key(lhsKey, rhsKey);
   }

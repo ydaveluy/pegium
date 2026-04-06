@@ -27,47 +27,6 @@ enum class RecoveryAttemptStatus : std::uint8_t {
   Stable,
 };
 
-struct EditTrace {
-  TextOffset firstEditOffset = 0;
-  TextOffset lastEditOffset = 0;
-  TextOffset editSpan = 0;
-  std::size_t insertCount = 0;
-  std::size_t deleteCount = 0;
-  std::size_t replaceCount = 0;
-  std::size_t tokenInsertCount = 0;
-  std::size_t tokenDeleteCount = 0;
-  std::size_t codepointDeleteCount = 0;
-  std::size_t editCount = 0;
-  std::size_t entryCount = 0;
-  std::uint32_t editCost = 0;
-  bool hasEdits = false;
-};
-
-struct RecoverySelectionScore {
-  bool entryRuleMatched = false;
-  bool stable = false;
-  bool credible = false;
-  bool fullMatch = false;
-};
-
-struct RecoveryEditScore {
-  std::uint32_t editCost = 0;
-  TextOffset editSpan = 0;
-  std::uint32_t entryCount = 0;
-  TextOffset firstEditOffset = 0;
-};
-
-struct RecoveryProgressScore {
-  TextOffset parsedLength = 0;
-  TextOffset maxCursorOffset = 0;
-};
-
-struct RecoveryScore {
-  RecoverySelectionScore selection;
-  RecoveryEditScore edits;
-  RecoveryProgressScore progress;
-};
-
 struct RecoveryAttemptSpec {
   std::vector<RecoveryWindow> windows;
   bool allowTrailingEofTrim = true;
@@ -81,6 +40,7 @@ struct RecoveryAttempt {
   TextOffset parsedLength = 0;
   TextOffset lastVisibleCursorOffset = 0;
   TextOffset maxCursorOffset = 0;
+  TextOffset noEditFirstEditOffset = 0;
   TextOffset stablePrefixOffset = 0;
   std::uint32_t configuredMaxEditCost = 0;
   std::uint32_t editCost = 0;
@@ -93,8 +53,6 @@ struct RecoveryAttempt {
   bool hasStablePrefix = false;
   bool trimmedVisibleTailToEof = false;
   RecoveryAttemptStatus status = RecoveryAttemptStatus::StrictFailure;
-  EditTrace editTrace;
-  RecoveryScore score;
 };
 
 struct PlannedRecoveryWindow {
@@ -166,10 +124,8 @@ run_recovery_search(const grammar::ParserRule &entryRule,
 
 void classify_recovery_attempt(RecoveryAttempt &attempt) noexcept;
 
-void score_recovery_attempt(RecoveryAttempt &attempt) noexcept;
-
 [[nodiscard]] NormalizedRecoveryOrderKey
-recovery_attempt_order_key(const RecoveryScore &score) noexcept;
+recovery_attempt_order_key(const RecoveryAttempt &attempt) noexcept;
 
 [[nodiscard]] bool
 is_selectable_recovery_attempt(const RecoveryAttempt &attempt) noexcept;

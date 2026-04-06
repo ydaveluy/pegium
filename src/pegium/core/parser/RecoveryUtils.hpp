@@ -2,6 +2,7 @@
 
 /// Shared delete-scan recovery utilities.
 
+#include <concepts>
 #include <limits>
 #include <utility>
 
@@ -79,12 +80,17 @@ template <typename Context> struct DeleteRetryReplayScope {
   Context &ctx;
   bool savedAllowDeleteRetry;
   bool savedSkipAfterDelete;
+  bool disableDeleteRetry;
   ExtendedDeleteScanBudgetScope<Context> overflowBudgetScope;
 
-  explicit DeleteRetryReplayScope(Context &ctx) noexcept
+  explicit DeleteRetryReplayScope(Context &ctx,
+                                  bool disableDeleteRetry = true) noexcept
       : ctx(ctx), savedAllowDeleteRetry(ctx.allowDeleteRetry),
-        savedSkipAfterDelete(ctx.skipAfterDelete), overflowBudgetScope(ctx) {
-    ctx.allowDeleteRetry = false;
+        savedSkipAfterDelete(ctx.skipAfterDelete),
+        disableDeleteRetry(disableDeleteRetry), overflowBudgetScope(ctx) {
+    if (disableDeleteRetry) {
+      ctx.allowDeleteRetry = false;
+    }
     ctx.skipAfterDelete = false;
   }
 
@@ -94,7 +100,9 @@ template <typename Context> struct DeleteRetryReplayScope {
 
   ~DeleteRetryReplayScope() noexcept {
     ctx.skipAfterDelete = savedSkipAfterDelete;
-    ctx.allowDeleteRetry = savedAllowDeleteRetry;
+    if (disableDeleteRetry) {
+      ctx.allowDeleteRetry = savedAllowDeleteRetry;
+    }
   }
 
   [[nodiscard]] bool tryEnableExtendedDeleteScan() noexcept {
@@ -106,76 +114,345 @@ template <typename Context> struct DeleteRetryReplayScope {
   void commitOverflowEdits() noexcept { overflowBudgetScope.commitOverflowEdits(); }
 };
 
-template <typename Context, typename MatchFn, typename OnMatchFn>
-[[nodiscard]] inline bool recover_by_delete_scan(Context &ctx,
-                                                 MatchFn &&matchFn,
-                                                 OnMatchFn &&onMatchFn) {
-  if (!ctx.canDelete()) {
-    return false;
-  }
+struct DeleteScanOptions {
+  std::uint32_t maxDeletes = std::numeric_limits<std::uint32_t>::max();
+  bool allowOverflow = true;
+};
 
-  const auto recoveryCheckpoint = ctx.mark();
-  while (ctx.deleteOneCodepoint()) {
-    const char *const scanCursor = ctx.cursor();
-    if (const char *const matchedEnd =
-            std::forward<MatchFn>(matchFn)(scanCursor);
-        matchedEnd != nullptr) {
-      std::forward<OnMatchFn>(onMatchFn)(matchedEnd);
-      return true;
-    }
-  }
-  ExtendedDeleteScanBudgetScope overflowBudgetScope{ctx};
-  if (overflowBudgetScope.tryEnable()) {
-    while (ctx.deleteOneCodepoint()) {
-      const char *const scanCursor = ctx.cursor();
-      if (const char *const matchedEnd =
-              std::forward<MatchFn>(matchFn)(scanCursor);
-          matchedEnd != nullptr) {
-        overflowBudgetScope.commitOverflowEdits();
-        std::forward<OnMatchFn>(onMatchFn)(matchedEnd);
-        return true;
-      }
-    }
-  }
+enum class DeleteScanVisitResult : std::uint8_t {
+  Continue,
+  Stop,
+  Accept,
+};
 
-  ctx.rewind(recoveryCheckpoint);
-  return false;
+struct DeleteScanVisitOptions {
+  DeleteScanOptions scan{};
+  bool extendThroughHiddenTrivia = false;
+  bool stopAtHiddenTriviaBoundary = false;
+  bool visitAfterHiddenTriviaExtension = false;
+};
+
+struct DeleteScanVisitState {
+  bool overflowBudget = false;
+  bool hiddenTriviaBoundary = false;
+  bool hiddenTriviaExtended = false;
+  std::uint32_t deleteCount = 0u;
+};
+
+enum class DeleteRetryVisitResult : std::uint8_t {
+  Continue,
+  Stop,
+  Accept,
+};
+
+struct DeleteRetryOptions {
+  DeleteScanOptions scan{};
+  bool disableDeleteRetry = true;
+  bool extendThroughHiddenTrivia = true;
+  bool stopAtHiddenTriviaBoundary = false;
+  bool visitAfterHiddenTriviaExtension = true;
+};
+
+struct DeleteRetryVisitState {
+  bool overflowBudget = false;
+  bool hiddenTriviaBoundary = false;
+  bool hiddenTriviaExtended = false;
+  std::uint32_t deleteCount = 0u;
+};
+
+template <typename ShouldRetryFn>
+[[nodiscard]] inline bool invoke_delete_retry_predicate(
+    ShouldRetryFn &shouldRetryFn, const DeleteRetryVisitState &state) {
+  if constexpr (requires { shouldRetryFn(state); }) {
+    return shouldRetryFn(state);
+  } else {
+    return shouldRetryFn();
+  }
 }
 
-template <typename Context, typename RetryFn>
-[[nodiscard]] inline bool recover_by_delete_retry(Context &ctx,
-                                                  RetryFn &&retryFn) {
+template <typename RetryFn>
+[[nodiscard]] inline DeleteRetryVisitResult invoke_delete_retry_attempt(
+    RetryFn &retryFn, const DeleteRetryVisitState &state) {
+  if constexpr (requires {
+                  { retryFn(state) } -> std::same_as<DeleteRetryVisitResult>;
+                }) {
+    return retryFn(state);
+  } else if constexpr (requires {
+                         { retryFn() } -> std::same_as<DeleteRetryVisitResult>;
+                       }) {
+    return retryFn();
+  } else if constexpr (requires { retryFn(state); }) {
+    return retryFn(state) ? DeleteRetryVisitResult::Accept
+                          : DeleteRetryVisitResult::Continue;
+  } else {
+    return retryFn() ? DeleteRetryVisitResult::Accept
+                     : DeleteRetryVisitResult::Continue;
+  }
+}
+
+template <typename MatchFn>
+[[nodiscard]] inline const char *
+invoke_delete_scan_match(MatchFn &matchFn, const char *scanCursor,
+                         std::uint32_t deleteCount) {
+  if constexpr (requires { matchFn(scanCursor, deleteCount); }) {
+    return matchFn(scanCursor, deleteCount);
+  } else {
+    return matchFn(scanCursor);
+  }
+}
+
+template <typename OnMatchFn>
+inline void invoke_delete_scan_on_match(OnMatchFn &onMatchFn,
+                                        const char *matchedEnd,
+                                        std::uint32_t deleteCount) {
+  if constexpr (requires { onMatchFn(matchedEnd, deleteCount); }) {
+    onMatchFn(matchedEnd, deleteCount);
+  } else {
+    onMatchFn(matchedEnd);
+  }
+}
+
+template <typename VisitFn>
+[[nodiscard]] inline DeleteScanVisitResult
+invoke_delete_scan_visit(VisitFn &visitFn, const DeleteScanVisitState &state) {
+  if constexpr (requires {
+                  { visitFn(state) } -> std::same_as<DeleteScanVisitResult>;
+                }) {
+    return visitFn(state);
+  } else if constexpr (requires {
+                         { visitFn() } -> std::same_as<DeleteScanVisitResult>;
+                       }) {
+    return visitFn();
+  } else if constexpr (requires { visitFn(state); }) {
+    return visitFn(state) ? DeleteScanVisitResult::Accept
+                          : DeleteScanVisitResult::Continue;
+  } else {
+    return visitFn() ? DeleteScanVisitResult::Accept
+                     : DeleteScanVisitResult::Continue;
+  }
+}
+
+template <typename Context, typename CanDeleteStepFn, typename VisitFn>
+[[nodiscard]] inline DeleteScanVisitResult
+visit_guarded_delete_scan_positions(
+    Context &ctx, CanDeleteStepFn &&canDeleteStepFn, VisitFn &&visitFn,
+    DeleteScanVisitOptions options = {}) {
   if (!ctx.canDelete()) {
-    return false;
+    return DeleteScanVisitResult::Stop;
   }
 
   const auto recoveryCheckpoint = ctx.mark();
-  const bool previousSkipAfterDelete = ctx.skipAfterDelete;
-  ctx.skipAfterDelete = false;
-  while (ctx.deleteOneCodepoint()) {
-    if (std::forward<RetryFn>(retryFn)()) {
-      ctx.skipAfterDelete = previousSkipAfterDelete;
-      return true;
-    }
-    if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
-      if (ctx.skip_without_builder(ctx.cursor()) > ctx.cursor()) {
+  ExtendedDeleteScanBudgetScope overflowBudgetScope{ctx};
+  auto &&canDeleteStep = canDeleteStepFn;
+  auto &&visit = visitFn;
+  std::uint32_t deleteCount = 0u;
+  const auto try_visit_at_current_position =
+      [&](const DeleteScanVisitState &state) {
+        const auto result = invoke_delete_scan_visit(visit, state);
+        if (result == DeleteScanVisitResult::Accept && state.overflowBudget) {
+          overflowBudgetScope.commitOverflowEdits();
+        }
+        return result;
+      };
+  const auto try_visit_pass = [&](bool overflowBudget) {
+    while (deleteCount < options.scan.maxDeletes && canDeleteStep() &&
+           ctx.deleteOneCodepoint()) {
+      ++deleteCount;
+      bool hiddenTriviaBoundary = false;
+      if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
+        hiddenTriviaBoundary =
+            ctx.skip_without_builder(ctx.cursor()) > ctx.cursor();
+      }
+      const auto visitState = DeleteScanVisitState{
+          .overflowBudget = overflowBudget,
+          .hiddenTriviaBoundary = hiddenTriviaBoundary,
+          .hiddenTriviaExtended = false,
+          .deleteCount = deleteCount,
+      };
+      if (const auto result = try_visit_at_current_position(visitState);
+          result != DeleteScanVisitResult::Continue) {
+        return result;
+      }
+      if (!hiddenTriviaBoundary) {
+        continue;
+      }
+      if (options.extendThroughHiddenTrivia) {
         if constexpr (requires { ctx.extendLastDeleteThroughHiddenTrivia(); }) {
           if (ctx.extendLastDeleteThroughHiddenTrivia()) {
-            if (std::forward<RetryFn>(retryFn)()) {
-              ctx.skipAfterDelete = previousSkipAfterDelete;
-              return true;
+            if (!options.visitAfterHiddenTriviaExtension) {
+              continue;
+            }
+            const auto extendedVisitState = DeleteScanVisitState{
+                .overflowBudget = overflowBudget,
+                .hiddenTriviaBoundary = false,
+                .hiddenTriviaExtended = true,
+                .deleteCount = deleteCount,
+            };
+            if (const auto result =
+                    try_visit_at_current_position(extendedVisitState);
+                result != DeleteScanVisitResult::Continue) {
+              return result;
             }
             continue;
           }
         }
-        break;
+      }
+      if (options.stopAtHiddenTriviaBoundary) {
+        return DeleteScanVisitResult::Stop;
       }
     }
+    return DeleteScanVisitResult::Continue;
+  };
+
+  if (const auto result = try_visit_pass(false);
+      result != DeleteScanVisitResult::Continue) {
+    if (result != DeleteScanVisitResult::Accept) {
+      ctx.rewind(recoveryCheckpoint);
+    }
+    return result;
   }
-  ctx.skipAfterDelete = previousSkipAfterDelete;
+
+  if (options.scan.allowOverflow && overflowBudgetScope.tryEnable()) {
+    if (const auto result = try_visit_pass(true);
+        result != DeleteScanVisitResult::Continue) {
+      if (result != DeleteScanVisitResult::Accept) {
+        ctx.rewind(recoveryCheckpoint);
+      }
+      return result;
+    }
+  }
 
   ctx.rewind(recoveryCheckpoint);
-  return false;
+  return DeleteScanVisitResult::Stop;
+}
+
+template <typename Context, typename CanDeleteStepFn, typename MatchFn,
+          typename OnMatchFn>
+[[nodiscard]] inline bool recover_by_guarded_delete_scan(
+    Context &ctx, CanDeleteStepFn &&canDeleteStepFn, MatchFn &&matchFn,
+    OnMatchFn &&onMatchFn, DeleteScanOptions options = {}) {
+  auto &&match = matchFn;
+  auto &&onMatch = onMatchFn;
+  return visit_guarded_delete_scan_positions(
+             ctx, std::forward<CanDeleteStepFn>(canDeleteStepFn),
+             [&](const DeleteScanVisitState &state) {
+               if (const char *const matchedEnd =
+                       invoke_delete_scan_match(match, ctx.cursor(),
+                                                state.deleteCount);
+                   matchedEnd != nullptr) {
+                 invoke_delete_scan_on_match(onMatch, matchedEnd,
+                                             state.deleteCount);
+                 return DeleteScanVisitResult::Accept;
+               }
+               return DeleteScanVisitResult::Continue;
+             },
+             {.scan = options}) == DeleteScanVisitResult::Accept;
+}
+
+template <typename Context, typename ShouldRetryFn, typename RetryFn>
+[[nodiscard]] inline DeleteRetryVisitResult
+visit_guarded_delete_retry_positions(
+    Context &ctx, ShouldRetryFn &&shouldRetryFn, RetryFn &&retryFn,
+    DeleteRetryOptions options = {}) {
+  if (!ctx.canDelete()) {
+    return DeleteRetryVisitResult::Stop;
+  }
+
+  const auto recoveryCheckpoint = ctx.mark();
+  DeleteRetryReplayScope retryScope{ctx, options.disableDeleteRetry};
+  auto &&shouldRetry = shouldRetryFn;
+  auto &&retry = retryFn;
+  std::uint32_t deleteCount = 0u;
+  const auto try_retry_at_current_position =
+      [&](const DeleteRetryVisitState &state) {
+        if (!invoke_delete_retry_predicate(shouldRetry, state)) {
+          return DeleteRetryVisitResult::Continue;
+        }
+        const auto result = invoke_delete_retry_attempt(retry, state);
+        if (result == DeleteRetryVisitResult::Accept && state.overflowBudget) {
+          retryScope.commitOverflowEdits();
+        }
+        return result;
+      };
+  const auto try_retry_pass = [&](bool overflowBudget) {
+    while (deleteCount < options.scan.maxDeletes && ctx.deleteOneCodepoint()) {
+      ++deleteCount;
+      bool hiddenTriviaBoundary = false;
+      if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
+        hiddenTriviaBoundary =
+            ctx.skip_without_builder(ctx.cursor()) > ctx.cursor();
+      }
+      const auto visitState = DeleteRetryVisitState{
+          .overflowBudget = overflowBudget,
+          .hiddenTriviaBoundary = hiddenTriviaBoundary,
+          .hiddenTriviaExtended = false,
+          .deleteCount = deleteCount,
+      };
+      if (const auto result = try_retry_at_current_position(visitState);
+          result != DeleteRetryVisitResult::Continue) {
+        return result;
+      }
+      if (!hiddenTriviaBoundary) {
+        continue;
+      }
+      if (options.extendThroughHiddenTrivia) {
+        if constexpr (requires { ctx.extendLastDeleteThroughHiddenTrivia(); }) {
+          if (ctx.extendLastDeleteThroughHiddenTrivia()) {
+            if (!options.visitAfterHiddenTriviaExtension) {
+              continue;
+            }
+            const auto extendedVisitState = DeleteRetryVisitState{
+                .overflowBudget = overflowBudget,
+                .hiddenTriviaBoundary = false,
+                .hiddenTriviaExtended = true,
+                .deleteCount = deleteCount,
+            };
+            if (const auto result =
+                    try_retry_at_current_position(extendedVisitState);
+                result != DeleteRetryVisitResult::Continue) {
+              return result;
+            }
+            continue;
+          }
+        }
+      }
+      if (options.stopAtHiddenTriviaBoundary) {
+        return DeleteRetryVisitResult::Stop;
+      }
+    }
+    return DeleteRetryVisitResult::Continue;
+  };
+
+  if (const auto result = try_retry_pass(false);
+      result != DeleteRetryVisitResult::Continue) {
+    if (result != DeleteRetryVisitResult::Accept) {
+      ctx.rewind(recoveryCheckpoint);
+    }
+    return result;
+  }
+
+  if (options.scan.allowOverflow && retryScope.tryEnableExtendedDeleteScan()) {
+    if (const auto result = try_retry_pass(true);
+        result != DeleteRetryVisitResult::Continue) {
+      if (result != DeleteRetryVisitResult::Accept) {
+        ctx.rewind(recoveryCheckpoint);
+      }
+      return result;
+    }
+  }
+
+  ctx.rewind(recoveryCheckpoint);
+  return DeleteRetryVisitResult::Stop;
+}
+
+template <typename Context, typename ShouldRetryFn, typename RetryFn>
+[[nodiscard]] inline bool recover_by_guarded_delete_retry(
+    Context &ctx, ShouldRetryFn &&shouldRetryFn, RetryFn &&retryFn,
+    DeleteRetryOptions options = {}) {
+  const auto result = visit_guarded_delete_retry_positions(
+      ctx, std::forward<ShouldRetryFn>(shouldRetryFn),
+      std::forward<RetryFn>(retryFn), options);
+  return result == DeleteRetryVisitResult::Accept;
 }
 
 } // namespace pegium::parser::detail
