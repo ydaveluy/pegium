@@ -19,28 +19,59 @@
 
 namespace pegium::parser::detail {
 
-[[nodiscard]] NormalizedRecoveryOrderKey
-recovery_attempt_order_key(const RecoveryScore &score) noexcept {
-  NormalizedRecoveryOrderKey key;
-  key.safety.matched = score.selection.entryRuleMatched;
-  key.prefix.entryRuleMatched = score.selection.entryRuleMatched;
-  key.prefix.stable = score.selection.stable;
-  key.prefix.credible = score.selection.credible;
-  key.prefix.fullMatch = score.selection.fullMatch;
-  key.prefix.firstEditOffset = score.edits.firstEditOffset;
-  key.continuation.continuesAfterFirstEdit =
-      score.edits.entryCount > 0u &&
-      score.progress.parsedLength >
-          score.edits.firstEditOffset + score.edits.editSpan;
-  key.edits.editCost = score.edits.editCost;
-  key.edits.editSpan = score.edits.editSpan;
-  key.edits.entryCount = score.edits.entryCount;
-  key.progress.parsedLength = score.progress.parsedLength;
-  key.progress.maxCursorOffset = score.progress.maxCursorOffset;
-  return key;
+struct RecoveryAttemptEditProjection {
+  TextOffset firstEditOffset = std::numeric_limits<TextOffset>::max();
+  TextOffset lastEditOffset = 0;
+  TextOffset editSpan = 0;
+  std::uint32_t entryCount = 0;
+  bool continuesAfterFirstEdit = false;
+};
+
+[[nodiscard]] RecoveryAttemptEditProjection
+project_recovery_attempt_edits(const RecoveryAttempt &attempt) noexcept {
+  RecoveryAttemptEditProjection projection{
+      .firstEditOffset =
+          attempt.recoveryEdits.empty() ? attempt.noEditFirstEditOffset
+                                        : std::numeric_limits<TextOffset>::max(),
+      .entryCount =
+          static_cast<std::uint32_t>(attempt.recoveryEdits.size()),
+  };
+  if (attempt.recoveryEdits.empty()) {
+    return projection;
+  }
+
+  for (const auto &entry : attempt.recoveryEdits) {
+    projection.firstEditOffset =
+        std::min(projection.firstEditOffset, entry.beginOffset);
+    projection.lastEditOffset =
+        std::max(projection.lastEditOffset, entry.endOffset);
+  }
+  projection.editSpan =
+      projection.lastEditOffset - projection.firstEditOffset;
+  projection.continuesAfterFirstEdit =
+      attempt.parsedLength > projection.lastEditOffset;
+  return projection;
 }
 
-namespace {
+[[nodiscard]] NormalizedRecoveryOrderKey
+recovery_attempt_order_key(const RecoveryAttempt &attempt) noexcept {
+  const auto edits = project_recovery_attempt_edits(attempt);
+  NormalizedRecoveryOrderKey key;
+  key.safety.matched = attempt.entryRuleMatched;
+  key.prefix.entryRuleMatched = attempt.entryRuleMatched;
+  key.prefix.stable = attempt.status == RecoveryAttemptStatus::Stable;
+  key.prefix.credible = attempt.status == RecoveryAttemptStatus::Credible ||
+                        attempt.status == RecoveryAttemptStatus::Stable;
+  key.prefix.fullMatch = attempt.fullMatch;
+  key.prefix.firstEditOffset = edits.firstEditOffset;
+  key.continuation.continuesAfterFirstEdit = edits.continuesAfterFirstEdit;
+  key.edits.editCost = attempt.editCost;
+  key.edits.editSpan = edits.editSpan;
+  key.edits.entryCount = edits.entryCount;
+  key.progress.parsedLength = attempt.parsedLength;
+  key.progress.maxCursorOffset = attempt.maxCursorOffset;
+  return key;
+}
 
 void trace_recovery_json(const char *label, const pegium::JsonValue &value) {
   PEGIUM_RECOVERY_TRACE(label, " ", value.toJsonString({.pretty = false}));
@@ -91,7 +122,7 @@ struct StrictFailureStageResult {
 };
 
 struct WindowRecoverySearchResult {
-  struct CandidateRoles {
+  struct RetainedAttemptRoles {
     bool selectable = false;
     bool fallback = false;
     bool rankedSelectable = false;
@@ -108,14 +139,6 @@ struct WindowRecoverySearchResult {
 
   [[nodiscard]] bool hasSelectableAttempt() const noexcept {
     return bestSelectableAttempt() != nullptr;
-  }
-
-  [[nodiscard]] bool hasFallbackAttempt() const noexcept {
-    return bestFallbackAttempt() != nullptr;
-  }
-
-  [[nodiscard]] bool hasQualifiedAttempt() const noexcept {
-    return hasSelectableAttempt() || hasFallbackAttempt();
   }
 
   [[nodiscard]] const RecoveryAttempt *bestSelectableAttempt() const noexcept {
@@ -148,16 +171,7 @@ struct WindowRecoverySearchResult {
     return nullptr;
   }
 
-  [[nodiscard]] bool hasRankedAttempt() const noexcept {
-    bool selectableAttempt = false;
-    return narrowingRetryCandidate(selectableAttempt) != nullptr;
-  }
-
-  [[nodiscard]] bool hasAnyCandidate() const noexcept {
-    return hasQualifiedAttempt() || hasRankedAttempt();
-  }
-
-  void considerAttempt(RecoveryAttempt attempt, CandidateRoles roles) {
+  void considerAttempt(RecoveryAttempt attempt, RetainedAttemptRoles roles) {
     const bool betterSelectable =
         roles.selectable &&
         better_than(bestSelectableAttemptIndex, attempt);
@@ -202,7 +216,7 @@ struct WindowRecoverySearchResult {
     onlyInertTrailingRejectedAttempts =
         onlyInertTrailingRejectedAttempts &&
         other.onlyInertTrailingRejectedAttempts;
-    std::vector<CandidateRoles> roles(other.attempts.size());
+    std::vector<RetainedAttemptRoles> roles(other.attempts.size());
     if (other.bestSelectableAttemptIndex.has_value()) {
       roles[*other.bestSelectableAttemptIndex].selectable = true;
     }
@@ -250,6 +264,8 @@ enum class RecoveryAttemptRunCharge : std::uint8_t {
   ValidationOnly,
 };
 
+namespace {
+
 [[nodiscard]] bool trimmed_tail_delete_extends_attempt(
     const RecoveryAttempt &trimmed,
     const RecoveryAttempt &untrimmed) noexcept;
@@ -268,16 +284,6 @@ void consider_window_attempt_candidate(
     WindowRecoverySearchResult &result, RecoveryAttempt attempt,
     const RecoveryAttempt &selectedAttempt,
     const FailureSnapshot &failureSnapshot, TextOffset inputSize);
-
-[[nodiscard]] TextOffset
-last_edit_offset(const RecoveryAttempt &attempt) noexcept;
-
-[[nodiscard]] bool
-preserves_stable_prefix_before_first_edit(
-    const RecoveryAttempt &attempt) noexcept;
-
-[[nodiscard]] bool
-continues_after_first_edit(const RecoveryAttempt &attempt) noexcept;
 
 [[nodiscard]] std::size_t visible_leaf_count_in_offset_range(
     const RootCstNode &cst, TextOffset beginOffset,
@@ -368,10 +374,9 @@ run_strict_failure_stage(const grammar::ParserRule &entryRule,
       strictResult.summary.lastVisibleCursorOffset;
   result.strictAttempt.fullMatch = strictResult.summary.fullMatch;
   result.strictAttempt.maxCursorOffset = strictResult.summary.maxCursorOffset;
-  result.strictAttempt.editTrace.firstEditOffset = inputSize;
+  result.strictAttempt.noEditFirstEditOffset = inputSize;
   result.failureVisibleCursorOffset =
       result.strictAttempt.lastVisibleCursorOffset;
-  score_recovery_attempt(result.strictAttempt);
 
   if (result.strictAttempt.fullMatch || !options.recoveryEnabled) {
     return result;
@@ -472,68 +477,90 @@ last_failure_leaf_end_offset(const FailureSnapshot &snapshot) noexcept {
     return result;
   }
 
-  ++recoveryAttemptRuns;
-  if (runCharge == RecoveryAttemptRunCharge::Budgeted) {
-    ++budgetedRecoveryAttemptRuns;
-  }
-  PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
-  auto attempt = run_recovery_attempt(entryRule, skipper, options, text, spec,
-                                      cancelToken);
-  classify_recovery_attempt(attempt);
-  score_recovery_attempt(attempt);
-  trace_recovery_attempt(attempt, spec);
-  // A full match obtained only by trimming a visible tail must prove that the
-  // same replay contract still holds without the trim before it can replace
-  // the untrimmed continuation.
-  if (attempt.entryRuleMatched && attempt.fullMatch &&
-      attempt.trimmedVisibleTailToEof) {
-    auto untrimmedSpec = spec;
-    untrimmedSpec.allowTrailingEofTrim = false;
+  struct PendingWindowAttempt {
+    RecoveryAttemptSpec spec;
+    FailureSnapshot failureSnapshot;
+    RecoveryAttemptRunCharge runCharge = RecoveryAttemptRunCharge::Budgeted;
+    bool canPlanTrimmedTailFollowUp = false;
+  };
+
+  auto runPendingAttempt = [&](const PendingWindowAttempt &pending) {
     ++recoveryAttemptRuns;
-    PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
-    auto untrimmedAttempt = run_recovery_attempt(entryRule, skipper, options,
-                                                 text, untrimmedSpec,
-                                                 cancelToken);
-    classify_recovery_attempt(untrimmedAttempt);
-    score_recovery_attempt(untrimmedAttempt);
-    trace_recovery_attempt(untrimmedAttempt, untrimmedSpec);
-    if (trimmed_tail_delete_extends_attempt(attempt, untrimmedAttempt) &&
-        spec.windows.size() < options.maxRecoveryWindows) {
-      WindowPlanner planner{options};
-      planner.seedAcceptedWindows(untrimmedAttempt.replayWindows);
-      const auto followUpFailureSnapshot =
-          untrimmedAttempt.failureSnapshot.has_value()
-              ? *untrimmedAttempt.failureSnapshot
-              : snapshot_from_committed_cst(*untrimmedAttempt.cst,
-                                            untrimmedAttempt.maxCursorOffset);
-      planner.begin(followUpFailureSnapshot, untrimmedAttempt);
-      const auto plannedWindow = planner.plan();
-      const auto &window = plannedWindow.window;
-      auto followUpSpec = planner.buildAttemptSpec(window);
-      followUpSpec.allowTrailingEofTrim = false;
-      ++recoveryAttemptRuns;
-      PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
-      auto followUpAttempt = run_recovery_attempt(entryRule, skipper, options,
-                                                  text, followUpSpec,
-                                                  cancelToken);
-      classify_recovery_attempt(followUpAttempt);
-      score_recovery_attempt(followUpAttempt);
-      trace_recovery_attempt(followUpAttempt, followUpSpec);
-      consider_window_attempt_candidate(result, std::move(followUpAttempt),
-                                        selectedAttempt, followUpFailureSnapshot,
-                                        inputSize);
+    if (pending.runCharge == RecoveryAttemptRunCharge::Budgeted) {
+      ++budgetedRecoveryAttemptRuns;
     }
-    consider_window_attempt_candidate(result, std::move(untrimmedAttempt),
+    PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
+    auto attempt = run_recovery_attempt(entryRule, skipper, options, text,
+                                        pending.spec, cancelToken);
+    classify_recovery_attempt(attempt);
+    trace_recovery_attempt(attempt, pending.spec);
+    return attempt;
+  };
+
+  std::vector<PendingWindowAttempt> pendingAttempts;
+  pendingAttempts.reserve(3u);
+  pendingAttempts.push_back(
+      {.spec = spec, .failureSnapshot = failureSnapshot, .runCharge = runCharge});
+  std::optional<RecoveryAttempt> trimmedTailFallbackAttempt;
+  for (std::size_t attemptIndex = 0; attemptIndex < pendingAttempts.size();
+       ++attemptIndex) {
+    const auto &pending = pendingAttempts[attemptIndex];
+    auto attempt = runPendingAttempt(pending);
+    // A full match obtained only by trimming a visible tail must prove that the
+    // same replay contract still holds without the trim before it can replace
+    // the untrimmed continuation.
+    if (!trimmedTailFallbackAttempt.has_value() && attempt.entryRuleMatched &&
+        attempt.fullMatch && attempt.trimmedVisibleTailToEof) {
+      trimmedTailFallbackAttempt = std::move(attempt);
+      auto untrimmedSpec = pending.spec;
+      untrimmedSpec.allowTrailingEofTrim = false;
+      pendingAttempts.push_back(
+          {.spec = std::move(untrimmedSpec),
+           .failureSnapshot = pending.failureSnapshot,
+           .runCharge = RecoveryAttemptRunCharge::ValidationOnly,
+           .canPlanTrimmedTailFollowUp = true});
+      continue;
+    }
+    if (pending.canPlanTrimmedTailFollowUp &&
+        trimmedTailFallbackAttempt.has_value() &&
+        trimmed_tail_delete_extends_attempt(*trimmedTailFallbackAttempt,
+                                            attempt) &&
+        pending.spec.windows.size() < options.maxRecoveryWindows) {
+      WindowPlanner planner{options};
+      planner.seedAcceptedWindows(attempt.replayWindows);
+      const auto followUpFailureSnapshot =
+          attempt.failureSnapshot.has_value()
+              ? *attempt.failureSnapshot
+              : snapshot_from_committed_cst(*attempt.cst,
+                                            attempt.maxCursorOffset);
+      planner.begin(followUpFailureSnapshot, attempt);
+      const auto plannedWindow = planner.plan();
+      auto followUpSpec = planner.buildAttemptSpec(plannedWindow.window);
+      followUpSpec.allowTrailingEofTrim = false;
+      pendingAttempts.push_back(
+          {.spec = std::move(followUpSpec),
+           .failureSnapshot = std::move(followUpFailureSnapshot),
+           .runCharge = RecoveryAttemptRunCharge::ValidationOnly});
+    }
+    consider_window_attempt_candidate(result, std::move(attempt),
+                                      selectedAttempt, pending.failureSnapshot,
+                                      inputSize);
+  }
+  bool hasRankedCandidate = false;
+  if (trimmedTailFallbackAttempt.has_value()) {
+    bool selectableAttempt = false;
+    hasRankedCandidate =
+        result.narrowingRetryCandidate(selectableAttempt) != nullptr;
+  }
+  if (trimmedTailFallbackAttempt.has_value() &&
+      !result.hasSelectableAttempt() &&
+      result.bestFallbackAttempt() == nullptr &&
+      !hasRankedCandidate) {
+    consider_window_attempt_candidate(result,
+                                      std::move(*trimmedTailFallbackAttempt),
                                       selectedAttempt, failureSnapshot,
                                       inputSize);
-    if (result.hasAnyCandidate()) {
-      return result;
-    }
   }
-
-  consider_window_attempt_candidate(result, std::move(attempt),
-                                    selectedAttempt, failureSnapshot,
-                                    inputSize);
   return result;
 }
 
@@ -687,20 +714,12 @@ void apply_window_acceptance(RecoveryAttempt acceptedAttempt,
 
 [[nodiscard]] TextOffset
 first_edit_offset(const RecoveryAttempt &attempt) noexcept {
-  TextOffset firstEditOffset = std::numeric_limits<TextOffset>::max();
-  for (const auto &entry : attempt.recoveryEdits) {
-    firstEditOffset = std::min(firstEditOffset, entry.beginOffset);
-  }
-  return firstEditOffset;
+  return project_recovery_attempt_edits(attempt).firstEditOffset;
 }
 
 [[nodiscard]] TextOffset
 last_edit_offset(const RecoveryAttempt &attempt) noexcept {
-  TextOffset lastEditOffset = 0;
-  for (const auto &entry : attempt.recoveryEdits) {
-    lastEditOffset = std::max(lastEditOffset, entry.endOffset);
-  }
-  return lastEditOffset;
+  return project_recovery_attempt_edits(attempt).lastEditOffset;
 }
 
 [[nodiscard]] bool preserves_stable_prefix_before_first_edit(
@@ -717,10 +736,7 @@ last_edit_offset(const RecoveryAttempt &attempt) noexcept {
 
 [[nodiscard]] bool
 continues_after_first_edit(const RecoveryAttempt &attempt) noexcept {
-  const auto firstEditOffset = first_edit_offset(attempt);
-  const auto lastEditOffset = last_edit_offset(attempt);
-  return firstEditOffset != std::numeric_limits<TextOffset>::max() &&
-         attempt.parsedLength > lastEditOffset;
+  return project_recovery_attempt_edits(attempt).continuesAfterFirstEdit;
 }
 
 [[nodiscard]] bool
@@ -758,9 +774,6 @@ has_committed_replay_prefix(const RecoveryAttempt &attempt) noexcept {
          (recovery_attempt_establishes_replay_contract(attempt) ||
           continues_after_first_edit(attempt));
 }
-
-[[nodiscard]] TextOffset
-last_edit_offset(const RecoveryAttempt &attempt) noexcept;
 
 [[nodiscard]] constexpr bool same_syntax_script_entry(
     const SyntaxScriptEntry &lhs,
@@ -1277,64 +1290,40 @@ try_prefix_delete_retry_entry_rule(RecoveryContext &ctx,
 
   const bool savedAllowInsert = ctx.allowInsert;
   const bool savedAllowDelete = ctx.allowDelete;
-  const auto recoveryCheckpoint = ctx.mark();
   const bool previousSkipAfterDelete = ctx.skipAfterDelete;
-  ctx.skipAfterDelete = false;
   auto deleteOnlyGuard = ctx.withEditPermissions(false, true);
   (void)deleteOnlyGuard;
-  detail::ExtendedDeleteScanBudgetScope overflowBudgetScope{ctx};
-
-  const auto try_scan_pass = [&](bool overflowBudget) {
-    while (ctx.deleteOneCodepoint()) {
-      const auto retryCheckpoint = ctx.mark();
-      const char *const savedFurthestExploredCursor =
-          ctx.furthestExploredCursor();
-      ctx.skip();
-      ctx.skipAfterDelete = previousSkipAfterDelete;
-      auto retryEditGuard =
-          ctx.withEditPermissions(savedAllowInsert, savedAllowDelete);
-      (void)retryEditGuard;
-      const bool matched = entryRule.recover(ctx);
-      if (matched) {
-        const auto retryVisibleLeafCount =
-            retryCheckpoint.parseCheckpoint.failureHistorySize;
-        const auto recoveredVisibleLeafCount = ctx.failureHistorySize();
-        const bool exposesStructuredEntry =
-            recoveredVisibleLeafCount >= retryVisibleLeafCount + 2u ||
-            (ctx.cursor() == ctx.end &&
-             recoveredVisibleLeafCount > retryVisibleLeafCount);
-        if (!exposesStructuredEntry) {
-          ctx.rewind(retryCheckpoint);
-          ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
-          continue;
+  return detail::recover_by_guarded_delete_retry(
+      ctx,
+      [](const detail::DeleteRetryVisitState &) noexcept { return true; },
+      [&](const detail::DeleteRetryVisitState &) {
+        const auto retryCheckpoint = ctx.mark();
+        const char *const savedFurthestExploredCursor =
+            ctx.furthestExploredCursor();
+        ctx.skip();
+        ctx.skipAfterDelete = previousSkipAfterDelete;
+        auto retryEditGuard =
+            ctx.withEditPermissions(savedAllowInsert, savedAllowDelete);
+        (void)retryEditGuard;
+        const bool matched = entryRule.recover(ctx);
+        if (matched) {
+          const auto retryVisibleLeafCount =
+              retryCheckpoint.parseCheckpoint.failureHistorySize;
+          const auto recoveredVisibleLeafCount = ctx.failureHistorySize();
+          const bool exposesStructuredEntry =
+              recoveredVisibleLeafCount >= retryVisibleLeafCount + 2u ||
+              (ctx.cursor() == ctx.end &&
+               recoveredVisibleLeafCount > retryVisibleLeafCount);
+          if (exposesStructuredEntry) {
+            return true;
+          }
         }
-        if (overflowBudget) {
-          overflowBudgetScope.commitOverflowEdits();
-        }
-        return true;
-      }
-      ctx.skipAfterDelete = false;
-      ctx.rewind(retryCheckpoint);
-      ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
-    }
-    return false;
-  };
-
-  if (try_scan_pass(false)) {
-    ctx.skipAfterDelete = previousSkipAfterDelete;
-    return true;
-  }
-
-  if (overflowBudgetScope.tryEnable()) {
-    if (try_scan_pass(true)) {
-      ctx.skipAfterDelete = previousSkipAfterDelete;
-      return true;
-    }
-  }
-
-  ctx.skipAfterDelete = previousSkipAfterDelete;
-  ctx.rewind(recoveryCheckpoint);
-  return false;
+        ctx.skipAfterDelete = false;
+        ctx.rewind(retryCheckpoint);
+        ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+        return false;
+      },
+      {.disableDeleteRetry = false, .extendThroughHiddenTrivia = false});
 }
 
 } // namespace
@@ -1712,7 +1701,6 @@ run_recovery_search_pass(const grammar::ParserRule &entryRule,
       }
       ++result.recoveryWindowsTried;
 
-      const auto spec = windowPlanner.buildAttemptSpec(window);
       if (windowIndex == 0 && windowPlanner.acceptedWindows().empty() &&
           is_near_eof_tail_failure(failureSnapshot, inputSize)) {
         PEGIUM_RECOVERY_TRACE(
@@ -1720,21 +1708,49 @@ run_recovery_search_pass(const grammar::ParserRule &entryRule,
         break;
       }
 
-      auto windowSearch = evaluate_recovery_window_attempts(
-          entryRule, skipper, options, text, spec, result.selectedAttempt,
-          failureSnapshot, inputSize, result.recoveryAttemptRuns,
-          result.budgetedRecoveryAttemptRuns,
-          RecoveryAttemptRunCharge::Budgeted, cancelToken);
-      if (requires_narrowed_window_search(windowSearch, window)) {
-        const auto narrowWindow =
-            build_narrowed_recovery_window(failureSnapshot, window);
-        const auto narrowSpec = windowPlanner.buildAttemptSpec(narrowWindow);
-        auto narrowWindowSearch = evaluate_recovery_window_attempts(
-            entryRule, skipper, options, text, narrowSpec,
+      struct PendingWindowVariant {
+        RecoveryWindow window;
+        std::uint32_t requestedTokenCount = 0;
+        bool canRetryNarrowedWindow = false;
+      };
+
+      std::vector<PendingWindowVariant> pendingWindowVariants;
+      pendingWindowVariants.reserve(2u);
+      pendingWindowVariants.push_back(
+          {.window = window,
+           .requestedTokenCount = plannedWindow.requestedTokenCount,
+           .canRetryNarrowedWindow = true});
+      WindowRecoverySearchResult windowSearch;
+      for (std::size_t pendingVariantIndex = 0;
+           pendingVariantIndex < pendingWindowVariants.size();
+           ++pendingVariantIndex) {
+        const auto &pendingVariant = pendingWindowVariants[pendingVariantIndex];
+        if (pendingVariantIndex != 0u) {
+          trace_recovery_window(windowIndex, pendingVariant.requestedTokenCount,
+                                pendingVariant.window,
+                                windowPlanner.acceptedWindows().size());
+        }
+        const auto pendingSpec =
+            windowPlanner.buildAttemptSpec(pendingVariant.window);
+        auto pendingWindowSearch = evaluate_recovery_window_attempts(
+            entryRule, skipper, options, text, pendingSpec,
             result.selectedAttempt, failureSnapshot, inputSize,
             result.recoveryAttemptRuns, result.budgetedRecoveryAttemptRuns,
             RecoveryAttemptRunCharge::Budgeted, cancelToken);
-        windowSearch.merge(std::move(narrowWindowSearch));
+        if (pendingVariant.canRetryNarrowedWindow &&
+            requires_narrowed_window_search(pendingWindowSearch,
+                                            pendingVariant.window)) {
+          auto narrowedWindow =
+              build_narrowed_recovery_window(failureSnapshot,
+                                            pendingVariant.window);
+          pendingWindowVariants.push_back(
+              {.window = std::move(narrowedWindow),
+               .requestedTokenCount =
+                   narrowed_window_token_count(
+                       pendingVariant.requestedTokenCount),
+               .canRetryNarrowedWindow = false});
+        }
+        windowSearch.merge(std::move(pendingWindowSearch));
       }
       if (windowSearch.hasSelectableAttempt()) {
         const bool preferBackwardContext =
@@ -1826,29 +1842,38 @@ run_recovery_search(const grammar::ParserRule &entryRule,
                     const utils::CancellationToken &cancelToken) {
   PEGIUM_STEP_TRACE_RESET();
 
-  ParseOptions currentOptions = options;
-  auto result = run_recovery_search_pass(entryRule, skipper, currentOptions,
-                                         text, cancelToken);
+  std::vector<ParseOptions> pendingPassOptions;
+  pendingPassOptions.reserve(2u);
+  pendingPassOptions.push_back(options);
 
-  while (requires_narrowed_global_rerun(result, currentOptions)) {
-    const auto narrowedOptions =
-        build_narrowed_recovery_search_options(currentOptions);
-    auto narrowedResult = run_recovery_search_pass(
-        entryRule, skipper, narrowedOptions, text, cancelToken);
-    if (!is_better_recovery_attempt(narrowedResult.selectedAttempt,
-                                    result.selectedAttempt)) {
-      break;
+  std::optional<RecoverySearchRunResult> result;
+  for (std::size_t pendingPassIndex = 0;
+       pendingPassIndex < pendingPassOptions.size(); ++pendingPassIndex) {
+    const auto &passOptions = pendingPassOptions[pendingPassIndex];
+    auto passResult = run_recovery_search_pass(entryRule, skipper, passOptions,
+                                               text, cancelToken);
+    if (!result.has_value()) {
+      result = std::move(passResult);
+    } else {
+      if (!is_better_recovery_attempt(passResult.selectedAttempt,
+                                      result->selectedAttempt)) {
+        break;
+      }
+      passResult.recoveryAttemptRuns += result->recoveryAttemptRuns;
+      passResult.budgetedRecoveryAttemptRuns +=
+          result->budgetedRecoveryAttemptRuns;
+      passResult.recoveryWindowsTried += result->recoveryWindowsTried;
+      passResult.strictParseRuns += result->strictParseRuns;
+      *result = std::move(passResult);
     }
-    narrowedResult.recoveryAttemptRuns += result.recoveryAttemptRuns;
-    narrowedResult.budgetedRecoveryAttemptRuns +=
-        result.budgetedRecoveryAttemptRuns;
-    narrowedResult.recoveryWindowsTried += result.recoveryWindowsTried;
-    narrowedResult.strictParseRuns += result.strictParseRuns;
-    currentOptions = narrowedOptions;
-    result = std::move(narrowedResult);
+
+    if (requires_narrowed_global_rerun(*result, passOptions)) {
+      pendingPassOptions.push_back(
+          build_narrowed_recovery_search_options(passOptions));
+    }
   }
 
-  return result;
+  return std::move(*result);
 }
 
 void classify_recovery_attempt(RecoveryAttempt &attempt) noexcept {
@@ -1896,71 +1921,6 @@ void classify_recovery_attempt(RecoveryAttempt &attempt) noexcept {
   } else {
     attempt.status = StrictFailure;
   }
-}
-
-void score_recovery_attempt(RecoveryAttempt &attempt) noexcept {
-  using enum ParseDiagnosticKind;
-  using enum RecoveryAttemptStatus;
-  attempt.editTrace.entryCount = attempt.recoveryEdits.size();
-  attempt.editTrace.editCount = attempt.editCount;
-  attempt.editTrace.editCost = attempt.editCost;
-  for (const auto &entry : attempt.recoveryEdits) {
-    switch (entry.kind) {
-    case Inserted:
-      ++attempt.editTrace.insertCount;
-      ++attempt.editTrace.tokenInsertCount;
-      break;
-    case Deleted:
-      ++attempt.editTrace.deleteCount;
-      ++attempt.editTrace.codepointDeleteCount;
-      break;
-    case Replaced:
-      ++attempt.editTrace.replaceCount;
-      break;
-    case Incomplete:
-    case Recovered:
-    case ConversionError:
-      break;
-    }
-  }
-  if (!attempt.recoveryEdits.empty()) {
-    attempt.editTrace.hasEdits = true;
-    attempt.editTrace.firstEditOffset =
-        std::numeric_limits<TextOffset>::max();
-    attempt.editTrace.lastEditOffset = 0;
-    for (const auto &entry : attempt.recoveryEdits) {
-      attempt.editTrace.firstEditOffset =
-          std::min(attempt.editTrace.firstEditOffset, entry.beginOffset);
-      attempt.editTrace.lastEditOffset =
-          std::max(attempt.editTrace.lastEditOffset, entry.endOffset);
-    }
-    attempt.editTrace.editSpan =
-        attempt.editTrace.lastEditOffset - attempt.editTrace.firstEditOffset;
-  }
-
-  attempt.score = {
-      .selection =
-          {
-              .entryRuleMatched = attempt.entryRuleMatched,
-              .stable = attempt.status == Stable,
-              .credible =
-                  attempt.status == Credible || attempt.status == Stable,
-              .fullMatch = attempt.fullMatch,
-          },
-      .edits =
-          {
-              .editCost = attempt.editCost,
-              .editSpan = attempt.editTrace.editSpan,
-              .entryCount =
-                  static_cast<std::uint32_t>(attempt.editTrace.entryCount),
-              .firstEditOffset = attempt.editTrace.firstEditOffset,
-          },
-      .progress =
-          {
-              .parsedLength = attempt.parsedLength,
-              .maxCursorOffset = attempt.maxCursorOffset,
-          },
-  };
 }
 
 bool is_selectable_recovery_attempt(const RecoveryAttempt &attempt) noexcept {
@@ -2115,7 +2075,7 @@ bool satisfies_non_credible_fallback_contract(
 bool is_better_recovery_attempt(const RecoveryAttempt &lhs,
                                 const RecoveryAttempt &rhs) noexcept {
   return is_better_normalized_recovery_order_key(
-      recovery_attempt_order_key(lhs.score), recovery_attempt_order_key(rhs.score),
+      recovery_attempt_order_key(lhs), recovery_attempt_order_key(rhs),
       RecoveryOrderProfile::Attempt);
 }
 

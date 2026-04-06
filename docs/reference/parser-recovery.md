@@ -40,6 +40,12 @@ Recovery runs in this order:
 4. Replay the entry rule in recovery mode inside that window.
 5. Classify and rank the result.
 6. If needed, widen the window and try again.
+7. If the best pass still overreaches with a non-credible winner, rerun the
+   same global search with a smaller initial recovery-window budget.
+
+Validation-only retries such as untrimmed tail rechecks and their follow-up
+windows re-enter that same window-level qualification flow. They do not use a
+separate acceptance path.
 
 The main runtime lives in:
 
@@ -47,6 +53,12 @@ The main runtime lives in:
 - `RecoverySearch.*`
 - `ParseContext.hpp`
 - `PegiumParser.cpp`
+
+Shared delete-scan and delete-retry position enumeration now also lives in
+`RecoveryUtils.hpp`. The global prefix delete-only entry retry, terminal
+nearby delete-scan, repetition restart retry, ordered-choice restart
+enumeration, and infix operator-run cleanup all build from those shared
+helpers instead of keeping separate local overflow/delete loops.
 
 ## Strict Failure Analysis
 
@@ -97,6 +109,11 @@ Each window carries:
 If no acceptable attempt is found, Pegium widens the backward token history of
 the current window. One final full-history attempt may still be tried after the
 configured search limit is reached.
+
+If the best result of a whole search pass still requests a narrowed retry, the
+runtime reruns the same pass shape with a smaller initial and maximum recovery
+window budget. This rerun uses the same global classifier and ranker as the
+primary pass; it is not a separate ranking mode.
 
 ### Replay Contract
 
@@ -219,7 +236,14 @@ runtime type. Instead, each layer projects onto the same axis vocabulary:
 - `edits`
 - `progress`
 
-For global attempts, the public score still exposes:
+The runtime now exposes only three comparison entries over that vocabulary:
+
+- terminal local candidates
+- structural local candidates
+- global recovery attempts
+
+For global attempts, the debug surface still exposes a derived summary with the
+same coarse facts:
 
 - `selection`
   `entryRuleMatched`, `stable`, `credible`, `fullMatch`
@@ -227,6 +251,9 @@ For global attempts, the public score still exposes:
   `editCost`, `editSpan`, `entryCount`, `firstEditOffset`
 - `progress`
   `parsedLength`, `maxCursorOffset`
+
+That summary is projected directly from `RecoveryAttempt` when needed. The
+runtime does not keep a separate stored global score object for ranking.
 
 ### Global Comparison Order
 
@@ -347,6 +374,11 @@ Delete recovery may absorb hidden trivia into the same delete edit when the run
 stays inside the same coarse lexical class. This keeps long deletes contiguous
 without relying on line-based heuristics.
 
+That delete-run enumeration is shared now. Terminal nearby delete-scan uses the
+guarded delete-scan position visitor from `RecoveryUtils.hpp`, then applies the
+terminal-specific lexical admissibility checks on top of those shared scan
+positions.
+
 ### Entry Probes
 
 Entry probes are stricter than full terminal recovery.
@@ -387,22 +419,32 @@ It follows a simple shape:
 - whether the current offset is still inside the active recovery window
 - terminal and trivia facts for the current element when relevant
 
-### Sequence Strategies
+### Sequence Candidates
 
-Current sequence strategies are:
+`Group` does not expose a stable public family of named sequence strategies.
 
-- `InsertCurrentWithCleanTail`
-- `DeleteThenInsertCurrent`
-- `ReparseCurrentWithoutDelete`
-- `SkipNullable`
+Instead it derives legal candidates from the observed facts and compares a
+small set of replay shapes:
 
-`SkipNullable` is a real strategy, not an implicit fallback.
+- local completion of the current element
+- same-start replay of the current element without broad delete when that
+  continuation is legal
+- missing required non-terminal completion when an explicit missing-element
+  replay plan beats reparsing the current element itself
+- nullable-suffix progression when the remaining suffix is already
+  structurally satisfied
+
+A local current-element repair may still materialize as a delete plus insert in
+the winning edit script, but it is treated as one legal replay shape, not as a
+separate documented runtime family.
 
 ### Main Sequence Rules
 
 - a nullable current may yield to a strict suffix that already matches
 - local completion of the current element beats a broader restart when it keeps
   a stronger prefix
+- a missing-element hole is replayed only after an explicit local winner
+  selection; it is not committed through a boolean preselection path anymore
 - terminal-local permissions are derived once from sequence facts instead of
   being recomputed ad hoc at many call sites
 
@@ -416,35 +458,27 @@ booleans.
 
 For one iteration, the flow is:
 
-1. build `IterationObservation`
-2. derive `IterationCandidateSet`
-3. evaluate legal iteration families
-4. compare them
-5. replay the winner
+1. build iteration observation
+2. derive legal retry plans from those facts
+3. compare continuing and restarting candidates
+4. replay the winner
 
-### Iteration Families
+### Iteration Candidates
 
-Current iteration families are:
+`Repetition` compares a small set of legal candidate shapes:
 
-- `NoInsert`
-- `InsertRetry`
-- `DeleteRetry`
+- no-insert continuation when the current iteration can still progress cleanly
+- insert-based local completion when scoped continuation remains credible
+- delete-based restart when retry legality and boundary protection permit it
 
-Priority remains fixed:
+Those candidates are ranked through the shared structural comparator, with the
+same-start boundary-literal insert rule applied as an explicit invariant before
+the generic axes decide.
 
-1. `NoInsert`
-2. `InsertRetry`
-3. `DeleteRetry`
-
-### Meaning
-
-- `NoInsert`
-  replay the current iteration without opening a fresh insertion strategy
-- `InsertRetry`
-  local completion of the current iteration, possibly with scoped local
-  continuation
-- `DeleteRetry`
-  local restart of the current iteration after deletion
+Retry replay is also shared in shape now. Delete-based restart no longer keeps
+its own local overflow loop: it uses the guarded delete-retry utility from
+`RecoveryUtils.hpp`, while the replay plan carries the boundary-protection
+facts that are checked as the retry attempt is materialized.
 
 ### Local Continuation
 
@@ -456,22 +490,17 @@ instead of turning into broad permissiveness.
 
 `optional`, `*`, and `repeat<0, N>` share the same zero-min recovery path.
 
-Iterations are still classified internally as:
-
-- `Strong`
-- `Weak`
-
-A weak iteration is a repair that technically matches but does not continue
-strongly enough after its first edit to be committed greedily.
-
-For zero-min repetitions, Pegium keeps a provisional weak run instead of
-committing each weak iteration immediately. That lets the repetition compare:
+For zero-min repetitions, Pegium may keep a provisional restart anchor instead
+of committing each weak local run immediately. That lets the repetition compare:
 
 - keeping the weak run
 - restarting from the beginning of that run with a broader delete-only restart
 
 This is what prevents long runs of tiny low-value repairs from being committed
 before a better larger restart is considered.
+
+That provisional anchor is the only intentional residual repetition-specific
+concept left in the runtime.
 
 ## Branch Recovery in OrderedChoice
 
@@ -480,42 +509,83 @@ before a better larger restart is considered.
 1. best local attempt for one branch
 2. best branch overall
 
-### Branch Families
+### Branch Candidates
 
-The branch-local families are:
+For one branch, `OrderedChoice` compares:
 
-- `Strict`
-- `StrictDeferred`
-- `Editable`
-- `EditableDeleteRetry`
-
-### Meaning
-
-- `Strict`
-  direct branch success without edits
-- `StrictDeferred`
-  delayed strict fallback when a branch is structurally promising but not yet
-  the preferred editable winner
-- `Editable`
-  ordinary local repair inside the branch
-- `EditableDeleteRetry`
-  branch-local restart after delete-only scanning
+- direct strict branch success when a branch already matches without edits
+- local editable repair inside the branch
+- delete-scan restart only when restart admission and branch-entry facts make
+  it legal
 
 ### Branch Pipeline
 
 For one branch, the runtime currently:
 
-1. evaluates the strict attempt
-2. evaluates the best editable attempt
-3. optionally evaluates delete-retry
+1. observes no-edit branch facts
+2. probes entry-start facts only for candidates that need them
+3. enumerates only legal branch candidates
 4. keeps the best local branch attempt
 5. compares that branch winner to the other branches
+
+`no strict start signal` is not a separate strategy family. It is a legality
+filter applied while branch candidates are constructed.
+
+The branch winner is ranked through the same shared structural comparator used
+by `Group`, `Repetition`, and `InfixRule`. The only remaining branch-specific
+survivors are explicit invariants such as clean no-edit boundary preservation,
+preferred same-start boundary edits, and same-start continuing repairs that
+keep the stronger visible continuation before raw edit cost.
+
+Restart candidate enumeration is also shared in shape now. `OrderedChoice` no
+longer keeps its own local delete-retry loop: it uses the guarded delete-retry
+position visitor from `RecoveryUtils.hpp`, then applies branch-local replay and
+clean-boundary invariants on top of those shared retry positions.
 
 ### Important Branch Rule
 
 A branch-local delete-retry must not beat a credible local completion only
 because it leaves a cleaner cursor shape. Branch comparison still prefers real
 continuation after the first edit over cosmetic restart wins.
+
+## Tail Recovery in InfixRule
+
+`InfixRule` keeps infix-tail recovery local, but the runtime now uses the same
+high-level shape as the other structural combinators:
+
+1. observe RHS facts after an operator has matched
+2. enumerate the legal local tail candidates
+3. compare them with a fixed local order that prefers a legal RHS continuation
+4. replay the selected candidate
+
+### Observed RHS Facts
+
+The local observation step records whether:
+
+- bounded operator-noise cleanup is needed before the RHS primary and, if so,
+  how much of it must be replayed from the shared guarded delete-scan utility
+- that bounded cleanup still exposes a credible RHS primary
+- the RHS primary actually matches and advances the cursor
+- immediate RHS edits crossed skipped trivia
+- multiple immediate edits start exactly at the RHS anchor
+
+Those facts drive two local candidates:
+
+- `ContinueTail`, which carries the observed bounded cleanup count and is legal
+  only when the RHS continuation facts remain clean
+- `DeleteOperatorRun`, which falls back to deleting a stray operator run when
+  continuing the RHS is not legal
+
+### Stray Operator Runs
+
+When the RHS continuation is illegal, `InfixRule` falls back to deleting the
+operator run from the shared delete-scan utility. After that delete run, the
+tail stops if hidden trivia begins immediately at the new cursor. This is what
+keeps the next visible statement outside the recovered infix expression even
+when the deleted operator run is long.
+
+That tail stop is carried by the local infix replay result itself. It is not
+stored in shared parser recovery state anymore.
 
 ## Diagnostics
 

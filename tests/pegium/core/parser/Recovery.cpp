@@ -427,6 +427,39 @@ TEST(RecoveryTest,
       << parseDump;
 }
 
+TEST(RecoveryTest,
+     OrderedChoiceDeleteRetryAcrossHiddenTriviaKeepsLaterCleanBranch) {
+  const auto skipper = SkipperBuilder().ignore(some(s)).build();
+  ParserRule<RecoveryNode> rule{"Rule", "a"_kw | ("ab"_kw + ";"_kw)};
+
+  const auto result = parseRule(rule, "x   ab", skipper);
+  const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+
+  ASSERT_TRUE(result.value) << parseDump;
+  EXPECT_TRUE(result.fullMatch) << parseDump;
+  EXPECT_TRUE(result.result.recoveryReport.hasRecovered) << parseDump;
+  EXPECT_TRUE(std::ranges::any_of(result.parseDiagnostics,
+                                  [](const ParseDiagnostic &diagnostic) {
+                                    return diagnostic.kind ==
+                                               ParseDiagnosticKind::Deleted &&
+                                           diagnostic.beginOffset == 0u;
+                                  }))
+      << parseDump;
+  EXPECT_TRUE(std::ranges::any_of(result.parseDiagnostics,
+                                  [](const ParseDiagnostic &diagnostic) {
+                                    return diagnostic.kind ==
+                                           ParseDiagnosticKind::Inserted;
+                                  }))
+      << parseDump;
+  EXPECT_FALSE(std::ranges::any_of(result.parseDiagnostics,
+                                   [](const ParseDiagnostic &diagnostic) {
+                                     return diagnostic.kind ==
+                                                ParseDiagnosticKind::Deleted &&
+                                            diagnostic.beginOffset == 5u;
+                                   }))
+      << parseDump;
+}
+
 TEST(RecoveryTest, RecoveryCanBeDisabledThroughParseOptions) {
   const std::string input = "oopsservice";
   const auto skipper = SkipperBuilder().build();
@@ -3392,18 +3425,23 @@ TEST(RecoveryTest, UnexpectedTokenAfterOperatorUsesGenericDeleteInPrimary) {
                     many(append<&RecoveryModule::statements>(definition |
                                                              evaluationRule))};
 
-  const auto result = parseRule(module,
-                                "module calc\n"
-                                "def c: 8;\n"
-                                "2 * +c;\n",
-                                skipper);
+  const std::string text = "module calc\n"
+                           "def c: 8;\n"
+                           "2 * +c;\n";
+  const auto result = parseRule(module, text, skipper);
   const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
 
   ASSERT_TRUE(result.value) << parseDump;
   EXPECT_TRUE(result.fullMatch) << parseDump;
+  const auto plusPos = text.find('+');
+  ASSERT_NE(plusPos, std::string::npos);
   EXPECT_TRUE(std::ranges::any_of(
-      result.parseDiagnostics, [](const ParseDiagnostic &diagnostic) {
-        return diagnostic.kind == ParseDiagnosticKind::Deleted;
+      result.parseDiagnostics, [plusPos](const ParseDiagnostic &diagnostic) {
+        return diagnostic.kind == ParseDiagnosticKind::Deleted &&
+               diagnostic.beginOffset ==
+                   static_cast<pegium::TextOffset>(plusPos) &&
+               diagnostic.endOffset ==
+                   static_cast<pegium::TextOffset>(plusPos + 1u);
       }))
       << parseDump;
 

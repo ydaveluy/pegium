@@ -25,7 +25,7 @@ AbstractInlayHintProvider::getInlayHints(const workspace::Document &document,
     if (!node.hasCstNode()) {
       return;
     }
-    if (const auto cstNode = node.getCstNode();
+    if (const auto &cstNode = node.getCstNode();
         cstNode.getEnd() < rangeBegin || cstNode.getBegin() > rangeEnd) {
       return;
     }

@@ -1,5 +1,6 @@
 #include <pegium/core/parser/RecoveryDebug.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -31,6 +32,60 @@ namespace {
 
 [[nodiscard]] std::int64_t json_int(std::size_t value) noexcept {
   return static_cast<std::int64_t>(value);
+}
+
+struct RecoveryAttemptEditSummary {
+  TextOffset firstEditOffset = 0;
+  TextOffset lastEditOffset = 0;
+  TextOffset editSpan = 0;
+  std::size_t insertCount = 0;
+  std::size_t deleteCount = 0;
+  std::size_t replaceCount = 0;
+  std::size_t tokenInsertCount = 0;
+  std::size_t tokenDeleteCount = 0;
+  std::size_t codepointDeleteCount = 0;
+  std::size_t editCount = 0;
+  std::size_t entryCount = 0;
+  std::uint32_t editCost = 0;
+  bool hasEdits = false;
+};
+
+[[nodiscard]] RecoveryAttemptEditSummary
+summarize_recovery_attempt_edits(const RecoveryAttempt &attempt) {
+  RecoveryAttemptEditSummary summary{
+      .firstEditOffset =
+          attempt.recoveryEdits.empty() ? attempt.noEditFirstEditOffset
+                                        : std::numeric_limits<TextOffset>::max(),
+      .editCount = attempt.editCount,
+      .entryCount = attempt.recoveryEdits.size(),
+      .editCost = attempt.editCost,
+  };
+  for (const auto &entry : attempt.recoveryEdits) {
+    switch (entry.kind) {
+    case ParseDiagnosticKind::Inserted:
+      ++summary.insertCount;
+      ++summary.tokenInsertCount;
+      break;
+    case ParseDiagnosticKind::Deleted:
+      ++summary.deleteCount;
+      ++summary.codepointDeleteCount;
+      break;
+    case ParseDiagnosticKind::Replaced:
+      ++summary.replaceCount;
+      break;
+    case ParseDiagnosticKind::Incomplete:
+    case ParseDiagnosticKind::Recovered:
+    case ParseDiagnosticKind::ConversionError:
+      break;
+    }
+    summary.firstEditOffset = std::min(summary.firstEditOffset, entry.beginOffset);
+    summary.lastEditOffset = std::max(summary.lastEditOffset, entry.endOffset);
+  }
+  summary.hasEdits = !attempt.recoveryEdits.empty();
+  if (summary.hasEdits) {
+    summary.editSpan = summary.lastEditOffset - summary.firstEditOffset;
+  }
+  return summary;
 }
 
 [[nodiscard]] std::string
@@ -277,37 +332,39 @@ failure_leaf_to_json(const FailureLeaf &leaf) {
 }
 
 [[nodiscard]] pegium::JsonValue
-edit_trace_to_json(const EditTrace &trace) {
+edit_summary_to_json(const RecoveryAttemptEditSummary &summary) {
   return pegium::JsonValue::Object{
-      {"codepointDeleteCount", json_int(trace.codepointDeleteCount)},
-      {"deleteCount", json_int(trace.deleteCount)},
-      {"entryCount", json_int(trace.entryCount)},
-      {"editCost", json_int(trace.editCost)},
-      {"editCount", json_int(trace.editCount)},
-      {"editSpan", json_int(trace.editSpan)},
-      {"firstEditOffset", json_int(trace.firstEditOffset)},
-      {"hasEdits", trace.hasEdits},
-      {"insertCount", json_int(trace.insertCount)},
-      {"lastEditOffset", json_int(trace.lastEditOffset)},
-      {"replaceCount", json_int(trace.replaceCount)},
-      {"tokenDeleteCount", json_int(trace.tokenDeleteCount)},
-      {"tokenInsertCount", json_int(trace.tokenInsertCount)},
+      {"codepointDeleteCount", json_int(summary.codepointDeleteCount)},
+      {"deleteCount", json_int(summary.deleteCount)},
+      {"entryCount", json_int(summary.entryCount)},
+      {"editCost", json_int(summary.editCost)},
+      {"editCount", json_int(summary.editCount)},
+      {"editSpan", json_int(summary.editSpan)},
+      {"firstEditOffset", json_int(summary.firstEditOffset)},
+      {"hasEdits", summary.hasEdits},
+      {"insertCount", json_int(summary.insertCount)},
+      {"lastEditOffset", json_int(summary.lastEditOffset)},
+      {"replaceCount", json_int(summary.replaceCount)},
+      {"tokenDeleteCount", json_int(summary.tokenDeleteCount)},
+      {"tokenInsertCount", json_int(summary.tokenInsertCount)},
   };
 }
 
 [[nodiscard]] pegium::JsonValue
-score_to_json(const RecoveryScore &score) {
+attempt_score_projection_to_json(const RecoveryAttempt &attempt,
+                                 const RecoveryAttemptEditSummary &summary) {
   return pegium::JsonValue::Object{
-      {"credible", score.selection.credible},
-      {"entryCount", json_int(score.edits.entryCount)},
-      {"editCost", json_int(score.edits.editCost)},
-      {"editSpan", json_int(score.edits.editSpan)},
-      {"entryRuleMatched", score.selection.entryRuleMatched},
-      {"firstEditOffset", json_int(score.edits.firstEditOffset)},
-      {"fullMatch", score.selection.fullMatch},
-      {"maxCursorOffset", json_int(score.progress.maxCursorOffset)},
-      {"parsedLength", json_int(score.progress.parsedLength)},
-      {"stable", score.selection.stable},
+      {"credible", attempt.status == RecoveryAttemptStatus::Credible ||
+                       attempt.status == RecoveryAttemptStatus::Stable},
+      {"entryCount", json_int(summary.entryCount)},
+      {"editCost", json_int(summary.editCost)},
+      {"editSpan", json_int(summary.editSpan)},
+      {"entryRuleMatched", attempt.entryRuleMatched},
+      {"firstEditOffset", json_int(summary.firstEditOffset)},
+      {"fullMatch", attempt.fullMatch},
+      {"maxCursorOffset", json_int(attempt.maxCursorOffset)},
+      {"parsedLength", json_int(attempt.parsedLength)},
+      {"stable", attempt.status == RecoveryAttemptStatus::Stable},
   };
 }
 
@@ -451,6 +508,7 @@ recovery_windows_to_json(std::span<const RecoveryWindow> windows) {
 pegium::JsonValue
 recovery_attempt_to_json(const RecoveryAttempt &attempt,
                          const RecoveryAttemptSpec *spec) {
+  const auto editSummary = summarize_recovery_attempt_edits(attempt);
   pegium::JsonValue::Array recoveryEdits;
   recoveryEdits.reserve(attempt.recoveryEdits.size());
   for (const auto &edit : attempt.recoveryEdits) {
@@ -469,7 +527,7 @@ recovery_attempt_to_json(const RecoveryAttempt &attempt,
       {"completedRecoveryWindows", json_int(attempt.completedRecoveryWindows)},
       {"editCost", json_int(attempt.editCost)},
       {"editCount", json_int(attempt.editCount)},
-      {"editTrace", edit_trace_to_json(attempt.editTrace)},
+      {"editTrace", edit_summary_to_json(editSummary)},
       {"entryRuleMatched", attempt.entryRuleMatched},
       {"failureSnapshot",
        attempt.failureSnapshot.has_value()
@@ -477,13 +535,12 @@ recovery_attempt_to_json(const RecoveryAttempt &attempt,
            : pegium::JsonValue(nullptr)},
       {"fullMatch", attempt.fullMatch},
       {"maxCursorOffset", json_int(attempt.maxCursorOffset)},
-      {"orderKey",
-       order_key_to_json(recovery_attempt_order_key(attempt.score))},
+      {"orderKey", order_key_to_json(recovery_attempt_order_key(attempt))},
       {"parseDiagnostics", std::move(diagnostics)},
       {"recoveryEdits", std::move(recoveryEdits)},
       {"parsedLength", json_int(attempt.parsedLength)},
       {"reachedRecoveryTarget", attempt.reachedRecoveryTarget},
-      {"score", score_to_json(attempt.score)},
+      {"score", attempt_score_projection_to_json(attempt, editSummary)},
       {"hasStablePrefix", attempt.hasStablePrefix},
       {"stableAfterRecovery", attempt.stableAfterRecovery},
       {"stablePrefixOffset", json_int(attempt.stablePrefixOffset)},

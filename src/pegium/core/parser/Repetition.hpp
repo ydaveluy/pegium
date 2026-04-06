@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <concepts>
 #include <limits>
 #include <optional>
@@ -159,10 +160,6 @@ private:
       }
     } else if constexpr (RecoveryParseModeContext<Context>) {
       PEGIUM_STEP_TRACE_INC(detail::StepCounter::RepetitionRecoverCalls);
-      auto try_insertable_recovery_iteration =
-          [this, &ctx](bool skipBetweenIterations) {
-        return try_recovery_iteration(ctx, skipBetweenIterations);
-      };
       if constexpr (is_optional) {
         const auto checkpoint = ctx.mark();
         const char *const savedFurthestExploredCursor =
@@ -201,7 +198,7 @@ private:
             ctx.cursorOffset());
         return matched;
       } else if constexpr (is_plus) {
-        if (!try_insertable_recovery_iteration(/*skipBetweenIterations=*/false)) {
+        if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/false)) {
           PEGIUM_RECOVERY_TRACE("[repeat + rule] first element failed offset=",
                                 ctx.cursorOffset());
           return false;
@@ -209,7 +206,7 @@ private:
         PEGIUM_RECOVERY_TRACE("[repeat + rule] first element ok offset=",
                               ctx.cursorOffset());
         while (true) {
-          if (!try_insertable_recovery_iteration(/*skipBetweenIterations=*/true)) {
+          if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/true)) {
             if (ctx.frontierBlocked()) {
               return false;
             }
@@ -245,7 +242,7 @@ private:
           return parse_zero_min_repetition_recovery(ctx, max);
         }
         for (; repetitionCount < max; ++repetitionCount) {
-          if (!try_insertable_recovery_iteration(repetitionCount > 0)) {
+          if (!try_recovery_iteration(ctx, repetitionCount > 0)) {
             if (ctx.frontierBlocked()) {
               return false;
             }
@@ -371,17 +368,6 @@ private:
     bool mutatesDestructiveSuffixBeyondStrictExploration = false;
   };
 
-  struct IterationRecoveryOutcome {
-    bool matched = false;
-    IterationRecoveryStrength strength = IterationRecoveryStrength::Strong;
-    RecoveryContext::Checkpoint parseCheckpoint{};
-    const char *parseStart = nullptr;
-    const char *parseStartFurthestExploredCursor = nullptr;
-    TextOffset parseStartOffset = 0;
-    std::uint32_t baseEditCost = 0;
-    std::size_t baseRecoveryEditCount = 0;
-  };
-
   struct IterationObservation {
     IterationAttempt noInsertAttempt{};
     detail::RecoveryProbeProgress noInsertProbe{};
@@ -389,11 +375,6 @@ private:
     bool startedWithoutEdits = false;
     bool iterationStarted = false;
     bool failedInActiveWindow = false;
-  };
-
-  struct IterationBoundaryProtection {
-    bool protectParseStartBoundary = false;
-    bool protectLaterVisibleBoundary = false;
   };
 
   struct IterationReplayPlan {
@@ -404,8 +385,11 @@ private:
     bool allowDestructiveWindowContinuation = false;
     bool scopeLeadingTerminalInsert = false;
     bool allowExtendedDeleteScan = false;
-    IterationBoundaryProtection boundaryProtection{};
+    bool protectParseStartBoundary = false;
+    bool protectLaterVisibleBoundary = false;
   };
+
+  using IterationPlanList = std::array<IterationReplayPlan, 4>;
 
   struct IterationSelectionResult {
     IterationAttempt bestAttempt{};
@@ -429,69 +413,14 @@ private:
     }
   }
 
-  [[nodiscard]] static bool has_iteration_retry_candidates(
-      const IterationReplayPlan &deleteRetry,
-      const IterationReplayPlan &insertRetry,
-      const IterationReplayPlan &boundaryPreservingInsertRetry) noexcept {
-    return deleteRetry.legal || insertRetry.legal ||
-           boundaryPreservingInsertRetry.legal;
-  }
-
-  [[nodiscard]] static bool has_only_no_insert_iteration_candidate(
-      const IterationReplayPlan &noInsert,
-      const IterationReplayPlan &deleteRetry,
-      const IterationReplayPlan &insertRetry,
-      const IterationReplayPlan &boundaryPreservingInsertRetry) noexcept {
-    return noInsert.legal &&
-           !has_iteration_retry_candidates(deleteRetry, insertRetry,
-                                           boundaryPreservingInsertRetry);
-  }
-
-  [[nodiscard]] static bool retry_rewrites_parse_start_boundary(
-      const IterationAttempt &attempt, TextOffset parseStartOffset) noexcept {
-    return attempt.candidate.matched && attempt.candidate.hadEdits &&
-           attempt.candidate.firstEditOffset < parseStartOffset;
-  }
-
-  [[nodiscard]] static bool retry_attempt_is_boundary_unsafe(
-      const IterationAttempt &attempt, TextOffset parseStartOffset,
-      const IterationReplayPlan &plan) noexcept {
-    const bool rewritesParseStartBoundary =
-        retry_rewrites_parse_start_boundary(attempt, parseStartOffset);
-    return (plan.boundaryProtection.protectParseStartBoundary &&
-            rewritesParseStartBoundary) ||
-           (plan.boundaryProtection.protectLaterVisibleBoundary &&
-            attempt.mutatesDestructiveSuffixBeyondStrictExploration);
-  }
-
-  struct ZeroMinRestartAnchor {
-    RecoveryContext::Checkpoint parseCheckpoint{};
-    const char *parseStart = nullptr;
-    const char *parseStartFurthestExploredCursor = nullptr;
-    TextOffset parseStartOffset = 0;
-    std::size_t matchedCountBeforeAnchor = 0;
-    std::uint32_t baseEditCost = 0;
-    std::size_t baseRecoveryEditCount = 0;
-  };
-
-  // Residual Phase 4 concept: zero-min recovery may keep one weak iteration
-  // boundary alive so later iterations can prove that the run should restart
-  // from there with DeleteRetry instead of committing the weak start greedily.
-  [[nodiscard]] static std::optional<ZeroMinRestartAnchor>
-  seed_zero_min_restart_anchor(const IterationRecoveryOutcome &outcome,
-                               std::size_t matchedCountBeforeAnchor) {
-    if (!outcome.matched || outcome.strength == IterationRecoveryStrength::Strong) {
-      return std::nullopt;
+  [[nodiscard]] static bool
+  has_legal_iteration_retry_plan(const IterationPlanList &plans) noexcept {
+    for (const auto &plan : plans) {
+      if (plan.legal && plan.kind != IterationReplayKind::NoInsert) {
+        return true;
+      }
     }
-    return ZeroMinRestartAnchor{
-        .parseCheckpoint = outcome.parseCheckpoint,
-        .parseStart = outcome.parseStart,
-        .parseStartFurthestExploredCursor =
-            outcome.parseStartFurthestExploredCursor,
-        .parseStartOffset = outcome.parseStartOffset,
-        .matchedCountBeforeAnchor = matchedCountBeforeAnchor,
-        .baseEditCost = outcome.baseEditCost,
-        .baseRecoveryEditCount = outcome.baseRecoveryEditCount};
+    return false;
   }
 
   [[nodiscard]] static constexpr std::uint8_t
@@ -530,7 +459,8 @@ private:
            ++i) {
         maxEndOffset = std::max(maxEndOffset, edits[i].endOffset);
       }
-      continuesAfterFirstEdit = post_skip_cursor_offset(ctx) > maxEndOffset;
+      continuesAfterFirstEdit =
+          detail::post_skip_cursor_offset(ctx) > maxEndOffset;
     }
     return detail::make_structural_progress_recovery_candidate(
         detail::capture_progress_recovery_candidate(ctx, iterationCheckpoint),
@@ -554,23 +484,6 @@ private:
       return ctx.skip_without_builder(ctx.cursor()) < ctx.end;
     }
     return ctx.cursor() < ctx.end;
-  }
-
-  [[nodiscard]] static bool
-  is_recovery_relevant_offset(const RecoveryContext &ctx, TextOffset offset) {
-    if (ctx.canEditAtOffset(offset)) {
-      return true;
-    }
-    if (!ctx.hasPendingRecoveryWindows()) {
-      return false;
-    }
-    return offset >= ctx.pendingRecoveryWindowBeginOffset() &&
-           offset <= ctx.pendingRecoveryWindowMaxCursorOffset();
-  }
-
-  [[nodiscard]] static TextOffset
-  post_skip_cursor_offset(RecoveryContext &ctx) {
-    return detail::post_skip_cursor_offset(ctx);
   }
 
   [[nodiscard]] bool has_entry_recovery_signal(RecoveryContext &ctx) const {
@@ -605,8 +518,13 @@ private:
     const auto strictCursorOffset = ctx.cursorOffset();
     const auto strictExploredOffset =
         std::max(strictCursorOffset, ctx.furthestExploredOffset());
-    const auto strictPostSkipOffset = post_skip_cursor_offset(ctx);
-    if (!is_recovery_relevant_offset(ctx, strictPostSkipOffset)) {
+    const auto strictPostSkipOffset = detail::post_skip_cursor_offset(ctx);
+    const bool strictFrontierIsRecoveryRelevant =
+        ctx.canEditAtOffset(strictPostSkipOffset) ||
+        (ctx.hasPendingRecoveryWindows() &&
+         strictPostSkipOffset >= ctx.pendingRecoveryWindowBeginOffset() &&
+         strictPostSkipOffset <= ctx.pendingRecoveryWindowMaxCursorOffset());
+    if (!strictFrontierIsRecoveryRelevant) {
       if (savedFurthestExploredCursor > ctx.furthestExploredCursor()) {
         ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
       }
@@ -709,7 +627,6 @@ private:
       const auto recoveryCheckpoint = ctx.mark();
       const char *const savedRecoveryFurthestExploredCursor =
           ctx.furthestExploredCursor();
-      detail::ExtendedDeleteScanBudgetScope overflowBudgetScope{ctx};
       const auto parseWithRetryPermissions = [this, &ctx, parseStart]() {
         return parse(_element, ctx) && ctx.cursor() != parseStart;
       };
@@ -718,77 +635,32 @@ private:
       }
       ctx.rewind(recoveryCheckpoint);
       ctx.restoreFurthestExploredCursor(savedRecoveryFurthestExploredCursor);
-
-      const bool previousSkipAfterDelete = ctx.skipAfterDelete;
-      ctx.skipAfterDelete = false;
-      const auto try_delete_scan_pass = [&](bool overflowBudget) {
-        while (ctx.deleteOneCodepoint()) {
-          const auto retryCheckpoint = ctx.mark();
-          const char *const savedFurthestExploredCursor =
-              ctx.furthestExploredCursor();
-          const bool plausibleRetryStart =
-              attempt_fast_probe(ctx, _element) ||
-              probe_recoverable_at_entry(_element, ctx) ||
-              probe_locally_recoverable(_element, ctx);
-          ctx.rewind(retryCheckpoint);
-          ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
-          if (!plausibleRetryStart) {
-            if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
-              if (ctx.skip_without_builder(ctx.cursor()) > ctx.cursor()) {
-                if constexpr (requires { ctx.extendLastDeleteThroughHiddenTrivia(); }) {
-                  if (ctx.extendLastDeleteThroughHiddenTrivia()) {
-                    continue;
-                  }
-                }
-              }
+      return detail::recover_by_guarded_delete_retry(
+          ctx,
+          [this, &ctx]() {
+            const auto retryCheckpoint = ctx.mark();
+            const char *const savedFurthestExploredCursor =
+                ctx.furthestExploredCursor();
+            const bool plausibleRetryStart =
+                attempt_fast_probe(ctx, _element) ||
+                probe_recoverable_at_entry(_element, ctx) ||
+                probe_locally_recoverable(_element, ctx);
+            ctx.rewind(retryCheckpoint);
+            ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+            return plausibleRetryStart;
+          },
+          [&ctx, &parseWithRetryPermissions]() {
+            const auto retryCheckpoint = ctx.mark();
+            const char *const savedFurthestExploredCursor =
+                ctx.furthestExploredCursor();
+            const bool matched = parseWithRetryPermissions();
+            if (!matched) {
+              ctx.rewind(retryCheckpoint);
+              ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
             }
-            continue;
-          }
-          if (parseWithRetryPermissions()) {
-            if (overflowBudget) {
-              overflowBudgetScope.commitOverflowEdits();
-            }
-            return true;
-          }
-          ctx.rewind(retryCheckpoint);
-          ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
-          if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
-            if (ctx.skip_without_builder(ctx.cursor()) > ctx.cursor()) {
-              if constexpr (requires { ctx.extendLastDeleteThroughHiddenTrivia(); }) {
-                if (ctx.extendLastDeleteThroughHiddenTrivia()) {
-                  continue;
-                }
-              }
-            }
-          }
-        }
-        return false;
-      };
-
-      if (try_delete_scan_pass(false)) {
-        ctx.skipAfterDelete = previousSkipAfterDelete;
-        return true;
-      }
-      if (!plan.allowExtendedDeleteScan) {
-        ctx.skipAfterDelete = previousSkipAfterDelete;
-        ctx.rewind(recoveryCheckpoint);
-        ctx.restoreFurthestExploredCursor(savedRecoveryFurthestExploredCursor);
-        return false;
-      }
-
-      if (!overflowBudgetScope.tryEnable()) {
-        ctx.skipAfterDelete = previousSkipAfterDelete;
-        ctx.rewind(recoveryCheckpoint);
-        ctx.restoreFurthestExploredCursor(savedRecoveryFurthestExploredCursor);
-        return false;
-      }
-      const bool matched = try_delete_scan_pass(true);
-      ctx.skipAfterDelete = previousSkipAfterDelete;
-      if (!matched) {
-        ctx.rewind(recoveryCheckpoint);
-        ctx.restoreFurthestExploredCursor(savedRecoveryFurthestExploredCursor);
-      }
-      return matched;
+            return matched;
+          },
+          {.scan = {.allowOverflow = plan.allowExtendedDeleteScan}});
     }
     }
     return false;
@@ -807,7 +679,7 @@ private:
     if (insertEditCount > 0u) {
       const auto edits = ctx.recoveryEditsView();
       continuesAfterFirstEdit =
-          post_skip_cursor_offset(ctx) >
+          detail::post_skip_cursor_offset(ctx) >
           edits[recoveryEditCountBefore].endOffset;
     }
     return insertEditCount == 1u && continuesAfterFirstEdit;
@@ -852,17 +724,13 @@ private:
     return observation;
   }
 
-  void enumerate_iteration_candidates(
+  [[nodiscard]] IterationPlanList enumerate_iteration_plans(
       RecoveryContext &ctx, bool skipBetweenIterations,
       const IterationObservation &observation,
       TextOffset parseStartOffset,
       std::size_t recoveryEditCountBefore,
       bool parseStartAtIterationEntryBoundary,
-      bool deepStartedOptionalAfterPriorRecovery,
-      IterationReplayPlan &noInsertPlan,
-      IterationReplayPlan &deleteRetryPlan,
-      IterationReplayPlan &insertRetryPlan,
-      IterationReplayPlan &boundaryPreservingInsertRetryPlan) const {
+      bool deepStartedOptionalAfterPriorRecovery) const {
     const bool noInsertCandidateLegal =
         observation.noInsertAttempt.candidate.matched &&
         observation.noInsertProgressed;
@@ -961,9 +829,12 @@ private:
         !ctx.hasHadEdits()) {
       insertRetryLegal = is_locally_recoverable_after_iteration_skip(ctx);
     }
-    noInsertPlan = {.kind = IterationReplayKind::NoInsert,
-                    .legal = noInsertCandidateLegal};
-    deleteRetryPlan = {
+    IterationPlanList plans{
+        IterationReplayPlan{
+            .kind = IterationReplayKind::NoInsert,
+            .legal = noInsertCandidateLegal,
+        },
+        IterationReplayPlan{
         .kind = IterationReplayKind::DeleteRetry,
         .legal = deleteRetryLegal,
         .allowDelete = deleteRetryLegal && ctx.allowDelete,
@@ -972,15 +843,14 @@ private:
             ctx.hasHadEdits() && parseStartAtIterationEntryBoundary,
         .allowExtendedDeleteScan =
             deleteRetryLegal && detail::allows_extended_delete_scan(ctx),
-        .boundaryProtection =
-            {.protectParseStartBoundary =
-                 protectRecoveredIterationBoundary &&
-                 (observation.iterationStarted ||
-                  currentBoundaryLooksLikeStartedIteration),
-             .protectLaterVisibleBoundary =
-                 protectRecoveredIterationBoundary &&
-                 observation.iterationStarted}};
-    insertRetryPlan = {
+        .protectParseStartBoundary =
+            protectRecoveredIterationBoundary &&
+            (observation.iterationStarted ||
+             currentBoundaryLooksLikeStartedIteration),
+        .protectLaterVisibleBoundary =
+            protectRecoveredIterationBoundary &&
+            observation.iterationStarted},
+        IterationReplayPlan{
         .kind = IterationReplayKind::InsertRetry,
         .legal = insertRetryLegal,
         .allowInsert = insertRetryLegal,
@@ -992,18 +862,19 @@ private:
             ctx.hasHadEdits() && parseStartAtIterationEntryBoundary,
         .scopeLeadingTerminalInsert =
             insertRetryLegal && !retryContinuesStartedIteration,
-        .boundaryProtection =
-            {.protectParseStartBoundary =
-                 protectRecoveredIterationBoundary ||
-                 (!observation.noInsertProgressed &&
-                  parseStartAtIterationEntryBoundary &&
-                  currentBoundaryLooksLikeStartedIteration),
-             .protectLaterVisibleBoundary =
-                 protectRecoveredIterationBoundary &&
-                 currentBoundaryLooksLikeStartedIteration}};
-    boundaryPreservingInsertRetryPlan = {
-        .kind = IterationReplayKind::InsertRetry,
-    };
+        .protectParseStartBoundary =
+            protectRecoveredIterationBoundary ||
+            (!observation.noInsertProgressed &&
+             parseStartAtIterationEntryBoundary &&
+             currentBoundaryLooksLikeStartedIteration),
+        .protectLaterVisibleBoundary =
+            protectRecoveredIterationBoundary &&
+            currentBoundaryLooksLikeStartedIteration},
+        IterationReplayPlan{
+            .kind = IterationReplayKind::InsertRetry,
+        }};
+    auto &insertRetryPlan = plans[2];
+    auto &boundaryPreservingInsertRetryPlan = plans[3];
     if (insertRetryPlan.legal && insertRetryPlan.allowDelete &&
         parseStartAtIterationEntryBoundary &&
         currentBoundaryLooksLikeStartedIteration &&
@@ -1011,6 +882,7 @@ private:
       boundaryPreservingInsertRetryPlan = insertRetryPlan;
       boundaryPreservingInsertRetryPlan.allowDelete = false;
     }
+    return plans;
   }
 
   IterationAttempt evaluate_retry_iteration_attempt(
@@ -1038,7 +910,14 @@ private:
       attempt.mutatesDestructiveSuffixBeyondStrictExploration =
           mutates_destructive_suffix_beyond_strict_exploration(
               ctx, strictExploredOffset, recoveryEditCountBefore);
-      if (retry_attempt_is_boundary_unsafe(attempt, parseStartOffset, plan)) {
+      const bool rewritesParseStartBoundary =
+          attempt.candidate.matched && attempt.candidate.hadEdits &&
+          attempt.candidate.firstEditOffset < parseStartOffset;
+      const bool boundaryUnsafe =
+          (plan.protectParseStartBoundary && rewritesParseStartBoundary) ||
+          (plan.protectLaterVisibleBoundary &&
+           attempt.mutatesDestructiveSuffixBeyondStrictExploration);
+      if (boundaryUnsafe) {
         blockedByBoundaryUnsafeRetry =
             blockedByBoundaryUnsafeRetry || attempt.candidate.matched;
         attempt = {};
@@ -1051,10 +930,7 @@ private:
   }
 
   IterationSelectionResult select_iteration_attempt(
-      RecoveryContext &ctx, const IterationReplayPlan &noInsertPlan,
-      const IterationReplayPlan &deleteRetryPlan,
-      const IterationReplayPlan &insertRetryPlan,
-      const IterationReplayPlan &boundaryPreservingInsertRetryPlan,
+      RecoveryContext &ctx, const IterationPlanList &plans,
       const IterationObservation &observation,
       const RecoveryContext::Checkpoint &iterationCheckpoint,
       const RecoveryContext::Checkpoint &parseCheckpoint,
@@ -1063,64 +939,25 @@ private:
       const char *&furthestExploredCursor,
       std::size_t recoveryEditCountBefore) const {
     IterationSelectionResult selection;
-    if (noInsertPlan.legal) {
-      selection.bestAttempt = observation.noInsertAttempt;
-      selection.winningPlan = noInsertPlan;
-    }
-
-    if (deleteRetryPlan.legal) {
-      auto deleteRetryAttempt = evaluate_retry_iteration_attempt(
-          ctx, deleteRetryPlan, iterationCheckpoint, parseCheckpoint,
-          parseStart, parseStartFurthestExploredCursor, parseStartOffset,
+    for (const auto &plan : plans) {
+      if (!plan.legal) {
+        continue;
+      }
+      if (plan.kind == IterationReplayKind::NoInsert) {
+        selection.bestAttempt = observation.noInsertAttempt;
+        selection.winningPlan = plan;
+        continue;
+      }
+      auto retryAttempt = evaluate_retry_iteration_attempt(
+          ctx, plan, iterationCheckpoint, parseCheckpoint, parseStart,
+          parseStartFurthestExploredCursor, parseStartOffset,
           observation.noInsertProbe.furthestExploredOffset,
-          furthestExploredCursor,
-          recoveryEditCountBefore, selection.blockedByBoundaryUnsafeRetry);
-      consider_iteration_attempt(selection, deleteRetryAttempt,
-                                 deleteRetryPlan);
-    }
-
-    if (insertRetryPlan.legal) {
-      auto insertRetryAttempt = evaluate_retry_iteration_attempt(
-          ctx, insertRetryPlan, iterationCheckpoint, parseCheckpoint,
-          parseStart, parseStartFurthestExploredCursor, parseStartOffset,
-          observation.noInsertProbe.furthestExploredOffset,
-          furthestExploredCursor,
-          recoveryEditCountBefore, selection.blockedByBoundaryUnsafeRetry);
-      consider_iteration_attempt(selection, insertRetryAttempt,
-                                 insertRetryPlan);
-    }
-
-    if (boundaryPreservingInsertRetryPlan.legal) {
-      auto boundaryPreservingInsertRetryAttempt =
-          evaluate_retry_iteration_attempt(
-              ctx, boundaryPreservingInsertRetryPlan, iterationCheckpoint,
-              parseCheckpoint, parseStart, parseStartFurthestExploredCursor,
-              parseStartOffset, observation.noInsertProbe.furthestExploredOffset,
-              furthestExploredCursor, recoveryEditCountBefore,
-              selection.blockedByBoundaryUnsafeRetry);
-      consider_iteration_attempt(selection, boundaryPreservingInsertRetryAttempt,
-                                 boundaryPreservingInsertRetryPlan);
+          furthestExploredCursor, recoveryEditCountBefore,
+          selection.blockedByBoundaryUnsafeRetry);
+      consider_iteration_attempt(selection, retryAttempt, plan);
     }
 
     return selection;
-  }
-
-  static void set_iteration_recovery_outcome(
-      IterationRecoveryOutcome &outcome,
-      IterationRecoveryStrength strength,
-      const RecoveryContext::Checkpoint &parseCheckpoint,
-      const char *parseStart, const char *parseStartFurthestExploredCursor,
-      TextOffset parseStartOffset, std::uint32_t baseEditCost,
-      std::size_t baseRecoveryEditCount) {
-    outcome = {.matched = true,
-               .strength = strength,
-               .parseCheckpoint = parseCheckpoint,
-               .parseStart = parseStart,
-               .parseStartFurthestExploredCursor =
-                   parseStartFurthestExploredCursor,
-               .parseStartOffset = parseStartOffset,
-               .baseEditCost = baseEditCost,
-               .baseRecoveryEditCount = baseRecoveryEditCount};
   }
 
   [[nodiscard]] static bool
@@ -1137,137 +974,16 @@ private:
         });
   }
 
-  [[nodiscard]] detail::EditableRecoveryCandidate
-  capture_current_zero_min_run_candidate(
-      RecoveryContext &ctx, const ZeroMinRestartAnchor &anchor) const {
-    detail::EditableRecoveryCandidate candidate{.matched = true,
-                                                .cursorOffset = ctx.cursorOffset()};
-    candidate.postSkipCursorOffset = detail::post_skip_cursor_offset(ctx);
-    candidate.editCost = ctx.currentEditCost() - anchor.baseEditCost;
-    candidate.editCount = static_cast<std::uint32_t>(ctx.recoveryEditCount() -
-                                                     anchor.baseRecoveryEditCount);
-    if (ctx.recoveryEditCount() > anchor.baseRecoveryEditCount) {
-      const auto edits = ctx.recoveryEditsView();
-      candidate.firstEditOffset =
-          edits[anchor.baseRecoveryEditCount].beginOffset;
-      candidate.firstEditElement = edits[anchor.baseRecoveryEditCount].element;
-    }
-    return candidate;
-  }
-
-  [[nodiscard]] static bool
-  zero_min_anchor_has_following_iteration(std::size_t matchedCount,
-                                          const ZeroMinRestartAnchor &anchor) noexcept {
-    return matchedCount > anchor.matchedCountBeforeAnchor + 1u;
-  }
-
   std::size_t continue_zero_min_recovery_run(
       RecoveryContext &ctx, std::size_t matchedCount,
-      std::size_t maxIterationCount,
-      std::optional<ZeroMinRestartAnchor> restartAnchor = std::nullopt) const {
+      std::size_t maxIterationCount) const {
     while (matchedCount < maxIterationCount) {
-      IterationRecoveryOutcome outcome;
-      if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/true,
-                                  &outcome)) {
-        if (restartAnchor.has_value() &&
-            zero_min_anchor_has_following_iteration(matchedCount,
-                                                    *restartAnchor)) {
-          const auto restartedCount = try_restart_from_zero_min_anchor(
-              ctx, *restartAnchor, maxIterationCount);
-          if (restartedCount.has_value()) {
-            matchedCount = *restartedCount;
-            restartAnchor.reset();
-            continue;
-          }
-        }
-        if (ctx.frontierBlocked()) {
-          break;
-        }
+      if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/true)) {
         break;
       }
-      const auto matchedCountBeforeOutcome = matchedCount;
       ++matchedCount;
-      if (const auto restartedCount = reconcile_zero_min_restart_anchor(
-              ctx, matchedCountBeforeOutcome, maxIterationCount, outcome,
-              restartAnchor);
-          restartedCount.has_value()) {
-        matchedCount = *restartedCount;
-      }
     }
     return matchedCount;
-  }
-
-  std::optional<std::size_t> replay_zero_min_anchor_delete_retry(
-      RecoveryContext &ctx, const ZeroMinRestartAnchor &anchor,
-      std::size_t maxIterationCount) const {
-    auto deleteOnlyGuard = ctx.withEditPermissions(false, ctx.allowDelete);
-    (void)deleteOnlyGuard;
-    if (!(parse(_element, ctx) && ctx.cursor() != anchor.parseStart)) {
-      return std::nullopt;
-    }
-    const auto matchedCount = continue_zero_min_recovery_run(
-        ctx, anchor.matchedCountBeforeAnchor + 1u, maxIterationCount);
-    return matchedCount;
-  }
-
-  [[nodiscard]] detail::EditableRecoveryCandidate
-  evaluate_zero_min_anchor_restart_candidate(
-      RecoveryContext &ctx, const ZeroMinRestartAnchor &anchor,
-      std::size_t maxIterationCount) const {
-    const auto currentCheckpoint = ctx.mark();
-    const char *const currentFurthestExploredCursor =
-        ctx.furthestExploredCursor();
-    const auto currentRecoveryEdits = ctx.recoveryEdits;
-    ctx.rewind(anchor.parseCheckpoint);
-    ctx.restoreFurthestExploredCursor(anchor.parseStartFurthestExploredCursor);
-    const auto candidate = detail::evaluate_editable_recovery_candidate(
-        ctx, anchor.parseCheckpoint, anchor.baseEditCost,
-        anchor.baseRecoveryEditCount,
-        [this, &ctx, &anchor, maxIterationCount]() {
-          return replay_zero_min_anchor_delete_retry(ctx, anchor,
-                                                     maxIterationCount)
-              .has_value();
-        });
-    ctx.rewind(currentCheckpoint);
-    ctx.recoveryEdits = currentRecoveryEdits;
-    ctx.restoreFurthestExploredCursor(currentFurthestExploredCursor);
-    return candidate;
-  }
-
-  std::optional<std::size_t>
-  try_restart_from_zero_min_anchor(RecoveryContext &ctx,
-                                   const ZeroMinRestartAnchor &anchor,
-                                   std::size_t maxIterationCount) const {
-    (void)ctx;
-    (void)anchor;
-    (void)maxIterationCount;
-    return std::nullopt;
-  }
-
-  std::optional<std::size_t> reconcile_zero_min_restart_anchor(
-      RecoveryContext &ctx, std::size_t matchedCountBeforeOutcome,
-      std::size_t maxIterationCount,
-      const IterationRecoveryOutcome &outcome,
-      std::optional<ZeroMinRestartAnchor> &restartAnchor) const {
-    if (!outcome.matched) {
-      restartAnchor.reset();
-      return std::nullopt;
-    }
-    if (!restartAnchor.has_value()) {
-      restartAnchor = seed_zero_min_restart_anchor(
-          outcome, matchedCountBeforeOutcome);
-      return std::nullopt;
-    }
-    if (const auto restartedCount = try_restart_from_zero_min_anchor(
-            ctx, *restartAnchor, maxIterationCount);
-        restartedCount.has_value()) {
-      restartAnchor.reset();
-      return restartedCount;
-    }
-    if (outcome.strength == IterationRecoveryStrength::Strong) {
-      restartAnchor.reset();
-    }
-    return std::nullopt;
   }
 
   bool parse_zero_min_repetition_recovery(RecoveryContext &ctx,
@@ -1276,9 +992,7 @@ private:
     const char *const savedFurthestExploredCursor =
         ctx.furthestExploredCursor();
     const bool startedWithoutEdits = probe_started_without_edits(ctx, _element);
-    IterationRecoveryOutcome firstOutcome;
-    if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/false,
-                                &firstOutcome)) {
+    if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/false)) {
       if (ctx.frontierBlocked()) {
         ctx.rewind(checkpoint);
         if (savedFurthestExploredCursor > ctx.furthestExploredCursor()) {
@@ -1295,9 +1009,7 @@ private:
       return !startedWithoutEdits;
     }
     if (maxIterationCount > 1u) {
-      (void)continue_zero_min_recovery_run(
-          ctx, 1u, maxIterationCount,
-          seed_zero_min_restart_anchor(firstOutcome, 0u));
+      (void)continue_zero_min_recovery_run(ctx, 1u, maxIterationCount);
     }
     if (ctx.frontierBlocked()) {
       return false;
@@ -1305,8 +1017,8 @@ private:
     return true;
   }
 
-  bool try_recovery_iteration(RecoveryContext &ctx, bool skipBetweenIterations,
-                              IterationRecoveryOutcome *outcome = nullptr) const {
+  bool try_recovery_iteration(RecoveryContext &ctx,
+                              bool skipBetweenIterations) const {
     const auto iterationCheckpoint = ctx.mark();
     const auto recoveryEditCountBefore = ctx.recoveryEditCount();
     if (skipBetweenIterations) {
@@ -1318,22 +1030,9 @@ private:
         ctx.furthestExploredCursor();
     const TextOffset parseStartOffset = ctx.cursorOffset();
     const bool parseStartAtIterationEntryBoundary =
-        post_skip_cursor_offset(ctx) == parseStartOffset;
-    const auto baseEditCost = ctx.currentEditCost();
+        detail::post_skip_cursor_offset(ctx) == parseStartOffset;
     const auto observation =
         observe_iteration(ctx, iterationCheckpoint, parseStart, parseStartOffset);
-    IterationReplayPlan noInsertPlan{
-        .kind = IterationReplayKind::NoInsert,
-    };
-    IterationReplayPlan deleteRetryPlan{
-        .kind = IterationReplayKind::DeleteRetry,
-    };
-    IterationReplayPlan insertRetryPlan{
-        .kind = IterationReplayKind::InsertRetry,
-    };
-    IterationReplayPlan boundaryPreservingInsertRetryPlan{
-        .kind = IterationReplayKind::InsertRetry,
-    };
     const bool deepStartedOptionalAfterPriorRecovery =
         is_optional &&
         !skipBetweenIterations &&
@@ -1342,23 +1041,21 @@ private:
         observation.noInsertProgressed &&
         !observation.failedInActiveWindow &&
         !observation.noInsertProbe.exploredSingleVisibleLeafOrLess();
-    enumerate_iteration_candidates(
+    const auto iterationPlans = enumerate_iteration_plans(
         ctx, skipBetweenIterations, observation, parseStartOffset,
         recoveryEditCountBefore,
         parseStartAtIterationEntryBoundary,
-        deepStartedOptionalAfterPriorRecovery, noInsertPlan, deleteRetryPlan,
-        insertRetryPlan, boundaryPreservingInsertRetryPlan);
+        deepStartedOptionalAfterPriorRecovery);
+    const bool hasLegalRetryPlan =
+        has_legal_iteration_retry_plan(iterationPlans);
     const char *furthestExploredCursor = ctx.furthestExploredCursor();
-    if (has_only_no_insert_iteration_candidate(
-            noInsertPlan, deleteRetryPlan, insertRetryPlan,
-            boundaryPreservingInsertRetryPlan)) {
+    if (iterationPlans.front().legal && !hasLegalRetryPlan) {
       return true;
     }
     ctx.rewind(parseCheckpoint);
     ctx.restoreFurthestExploredCursor(parseStartFurthestExploredCursor);
     if (!observation.noInsertProgressed &&
-        !has_iteration_retry_candidates(deleteRetryPlan, insertRetryPlan,
-                                        boundaryPreservingInsertRetryPlan)) {
+        !hasLegalRetryPlan) {
       ctx.rewind(iterationCheckpoint);
       if (furthestExploredCursor > ctx.furthestExploredCursor()) {
         ctx.restoreFurthestExploredCursor(furthestExploredCursor);
@@ -1366,10 +1063,9 @@ private:
       return false;
     }
     const auto selection = select_iteration_attempt(
-        ctx, noInsertPlan, deleteRetryPlan, insertRetryPlan,
-        boundaryPreservingInsertRetryPlan, observation, iterationCheckpoint,
-        parseCheckpoint, parseStart, parseStartFurthestExploredCursor,
-        parseStartOffset, furthestExploredCursor, recoveryEditCountBefore);
+        ctx, iterationPlans, observation, iterationCheckpoint, parseCheckpoint,
+        parseStart, parseStartFurthestExploredCursor, parseStartOffset,
+        furthestExploredCursor, recoveryEditCountBefore);
     if (!selection.bestAttempt.candidate.matched) {
       ctx.rewind(iterationCheckpoint);
       if (selection.blockedByBoundaryUnsafeRetry) {
@@ -1408,12 +1104,6 @@ private:
       if (furthestExploredCursor > ctx.furthestExploredCursor()) {
         ctx.restoreFurthestExploredCursor(furthestExploredCursor);
       }
-    }
-    if (replayed && outcome != nullptr) {
-      set_iteration_recovery_outcome(
-          *outcome, bestStrength, parseCheckpoint, parseStart,
-          parseStartFurthestExploredCursor, parseStartOffset, baseEditCost,
-          recoveryEditCountBefore);
     }
     return replayed;
   }

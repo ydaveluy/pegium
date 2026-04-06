@@ -55,6 +55,49 @@ void set_recovery_edits(
   }
 }
 
+detail::RecoveryAttempt make_ranked_attempt(
+    detail::RecoveryAttemptStatus status, bool fullMatch,
+    pegium::TextOffset parsedLength, pegium::TextOffset maxCursorOffset,
+    std::uint32_t editCost, pegium::TextOffset firstEditOffset,
+    pegium::TextOffset editSpan, std::uint32_t entryCount) {
+  detail::RecoveryAttempt attempt;
+  attempt.entryRuleMatched = true;
+  attempt.fullMatch = fullMatch;
+  attempt.parsedLength = parsedLength;
+  attempt.maxCursorOffset = maxCursorOffset;
+  attempt.editCost = editCost;
+  attempt.editCount = entryCount;
+  attempt.status = status;
+  attempt.recoveryEdits.reserve(entryCount);
+  if (entryCount == 1u) {
+    attempt.recoveryEdits.push_back(
+        {
+            .kind = editSpan == 0u ? ParseDiagnosticKind::Inserted
+                                   : ParseDiagnosticKind::Deleted,
+            .offset = firstEditOffset,
+            .beginOffset = firstEditOffset,
+            .endOffset = firstEditOffset + editSpan,
+            .element = nullptr,
+            .message = {},
+        });
+    return attempt;
+  }
+  for (std::uint32_t index = 0; index < entryCount; ++index) {
+    const auto offset =
+        index + 1u == entryCount ? firstEditOffset + editSpan : firstEditOffset;
+    attempt.recoveryEdits.push_back(
+        {
+            .kind = ParseDiagnosticKind::Inserted,
+            .offset = offset,
+            .beginOffset = offset,
+            .endOffset = offset,
+            .element = nullptr,
+            .message = {},
+        });
+  }
+  return attempt;
+}
+
 std::unique_ptr<pegium::RootCstNode>
 make_attempt_cst(std::string_view text,
                  std::initializer_list<
@@ -209,7 +252,6 @@ bestRecoveryAttempt(const RuleType &entryRule, std::string_view text,
   auto attempt =
       detail::run_recovery_attempt(entryRule, skipper, options, snapshot, spec);
   detail::classify_recovery_attempt(attempt);
-  detail::score_recovery_attempt(attempt);
   if (!harness.attempt.cst ||
       detail::is_better_recovery_attempt(attempt, harness.attempt)) {
     harness.attempt = std::move(attempt);
@@ -516,7 +558,6 @@ TEST(
   auto attempt =
       detail::run_recovery_attempt(entry, skipper, options, text, spec);
   detail::classify_recovery_attempt(attempt);
-  detail::score_recovery_attempt(attempt);
   const auto diagnostics =
       detail::materialize_syntax_diagnostics(attempt.recoveryEdits);
 
@@ -564,7 +605,6 @@ TEST(RecoverySearchTest,
   auto attempt =
       detail::run_recovery_attempt(entry, skipper, options, text, spec);
   detail::classify_recovery_attempt(attempt);
-  detail::score_recovery_attempt(attempt);
   const auto diagnostics =
       detail::materialize_syntax_diagnostics(attempt.recoveryEdits);
 
@@ -1056,31 +1096,10 @@ TEST(RecoverySearchTest, ParserResultMatchesGlobalRecoverySearchRunResult) {
 
 TEST(RecoverySearchTest,
      GlobalRecoveryRankingPrefersFartherParseBeforeEditPosition) {
-  detail::RecoveryAttempt farther;
-  farther.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = true,
-                    .credible = true,
-                    .fullMatch = false},
-      .edits = {.editCost = 1,
-                .editSpan = 0,
-                .entryCount = 1,
-                .firstEditOffset = 10},
-      .progress = {.parsedLength = 24, .maxCursorOffset = 24},
-  };
-
-  detail::RecoveryAttempt nearer;
-  nearer.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = true,
-                    .credible = true,
-                    .fullMatch = false},
-      .edits = {.editCost = 1,
-                .editSpan = 0,
-                .entryCount = 1,
-                .firstEditOffset = 18},
-      .progress = {.parsedLength = 20, .maxCursorOffset = 20},
-  };
+  const auto farther = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+                                           false, 24u, 24u, 1u, 10u, 0u, 1u);
+  const auto nearer = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+                                          false, 20u, 20u, 1u, 18u, 0u, 1u);
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(farther, nearer));
   EXPECT_FALSE(detail::is_better_recovery_attempt(nearer, farther));
@@ -1088,31 +1107,10 @@ TEST(RecoverySearchTest,
 
 TEST(RecoverySearchTest,
      GlobalRecoveryRankingPrefersLaterEditWhenAttemptsOtherwiseTie) {
-  detail::RecoveryAttempt earlier;
-  earlier.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = true,
-                    .credible = true,
-                    .fullMatch = true},
-      .edits = {.editCost = 1,
-                .editSpan = 0,
-                .entryCount = 1,
-                .firstEditOffset = 8},
-      .progress = {.parsedLength = 24, .maxCursorOffset = 24},
-  };
-
-  detail::RecoveryAttempt later;
-  later.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = true,
-                    .credible = true,
-                    .fullMatch = true},
-      .edits = {.editCost = 1,
-                .editSpan = 0,
-                .entryCount = 1,
-                .firstEditOffset = 12},
-      .progress = {.parsedLength = 24, .maxCursorOffset = 24},
-  };
+  const auto earlier = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+                                           true, 24u, 24u, 1u, 8u, 0u, 1u);
+  const auto later = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+                                         true, 24u, 24u, 1u, 12u, 0u, 1u);
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(later, earlier));
   EXPECT_FALSE(detail::is_better_recovery_attempt(earlier, later));
@@ -1120,31 +1118,12 @@ TEST(RecoverySearchTest,
 
 TEST(RecoverySearchTest,
      GlobalRecoveryRankingLetsNonCredibleFallbacksAdvanceByProgress) {
-  detail::RecoveryAttempt earlierLocalFallback;
-  earlierLocalFallback.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = false,
-                    .credible = false,
-                    .fullMatch = false},
-      .edits = {.editCost = 1,
-                .editSpan = 0,
-                .entryCount = 1,
-                .firstEditOffset = 18},
-      .progress = {.parsedLength = 24, .maxCursorOffset = 24},
-  };
-
-  detail::RecoveryAttempt fartherFallback;
-  fartherFallback.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = false,
-                    .credible = false,
-                    .fullMatch = false},
-      .edits = {.editCost = 2,
-                .editSpan = 4,
-                .entryCount = 2,
-                .firstEditOffset = 12},
-      .progress = {.parsedLength = 31, .maxCursorOffset = 31},
-  };
+  const auto earlierLocalFallback = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::RecoveredButNotCredible, false, 24u, 24u,
+      1u, 18u, 0u, 1u);
+  const auto fartherFallback = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::RecoveredButNotCredible, false, 31u, 31u,
+      2u, 12u, 4u, 2u);
 
   EXPECT_TRUE(
       detail::is_better_recovery_attempt(fartherFallback, earlierLocalFallback));
@@ -1154,31 +1133,10 @@ TEST(RecoverySearchTest,
 
 TEST(RecoverySearchTest,
      GlobalRecoveryRankingLetsLaterLocalRepairBeatSameCostSingleDelete) {
-  detail::RecoveryAttempt wholeLineDelete;
-  wholeLineDelete.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = true,
-                    .credible = true,
-                    .fullMatch = true},
-      .edits = {.editCost = 8,
-                .editSpan = 12,
-                .entryCount = 1,
-                .firstEditOffset = 40},
-      .progress = {.parsedLength = 80, .maxCursorOffset = 80},
-  };
-
-  detail::RecoveryAttempt localRepair;
-  localRepair.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = true,
-                    .credible = true,
-                    .fullMatch = true},
-      .edits = {.editCost = 8,
-                .editSpan = 12,
-                .entryCount = 2,
-                .firstEditOffset = 41},
-      .progress = {.parsedLength = 80, .maxCursorOffset = 80},
-  };
+  const auto wholeLineDelete = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::Stable, true, 80u, 80u, 8u, 40u, 12u, 1u);
+  const auto localRepair = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::Stable, true, 80u, 80u, 8u, 41u, 12u, 2u);
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(localRepair, wholeLineDelete));
   EXPECT_FALSE(
@@ -1187,31 +1145,10 @@ TEST(RecoverySearchTest,
 
 TEST(RecoverySearchTest,
      GlobalRecoveryRankingDoesNotPreferLaterEditWhenItCostsMoreAndSpansMore) {
-  detail::RecoveryAttempt earlyLocalRepair;
-  earlyLocalRepair.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = true,
-                    .credible = true,
-                    .fullMatch = true},
-      .edits = {.editCost = 3,
-                .editSpan = 0,
-                .entryCount = 1,
-                .firstEditOffset = 17},
-      .progress = {.parsedLength = 31, .maxCursorOffset = 31},
-  };
-
-  detail::RecoveryAttempt laterRewrite;
-  laterRewrite.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = true,
-                    .credible = true,
-                    .fullMatch = true},
-      .edits = {.editCost = 9,
-                .editSpan = 6,
-                .entryCount = 3,
-                .firstEditOffset = 18},
-      .progress = {.parsedLength = 31, .maxCursorOffset = 31},
-  };
+  const auto earlyLocalRepair = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::Stable, true, 31u, 31u, 3u, 17u, 0u, 1u);
+  const auto laterRewrite = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::Stable, true, 31u, 31u, 9u, 18u, 6u, 3u);
 
   EXPECT_TRUE(
       detail::is_better_recovery_attempt(earlyLocalRepair, laterRewrite));
@@ -1221,31 +1158,10 @@ TEST(RecoverySearchTest,
 
 TEST(RecoverySearchTest,
      GlobalRecoveryRankingPrefersFullerRecoveryBeforeCheaperPartialAttempt) {
-  detail::RecoveryAttempt full;
-  full.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = true,
-                    .credible = true,
-                    .fullMatch = true},
-      .edits = {.editCost = 12,
-                .editSpan = 0,
-                .entryCount = 2,
-                .firstEditOffset = 8},
-      .progress = {.parsedLength = 24, .maxCursorOffset = 24},
-  };
-
-  detail::RecoveryAttempt partial;
-  partial.score = {
-      .selection = {.entryRuleMatched = true,
-                    .stable = true,
-                    .credible = true,
-                    .fullMatch = false},
-      .edits = {.editCost = 1,
-                .editSpan = 0,
-                .entryCount = 1,
-                .firstEditOffset = 12},
-      .progress = {.parsedLength = 20, .maxCursorOffset = 20},
-  };
+  const auto full = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+                                        true, 24u, 24u, 12u, 8u, 0u, 2u);
+  const auto partial = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+                                           false, 20u, 20u, 1u, 12u, 0u, 1u);
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(full, partial));
   EXPECT_FALSE(detail::is_better_recovery_attempt(partial, full));
@@ -1273,11 +1189,11 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
       detail::editable_recovery_order_key(realProgress),
       detail::editable_recovery_order_key(trailingTriviaHeavy),
-      detail::RecoveryOrderProfile::Editable));
+      detail::RecoveryOrderProfile::Structural));
   EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
       detail::editable_recovery_order_key(trailingTriviaHeavy),
       detail::editable_recovery_order_key(realProgress),
-      detail::RecoveryOrderProfile::Editable));
+      detail::RecoveryOrderProfile::Structural));
 }
 
 TEST(RecoverySearchTest,
@@ -1396,7 +1312,7 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
       detail::editable_recovery_order_key(lhs),
       detail::editable_recovery_order_key(rhs),
-      detail::RecoveryOrderProfile::Choice));
+      detail::RecoveryOrderProfile::Structural));
 }
 
 TEST(RecoverySearchTest,
@@ -1423,20 +1339,82 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
       detail::editable_recovery_order_key(laterCheaperContinuingEdit),
       detail::editable_recovery_order_key(earlierCostlierEdit),
-      detail::RecoveryOrderProfile::Choice));
+      detail::RecoveryOrderProfile::Structural));
   EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
       detail::editable_recovery_order_key(earlierCostlierEdit),
       detail::editable_recovery_order_key(laterCheaperContinuingEdit),
-      detail::RecoveryOrderProfile::Choice));
+      detail::RecoveryOrderProfile::Structural));
   EXPECT_EQ(
       detail::is_better_normalized_recovery_order_key(
           detail::editable_recovery_order_key(laterCheaperContinuingEdit),
           detail::editable_recovery_order_key(earlierCostlierEdit),
-          detail::RecoveryOrderProfile::Choice),
+          detail::RecoveryOrderProfile::Structural),
       detail::is_better_normalized_recovery_order_key(
           detail::editable_recovery_order_key(laterCheaperContinuingEdit),
           detail::editable_recovery_order_key(earlierCostlierEdit),
-          detail::RecoveryOrderProfile::Choice));
+          detail::RecoveryOrderProfile::Structural));
+}
+
+TEST(RecoverySearchTest,
+     StructuralComparatorPrefersFartherContinuationBeforeCheaperEarlierRewrite) {
+  const detail::EditableRecoveryCandidate cheaperEarlierRewrite{
+      .matched = true,
+      .cursorOffset = 5u,
+      .postSkipCursorOffset = 5u,
+      .editCost = 1u,
+      .editCount = 1u,
+      .editSpan = 0u,
+      .firstEditOffset = 0u,
+  };
+  const detail::EditableRecoveryCandidate fullerLaterRepair{
+      .matched = true,
+      .cursorOffset = 13u,
+      .postSkipCursorOffset = 13u,
+      .editCost = 2u,
+      .editCount = 1u,
+      .editSpan = 0u,
+      .firstEditOffset = 5u,
+  };
+
+  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
+      detail::editable_recovery_order_key(fullerLaterRepair),
+      detail::editable_recovery_order_key(cheaperEarlierRewrite),
+      detail::RecoveryOrderProfile::Structural));
+  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
+      detail::editable_recovery_order_key(cheaperEarlierRewrite),
+      detail::editable_recovery_order_key(fullerLaterRepair),
+      detail::RecoveryOrderProfile::Structural));
+}
+
+TEST(RecoverySearchTest,
+     StructuralComparatorPrefersSameStartStrongerContinuationOverCheaperShorterRewrite) {
+  const detail::EditableRecoveryCandidate cheaperShorterRewrite{
+      .matched = true,
+      .cursorOffset = 6u,
+      .postSkipCursorOffset = 6u,
+      .editCost = 1u,
+      .editCount = 1u,
+      .editSpan = 0u,
+      .firstEditOffset = 0u,
+  };
+  const detail::EditableRecoveryCandidate strongerSameStartContinuation{
+      .matched = true,
+      .cursorOffset = 13u,
+      .postSkipCursorOffset = 13u,
+      .editCost = 2u,
+      .editCount = 1u,
+      .editSpan = 5u,
+      .firstEditOffset = 0u,
+  };
+
+  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
+      detail::editable_recovery_order_key(strongerSameStartContinuation),
+      detail::editable_recovery_order_key(cheaperShorterRewrite),
+      detail::RecoveryOrderProfile::Structural));
+  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
+      detail::editable_recovery_order_key(cheaperShorterRewrite),
+      detail::editable_recovery_order_key(strongerSameStartContinuation),
+      detail::RecoveryOrderProfile::Structural));
 }
 
 TEST(RecoverySearchTest,
@@ -1463,11 +1441,11 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
       detail::editable_recovery_order_key(localInsert),
       detail::editable_recovery_order_key(deleteThenInsert),
-      detail::RecoveryOrderProfile::Choice));
+      detail::RecoveryOrderProfile::Structural));
   EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
       detail::editable_recovery_order_key(deleteThenInsert),
       detail::editable_recovery_order_key(localInsert),
-      detail::RecoveryOrderProfile::Choice));
+      detail::RecoveryOrderProfile::Structural));
 }
 
 TEST(RecoverySearchTest,
@@ -1494,11 +1472,11 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
       detail::editable_recovery_order_key(earlyReplace),
       detail::editable_recovery_order_key(laterRewrite),
-      detail::RecoveryOrderProfile::Choice));
+      detail::RecoveryOrderProfile::Structural));
   EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
       detail::editable_recovery_order_key(laterRewrite),
       detail::editable_recovery_order_key(earlyReplace),
-      detail::RecoveryOrderProfile::Choice));
+      detail::RecoveryOrderProfile::Structural));
 }
 
 TEST(RecoverySearchTest,
@@ -1596,48 +1574,110 @@ TEST(RecoverySearchTest,
       {.parseStartOffset = parseStartOffset}));
 }
 
-TEST(RecoverySearchTest, ProgressOrderKeyComparatorMatchesCandidateComparator) {
-  const detail::ProgressRecoveryCandidate lhs{
+TEST(RecoverySearchTest,
+     ChoiceEntrySignalRequirementAcceptsLaterEditWithoutStrictStartSignal) {
+  const detail::EditableRecoveryCandidate candidate{
+      .matched = true,
+      .cursorOffset = 24u,
+      .postSkipCursorOffset = 24u,
+      .editCost = 1u,
+      .editCount = 1u,
+      .editSpan = 1u,
+      .firstEditOffset = 16u,
+  };
+
+  EXPECT_EQ(detail::classify_choice_recovery_entry_signal_requirement(
+                candidate, 12u, false, false),
+            detail::ChoiceRecoveryEntrySignalRequirement::Accept);
+}
+
+TEST(RecoverySearchTest,
+     ChoiceEntrySignalRequirementRejectsDeletingRewriteWithoutContinuationAndStrictStartSignal) {
+  const detail::EditableRecoveryCandidate candidate{
+      .matched = true,
+      .hasDeleteEdit = true,
+      .cursorOffset = 16u,
+      .postSkipCursorOffset = 16u,
+      .editCost = 2u,
+      .editCount = 1u,
+      .editSpan = 4u,
+      .firstEditOffset = 12u,
+  };
+
+  EXPECT_EQ(detail::classify_choice_recovery_entry_signal_requirement(
+                candidate, 12u, false, false),
+            detail::ChoiceRecoveryEntrySignalRequirement::Reject);
+}
+
+TEST(RecoverySearchTest,
+     ChoiceEntrySignalRequirementRequestsProbeForSameStartRewriteWithoutContinuation) {
+  const detail::EditableRecoveryCandidate candidate{
+      .matched = true,
+      .cursorOffset = 13u,
+      .postSkipCursorOffset = 13u,
+      .editCost = 1u,
+      .editCount = 1u,
+      .editSpan = 2u,
+      .firstEditOffset = 12u,
+  };
+
+  EXPECT_EQ(detail::classify_choice_recovery_entry_signal_requirement(
+                candidate, 12u, false, false),
+            detail::ChoiceRecoveryEntrySignalRequirement::ProbeEntryStart);
+}
+
+TEST(RecoverySearchTest,
+     ChoiceEntrySignalRequirementRequestsProbeWhenAnotherBranchAlreadyHasStrictStartSignal) {
+  const detail::EditableRecoveryCandidate candidate{
+      .matched = true,
+      .cursorOffset = 24u,
+      .postSkipCursorOffset = 24u,
+      .editCost = 1u,
+      .editCount = 1u,
+      .editSpan = 1u,
+      .firstEditOffset = 16u,
+  };
+
+  EXPECT_EQ(detail::classify_choice_recovery_entry_signal_requirement(
+                candidate, 12u, true, false),
+            detail::ChoiceRecoveryEntrySignalRequirement::ProbeEntryStart);
+  EXPECT_EQ(detail::classify_choice_recovery_entry_signal_requirement(
+                candidate, 12u, true, true),
+            detail::ChoiceRecoveryEntrySignalRequirement::Accept);
+}
+
+TEST(RecoverySearchTest,
+     StructuralComparatorKeepsCursorProgressTieBreakForNoEditCandidates) {
+  const detail::StructuralProgressRecoveryCandidate lhs{
       .matched = true,
       .cursorOffset = 12u,
       .editCost = 1u,
+      .strategyPriority = 0u,
+      .hadEdits = false,
+      .continuesAfterFirstEdit = true,
+      .rewritesParseStartBoundary = false,
   };
-  const detail::ProgressRecoveryCandidate rhs{
+  const detail::StructuralProgressRecoveryCandidate rhs{
       .matched = true,
       .cursorOffset = 11u,
       .editCost = 1u,
+      .strategyPriority = 0u,
+      .hadEdits = false,
+      .continuesAfterFirstEdit = true,
+      .rewritesParseStartBoundary = false,
   };
 
   EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::progress_recovery_order_key(lhs),
-      detail::progress_recovery_order_key(rhs),
-      detail::RecoveryOrderProfile::Progress));
+      detail::structural_progress_recovery_order_key(lhs),
+      detail::structural_progress_recovery_order_key(rhs),
+      detail::RecoveryOrderProfile::Structural));
 }
 
 TEST(RecoverySearchTest, GlobalRecoveryOrderKeyProjectsSharedAxes) {
-  const detail::RecoveryScore score{
-      .selection =
-          {
-              .entryRuleMatched = true,
-              .stable = true,
-              .credible = true,
-              .fullMatch = false,
-          },
-      .edits =
-          {
-              .editCost = 2u,
-              .editSpan = 6u,
-              .entryCount = 1u,
-              .firstEditOffset = 12u,
-          },
-      .progress =
-          {
-              .parsedLength = 24u,
-              .maxCursorOffset = 28u,
-          },
-  };
+  const auto attempt = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+                                           false, 24u, 28u, 2u, 12u, 6u, 1u);
 
-  const auto key = detail::recovery_attempt_order_key(score);
+  const auto key = detail::recovery_attempt_order_key(attempt);
   EXPECT_TRUE(key.safety.matched);
   EXPECT_TRUE(key.prefix.entryRuleMatched);
   EXPECT_TRUE(key.prefix.stable);
@@ -1652,10 +1692,12 @@ TEST(RecoverySearchTest, GlobalRecoveryOrderKeyProjectsSharedAxes) {
   EXPECT_EQ(key.progress.maxCursorOffset, 28u);
 }
 
-TEST(RecoverySearchTest, ScoreRecoveryAttemptTracksEditedSourceSpan) {
+TEST(RecoverySearchTest, RecoveryAttemptDebugJsonTracksEditedSourceSpan) {
   detail::RecoveryAttempt attempt;
   attempt.entryRuleMatched = true;
-  attempt.configuredMaxEditCost = 64;
+  attempt.status = detail::RecoveryAttemptStatus::Stable;
+  attempt.parsedLength = 40u;
+  attempt.maxCursorOffset = 40u;
   attempt.editCost = 9u;
   attempt.editCount = 2u;
   set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
@@ -1671,46 +1713,30 @@ TEST(RecoverySearchTest, ScoreRecoveryAttemptTracksEditedSourceSpan) {
                                 .element = nullptr,
                                 .message = {}}});
 
-  detail::score_recovery_attempt(attempt);
+  const auto json = detail::recovery_attempt_to_json(attempt);
+  const auto &object = json.object();
+  const auto &editTrace = object.at("editTrace").object();
+  const auto &score = object.at("score").object();
 
-  EXPECT_EQ(attempt.editTrace.firstEditOffset, 9u);
-  EXPECT_EQ(attempt.editTrace.lastEditOffset, 31u);
-  EXPECT_EQ(attempt.editTrace.editSpan, 22u);
-  EXPECT_EQ(attempt.score.edits.firstEditOffset, 9u);
-  EXPECT_EQ(attempt.score.edits.editSpan, 22u);
+  EXPECT_EQ(editTrace.at("firstEditOffset").integer(), 9);
+  EXPECT_EQ(editTrace.at("lastEditOffset").integer(), 31);
+  EXPECT_EQ(editTrace.at("editSpan").integer(), 22);
+  EXPECT_EQ(score.at("firstEditOffset").integer(), 9);
+  EXPECT_EQ(score.at("editSpan").integer(), 22);
 }
 
 TEST(RecoverySearchTest, GlobalOrderKeyComparatorMatchesAttemptComparator) {
-  detail::RecoveryAttempt lhs;
-  lhs.score = {
-      .selection =
-          {
-              .entryRuleMatched = true,
-              .stable = false,
-              .credible = false,
-              .fullMatch = false,
-          },
-      .edits =
-          {
-              .editCost = 2u,
-              .editSpan = 4u,
-              .entryCount = 1u,
-              .firstEditOffset = 10u,
-          },
-      .progress =
-          {
-              .parsedLength = 18u,
-              .maxCursorOffset = 18u,
-          },
-  };
-  detail::RecoveryAttempt rhs;
-  rhs.score = lhs.score;
-  rhs.score.edits.editCost = 3u;
+  const auto lhs = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::RecoveredButNotCredible, false, 18u, 18u,
+      2u, 10u, 4u, 1u);
+  const auto rhs = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::RecoveredButNotCredible, false, 18u, 18u,
+      3u, 10u, 4u, 1u);
 
   EXPECT_EQ(detail::is_better_recovery_attempt(lhs, rhs),
             detail::is_better_normalized_recovery_order_key(
-                detail::recovery_attempt_order_key(lhs.score),
-                detail::recovery_attempt_order_key(rhs.score),
+                detail::recovery_attempt_order_key(lhs),
+                detail::recovery_attempt_order_key(rhs),
                 detail::RecoveryOrderProfile::Attempt));
 }
 
@@ -1744,11 +1770,11 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
       detail::structural_progress_recovery_order_key(continuingDelete),
       detail::structural_progress_recovery_order_key(weakInsert),
-      detail::RecoveryOrderProfile::StructuralProgress));
+      detail::RecoveryOrderProfile::Structural));
   EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
       detail::structural_progress_recovery_order_key(weakInsert),
       detail::structural_progress_recovery_order_key(continuingDelete),
-      detail::RecoveryOrderProfile::StructuralProgress));
+      detail::RecoveryOrderProfile::Structural));
 }
 
 TEST(RecoverySearchTest,
@@ -1782,11 +1808,11 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
       detail::structural_progress_recovery_order_key(weakLiteralInsert),
       detail::structural_progress_recovery_order_key(continuingDelete),
-      detail::RecoveryOrderProfile::StructuralProgress));
+      detail::RecoveryOrderProfile::Structural));
   EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
       detail::structural_progress_recovery_order_key(continuingDelete),
       detail::structural_progress_recovery_order_key(weakLiteralInsert),
-      detail::RecoveryOrderProfile::StructuralProgress));
+      detail::RecoveryOrderProfile::Structural));
 }
 
 TEST(RecoverySearchTest,
@@ -1821,11 +1847,11 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
       detail::structural_progress_recovery_order_key(continuingCommaInsert),
       detail::structural_progress_recovery_order_key(weakBoundaryClose),
-      detail::RecoveryOrderProfile::StructuralProgress));
+      detail::RecoveryOrderProfile::Structural));
   EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
       detail::structural_progress_recovery_order_key(weakBoundaryClose),
       detail::structural_progress_recovery_order_key(continuingCommaInsert),
-      detail::RecoveryOrderProfile::StructuralProgress));
+      detail::RecoveryOrderProfile::Structural));
 }
 
 TEST(RecoverySearchTest,
@@ -1894,7 +1920,7 @@ TEST(RecoverySearchTest,
       detail::is_better_normalized_recovery_order_key(
           detail::structural_progress_recovery_order_key(lhs),
           detail::structural_progress_recovery_order_key(rhs),
-          detail::RecoveryOrderProfile::StructuralProgress));
+          detail::RecoveryOrderProfile::Structural));
 }
 
 TEST(RecoverySearchTest, WordLiteralSingleSubstitutionCanRecoverGenerically) {

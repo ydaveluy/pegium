@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <requirements/parser/Parser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
@@ -30,11 +32,11 @@ TEST(RequirementsRecoveryProbeBatchTest, ReportsRequirementsBatchBehavior) {
   pegium::test::expect_recovery_probe_summary(
       "requirements", summary,
       {.total = 4u,
-       .withValue = 1u,
-       .fullMatch = 1u,
-       .recovered = 1u,
-       .incomplete = 3u,
-       .completeRecovery = 1u});
+       .withValue = 2u,
+       .fullMatch = 2u,
+       .recovered = 2u,
+       .incomplete = 2u,
+       .completeRecovery = 2u});
 }
 
 TEST(RequirementsRecoveryProbeBatchTest, ReportsTestsBatchBehavior) {
@@ -53,6 +55,36 @@ TEST(RequirementsRecoveryProbeBatchTest, ReportsTestsBatchBehavior) {
        .recovered = 0u,
        .incomplete = 4u,
        .completeRecovery = 0u});
+}
+
+TEST(RequirementsRecoveryProbeBatchTest,
+     Diff3ConflictingApplicableRecoversCompletely) {
+  const auto samples = requirements_probe_samples();
+  const auto sample = std::find_if(
+      samples.begin(), samples.end(), [](const auto &candidate) {
+        return candidate.label ==
+               "git-merge/diff3_conflicting_applicable.req";
+      });
+  ASSERT_NE(sample, samples.end());
+
+  parser::RequirementsParser parser;
+  auto document = pegium::test::parse_document(
+      parser, pegium::test::read_text_file(sample->path),
+      pegium::test::make_file_uri(sample->label), "requirements-lang");
+  const auto observation =
+      pegium::test::observe_recovery_probe(sample->label, *document);
+  EXPECT_TRUE(pegium::test::is_complete_recovery(observation));
+
+  auto *model =
+      dynamic_cast<ast::RequirementModel *>(document->parseResult.value.get());
+  ASSERT_NE(model, nullptr);
+  ASSERT_EQ(model->requirements.size(), 1u);
+  auto *requirement = model->requirements.front().get();
+  ASSERT_NE(requirement, nullptr);
+  EXPECT_EQ(requirement->name, "login");
+  ASSERT_EQ(requirement->environments.size(), 2u);
+  EXPECT_EQ(requirement->environments[0].getRefText(), "prod");
+  EXPECT_EQ(requirement->environments[1].getRefText(), "staging");
 }
 
 } // namespace
