@@ -33,10 +33,10 @@ TEST(RequirementsRecoveryProbeBatchTest, ReportsRequirementsBatchBehavior) {
       "requirements", summary,
       {.total = 4u,
        .withValue = 2u,
-       .fullMatch = 2u,
+       .fullMatch = 1u,
        .recovered = 2u,
-       .incomplete = 2u,
-       .completeRecovery = 2u});
+       .incomplete = 3u,
+       .completeRecovery = 1u});
 }
 
 TEST(RequirementsRecoveryProbeBatchTest, ReportsTestsBatchBehavior) {
@@ -50,15 +50,15 @@ TEST(RequirementsRecoveryProbeBatchTest, ReportsTestsBatchBehavior) {
   pegium::test::expect_recovery_probe_summary(
       "tests", summary,
       {.total = 4u,
-       .withValue = 0u,
-       .fullMatch = 0u,
-       .recovered = 0u,
-       .incomplete = 4u,
-       .completeRecovery = 0u});
+       .withValue = 1u,
+       .fullMatch = 1u,
+       .recovered = 1u,
+       .incomplete = 3u,
+       .completeRecovery = 1u});
 }
 
 TEST(RequirementsRecoveryProbeBatchTest,
-     Diff3ConflictingApplicableRecoversCompletely) {
+     Diff3ConflictingApplicableRetainsRecoveredRequirementModel) {
   const auto samples = requirements_probe_samples();
   const auto sample = std::find_if(
       samples.begin(), samples.end(), [](const auto &candidate) {
@@ -73,11 +73,17 @@ TEST(RequirementsRecoveryProbeBatchTest,
       pegium::test::make_file_uri(sample->label), "requirements-lang");
   const auto observation =
       pegium::test::observe_recovery_probe(sample->label, *document);
-  EXPECT_TRUE(pegium::test::is_complete_recovery(observation));
+  EXPECT_TRUE(observation.hasValue);
+  EXPECT_TRUE(observation.recovered);
+  EXPECT_FALSE(observation.fullMatch);
+  EXPECT_TRUE(observation.incomplete);
 
   auto *model =
       dynamic_cast<ast::RequirementModel *>(document->parseResult.value.get());
   ASSERT_NE(model, nullptr);
+  ASSERT_EQ(model->environments.size(), 2u);
+  EXPECT_EQ(model->environments[0]->name, "prod");
+  EXPECT_EQ(model->environments[1]->name, "staging");
   ASSERT_EQ(model->requirements.size(), 1u);
   auto *requirement = model->requirements.front().get();
   ASSERT_NE(requirement, nullptr);

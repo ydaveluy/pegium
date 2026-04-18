@@ -528,6 +528,36 @@ classify_choice_recovery_entry_signal_requirement(
   return false;
 }
 
+[[nodiscard]] constexpr bool
+decide_started_choice_boundary_delete_vs_continuation(
+    const EditableRecoveryCandidate &lhs,
+    const EditableRecoveryCandidate &rhs, TextOffset parseStartOffset,
+    bool &decided) noexcept {
+  const bool lhsContinuesStartedChoice =
+      lhs.matched && lhs.editCount != 0u &&
+      lhs.firstEditOffset > parseStartOffset &&
+      continues_after_first_edit(lhs);
+  const bool rhsContinuesStartedChoice =
+      rhs.matched && rhs.editCount != 0u &&
+      rhs.firstEditOffset > parseStartOffset &&
+      continues_after_first_edit(rhs);
+  const bool lhsRewritesChoiceStartWithDelete =
+      lhs.matched && lhs.editCount != 0u && lhs.hasDeleteEdit &&
+      lhs.firstEditOffset == parseStartOffset;
+  const bool rhsRewritesChoiceStartWithDelete =
+      rhs.matched && rhs.editCount != 0u && rhs.hasDeleteEdit &&
+      rhs.firstEditOffset == parseStartOffset;
+
+  if (compare_axis(lhsContinuesStartedChoice &&
+                       rhsRewritesChoiceStartWithDelete,
+                   rhsContinuesStartedChoice &&
+                       lhsRewritesChoiceStartWithDelete,
+                   prefer_higher<bool>, decided)) {
+    return true;
+  }
+  return false;
+}
+
 [[nodiscard]] constexpr bool decide_preferred_same_start_choice_boundary_edit(
     const EditableRecoveryCandidate &lhs,
     const EditableRecoveryCandidate &rhs,
@@ -580,6 +610,13 @@ classify_choice_recovery_entry_signal_requirement(
   if (constraints.parseStartOffset !=
       std::numeric_limits<TextOffset>::max()) {
     if (decide_clean_no_edit_choice_boundary(
+            lhs, rhs, constraints.parseStartOffset, decided)) {
+      return true;
+    }
+    if (decided) {
+      return false;
+    }
+    if (decide_started_choice_boundary_delete_vs_continuation(
             lhs, rhs, constraints.parseStartOffset, decided)) {
       return true;
     }

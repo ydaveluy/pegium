@@ -84,6 +84,11 @@ struct ParserRule final : AbstractRule<grammar::ParserRule>,
     if (!_wrapper.has_recovery_probe()) {
       return false;
     }
+    if (ctx.isActiveRecovery(this)) {
+      return false;
+    }
+    auto activeRecoveryGuard = ctx.enterActiveRecovery(this);
+    (void)activeRecoveryGuard;
     if (_localSkipper.has_value()) {
       auto localSkipperGuard = ctx.with_skipper(*_localSkipper);
       (void)localSkipperGuard;
@@ -93,6 +98,11 @@ struct ParserRule final : AbstractRule<grammar::ParserRule>,
   }
 
   bool probeRecoverableAtEntry(RecoveryContext &ctx) const {
+    if (ctx.isActiveRecovery(this)) {
+      return false;
+    }
+    auto activeRecoveryGuard = ctx.enterActiveRecovery(this);
+    (void)activeRecoveryGuard;
     const auto probeAtEntry = [this, &ctx]() {
       if (_wrapper.fast_probe(ctx)) {
         return true;

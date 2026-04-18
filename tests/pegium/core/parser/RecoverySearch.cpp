@@ -707,6 +707,36 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(planned.window.hasStablePrefix);
 }
 
+TEST(RecoverySearchTest,
+     InitialWindowFloorStopsBeforeFailureLeafThatEndsAtFurthestCursor) {
+  ParseOptions options;
+  options.recoveryWindowTokenCount = 8;
+  options.maxRecoveryWindowTokenCount = 8;
+  detail::WindowPlanner planner{options};
+
+  detail::FailureSnapshot snapshot{
+      .maxCursorOffset = 4,
+      .failureLeafHistory =
+          {
+              {.beginOffset = 0, .endOffset = 1, .element = nullptr},
+              {.beginOffset = 1, .endOffset = 2, .element = nullptr},
+              {.beginOffset = 2, .endOffset = 3, .element = nullptr},
+              {.beginOffset = 3, .endOffset = 4, .element = nullptr},
+          },
+      .failureTokenIndex = 3,
+      .hasFailureToken = true,
+  };
+  detail::RecoveryAttempt selectedAttempt;
+
+  planner.begin(snapshot, selectedAttempt);
+  const auto planned = planner.plan();
+
+  EXPECT_EQ(planned.window.beginOffset, 0u);
+  EXPECT_EQ(planned.window.editFloorOffset, 3u);
+  EXPECT_EQ(planned.window.stablePrefixOffset, 3u);
+  EXPECT_TRUE(planned.window.hasStablePrefix);
+}
+
 TEST(RecoverySearchTest, FallbackAcceptancePreservesReplayForwardTokenCount) {
   detail::WindowPlanner planner{ParseOptions{}};
   detail::RecoveryAttempt attempt;
@@ -1647,6 +1677,37 @@ TEST(RecoverySearchTest,
 }
 
 TEST(RecoverySearchTest,
+     ChoiceComparatorPrefersContinuingStartedBranchOverSameStartDeleteRewrite) {
+  const detail::EditableRecoveryCandidate continuingStartedBranch{
+      .matched = true,
+      .hasDeleteEdit = true,
+      .cursorOffset = 24u,
+      .postSkipCursorOffset = 24u,
+      .editCost = 36u,
+      .editCount = 9u,
+      .editSpan = 9u,
+      .firstEditOffset = 14u,
+  };
+  const detail::EditableRecoveryCandidate sameStartDeleteRewrite{
+      .matched = true,
+      .hasDeleteEdit = true,
+      .cursorOffset = 35u,
+      .postSkipCursorOffset = 35u,
+      .editCost = 72u,
+      .editCount = 16u,
+      .editSpan = 24u,
+      .firstEditOffset = 11u,
+  };
+
+  EXPECT_TRUE(detail::is_better_choice_recovery_candidate(
+      continuingStartedBranch, sameStartDeleteRewrite,
+      {.parseStartOffset = 11u}));
+  EXPECT_FALSE(detail::is_better_choice_recovery_candidate(
+      sameStartDeleteRewrite, continuingStartedBranch,
+      {.parseStartOffset = 11u}));
+}
+
+TEST(RecoverySearchTest,
      StructuralComparatorKeepsCursorProgressTieBreakForNoEditCandidates) {
   const detail::StructuralProgressRecoveryCandidate lhs{
       .matched = true,
@@ -2283,6 +2344,87 @@ TEST(RecoverySearchTest,
 }
 
 TEST(RecoverySearchTest,
+     StablePrefixBoundaryClosingInsertionsNeedTailProgressForFallbackSelection) {
+  detail::RecoveryAttempt attempt;
+  attempt.entryRuleMatched = true;
+  attempt.hasStablePrefix = true;
+  attempt.stablePrefixOffset = 10;
+  attempt.parsedLength = 34;
+  attempt.lastVisibleCursorOffset = 33;
+  attempt.maxCursorOffset = 34;
+  attempt.configuredMaxEditCost = 64;
+  attempt.editCost = 2;
+  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                .offset = 16,
+                                .beginOffset = 16,
+                                .endOffset = 16,
+                                .element = nullptr,
+                                .message = {}},
+                               {.kind = ParseDiagnosticKind::Inserted,
+                                .offset = 34,
+                                .beginOffset = 34,
+                                .endOffset = 34,
+                                .element = nullptr,
+                                .message = {}}});
+
+  detail::classify_recovery_attempt(attempt);
+
+  EXPECT_EQ(attempt.status,
+            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
+  EXPECT_FALSE(detail::satisfies_non_credible_fallback_contract(attempt, {}));
+}
+
+TEST(RecoverySearchTest,
+     SingleBoundaryClosingInsertionNeedsTailProgressForFallbackSelection) {
+  detail::RecoveryAttempt attempt;
+  attempt.entryRuleMatched = true;
+  attempt.hasStablePrefix = true;
+  attempt.stablePrefixOffset = 22;
+  attempt.parsedLength = 25;
+  attempt.lastVisibleCursorOffset = 25;
+  attempt.maxCursorOffset = 25;
+  attempt.configuredMaxEditCost = 64;
+  attempt.editCost = 1;
+  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                .offset = 25,
+                                .beginOffset = 25,
+                                .endOffset = 25,
+                                .element = nullptr,
+                                .message = {}}});
+
+  detail::classify_recovery_attempt(attempt);
+
+  EXPECT_EQ(attempt.status,
+            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
+  EXPECT_FALSE(detail::satisfies_non_credible_fallback_contract(attempt, {}));
+}
+
+TEST(RecoverySearchTest,
+     BoundaryClosingInsertionCanUseFallbackSelectionAfterSpeculativeForwardExploration) {
+  detail::RecoveryAttempt attempt;
+  attempt.entryRuleMatched = true;
+  attempt.hasStablePrefix = true;
+  attempt.stablePrefixOffset = 22;
+  attempt.parsedLength = 25;
+  attempt.lastVisibleCursorOffset = 25;
+  attempt.maxCursorOffset = 34;
+  attempt.configuredMaxEditCost = 64;
+  attempt.editCost = 1;
+  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                .offset = 25,
+                                .beginOffset = 25,
+                                .endOffset = 25,
+                                .element = nullptr,
+                                .message = {}}});
+
+  detail::classify_recovery_attempt(attempt);
+
+  EXPECT_EQ(attempt.status,
+            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
+  EXPECT_TRUE(detail::satisfies_non_credible_fallback_contract(attempt, {}));
+}
+
+TEST(RecoverySearchTest,
      ExtendedFallbackPreservingEarlierEditsCanUseFallbackSelection) {
   detail::RecoveryAttempt selectedAttempt;
   selectedAttempt.entryRuleMatched = true;
@@ -2342,6 +2484,110 @@ TEST(RecoverySearchTest,
             detail::RecoveryAttemptStatus::RecoveredButNotCredible);
   EXPECT_TRUE(detail::satisfies_non_credible_fallback_contract(candidate, {}));
   EXPECT_TRUE(detail::satisfies_non_credible_fallback_contract(
+      candidate, selectedAttempt));
+}
+
+TEST(RecoverySearchTest,
+     TrimmedFallbackCannotExtendProvisionalCredibleLeadingDelete) {
+  detail::RecoveryAttempt selectedAttempt;
+  selectedAttempt.entryRuleMatched = true;
+  selectedAttempt.hasStablePrefix = true;
+  selectedAttempt.stablePrefixOffset = 10;
+  selectedAttempt.parsedLength = 27;
+  selectedAttempt.lastVisibleCursorOffset = 27;
+  selectedAttempt.maxCursorOffset = 40;
+  selectedAttempt.reachedRecoveryTarget = true;
+  selectedAttempt.configuredMaxEditCost = 64;
+  selectedAttempt.editCost = 1;
+  set_recovery_edits(selectedAttempt, {{.kind = ParseDiagnosticKind::Deleted,
+                                        .offset = 10,
+                                        .beginOffset = 10,
+                                        .endOffset = 12,
+                                        .element = nullptr,
+                                        .message = {}}});
+  detail::classify_recovery_attempt(selectedAttempt);
+  ASSERT_EQ(selectedAttempt.status, detail::RecoveryAttemptStatus::Credible);
+
+  detail::RecoveryAttempt candidate;
+  candidate.entryRuleMatched = true;
+  candidate.hasStablePrefix = true;
+  candidate.stablePrefixOffset = 10;
+  candidate.parsedLength = 48;
+  candidate.lastVisibleCursorOffset = 48;
+  candidate.maxCursorOffset = 48;
+  candidate.fullMatch = true;
+  candidate.stableAfterRecovery = true;
+  candidate.trimmedVisibleTailToEof = true;
+  candidate.configuredMaxEditCost = 64;
+  candidate.editCost = 6;
+  set_recovery_edits(candidate, {{.kind = ParseDiagnosticKind::Deleted,
+                                  .offset = 10,
+                                  .beginOffset = 10,
+                                  .endOffset = 24,
+                                  .element = nullptr,
+                                  .message = {}},
+                                 {.kind = ParseDiagnosticKind::Deleted,
+                                  .offset = 34,
+                                  .beginOffset = 34,
+                                  .endOffset = 48,
+                                  .element = nullptr,
+                                  .message = {}}});
+  detail::classify_recovery_attempt(candidate);
+
+  EXPECT_EQ(candidate.status, detail::RecoveryAttemptStatus::Stable);
+  EXPECT_FALSE(detail::satisfies_non_credible_fallback_contract(
+      candidate, selectedAttempt));
+}
+
+TEST(RecoverySearchTest,
+     TrimmedFallbackCannotExtendLeadingDeleteAfterStableReplay) {
+  detail::RecoveryAttempt selectedAttempt;
+  selectedAttempt.entryRuleMatched = true;
+  selectedAttempt.hasStablePrefix = true;
+  selectedAttempt.stablePrefixOffset = 10;
+  selectedAttempt.parsedLength = 27;
+  selectedAttempt.lastVisibleCursorOffset = 27;
+  selectedAttempt.maxCursorOffset = 40;
+  selectedAttempt.stableAfterRecovery = true;
+  selectedAttempt.configuredMaxEditCost = 64;
+  selectedAttempt.editCost = 1;
+  set_recovery_edits(selectedAttempt, {{.kind = ParseDiagnosticKind::Deleted,
+                                        .offset = 10,
+                                        .beginOffset = 10,
+                                        .endOffset = 12,
+                                        .element = nullptr,
+                                        .message = {}}});
+  detail::classify_recovery_attempt(selectedAttempt);
+  ASSERT_EQ(selectedAttempt.status, detail::RecoveryAttemptStatus::Stable);
+
+  detail::RecoveryAttempt candidate;
+  candidate.entryRuleMatched = true;
+  candidate.hasStablePrefix = true;
+  candidate.stablePrefixOffset = 10;
+  candidate.parsedLength = 48;
+  candidate.lastVisibleCursorOffset = 48;
+  candidate.maxCursorOffset = 48;
+  candidate.fullMatch = true;
+  candidate.stableAfterRecovery = true;
+  candidate.trimmedVisibleTailToEof = true;
+  candidate.configuredMaxEditCost = 64;
+  candidate.editCost = 6;
+  set_recovery_edits(candidate, {{.kind = ParseDiagnosticKind::Deleted,
+                                  .offset = 10,
+                                  .beginOffset = 10,
+                                  .endOffset = 24,
+                                  .element = nullptr,
+                                  .message = {}},
+                                 {.kind = ParseDiagnosticKind::Deleted,
+                                  .offset = 34,
+                                  .beginOffset = 34,
+                                  .endOffset = 48,
+                                  .element = nullptr,
+                                  .message = {}}});
+  detail::classify_recovery_attempt(candidate);
+
+  EXPECT_EQ(candidate.status, detail::RecoveryAttemptStatus::Stable);
+  EXPECT_FALSE(detail::satisfies_non_credible_fallback_contract(
       candidate, selectedAttempt));
 }
 

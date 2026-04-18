@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 
 namespace pegium::parser {
 
@@ -41,7 +42,14 @@ struct SkipperContext<std::tuple<Hidden...>, std::tuple<Ignored...>> final {
       }
 
       const char *const hiddenMatchEnd =
-          parse_any_hidden(scanCursor, builder, builderInputBegin);
+          parse_any_hidden(scanCursor, [&builder, builderInputBegin,
+                                        scanCursor](const auto &element,
+                                                    const char *matchEnd) {
+            builder.leaf(
+                static_cast<TextOffset>(scanCursor - builderInputBegin),
+                static_cast<TextOffset>(matchEnd - builderInputBegin),
+                std::addressof(element), true);
+          });
       if (hiddenMatchEnd == nullptr) {
         return scanCursor;
       }
@@ -68,6 +76,58 @@ struct SkipperContext<std::tuple<Hidden...>, std::tuple<Ignored...>> final {
     return skip(text.c_str());
   }
 
+  [[nodiscard]] SkipTraceResult
+  trace_skip(const char *inputBegin,
+             std::span<HiddenLeafTraceEntry> traceEntries) const noexcept {
+    const char *scanCursor = inputBegin;
+    std::uint32_t hiddenLeafCount = 0;
+
+    while (true) {
+      if constexpr (sizeof...(Ignored) > 0) {
+        while (const char *const matchEnd = parse_any_ignored(scanCursor)) {
+          scanCursor = matchEnd;
+        }
+      }
+
+      if constexpr (sizeof...(Hidden) == 0) {
+        return {
+            .end = scanCursor,
+            .hiddenLeafCount = hiddenLeafCount,
+        };
+      }
+
+      bool overflowed = false;
+      const char *const hiddenMatchEnd = parse_any_hidden(
+          scanCursor, [&traceEntries, &hiddenLeafCount, &overflowed,
+                       inputBegin, scanCursor](const auto &element,
+                                               const char *matchEnd) {
+            if (hiddenLeafCount >= traceEntries.size()) {
+              overflowed = true;
+              return;
+            }
+            traceEntries[hiddenLeafCount++] = {
+                .beginOffset = static_cast<TextOffset>(scanCursor - inputBegin),
+                .endOffset = static_cast<TextOffset>(matchEnd - inputBegin),
+                .element = std::addressof(element),
+            };
+          });
+      if (hiddenMatchEnd == nullptr) {
+        return {
+            .end = scanCursor,
+            .hiddenLeafCount = hiddenLeafCount,
+        };
+      }
+      if (overflowed) {
+        return {
+            .end = hiddenMatchEnd,
+            .hiddenLeafCount = hiddenLeafCount,
+            .overflowed = true,
+        };
+      }
+      scanCursor = hiddenMatchEnd;
+    }
+  }
+
   [[nodiscard]] explicit(false) operator Skipper() const noexcept {
     return Skipper::from(*this);
   }
@@ -86,23 +146,20 @@ private:
     }
   }
 
-  template <std::size_t I = 0>
+  template <std::size_t I = 0, typename HiddenSink>
   [[nodiscard]] const char *parse_any_hidden(const char *cursor,
-                                             CstBuilder &builder,
-                                             const char *builderInputBegin) const
+                                             HiddenSink &&hiddenSink) const
       noexcept {
     if constexpr (I == sizeof...(Hidden)) {
       return nullptr;
     } else {
       const auto &element = std::get<I>(_hiddenRules);
       if (const char *const matchEnd = element.terminal(cursor)) {
-        builder.leaf(
-            static_cast<TextOffset>(cursor - builderInputBegin),
-            static_cast<TextOffset>(matchEnd - builderInputBegin),
-            std::addressof(element), true);
+        hiddenSink(element, matchEnd);
         return matchEnd;
       }
-      return parse_any_hidden<I + 1>(cursor, builder, builderInputBegin);
+      return parse_any_hidden<I + 1>(cursor,
+                                     std::forward<HiddenSink>(hiddenSink));
     }
   }
 

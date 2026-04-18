@@ -21,39 +21,19 @@
 
 namespace pegium::parser::detail {
 
-enum class LexicalRecoveryProfileKind : std::uint8_t {
-  WordLikeLiteral,
-  WordLikeFreeForm,
-  Separator,
-  Delimiter,
-  OperatorLike,
-  OpaqueSymbol,
-};
-
 inline constexpr std::uint32_t kCompactHiddenTriviaGapSpan = 8u;
 
 struct LexicalRecoveryProfile {
-  LexicalRecoveryProfileKind kind = LexicalRecoveryProfileKind::OpaqueSymbol;
+  bool literalBacked = false;
   bool singleCodepoint = false;
   std::uint32_t textLength = 0u;
 
-  [[nodiscard]] constexpr bool allowsMatchedInsert() const noexcept {
-    return kind == LexicalRecoveryProfileKind::WordLikeLiteral;
-  }
-
   [[nodiscard]] constexpr bool allowsReplace() const noexcept {
-    return kind == LexicalRecoveryProfileKind::WordLikeLiteral ||
-           (kind == LexicalRecoveryProfileKind::OperatorLike &&
-            !singleCodepoint);
+    return literalBacked && !singleCodepoint;
   }
 
   [[nodiscard]] constexpr bool allowsInsert() const noexcept {
-    return kind == LexicalRecoveryProfileKind::Separator ||
-           kind == LexicalRecoveryProfileKind::Delimiter ||
-           (kind == LexicalRecoveryProfileKind::OperatorLike &&
-            singleCodepoint) ||
-           (kind == LexicalRecoveryProfileKind::WordLikeLiteral &&
-            singleCodepoint);
+    return literalBacked && singleCodepoint;
   }
 };
 
@@ -88,40 +68,12 @@ terminal_anchor_rank_penalty(const TriviaGapProfile &profile) noexcept {
   return 1u;
 }
 
-[[nodiscard]] constexpr bool
-is_separator_recovery_symbol(std::string_view value) noexcept {
-  return value.size() == 1u &&
-         (value[0] == ',' || value[0] == ';' || value[0] == ':');
-}
-
-[[nodiscard]] constexpr bool
-is_delimiter_recovery_symbol(std::string_view value) noexcept {
-  return value.size() == 1u &&
-         (value[0] == '(' || value[0] == ')' || value[0] == '[' ||
-          value[0] == ']' || value[0] == '{' || value[0] == '}');
-}
-
 [[nodiscard]] constexpr LexicalRecoveryProfile
 classify_literal_recovery_profile(std::string_view value) noexcept {
   if (value.empty()) {
     return {};
   }
-  if (is_word_like_terminal(value)) {
-    return {.kind = LexicalRecoveryProfileKind::WordLikeLiteral,
-            .singleCodepoint = value.size() == 1u,
-            .textLength = static_cast<std::uint32_t>(value.size())};
-  }
-  if (is_separator_recovery_symbol(value)) {
-    return {.kind = LexicalRecoveryProfileKind::Separator,
-            .singleCodepoint = true,
-            .textLength = static_cast<std::uint32_t>(value.size())};
-  }
-  if (is_delimiter_recovery_symbol(value)) {
-    return {.kind = LexicalRecoveryProfileKind::Delimiter,
-            .singleCodepoint = true,
-            .textLength = static_cast<std::uint32_t>(value.size())};
-  }
-  return {.kind = LexicalRecoveryProfileKind::OperatorLike,
+  return {.literalBacked = true,
           .singleCodepoint = value.size() == 1u,
           .textLength = static_cast<std::uint32_t>(value.size())};
 }
@@ -136,11 +88,8 @@ infer_terminal_rule_recovery_profile(const Element &element) noexcept {
                 }) {
     return classify_literal_recovery_profile(element.getValue());
   } else {
-    return {.kind = detail::element_is_word_like_terminal(element)
-                        ? LexicalRecoveryProfileKind::WordLikeFreeForm
-                        : LexicalRecoveryProfileKind::OpaqueSymbol,
-            .singleCodepoint = false,
-            .textLength = 0u};
+    (void)element;
+    return {};
   }
 }
 
@@ -194,17 +143,7 @@ template <typename Context>
 [[nodiscard]] constexpr bool
 allows_terminal_rule_insert(const Context &ctx,
                             const LexicalRecoveryProfile &profile) noexcept {
-  switch (profile.kind) {
-  case LexicalRecoveryProfileKind::WordLikeFreeForm:
-  case LexicalRecoveryProfileKind::OpaqueSymbol:
-    return !cursor_starts_visible_source(ctx);
-  case LexicalRecoveryProfileKind::WordLikeLiteral:
-  case LexicalRecoveryProfileKind::Separator:
-  case LexicalRecoveryProfileKind::Delimiter:
-  case LexicalRecoveryProfileKind::OperatorLike:
-    return true;
-  }
-  return true;
+  return profile.literalBacked || !cursor_starts_visible_source(ctx);
 }
 
 template <typename Context>
@@ -224,44 +163,15 @@ allows_nearby_delete_scan(const TerminalRecoveryFacts &facts,
   if (!facts.triviaGap.hasHiddenGap()) {
     return true;
   }
-  if (!facts.triviaGap.isCompact()) {
-    return false;
-  }
-  switch (profile.kind) {
-  case LexicalRecoveryProfileKind::OperatorLike:
-  case LexicalRecoveryProfileKind::OpaqueSymbol:
-    return true;
-  case LexicalRecoveryProfileKind::WordLikeLiteral:
-  case LexicalRecoveryProfileKind::WordLikeFreeForm:
-  case LexicalRecoveryProfileKind::Separator:
-  case LexicalRecoveryProfileKind::Delimiter:
-    return false;
-  }
-  return false;
-}
-
-template <typename Context>
-[[nodiscard]] constexpr bool
-operator_like_delete_scan_crosses_identifier_gap(
-    const Context &ctx, const char *visibleCursor,
-    const LexicalRecoveryProfile &profile) noexcept {
-  if (visibleCursor == nullptr || visibleCursor >= ctx.end) {
-    return false;
-  }
-  if (profile.kind != LexicalRecoveryProfileKind::OperatorLike &&
-      profile.kind != LexicalRecoveryProfileKind::OpaqueSymbol) {
-    return false;
-  }
-  return is_identifier_like_codepoint(
-      static_cast<unsigned char>(*visibleCursor));
+  return facts.triviaGap.isCompact() && profile.literalBacked &&
+         !profile.allowsInsert();
 }
 
 template <typename Context>
 [[nodiscard]] constexpr bool
 allows_terminal_entry_probe(const Context &ctx,
                             const LexicalRecoveryProfile &profile) noexcept {
-  if (profile.kind != LexicalRecoveryProfileKind::Separator &&
-      profile.kind != LexicalRecoveryProfileKind::Delimiter) {
+  if (!profile.allowsInsert()) {
     return false;
   }
   if (cursor_starts_visible_source(ctx)) {
@@ -281,14 +191,6 @@ cursor_starts_visible_source(const Context &ctx) noexcept {
     return ctx.skip_without_builder(ctx.cursor()) == ctx.cursor();
   }
   return true;
-}
-
-template <typename Context>
-[[nodiscard]] constexpr bool
-cursor_starts_identifier_like_visible_source(const Context &ctx) noexcept {
-  return cursor_starts_visible_source(ctx) && ctx.cursor() < ctx.end &&
-         is_identifier_like_codepoint(
-             static_cast<unsigned char>(*ctx.cursor()));
 }
 
 template <typename Context>
@@ -343,47 +245,41 @@ allows_compact_local_gap_terminal_recovery(const Context &ctx) noexcept {
   return true;
 }
 
-[[nodiscard]] constexpr std::uint32_t literal_fuzzy_primary_rank_limit(
-    const LexicalRecoveryProfile &profile) noexcept {
-  return std::min<std::uint32_t>(5u, saturating_add(profile.textLength, 3u));
-}
-
 [[nodiscard]] constexpr bool allows_entry_probe_fuzzy_candidate(
     const LiteralFuzzyCandidate &candidate) noexcept {
   return candidate.distance == 1u && candidate.operationCount == 1u;
 }
 
+[[nodiscard]] constexpr std::uint32_t literal_fuzzy_primary_rank_limit(
+    const LexicalRecoveryProfile &profile) noexcept {
+  return std::min<std::uint32_t>(5u, saturating_add(profile.textLength, 3u));
+}
+
 [[nodiscard]] constexpr bool
 allows_fuzzy_replace_after_prior_edits(
     const LexicalRecoveryProfile &profile) noexcept {
-  return profile.kind == LexicalRecoveryProfileKind::OperatorLike;
+  return profile.allowsReplace();
 }
 
 [[nodiscard]] constexpr bool allows_literal_fuzzy_candidate(
     const LiteralFuzzyCandidate &candidate,
     const LexicalRecoveryProfile &profile, const TerminalRecoveryFacts &facts,
-    bool cursorStartsIdentifierLikeVisibleSource) noexcept {
-  switch (profile.kind) {
-  case LexicalRecoveryProfileKind::WordLikeLiteral:
-    if (facts.triviaGap.hasHiddenGap() &&
-        !cursorStartsIdentifierLikeVisibleSource) {
-      return false;
-    }
-    if (facts.triviaGap.hasHiddenGap() && candidate.substitutionCount != 0u) {
-      return false;
-    }
-    return candidate.cost.primaryRankCost <=
-           literal_fuzzy_primary_rank_limit(profile);
-  case LexicalRecoveryProfileKind::OperatorLike:
-    return candidate.distance == 1u && candidate.operationCount == 1u &&
-           candidate.substitutionCount == 0u;
-  case LexicalRecoveryProfileKind::WordLikeFreeForm:
-  case LexicalRecoveryProfileKind::Separator:
-  case LexicalRecoveryProfileKind::Delimiter:
-  case LexicalRecoveryProfileKind::OpaqueSymbol:
+    bool cursorStartsStructuredVisibleSource) noexcept {
+  if (!profile.allowsReplace()) {
     return false;
   }
-  return false;
+  if (profile.textLength <= 2u) {
+    return candidate.distance == 1u && candidate.operationCount == 1u &&
+           candidate.substitutionCount == 0u;
+  }
+  if (!cursorStartsStructuredVisibleSource) {
+    return false;
+  }
+  if (facts.triviaGap.hasHiddenGap() && candidate.substitutionCount != 0u) {
+    return false;
+  }
+  return candidate.cost.primaryRankCost <=
+         literal_fuzzy_primary_rank_limit(profile);
 }
 
 template <EditableParseModeContext Context>
@@ -446,13 +342,12 @@ template <EditableParseModeContext Context>
       literal_fuzzy_input_view(ctx, cursorStart, literal_fuzzy_input_limit(ctx),
                                profile.textLength),
       caseSensitive);
-  const bool cursorStartsIdentifierLikeVisibleSource =
-      cursor_starts_identifier_like_visible_source(ctx);
+  const bool cursorStartsStructuredVisibleSource =
+      cursor_starts_structured_visible_source(ctx);
   filteredCandidates.reserve(candidates.size());
   for (const auto &candidate : candidates) {
-    if (!allows_literal_fuzzy_candidate(
-            candidate, profile, facts,
-            cursorStartsIdentifierLikeVisibleSource)) {
+    if (!allows_literal_fuzzy_candidate(candidate, profile, facts,
+                                        cursorStartsStructuredVisibleSource)) {
       continue;
     }
     filteredCandidates.push_back(candidate);
@@ -519,10 +414,6 @@ probe_nearby_delete_scan_match(Context &ctx, MatchFn &&matchFn,
       if (skipped > scanCursor) {
         if (std::forward<MatchFn>(matchFn)(skipped) != nullptr) {
           return true;
-        }
-        if (operator_like_delete_scan_crosses_identifier_gap(
-                ctx, skipped, profile)) {
-          return false;
         }
         break;
       }
@@ -682,20 +573,8 @@ template <EditableParseModeContext Context, typename Element, typename MatchFn,
       facts.allowStructuredVisibleContinuationInsert &&
       cursorStartsVisibleSource &&
       detail::cursor_starts_structured_visible_source(ctx);
-  const bool structuredVisibleContinuationBlocksOpaqueDeleteScan =
-      structuredVisibleContinuationInsertAllowed &&
-      lexicalProfile.kind == LexicalRecoveryProfileKind::OpaqueSymbol;
-  const bool structuredVisibleContinuationBlocksWordLikeDeleteScan =
-      structuredVisibleContinuationInsertAllowed &&
-      visibleSourceEditCount != 0u &&
-      lexicalProfile.kind == LexicalRecoveryProfileKind::WordLikeLiteral &&
-      lexicalProfile.textLength > 1u;
   const bool preferStructuredVisibleInsertOverDeleteScan =
-      (structuredVisibleContinuationInsertAllowed &&
-      (lexicalProfile.kind == LexicalRecoveryProfileKind::Separator ||
-       lexicalProfile.kind == LexicalRecoveryProfileKind::Delimiter)) ||
-      structuredVisibleContinuationBlocksWordLikeDeleteScan ||
-      structuredVisibleContinuationBlocksOpaqueDeleteScan;
+      structuredVisibleContinuationInsertAllowed && allowInsert;
 
   TerminalRecoveryCandidate deleteScanChoice;
   if (!preferStructuredVisibleInsertOverDeleteScan &&
@@ -706,9 +585,6 @@ template <EditableParseModeContext Context, typename Element, typename MatchFn,
     considerChoice(deleteScanChoice);
   }
 
-  // Structural separators and delimiters still compete as local inserts when
-  // the visible source starts a structured continuation, but not when the
-  // visible source is only stray punctuation that delete-scan can absorb.
   const bool deleteScanBlocksVisibleInsert =
       deleteScanChoice.kind == TerminalRecoveryChoiceKind::DeleteScan &&
       cursorStartsVisibleSource &&
@@ -749,10 +625,16 @@ template <EditableParseModeContext Context, typename MatchFn,
   if constexpr (requires { ctx.skipAfterDelete; }) {
     previousSkipAfterDelete = ctx.skipAfterDelete;
     ctx.skipAfterDelete = false;
+    if constexpr (requires { ctx.noteRecoveryPolicyMutation(); }) {
+      ctx.noteRecoveryPolicyMutation();
+    }
   }
   const auto restore_skip_after_delete = [&]() {
     if constexpr (requires { ctx.skipAfterDelete; }) {
       ctx.skipAfterDelete = previousSkipAfterDelete;
+      if constexpr (requires { ctx.noteRecoveryPolicyMutation(); }) {
+        ctx.noteRecoveryPolicyMutation();
+      }
     }
   };
   auto &&match = matchFn;
@@ -776,10 +658,6 @@ template <EditableParseModeContext Context, typename MatchFn,
               matchedEnd = visibleMatch;
               matchedDeleteCount = state.deleteCount;
               return detail::DeleteScanVisitResult::Accept;
-            }
-            if (operator_like_delete_scan_crosses_identifier_gap(ctx, skipped,
-                                                                 profile)) {
-              return detail::DeleteScanVisitResult::Stop;
             }
             return detail::DeleteScanVisitResult::Continue;
           }

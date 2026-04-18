@@ -231,7 +231,7 @@ std::string dump_parse_diagnostics(
 } // namespace
 
 TEST(RecoveryTest,
-     WordLiteralReplacementRespectsConfidenceBeforeDeleteCostBudget) {
+     WordLiteralCanRecoverByGenericDeletePrefixBeforeLowConfidenceReplace) {
   DataTypeRule<std::string> rule{"Rule", "service"_kw};
   const std::string input = "xxxxxxxxxxxxxxxxxservice";
   const auto skipper = SkipperBuilder().build();
@@ -240,10 +240,10 @@ TEST(RecoveryTest,
   constrainedOptions.maxRecoveryEditCost = 64;
   const auto constrainedResult =
       parseDataType(rule, input, skipper, constrainedOptions);
-  EXPECT_FALSE(constrainedResult.value);
+  ASSERT_TRUE(constrainedResult.value);
   ASSERT_FALSE(constrainedResult.parseDiagnostics.empty());
   EXPECT_EQ(constrainedResult.parseDiagnostics.front().kind,
-            ParseDiagnosticKind::Incomplete);
+            ParseDiagnosticKind::Deleted);
 
   ParseOptions tunedOptions;
   tunedOptions.maxRecoveryEditCost = 128;
@@ -898,7 +898,7 @@ TEST(RecoveryTest, TransposedKeywordCodepointsCanRecoverLiteralAndContinue) {
 }
 
 TEST(RecoveryTest,
-     ParserRuleRejectsLowConfidenceReplacementBeforeDeleteCostBudget) {
+     ParserRuleCanRecoverByGenericDeletePrefixBeforeLowConfidenceReplace) {
   const std::string input = "xxxxxxxxxxxxxxxxxservice";
   const auto skipper = SkipperBuilder().build();
 
@@ -908,10 +908,10 @@ TEST(RecoveryTest,
   constrainedOptions.maxRecoveryEditCost = 64;
   const auto constrainedResult =
       parseRule(rule, input, skipper, constrainedOptions);
-  EXPECT_FALSE(constrainedResult.value);
+  ASSERT_TRUE(constrainedResult.value);
   ASSERT_FALSE(constrainedResult.parseDiagnostics.empty());
   EXPECT_EQ(constrainedResult.parseDiagnostics.front().kind,
-            ParseDiagnosticKind::Incomplete);
+            ParseDiagnosticKind::Deleted);
 
   ParseOptions tunedOptions;
   tunedOptions.maxRecoveryEditCost = 128;

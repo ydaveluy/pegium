@@ -68,14 +68,10 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
     return terminal(text.c_str());
   }
 
-  [[nodiscard]] constexpr bool isWordLike() const noexcept {
-    return _lexicalRecoveryProfile.kind ==
-               detail::LexicalRecoveryProfileKind::WordLikeLiteral ||
-           _lexicalRecoveryProfile.kind ==
-               detail::LexicalRecoveryProfileKind::WordLikeFreeForm;
-  }
-
   bool probeRecoverable(RecoveryContext &ctx) const noexcept {
+    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
+        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
+    };
     if (probeRecoverableAtEntry(ctx)) {
       return true;
     }
@@ -95,10 +91,13 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
         [this](const char *scanCursor) noexcept {
           return terminal(scanCursor);
         },
-        {}, _lexicalRecoveryProfile);
+        localRecoveryFacts, _lexicalRecoveryProfile);
   }
 
   bool probeRecoverableAtEntry(RecoveryContext &ctx) const noexcept {
+    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
+        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
+    };
     if (_literalRecoveryMetadata.has_value() &&
         (!ctx.hasHadEdits() ||
          detail::allows_fuzzy_replace_after_prior_edits(
@@ -114,7 +113,15 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
         return true;
       }
     }
-    return detail::allows_terminal_entry_probe(ctx, _lexicalRecoveryProfile);
+    if (detail::allows_terminal_entry_probe(ctx, _lexicalRecoveryProfile)) {
+      return true;
+    }
+    return detail::probe_nearby_delete_scan_match(
+        ctx,
+        [this](const char *scanCursor) noexcept {
+          return terminal(scanCursor);
+        },
+        localRecoveryFacts, _lexicalRecoveryProfile);
   }
 
   TerminalRule super() const { return *this; }
@@ -166,6 +173,14 @@ private:
   bool parse_terminal_recovery_impl(
       Context &ctx,
       const detail::TerminalRecoveryFacts &terminalRecoveryFacts) const {
+    const auto effectiveRecoveryFacts = [&]() {
+      auto facts = terminalRecoveryFacts;
+      if (!facts.triviaGap.hasHiddenGap() &&
+          !facts.triviaGap.visibleSourceAfterLocalSkip) {
+        facts.triviaGap = detail::current_local_skip_trivia_gap_profile(ctx);
+      }
+      return facts;
+    }();
     const char *const cursorStart = ctx.cursor();
     const char *const matchedEnd = terminal(cursorStart);
     const auto applyRecoveredLeaf = [this, &ctx](const char *matched) {
@@ -186,9 +201,10 @@ private:
       return detail::can_apply_recovery_match(ctx, matched) ? matched : nullptr;
     };
     const auto try_local_recovery = [this, &ctx, cursorStart,
-                                     &terminalRecoveryFacts,
+                                     &effectiveRecoveryFacts,
                                      &matchRecoverableTerminal,
                                      &applyRecoveredLeaf]() {
+      const auto &facts = effectiveRecoveryFacts;
       const bool hasHadEdits =
           []<typename Ctx>(const Ctx &currentCtx) constexpr noexcept {
             if constexpr (requires { currentCtx.hasHadEdits(); }) {
@@ -205,7 +221,7 @@ private:
               detail::collect_literal_replace_candidates(
                   ctx, cursorStart, _literalRecoveryMetadata->value,
                   _literalRecoveryMetadata->caseSensitive,
-                  _lexicalRecoveryProfile, terminalRecoveryFacts);
+                  _lexicalRecoveryProfile, facts);
           for (const auto &replaceCandidate : replaceCandidates) {
             const char *const replaceEnd =
                 cursorStart + replaceCandidate.consumed;
@@ -219,7 +235,7 @@ private:
                     replaceCandidate.substitutionCount,
                     replaceCandidate.operationCount,
                     detail::terminal_anchor_quality(
-                        terminalRecoveryFacts.triviaGap));
+                        facts.triviaGap));
             if (detail::is_better_normalized_recovery_order_key(
                     detail::terminal_recovery_order_key(candidate),
                     detail::terminal_recovery_order_key(bestChoice),
@@ -234,7 +250,7 @@ private:
           (!_literalRecoveryMetadata.has_value() ||
            _lexicalRecoveryProfile.allowsInsert());
       const auto choice = detail::complete_terminal_recovery_choice(
-          ctx, cursorStart, this, terminalRecoveryFacts,
+          ctx, cursorStart, this, facts,
           _lexicalRecoveryProfile, allowInsert, bestChoice,
           matchRecoverableTerminal,
           [this, &ctx](const char *matched) {
@@ -264,11 +280,12 @@ private:
                                     getName(), " offset=", ctx.cursorOffset());
             }
           },
-          [this, &ctx, &terminalRecoveryFacts, &matchRecoverableTerminal,
+          [this, &ctx, &effectiveRecoveryFacts, &matchRecoverableTerminal,
            &applyRecoveredLeaf]() {
+            const auto &facts = effectiveRecoveryFacts;
             return detail::apply_delete_scan_terminal_candidate(
                 ctx, matchRecoverableTerminal, applyRecoveredLeaf,
-                terminalRecoveryFacts, _lexicalRecoveryProfile);
+                facts, _lexicalRecoveryProfile);
           });
     };
 

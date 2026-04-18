@@ -7,7 +7,7 @@
 
 namespace arithmetics::lsp {
 
-struct ArithmeticsServices final : pegium::Services {
+struct ArithmeticsServices final : pegium::Services, arithmetics::ArithmeticsAddedServices {
   explicit ArithmeticsServices(
       const pegium::SharedServices &sharedServices);
   ArithmeticsServices(ArithmeticsServices &&) noexcept;
@@ -16,7 +16,6 @@ struct ArithmeticsServices final : pegium::Services {
   ArithmeticsServices &operator=(const ArithmeticsServices &) = delete;
   ~ArithmeticsServices() noexcept override;
 
-  arithmetics::ArithmeticsAddedServices arithmetics;
 };
 
 [[nodiscard]] inline const ArithmeticsServices *

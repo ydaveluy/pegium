@@ -42,7 +42,7 @@ public:
 template <typename TServices>
 void registerValidationChecks(TServices &services) {
   auto &registry = *services.validation.validationRegistry;
-  auto &validator = *services.arithmetics.validation.arithmeticsValidator;
+  auto &validator = *services.validator;
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
            &ArithmeticsValidator::checkDivByZero>(validator),

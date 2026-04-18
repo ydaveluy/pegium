@@ -57,10 +57,6 @@ public:
     return probe_recoverable_entry_elements<0>(ctx);
   }
 
-  [[nodiscard]] constexpr bool isWordLike() const noexcept {
-    return is_word_like_impl(std::make_index_sequence<sizeof...(Elements)>{});
-  }
-
   constexpr const char *terminal(const char *begin) const noexcept
     requires(... && TerminalCapableExpression<Elements>)
   {
@@ -446,7 +442,9 @@ private:
       return false;
     } else {
       const auto &current = std::get<I>(elements);
-      if (attempt_fast_probe(ctx, current)) {
+      if (attempt_fast_probe(ctx, current) ||
+          probe_recoverable_at_entry(current, ctx) ||
+          probe_locally_recoverable(current, ctx)) {
         return true;
       }
       if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
@@ -682,8 +680,8 @@ private:
           sequenceFacts.currentOffsetWithinRecoveryWindow) ||
          (state.hasRecoveredPrefixBeforeCurrent &&
           sequenceFacts.suffixFullyNullable &&
-          (state.facts.triviaGap.hasHiddenGap() ||
-           cursorStartsVisibleSource))) &&
+          (state.facts.triviaGap.hasHiddenGap() || cursorStartsVisibleSource ||
+           ctx.cursor() >= ctx.end))) &&
         (state.facts.triviaGap.hasHiddenGap() || !hasLocalSequenceEdits);
     const bool scopedLeadingContinuationInsertAllowed =
         I == 0u && ctx.allowsScopedLeadingTerminalInsertRecovery() &&
@@ -735,12 +733,6 @@ private:
     if constexpr (requires { current._lexicalRecoveryProfile; }) {
       return detail::allows_terminal_rule_insert(ctx,
                                                  current._lexicalRecoveryProfile);
-    } else if constexpr (requires {
-                           { current.isWordLike() } -> std::convertible_to<bool>;
-                         }) {
-      if (current.isWordLike()) {
-        return !detail::cursor_starts_visible_source(ctx);
-      }
     }
     return true;
   }
@@ -1024,7 +1016,32 @@ private:
           return false;
         }
       }
+      const auto memoKey = RecoveryContext::RecoveryMemoKey{
+          .queryKind =
+              RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert,
+          .ownerIdentity = static_cast<const void *>(std::addressof(current)),
+          .cursorOffset = ctx.cursorOffset(),
+          .furthestExploredOffset = ctx.furthestExploredOffset(),
+          .policySignature = ctx.recoveryPolicySignature(),
+          .activeRecoverySignature = ctx.activeRecoverySignature(),
+      };
+      RecoveryContext::GroupMissingElementInsertMemoValue cachedSelection;
+      if (ctx.memoTable().template tryGet<
+              RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
+              memoKey, cachedSelection)) {
+        const char *const cachedFurthestExploredCursor =
+            ctx.begin + cachedSelection.observedFurthestExploredOffset;
+        if (cachedFurthestExploredCursor > ctx.furthestExploredCursor()) {
+          ctx.restoreFurthestExploredCursor(cachedFurthestExploredCursor);
+        }
+        return cachedSelection.selectInsertReplay;
+      }
       if (detail::attempt_parse_without_side_effects(ctx, current)) {
+        ctx.memoTable().template store<
+            RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
+            memoKey,
+            {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
+             .selectInsertReplay = false});
         return false;
       }
       const auto checkpoint = ctx.mark();
@@ -1040,6 +1057,11 @@ private:
       if (!insertCandidate.matched ||
           insertCandidate.postSkipCursorOffset <=
               insertCandidate.firstEditOffset) {
+        ctx.memoTable().template store<
+            RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
+            memoKey,
+            {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
+             .selectInsertReplay = false});
         return false;
       }
       const bool singleInsertedElementWithCleanTail =
@@ -1059,27 +1081,45 @@ private:
             const bool previousAllowDeleteRetry = ctx.allowDeleteRetry;
             if (singleInsertedElementWithCleanTail) {
               ctx.allowDeleteRetry = false;
+              ctx.noteRecoveryPolicyMutation();
             }
             const bool matched =
                 parse(current, ctx) &&
                 this->template parse_elements<RecoveryContext, I + 1>(ctx);
             ctx.allowDeleteRetry = previousAllowDeleteRetry;
+            if (singleInsertedElementWithCleanTail) {
+              ctx.noteRecoveryPolicyMutation();
+            }
             return matched;
           });
       if (parseCandidate.matched && parseCandidate.editCost == 0 &&
           parseCandidate.editCount == 0) {
+        ctx.memoTable().template store<
+            RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
+            memoKey,
+            {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
+             .selectInsertReplay = false});
         return false;
       }
       if (leadingMissingElementSupportedOnlyBySingleTerminalTail) {
+        ctx.memoTable().template store<
+            RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
+            memoKey,
+            {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
+             .selectInsertReplay = false});
         return false;
       }
-      if (parseCandidate.matched &&
-          !detail::is_better_choice_recovery_candidate(
+      const bool selectInsertReplay =
+          !parseCandidate.matched ||
+          detail::is_better_choice_recovery_candidate(
               insertCandidate, parseCandidate,
-              {.preferredBoundaryElement = std::addressof(current)})) {
-        return false;
-      }
-      return true;
+              {.preferredBoundaryElement = std::addressof(current)});
+      ctx.memoTable().template store<
+          RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
+          memoKey,
+          {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
+           .selectInsertReplay = selectInsertReplay});
+      return selectInsertReplay;
     }
   }
 
@@ -1152,14 +1192,6 @@ private:
     ctx.skip();
     const auto postSkipCursorOffset = ctx.cursorOffset();
     ctx.rewind(postMatchCheckpoint);
-    if constexpr (requires {
-                    { current.isWordLike() } -> std::convertible_to<bool>;
-                  }) {
-      if (current.isWordLike() && postSkipCursorOffset <= parseStartOffset) {
-        ctx.rewind(checkpoint);
-        return false;
-      }
-    }
     if (!allowNullableTailStop) {
       if (postSkipCursorOffset <= parseStartOffset) {
         ctx.rewind(checkpoint);
@@ -1175,6 +1207,7 @@ private:
     const auto checkpoint = ctx.mark();
     const bool previousSkipAfterDelete = ctx.skipAfterDelete;
     ctx.skipAfterDelete = false;
+    ctx.noteRecoveryPolicyMutation();
     std::optional<TerminalDeleteRunObservation> observation;
     (void)detail::visit_guarded_delete_scan_positions(
         ctx, []() noexcept { return true; },
@@ -1190,6 +1223,7 @@ private:
          .stopAtHiddenTriviaBoundary = true,
          .visitAfterHiddenTriviaExtension = true});
     ctx.skipAfterDelete = previousSkipAfterDelete;
+    ctx.noteRecoveryPolicyMutation();
     ctx.rewind(checkpoint);
     return observation;
   }
@@ -1203,6 +1237,7 @@ private:
     }
     const bool previousSkipAfterDelete = ctx.skipAfterDelete;
     ctx.skipAfterDelete = false;
+    ctx.noteRecoveryPolicyMutation();
     const bool replayed =
         detail::visit_guarded_delete_scan_positions(
             ctx, []() noexcept { return true; },
@@ -1221,6 +1256,7 @@ private:
              .visitAfterHiddenTriviaExtension = true}) ==
         detail::DeleteScanVisitResult::Accept;
     ctx.skipAfterDelete = previousSkipAfterDelete;
+    ctx.noteRecoveryPolicyMutation();
     return replayed;
   }
 
@@ -1317,13 +1353,6 @@ private:
       parser::init(std::get<I>(elements), ctx);
       init_elements<I + 1>(ctx);
     }
-  }
-
-  template <std::size_t... Is>
-  [[nodiscard]] constexpr bool
-  is_word_like_impl(std::index_sequence<Is...>) const noexcept {
-    return (... &&
-            detail::element_is_word_like_terminal(std::get<Is>(elements)));
   }
 
   template <std::size_t... Is>

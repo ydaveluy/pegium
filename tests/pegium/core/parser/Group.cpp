@@ -131,6 +131,20 @@ TEST(GroupTest,
   }
 }
 
+TEST(GroupTest,
+     ProbeRecoverableCanSeeLocallyRecoverableSuffixAfterMissingRequiredPrefix) {
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  auto group = id + ";"_kw;
+  auto skipper = SkipperBuilder().build();
+
+  auto builderHarness = pegium::test::makeCstBuilderHarness("***;");
+  auto &builder = builderHarness.builder;
+  detail::FailureHistoryRecorder recorder(builder.input_begin());
+  RecoveryContext ctx{builder, skipper, recorder};
+  ctx.skip();
+  EXPECT_TRUE(probe_locally_recoverable(group, ctx));
+}
+
 TEST(GroupTest, ScopedLeadingTerminalInsertDoesNotLeakOutsideGuard) {
   auto skipper = SkipperBuilder().build();
   auto group = "::"_kw + "name"_kw;

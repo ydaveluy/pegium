@@ -97,6 +97,10 @@ private:
       PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceStrictPasses);
       return match_choice(ctx);
     } else if constexpr (RecoveryParseModeContext<Context>) {
+      if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows()) {
+        TrackedParseContext &strictCtx = ctx;
+        return parse_impl(strictCtx);
+      }
       PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceRecoverCalls);
 
       const auto entryCheckpoint = ctx.mark();
@@ -257,7 +261,57 @@ private:
     TextOffset restartRetryCursorOffset = 0;
     RestartReplayMode restartReplayMode = RestartReplayMode::Editable;
     bool startedWithoutEdits = false;
+    bool branchHasStrictStartSignal = false;
   };
+
+  [[nodiscard]] static RecoveryContext::OrderedChoiceAttemptMemoValue
+  capture_choice_attempt_memo_value(
+      const ChoiceAttempt &attempt,
+      TextOffset observedFurthestExploredOffset) noexcept {
+    return {
+        .branchIndex = attempt.branchIndex,
+        .restartRetryCursorOffset = attempt.restartRetryCursorOffset,
+        .candidateCursorOffset = attempt.recovery.cursorOffset,
+        .candidatePostSkipCursorOffset = attempt.recovery.postSkipCursorOffset,
+        .candidateEditSpan = attempt.recovery.editSpan,
+        .observedFurthestExploredOffset = observedFurthestExploredOffset,
+        .candidateFirstEditOffset = attempt.recovery.firstEditOffset,
+        .candidateFirstEditElement = attempt.recovery.firstEditElement,
+        .candidateEditCost = attempt.recovery.editCost,
+        .candidateEditCount = attempt.recovery.editCount,
+        .kind = static_cast<std::uint8_t>(attempt.kind),
+        .restartReplayMode = static_cast<std::uint8_t>(attempt.restartReplayMode),
+        .matched = attempt.recovery.matched,
+        .hasDeleteEdit = attempt.recovery.hasDeleteEdit,
+        .startedWithoutEdits = attempt.startedWithoutEdits,
+        .branchHasStrictStartSignal = attempt.branchHasStrictStartSignal,
+    };
+  }
+
+  [[nodiscard]] static ChoiceAttempt replay_cached_choice_attempt(
+      const RecoveryContext::OrderedChoiceAttemptMemoValue &cached) noexcept {
+    return {
+        .branchIndex = cached.branchIndex,
+        .kind = static_cast<ChoiceAttemptKind>(cached.kind),
+        .recovery =
+            {
+                .matched = cached.matched,
+                .hasDeleteEdit = cached.hasDeleteEdit,
+                .cursorOffset = cached.candidateCursorOffset,
+                .postSkipCursorOffset = cached.candidatePostSkipCursorOffset,
+                .editCost = cached.candidateEditCost,
+                .editCount = cached.candidateEditCount,
+                .editSpan = cached.candidateEditSpan,
+                .firstEditOffset = cached.candidateFirstEditOffset,
+                .firstEditElement = cached.candidateFirstEditElement,
+            },
+        .restartRetryCursorOffset = cached.restartRetryCursorOffset,
+        .restartReplayMode = static_cast<RestartReplayMode>(
+            cached.restartReplayMode),
+        .startedWithoutEdits = cached.startedWithoutEdits,
+        .branchHasStrictStartSignal = cached.branchHasStrictStartSignal,
+    };
+  }
 
   [[nodiscard]] detail::EditableRecoveryCandidate capture_choice_candidate(
       RecoveryContext &ctx, std::uint32_t baseEditCost,
@@ -307,20 +361,42 @@ private:
   ChoiceAttempt evaluate_choice_attempts(RecoveryContext &ctx,
                                          const Checkpoint &entryCheckpoint) const {
     const auto parseStartOffset = ctx.cursorOffset();
+    const auto furthestExploredOffset = ctx.furthestExploredOffset();
+    const auto policySignature = detail::mix_recovery_memo_signature(
+        ctx.recoveryPolicySignature(), ctx.recoveryObservationSignature());
+    const auto activeRecoverySignature = ctx.activeRecoverySignature();
     const auto baseEditCost = ctx.currentEditCost();
     const auto baseRecoveryEditCount = ctx.recoveryEditCount();
-    const char *const savedFurthestExploredCursor =
-        ctx.furthestExploredCursor();
-    ctx.restoreFurthestExploredCursor(ctx.cursor());
+    const auto memoKey = RecoveryContext::RecoveryMemoKey{
+        .queryKind =
+            RecoveryContext::RecoveryMemoQueryKind::OrderedChoiceAttempt,
+        .ownerIdentity = static_cast<const void *>(this),
+        .cursorOffset = parseStartOffset,
+        .furthestExploredOffset = furthestExploredOffset,
+        .policySignature = policySignature,
+        .activeRecoverySignature = activeRecoverySignature,
+    };
+    RecoveryContext::OrderedChoiceAttemptMemoValue cachedAttempt;
+    if (ctx.memoTable().template tryGet<
+            RecoveryContext::RecoveryMemoQueryKind::OrderedChoiceAttempt>(
+            memoKey, cachedAttempt)) {
+      const char *const cachedFurthestExploredCursor =
+          ctx.begin + cachedAttempt.observedFurthestExploredOffset;
+      if (cachedFurthestExploredCursor > ctx.furthestExploredCursor()) {
+        ctx.restoreFurthestExploredCursor(cachedFurthestExploredCursor);
+      }
+      return replay_cached_choice_attempt(cachedAttempt);
+    }
     const auto bestAttempt = collect_choice_attempts(
         ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
         parseStartOffset, std::make_index_sequence<sizeof...(Elements)>{});
+    ctx.memoTable().template store<
+        RecoveryContext::RecoveryMemoQueryKind::OrderedChoiceAttempt>(
+        memoKey, capture_choice_attempt_memo_value(bestAttempt,
+                                                   ctx.furthestExploredOffset()));
 
     PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceStrictPasses);
     PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceEditablePasses);
-    if (savedFurthestExploredCursor > ctx.furthestExploredCursor()) {
-      ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
-    }
     return bestAttempt;
   }
 
@@ -549,7 +625,7 @@ private:
       return replay_restart_choice_by_index(ctx, attempt.branchIndex,
                                             attempt.restartRetryCursorOffset,
                                             attempt.restartReplayMode);
-    case ChoiceAttemptKind::Editable:
+    case ChoiceAttemptKind::Editable: {
       ctx.restoreFurthestExploredCursor(entryFurthestExploredCursor);
       if (replay_editable_choice_by_index(ctx, attempt.branchIndex)) {
         PEGIUM_RECOVERY_TRACE("[choice rule] editable success offset=",
@@ -558,6 +634,7 @@ private:
       }
       ctx.rewind(entryCheckpoint);
       return false;
+    }
     case ChoiceAttemptKind::None:
       return false;
     }
@@ -672,10 +749,7 @@ private:
             ? evaluate_restart_choice_attempt<I>(
                   ctx, baseEditCost, baseRecoveryEditCount, parseStartOffset)
             : ChoiceAttempt{};
-
     ChoiceAttempt bestAttempt;
-    bool entryStartSignalKnown = branchHasStrictStartSignal;
-    bool branchHasEntryStartSignal = branchHasStrictStartSignal;
     const auto considerAdmittedAttempt = [&](const ChoiceAttempt &candidate) {
       const auto signalRequirement =
           detail::classify_choice_recovery_entry_signal_requirement(
@@ -687,16 +761,13 @@ private:
       }
       if (signalRequirement ==
           detail::ChoiceRecoveryEntrySignalRequirement::ProbeEntryStart) {
-        if (!entryStartSignalKnown) {
-          const auto checkpoint = ctx.mark();
-          const char *const savedFurthestExploredCursor =
-              ctx.furthestExploredCursor();
-          branchHasEntryStartSignal =
-              probe_recoverable_at_entry(std::get<I>(choices), ctx);
-          ctx.rewind(checkpoint);
-          ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
-          entryStartSignalKnown = true;
-        }
+        const auto checkpoint = ctx.mark();
+        const char *const savedFurthestExploredCursor =
+            ctx.furthestExploredCursor();
+        const bool branchHasEntryStartSignal =
+            probe_recoverable_at_entry(std::get<I>(choices), ctx);
+        ctx.rewind(checkpoint);
+        ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
         if (!branchHasEntryStartSignal) {
           return;
         }

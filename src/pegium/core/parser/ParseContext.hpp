@@ -3,9 +3,12 @@
 /// Strict, tracked, and recovery parse contexts used while building the CST.
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <span>
 #include <type_traits>
 #include <pegium/core/grammar/AbstractElement.hpp>
@@ -13,6 +16,7 @@
 #include <pegium/core/parser/ParseDiagnostics.hpp>
 #include <pegium/core/parser/Parser.hpp>
 #include <pegium/core/parser/RecoveryAnalysis.hpp>
+#include <pegium/core/parser/RecoveryMemoTable.hpp>
 #include <pegium/core/parser/RecoveryTrace.hpp>
 #include <pegium/core/parser/Skipper.hpp>
 #include <pegium/core/parser/StepTrace.hpp>
@@ -281,6 +285,14 @@ struct RecoveryContext : TrackedParseContext {
     bool frontierBlocked = false;
   };
 
+  using RecoveryMemoKey = detail::RecoveryMemoKey;
+  using RecoveryMemoQueryKind = detail::RecoveryMemoQueryKind;
+  using RecoveryMemoTable = detail::RecoveryMemoTable;
+  using OrderedChoiceAttemptMemoValue = detail::OrderedChoiceAttemptMemoValue;
+  using RepetitionIterationMemoValue = detail::RepetitionIterationMemoValue;
+  using GroupMissingElementInsertMemoValue =
+      detail::GroupMissingElementInsertMemoValue;
+
   static_assert(std::is_trivially_copyable_v<EditBudgetState>);
   static_assert(std::is_trivially_copyable_v<WindowReplayState>);
   static_assert(std::is_trivially_copyable_v<DeleteBridgeState>);
@@ -312,6 +324,7 @@ struct RecoveryContext : TrackedParseContext {
     ~LeadingTerminalInsertScopeGuard() noexcept {
       if (_active) {
         --_ctx._scopedLeadingTerminalInsertDepth;
+        _ctx.noteRecoveryPolicyMutation();
       }
     }
 
@@ -321,6 +334,7 @@ struct RecoveryContext : TrackedParseContext {
     explicit LeadingTerminalInsertScopeGuard(RecoveryContext &ctx) noexcept
         : _ctx(ctx) {
       ++_ctx._scopedLeadingTerminalInsertDepth;
+      _ctx.noteRecoveryPolicyMutation();
     }
 
     RecoveryContext &_ctx;
@@ -343,6 +357,7 @@ struct RecoveryContext : TrackedParseContext {
     ~DestructiveWindowContinuationGuard() noexcept {
       if (_active) {
         --_ctx._destructiveWindowContinuationDepth;
+        _ctx.noteRecoveryPolicyMutation();
       }
     }
 
@@ -353,10 +368,50 @@ struct RecoveryContext : TrackedParseContext {
         RecoveryContext &ctx) noexcept
         : _ctx(ctx) {
       ++_ctx._destructiveWindowContinuationDepth;
+      _ctx.noteRecoveryPolicyMutation();
     }
 
     RecoveryContext &_ctx;
     bool _active = true;
+  };
+
+  class EditFloorRelaxationGuard {
+  public:
+    EditFloorRelaxationGuard(const EditFloorRelaxationGuard &) = delete;
+    EditFloorRelaxationGuard &
+    operator=(const EditFloorRelaxationGuard &) = delete;
+
+    EditFloorRelaxationGuard(EditFloorRelaxationGuard &&other) noexcept
+        : _ctx(other._ctx), _active(other._active),
+          _savedScopedEditFloorOffset(other._savedScopedEditFloorOffset) {
+      other._active = false;
+    }
+
+    ~EditFloorRelaxationGuard() noexcept {
+      if (_active) {
+        _ctx._scopedEditFloorOffset = _savedScopedEditFloorOffset;
+        _ctx.noteRecoveryPolicyMutation();
+      }
+    }
+
+  private:
+    friend struct RecoveryContext;
+
+    explicit EditFloorRelaxationGuard(RecoveryContext &ctx,
+                                      TextOffset relaxedFloorOffset) noexcept
+        : _ctx(ctx), _savedScopedEditFloorOffset(ctx._scopedEditFloorOffset) {
+      if (_savedScopedEditFloorOffset.has_value()) {
+        ctx._scopedEditFloorOffset =
+            std::min(*_savedScopedEditFloorOffset, relaxedFloorOffset);
+      } else {
+        ctx._scopedEditFloorOffset = relaxedFloorOffset;
+      }
+      ctx.noteRecoveryPolicyMutation();
+    }
+
+    RecoveryContext &_ctx;
+    bool _active = true;
+    std::optional<TextOffset> _savedScopedEditFloorOffset;
   };
 
   using EditStateGuard = detail::EditStateGuard<RecoveryContext>;
@@ -369,6 +424,7 @@ struct RecoveryContext : TrackedParseContext {
       : TrackedParseContext(builder, skipper, failureRecorder, cancelToken) {
     _runRecoveryBookkeeping = true;
     _localReplayMaxCursor = begin;
+    _recoveryMemoTable = std::make_unique<RecoveryMemoTable>();
   }
 
   bool allowInsert = true;
@@ -387,15 +443,23 @@ struct RecoveryContext : TrackedParseContext {
   std::vector<RecoveryEdit> recoveryEdits;
   RecoveryState recoveryState;
   std::uint32_t recoveryStateVersion = 0;
+  std::uint32_t _recoveryPolicyMutationVersion = 0;
   std::uint32_t _scopedLeadingTerminalInsertDepth = 0;
   std::uint32_t _destructiveWindowContinuationDepth = 0;
+  std::optional<TextOffset> _scopedEditFloorOffset;
   const char *_localReplayMaxCursor = nullptr;
   DeleteBridgeState _deleteBridge{};
+  // Recovery-packrat stays local to recovery attempts. The nominal strict path
+  // never touches this table.
+  std::unique_ptr<RecoveryMemoTable> _recoveryMemoTable;
   struct ReplayForwardTokenDelta {
     std::uint32_t windowIndex = 0;
     std::uint32_t previousReplayForwardTokenCount = 1;
   };
   std::vector<ReplayForwardTokenDelta> _replayForwardTokenHistory;
+  mutable std::uint64_t _cachedRecoveryPolicySignatureStamp =
+      std::numeric_limits<std::uint64_t>::max();
+  mutable std::uint64_t _cachedRecoveryPolicySignature = 0;
 
   [[nodiscard]] constexpr const char *furthestExploredCursor() const noexcept {
     return maxCursor();
@@ -585,6 +649,111 @@ struct RecoveryContext : TrackedParseContext {
   [[nodiscard]] constexpr bool hasPendingRecoveryWindows() const noexcept {
     return recoveryState.windowReplay.activeEditWindowIndex < editWindows.size();
   }
+
+  [[nodiscard]] RecoveryMemoTable &memoTable() noexcept {
+    return *_recoveryMemoTable;
+  }
+
+  [[nodiscard]] const RecoveryMemoTable &memoTable() const noexcept {
+    return *_recoveryMemoTable;
+  }
+
+  [[nodiscard]] std::uint64_t recoveryProbeMemoSignature() const noexcept {
+    return static_cast<std::uint64_t>(
+        reinterpret_cast<std::uintptr_t>(_skipper));
+  }
+
+  void noteRecoveryPolicyMutation() noexcept {
+    ++_recoveryPolicyMutationVersion;
+  }
+
+  [[nodiscard]] std::uint64_t recoveryPolicySignature() const noexcept {
+    const auto stamp =
+        (static_cast<std::uint64_t>(recoveryStateVersion) << 32u) |
+        static_cast<std::uint64_t>(_recoveryPolicyMutationVersion);
+    if (_cachedRecoveryPolicySignatureStamp == stamp) {
+      return _cachedRecoveryPolicySignature;
+    }
+
+    constexpr auto noScopedEditFloor =
+        std::numeric_limits<TextOffset>::max();
+    const auto scopedEditFloor =
+        _scopedEditFloorOffset.value_or(noScopedEditFloor);
+    const auto &windowReplay = recoveryState.windowReplay;
+    std::uint64_t mixed =
+        static_cast<std::uint64_t>(recoveryStateVersion) * 1469598103934665603ull;
+    mixed ^= static_cast<std::uint64_t>(
+                 reinterpret_cast<std::uintptr_t>(_skipper)) *
+             1609587929392839161ull;
+    mixed ^= static_cast<std::uint64_t>(editFloorOffset) * 1099511628211ull;
+    mixed ^= static_cast<std::uint64_t>(scopedEditFloor) * 7809847782465536323ull;
+    mixed ^= static_cast<std::uint64_t>(maxConsecutiveCodepointDeletes) << 1u;
+    mixed ^= static_cast<std::uint64_t>(maxEditsPerAttempt) << 7u;
+    mixed ^= static_cast<std::uint64_t>(maxEditCost) << 13u;
+    mixed ^= static_cast<std::uint64_t>(_scopedLeadingTerminalInsertDepth) << 19u;
+    mixed ^=
+        static_cast<std::uint64_t>(_destructiveWindowContinuationDepth) << 25u;
+    mixed ^= static_cast<std::uint64_t>(allowInsert) << 33u;
+    mixed ^= static_cast<std::uint64_t>(allowDelete) << 34u;
+    mixed ^= static_cast<std::uint64_t>(allowExtendedDeleteScan) << 35u;
+    mixed ^= static_cast<std::uint64_t>(allowDeleteRetry) << 36u;
+    mixed ^= static_cast<std::uint64_t>(skipAfterDelete) << 37u;
+    mixed ^= static_cast<std::uint64_t>(trackEditState) << 38u;
+    mixed ^= static_cast<std::uint64_t>(allowTopLevelPartialSuccess) << 39u;
+    mixed ^= static_cast<std::uint64_t>(windowReplay.activeWindowEditCostBase) *
+             11400714819323198485ull;
+    mixed ^= static_cast<std::uint64_t>(windowReplay.activeWindowEditCountBase) *
+             7809847782465536323ull;
+    mixed ^= static_cast<std::uint64_t>(windowReplay.activeEditWindowIndex) *
+             2946739916269131511ull;
+    mixed ^=
+        static_cast<std::uint64_t>(windowReplay.currentForwardVisibleLeafCount) *
+        1609587929392839161ull;
+    mixed ^= static_cast<std::uint64_t>(
+                 windowReplay.strictVisibleLeafCountAfterRecovery) *
+             1099511628211ull;
+    mixed ^= static_cast<std::uint64_t>(windowReplay.completedRecoveryWindows)
+             << 40u;
+    mixed ^= static_cast<std::uint64_t>(windowReplay.inRecoveryPhase) << 48u;
+    mixed ^= static_cast<std::uint64_t>(windowReplay.reachedRecoveryTarget)
+             << 49u;
+    mixed ^= static_cast<std::uint64_t>(windowReplay.stableAfterRecovery)
+             << 50u;
+    mixed ^= static_cast<std::uint64_t>(windowReplay.awaitingStrictStability)
+             << 51u;
+    mixed ^= static_cast<std::uint64_t>(windowReplay.recoveryBookkeepingEnabled)
+             << 52u;
+    if (windowReplay.activeEditWindowIndex < editWindows.size()) {
+      const auto &window = editWindows[windowReplay.activeEditWindowIndex];
+      mixed ^= static_cast<std::uint64_t>(window.beginOffset) *
+               7046029254386353131ull;
+      mixed ^= static_cast<std::uint64_t>(window.editFloorOffset) *
+               11400714819323198485ull;
+      mixed ^= static_cast<std::uint64_t>(window.maxCursorOffset) *
+               7809847782465536323ull;
+      mixed ^= static_cast<std::uint64_t>(window.forwardTokenCount) << 53u;
+      mixed ^= static_cast<std::uint64_t>(window.replayForwardTokenCount)
+               << 55u;
+    }
+    _cachedRecoveryPolicySignatureStamp = stamp;
+    _cachedRecoveryPolicySignature = mixed;
+    return mixed;
+  }
+
+  [[nodiscard]] std::uint64_t activeRecoverySignature() const noexcept {
+    return detail::active_recovery_signature(_activeRecoveries, begin);
+  }
+
+  [[nodiscard]] std::uint64_t recoveryObservationSignature() const noexcept {
+    std::uint64_t mixed =
+        static_cast<std::uint64_t>(failureHistorySize()) *
+        11400714819323198485ull;
+    mixed = detail::mix_recovery_memo_signature(
+        mixed, static_cast<std::uint64_t>(furthestFailureHistorySize()) *
+                   7809847782465536323ull);
+    return mixed;
+  }
+
   [[nodiscard]] constexpr TextOffset
   pendingRecoveryWindowBeginOffset() const noexcept {
     return recoveryState.windowReplay.activeEditWindowIndex < editWindows.size()
@@ -650,21 +819,40 @@ struct RecoveryContext : TrackedParseContext {
     return DestructiveWindowContinuationGuard{*this};
   }
 
+  [[nodiscard]] EditFloorRelaxationGuard
+  withRelaxedEditFloor(TextOffset relaxedFloorOffset) noexcept {
+    return EditFloorRelaxationGuard{*this, relaxedFloorOffset};
+  }
+
   [[nodiscard]] constexpr bool
   allowsScopedLeadingTerminalInsertRecovery() const noexcept {
     return _scopedLeadingTerminalInsertDepth != 0u;
   }
 
   [[nodiscard]] constexpr bool canEditAtOffset(TextOffset offset) const noexcept {
+    const auto activeFloorOffset = [this]() noexcept {
+      if (editWindows.empty()) {
+        return recoveryState.windowReplay.inRecoveryPhase ? editFloorOffset
+                                                          : TextOffset{0};
+      }
+      if (recoveryState.windowReplay.inRecoveryPhase &&
+          recoveryState.windowReplay.activeEditWindowIndex < editWindows.size()) {
+        return editWindows[recoveryState.windowReplay.activeEditWindowIndex]
+            .editFloorOffset;
+      }
+      return TextOffset{0};
+    }();
+    const auto effectiveFloorOffset =
+        _scopedEditFloorOffset.has_value()
+            ? std::min(activeFloorOffset, *_scopedEditFloorOffset)
+            : activeFloorOffset;
     if (editWindows.empty()) {
       return recoveryState.windowReplay.inRecoveryPhase &&
-             offset >= editFloorOffset;
+             offset >= effectiveFloorOffset;
     }
     if (recoveryState.windowReplay.inRecoveryPhase &&
         recoveryState.windowReplay.activeEditWindowIndex < editWindows.size()) {
-      const auto &window =
-          editWindows[recoveryState.windowReplay.activeEditWindowIndex];
-      return offset >= window.editFloorOffset;
+      return offset >= effectiveFloorOffset;
     }
     return false;
   }
@@ -679,6 +867,9 @@ struct RecoveryContext : TrackedParseContext {
   }
 
   [[nodiscard]] constexpr bool canDelete() const noexcept {
+    if (_cursor >= end) {
+      return false;
+    }
     return detail::can_delete(allowDelete, canEdit(),
                               recoveryState.editBudget.consecutiveDeletes,
                               maxConsecutiveCodepointDeletes, *cursor());
@@ -840,6 +1031,10 @@ struct RecoveryContext : TrackedParseContext {
     if (!trackEditState) {
       return false;
     }
+    if (cursor() >= end) {
+      clearPendingDeleteHiddenTriviaBridge();
+      return false;
+    }
     auto *mergedDeleteEdit = pendingHiddenTriviaDeleteEdit();
     const auto *window = currentEditWindow();
     const bool destructiveEditOutsideActiveWindow =
@@ -896,6 +1091,8 @@ struct RecoveryContext : TrackedParseContext {
     ++recoveryStateVersion;
     if (skipAfterDelete) {
       skip();
+    } else {
+      refreshRecoveryPhase();
     }
     PEGIUM_RECOVERY_TRACE("[rule] delete offset=", beforeOffset, " -> ",
                           cursorOffset());
@@ -920,17 +1117,6 @@ struct RecoveryContext : TrackedParseContext {
     if (hiddenEnd >= end) {
       return false;
     }
-    const char *const previousDeletedCursor =
-        detail::previous_codepoint_cursor(begin, cursor());
-    const bool previousDeletedIsWordLike =
-        detail::is_identifier_like_codepoint(
-            static_cast<unsigned char>(*previousDeletedCursor));
-    const bool nextVisibleIsWordLike = detail::is_identifier_like_codepoint(
-        static_cast<unsigned char>(*hiddenEnd));
-    if (previousDeletedIsWordLike != nextVisibleIsWordLike) {
-      return false;
-    }
-
     _deleteBridge.pendingHiddenTriviaStart = cursor();
     _deleteBridge.pendingHiddenTriviaEnd = hiddenEnd;
     _cursor = hiddenEnd;
@@ -939,6 +1125,7 @@ struct RecoveryContext : TrackedParseContext {
     }
     noteLocalReplayCursorAdvance();
     ++recoveryStateVersion;
+    refreshRecoveryPhase();
     PEGIUM_RECOVERY_TRACE("[rule] bridge delete through hidden trivia -> ",
                           cursorOffset());
     return true;
@@ -1086,6 +1273,7 @@ private:
         {.windowIndex = windowIndex,
          .previousReplayForwardTokenCount = window->replayForwardTokenCount});
     window->replayForwardTokenCount = nextReplayForwardTokenCount;
+    ++recoveryStateVersion;
   }
 
   inline void noteLocalReplayCursorAdvance() noexcept {

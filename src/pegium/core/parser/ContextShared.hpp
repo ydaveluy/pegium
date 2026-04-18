@@ -40,29 +40,6 @@ is_word_like_terminal(std::string_view value) noexcept {
   }
   return true;
 }
-
-template <typename Element>
-[[nodiscard]] constexpr bool
-element_is_word_like_terminal(const Element &element) noexcept {
-  using ElementType = std::remove_cvref_t<Element>;
-  if constexpr (requires {
-                  { ElementType::isWordLike } -> std::convertible_to<bool>;
-                }) {
-    return ElementType::isWordLike;
-  } else if constexpr (requires {
-                         { element.isWordLike() } -> std::convertible_to<bool>;
-                       }) {
-    return element.isWordLike();
-  } else if constexpr (requires {
-                         { element.getValue() } ->
-                             std::convertible_to<std::string_view>;
-                       }) {
-    return is_word_like_terminal(element.getValue());
-  } else {
-    return false;
-  }
-}
-
 struct EditCheckpointState {
   bool allowInsert = true;
   bool allowDelete = true;
@@ -106,6 +83,11 @@ public:
     _ctx.allowInsert = nextAllowInsert;
     _ctx.allowDelete = nextAllowDelete;
     _ctx.trackEditState = nextTrackEditState;
+    if constexpr (requires(Context &context) {
+                    context.noteRecoveryPolicyMutation();
+                  }) {
+      _ctx.noteRecoveryPolicyMutation();
+    }
   }
 
   EditStateGuard(const EditStateGuard &) = delete;
@@ -124,6 +106,11 @@ public:
       _ctx.trackEditState = _prevTrackEditState;
       _ctx.allowInsert = _prevAllowInsert;
       _ctx.allowDelete = _prevAllowDelete;
+      if constexpr (requires(Context &context) {
+                      context.noteRecoveryPolicyMutation();
+                    }) {
+        _ctx.noteRecoveryPolicyMutation();
+      }
     }
   }
 
@@ -211,6 +198,11 @@ inline void restore_edit_checkpoint(Context &ctx,
   ctx.maxConsecutiveCodepointDeletes = state.maxConsecutiveCodepointDeletes;
   ctx.maxEditsPerAttempt = state.maxEditsPerAttempt;
   ctx.maxEditCost = state.maxEditCost;
+  if constexpr (requires(Context &mutableCtx) {
+                  mutableCtx.noteRecoveryPolicyMutation();
+                }) {
+    ctx.noteRecoveryPolicyMutation();
+  }
 }
 
 [[nodiscard]] constexpr std::uint32_t
@@ -319,9 +311,12 @@ inline void apply_replace_edit_state(std::uint32_t cost,
 }
 
 struct ActiveRecoveryStack {
+  static constexpr std::uint64_t kInitialSignature = 1469598103934665603ull;
+
   struct Entry {
     const grammar::AbstractElement *element = nullptr;
     const char *cursor = nullptr;
+    std::uint64_t previousSignature = kInitialSignature;
   };
 
   template <typename Context> class Guard {
@@ -329,7 +324,7 @@ struct ActiveRecoveryStack {
     Guard(ActiveRecoveryStack &stack, Context &ctx,
           const grammar::AbstractElement *element) noexcept
         : _stack(stack) {
-      _stack.entries.push_back({.element = element, .cursor = ctx.cursor()});
+      _stack.push(ctx.begin, ctx.cursor(), element);
     }
 
     Guard(const Guard &) = delete;
@@ -342,7 +337,7 @@ struct ActiveRecoveryStack {
 
     ~Guard() noexcept {
       if (_active) {
-        _stack.entries.pop_back();
+        _stack.pop();
       }
     }
 
@@ -361,8 +356,45 @@ struct ActiveRecoveryStack {
 
   [[nodiscard]] std::size_t size() const noexcept { return entries.size(); }
 
+  [[nodiscard]] std::uint64_t signature() const noexcept {
+    return _signature;
+  }
+
+  void push(const char *inputBegin, const char *cursor,
+            const grammar::AbstractElement *element) noexcept {
+    const auto previousSignature = _signature;
+    auto mixed = previousSignature;
+    const auto elementBits = static_cast<std::uint64_t>(
+        reinterpret_cast<std::uintptr_t>(element));
+    const auto cursorOffset =
+        static_cast<std::uint64_t>(cursor - inputBegin);
+    mixed ^= elementBits * 1099511628211ull;
+    mixed ^= cursorOffset * 11400714819323198485ull;
+    mixed ^= mixed >> 33u;
+    mixed *= 14029467366897019727ull;
+    entries.push_back({.element = element,
+                       .cursor = cursor,
+                       .previousSignature = previousSignature});
+    _signature = mixed;
+  }
+
+  void pop() noexcept {
+    _signature = entries.back().previousSignature;
+    entries.pop_back();
+  }
+
   std::vector<Entry> entries;
+
+private:
+  std::uint64_t _signature = kInitialSignature;
 };
+
+[[nodiscard]] inline std::uint64_t
+active_recovery_signature(const ActiveRecoveryStack &stack,
+                          const char *inputBegin) noexcept {
+  (void)inputBegin;
+  return stack.signature();
+}
 
 template <typename Context>
 [[nodiscard]] inline bool

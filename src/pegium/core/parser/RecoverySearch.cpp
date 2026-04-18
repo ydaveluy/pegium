@@ -291,8 +291,17 @@ void consider_window_attempt_candidate(
 
 [[nodiscard]] TextOffset
 visible_leaf_stable_prefix_offset(const FailureSnapshot &snapshot) noexcept {
+  const bool failureTokenEndsAtFurthestCursor =
+      snapshot.hasFailureToken &&
+      snapshot.failureTokenIndex < snapshot.failureLeafHistory.size() &&
+      snapshot.failureLeafHistory[snapshot.failureTokenIndex].endOffset ==
+          snapshot.maxCursorOffset;
+  const auto stableLeafEnd =
+      failureTokenEndsAtFurthestCursor ? snapshot.failureTokenIndex
+                                       : snapshot.failureLeafHistory.size();
   TextOffset stablePrefixOffset = 0;
-  for (const auto &leaf : snapshot.failureLeafHistory) {
+  for (std::size_t index = 0; index < stableLeafEnd; ++index) {
+    const auto &leaf = snapshot.failureLeafHistory[index];
     if (leaf.endOffset > snapshot.maxCursorOffset) {
       break;
     }
@@ -546,16 +555,7 @@ last_failure_leaf_end_offset(const FailureSnapshot &snapshot) noexcept {
                                       selectedAttempt, pending.failureSnapshot,
                                       inputSize);
   }
-  bool hasRankedCandidate = false;
   if (trimmedTailFallbackAttempt.has_value()) {
-    bool selectableAttempt = false;
-    hasRankedCandidate =
-        result.narrowingRetryCandidate(selectableAttempt) != nullptr;
-  }
-  if (trimmedTailFallbackAttempt.has_value() &&
-      !result.hasSelectableAttempt() &&
-      result.bestFallbackAttempt() == nullptr &&
-      !hasRankedCandidate) {
     consider_window_attempt_candidate(result,
                                       std::move(*trimmedTailFallbackAttempt),
                                       selectedAttempt, failureSnapshot,
@@ -568,6 +568,10 @@ last_failure_leaf_end_offset(const FailureSnapshot &snapshot) noexcept {
 extends_committed_prefix_with_leading_structural_placeholder(
     const RecoveryAttempt &candidate,
     const RecoveryAttempt &selectedAttempt) noexcept;
+
+[[nodiscard]] bool
+requires_narrowed_window_retry(const RecoveryAttempt &attempt,
+                               bool selectableAttempt) noexcept;
 
 [[nodiscard]] bool preserves_committed_replay_prefix(
     const RecoveryAttempt &candidate,
@@ -590,17 +594,22 @@ is_trimmed_tail_fallback_attempt(const RecoveryAttempt &attempt) noexcept {
 [[nodiscard]] bool qualifies_selectable_window_attempt(
     const RecoveryAttempt &candidate,
     const RecoveryAttempt &selectedAttempt) noexcept {
-  if (extends_committed_prefix_with_leading_structural_placeholder(
-          candidate, selectedAttempt)) {
+  const bool extendsPlaceholder =
+      extends_committed_prefix_with_leading_structural_placeholder(
+          candidate, selectedAttempt);
+  if (extendsPlaceholder) {
     return false;
   }
   const bool preservesCommittedReplayBoundary =
       has_committed_replay_prefix(selectedAttempt);
   NonCredibleReplayContract committedReplayContract;
-  if (!preserves_committed_replay_prefix(candidate, selectedAttempt,
-                                         committedReplayContract) ||
-      (preservesCommittedReplayBoundary &&
-       rewrites_committed_replay_boundary(candidate, committedReplayContract))) {
+  const bool preservesCommittedReplayPrefix =
+      preserves_committed_replay_prefix(candidate, selectedAttempt,
+                                        committedReplayContract);
+  const bool rewritesCommittedReplayBoundary =
+      preservesCommittedReplayBoundary &&
+      rewrites_committed_replay_boundary(candidate, committedReplayContract);
+  if (!preservesCommittedReplayPrefix || rewritesCommittedReplayBoundary) {
     return false;
   }
   return is_better_recovery_attempt(candidate, selectedAttempt);
@@ -655,6 +664,12 @@ void consider_window_attempt_candidate(
     if (!qualified) {
       result.recordRejectedAttempt(inertTrailingRejectedAttempt);
     }
+    return;
+  }
+  if (attempt.entryRuleMatched &&
+      requires_narrowed_window_retry(attempt, false)) {
+    result.considerAttempt(std::move(attempt), {.rankedFallback = true});
+    result.recordRejectedAttempt(inertTrailingRejectedAttempt);
     return;
   }
   if (!inertTrailingRejectedAttempt) {
@@ -961,12 +976,13 @@ starts_with_stable_boundary_delete_without_continuation(
 }
 
 [[nodiscard]] bool
-allows_input_prefix_delete_recovery_without_stable_prefix(
+allows_input_prefix_recovery_without_stable_prefix(
     const RecoveryAttempt &attempt) noexcept {
   if (attempt.hasStablePrefix || !attempt.fullMatch ||
-      first_edit_offset(attempt) != 0 || !has_delete_only_recovery(attempt) ||
+      first_edit_offset(attempt) != 0 ||
       attempt.parsedLength <= last_edit_offset(attempt) ||
-      attempt.cst == nullptr || attempt.replayWindows.size() != 1u) {
+      attempt.cst == nullptr || attempt.replayWindows.size() != 1u ||
+      !continues_after_first_edit(attempt)) {
     return false;
   }
   const auto &replayWindow = attempt.replayWindows.front();
@@ -974,21 +990,21 @@ allows_input_prefix_delete_recovery_without_stable_prefix(
     return false;
   }
 
-  std::size_t visibleLeafCount = 0u;
-  for (NodeId id = 0;; ++id) {
-    const auto node = attempt.cst->get(id);
-    if (!node.valid()) {
-      break;
-    }
-    if (node.isHidden() || !node.isLeaf() || node.getText().empty()) {
+  bool sawDelete = false;
+  for (const auto &entry : attempt.recoveryEdits) {
+    if (entry.kind == ParseDiagnosticKind::Deleted) {
+      sawDelete = true;
       continue;
     }
-    ++visibleLeafCount;
-    if (visibleLeafCount >= 2u) {
-      return true;
+    if (entry.kind != ParseDiagnosticKind::Inserted ||
+        entry.beginOffset != entry.endOffset || entry.beginOffset != 0) {
+      return false;
     }
   }
-  return false;
+  if (!sawDelete) {
+    return false;
+  }
+  return true;
 }
 
 [[nodiscard]] bool
@@ -1014,12 +1030,32 @@ preserved_prefix_last_window_overreach(
 }
 
 [[nodiscard]] bool
-requires_narrowed_window_retry(const RecoveryAttempt &attempt,
-                               bool selectableAttempt) noexcept {
-  if (!preserved_prefix_last_window_overreach(attempt)) {
+unstable_input_prefix_last_window_overreach(
+    const RecoveryAttempt &attempt) noexcept {
+  if (attempt.hasStablePrefix || attempt.replayWindows.empty() ||
+      attempt.recoveryEdits.empty() || has_delete_only_recovery(attempt) ||
+      !starts_with_unstable_prefix_delete(attempt)) {
     return false;
   }
-  return selectableAttempt || attempt.editCost > attempt.configuredMaxEditCost;
+  const auto &lastReplayWindow = attempt.replayWindows.back();
+  if (lastReplayWindow.beginOffset != 0 || lastReplayWindow.editFloorOffset != 0 ||
+      last_edit_offset(attempt) <= lastReplayWindow.maxCursorOffset) {
+    return false;
+  }
+  return (attempt.fullMatch || attempt.stableAfterRecovery ||
+          attempt.reachedRecoveryTarget) &&
+         has_cursor_progress_past_last_edit(attempt);
+}
+
+[[nodiscard]] bool
+requires_narrowed_window_retry(const RecoveryAttempt &attempt,
+                               bool selectableAttempt) noexcept {
+  if (!preserved_prefix_last_window_overreach(attempt) &&
+      !unstable_input_prefix_last_window_overreach(attempt)) {
+    return false;
+  }
+  return selectableAttempt || attempt.editCost > attempt.configuredMaxEditCost ||
+         unstable_input_prefix_last_window_overreach(attempt);
 }
 
 [[nodiscard]] std::uint32_t
@@ -1113,6 +1149,7 @@ requires_narrowed_global_rerun(const RecoverySearchRunResult &result,
         std::numeric_limits<std::uint32_t>::max();
     ctx.maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
     ctx.maxEditCost = std::numeric_limits<std::uint32_t>::max();
+    ctx.noteRecoveryPolicyMutation();
   }
 
   while (ctx.cursor() < ctx.end) {
@@ -1121,6 +1158,7 @@ requires_narrowed_global_rerun(const RecoverySearchRunResult &result,
       ctx.maxConsecutiveCodepointDeletes = savedMaxConsecutiveDeletes;
       ctx.maxEditsPerAttempt = savedMaxEditsPerAttempt;
       ctx.maxEditCost = savedMaxEditCost;
+      ctx.noteRecoveryPolicyMutation();
       ctx.allowBudgetOverflowEdits();
       return true;
     }
@@ -1132,6 +1170,7 @@ requires_narrowed_global_rerun(const RecoverySearchRunResult &result,
     ctx.maxConsecutiveCodepointDeletes = savedMaxConsecutiveDeletes;
     ctx.maxEditsPerAttempt = savedMaxEditsPerAttempt;
     ctx.maxEditCost = savedMaxEditCost;
+    ctx.noteRecoveryPolicyMutation();
     ctx.allowBudgetOverflowEdits();
     return true;
   }
@@ -1139,6 +1178,7 @@ requires_narrowed_global_rerun(const RecoverySearchRunResult &result,
   ctx.maxConsecutiveCodepointDeletes = savedMaxConsecutiveDeletes;
   ctx.maxEditsPerAttempt = savedMaxEditsPerAttempt;
   ctx.maxEditCost = savedMaxEditCost;
+  ctx.noteRecoveryPolicyMutation();
   ctx.rewind(checkpoint);
   return false;
 }
@@ -1302,6 +1342,7 @@ try_prefix_delete_retry_entry_rule(RecoveryContext &ctx,
             ctx.furthestExploredCursor();
         ctx.skip();
         ctx.skipAfterDelete = previousSkipAfterDelete;
+        ctx.noteRecoveryPolicyMutation();
         auto retryEditGuard =
             ctx.withEditPermissions(savedAllowInsert, savedAllowDelete);
         (void)retryEditGuard;
@@ -1319,6 +1360,7 @@ try_prefix_delete_retry_entry_rule(RecoveryContext &ctx,
           }
         }
         ctx.skipAfterDelete = false;
+        ctx.noteRecoveryPolicyMutation();
         ctx.rewind(retryCheckpoint);
         ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
         return false;
@@ -1565,12 +1607,22 @@ run_recovery_attempt(const grammar::ParserRule &entryRule,
       parseCtx.completedRecoveryWindowCount();
   const auto failureReachedRecoveryTarget = parseCtx.hasReachedRecoveryTarget();
   const auto failureStableAfterRecovery = parseCtx.isStableAfterRecovery();
-
-  if (!attempt.entryRuleMatched) {
+  const bool hasRootOffsetEdit =
+      !failureRecoveryEdits.empty() &&
+      failureRecoveryEdits.front().beginOffset == 0;
+  const bool weakMatchedZeroPrefixAttempt =
+      attempt.entryRuleMatched && hasRootOffsetEdit &&
+      failureParsedLength == 0 &&
+      !failureReachedRecoveryTarget && !failureStableAfterRecovery;
+  if (!attempt.entryRuleMatched || weakMatchedZeroPrefixAttempt) {
+    const bool hadDirectMatch = attempt.entryRuleMatched;
     parseCtx.rewind(attemptCheckpoint);
     if (can_try_prefix_delete_retry(entryRule, spec)) {
       attempt.entryRuleMatched =
           try_prefix_delete_retry_entry_rule(parseCtx, entryRule);
+    }
+    if (!attempt.entryRuleMatched && hadDirectMatch) {
+      attempt.entryRuleMatched = entryRule.recover(parseCtx);
     }
   }
 
@@ -1658,7 +1710,6 @@ run_recovery_search_pass(const grammar::ParserRule &entryRule,
   result.failureVisibleCursorOffset =
       strictFailureStage.failureVisibleCursorOffset;
   result.strictParseRuns = strictFailureStage.strictParseRuns;
-
   if (!strictFailureStage.failureSnapshot.has_value()) {
     return result;
   }
@@ -1748,7 +1799,7 @@ run_recovery_search_pass(const grammar::ParserRule &entryRule,
                .requestedTokenCount =
                    narrowed_window_token_count(
                        pendingVariant.requestedTokenCount),
-               .canRetryNarrowedWindow = false});
+               .canRetryNarrowedWindow = true});
         }
         windowSearch.merge(std::move(pendingWindowSearch));
       }
@@ -1894,7 +1945,7 @@ void classify_recovery_attempt(RecoveryAttempt &attempt) noexcept {
   if (attempt.editCost > attempt.configuredMaxEditCost &&
       !preservesStablePrefixBeforeFirstEdit &&
       !allows_local_gap_recovery_without_stable_prefix(attempt) &&
-      !allows_input_prefix_delete_recovery_without_stable_prefix(attempt)) {
+      !allows_input_prefix_recovery_without_stable_prefix(attempt)) {
     attempt.status =
         attempt.recoveryEdits.empty() ? StrictFailure : RecoveredButNotCredible;
     return;
@@ -1957,6 +2008,13 @@ bool is_selectable_recovery_attempt(const RecoveryAttempt &attempt) noexcept {
     };
   }
 
+  if (allows_input_prefix_recovery_without_stable_prefix(attempt)) {
+    return NonCredibleReplayContract{
+        .resumeFloor = first_edit_offset(attempt),
+        .preservedEditCount = 0u,
+    };
+  }
+
   if (!allows_local_delete_gap_recovery_without_stable_prefix(attempt)) {
     return std::nullopt;
   }
@@ -2000,11 +2058,14 @@ namespace {
   if (candidate.recoveryEdits.size() < contract.preservedEditCount) {
     return false;
   }
-  return std::equal(selectedAttempt.recoveryEdits.begin(),
-                    selectedAttempt.recoveryEdits.begin() +
-                        contract.preservedEditCount,
-                    candidate.recoveryEdits.begin(),
-                    same_syntax_script_entry);
+  for (std::size_t index = 0; index < contract.preservedEditCount; ++index) {
+    const auto &selectedEntry = selectedAttempt.recoveryEdits[index];
+    const auto &candidateEntry = candidate.recoveryEdits[index];
+    if (!same_syntax_script_entry(selectedEntry, candidateEntry)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 [[nodiscard]] bool rewrites_committed_replay_boundary(

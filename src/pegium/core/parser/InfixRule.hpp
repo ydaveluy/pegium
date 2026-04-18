@@ -670,9 +670,11 @@ private:
         const bool previousAllowDelete = ctx.allowDelete;
         ctx.allowInsert = false;
         ctx.allowDelete = false;
+        ctx.noteRecoveryPolicyMutation();
         const bool matched = parser::attempt_parse_editable(ctx, op);
         ctx.allowInsert = previousAllowInsert;
         ctx.allowDelete = previousAllowDelete;
+        ctx.noteRecoveryPolicyMutation();
         if (matched) {
           nextMinPrecedence =
               detail::infix_next_min_precedence<decltype(op)>(precedence);
@@ -708,8 +710,10 @@ private:
         const bool previousAllowExtendedDeleteScan =
             ctx.allowExtendedDeleteScan;
         ctx.allowExtendedDeleteScan = false;
+        ctx.noteRecoveryPolicyMutation();
         observation.matchedPrimary = parse(model->primary, ctx);
         ctx.allowExtendedDeleteScan = previousAllowExtendedDeleteScan;
+        ctx.noteRecoveryPolicyMutation();
         observation.advancedPrimary = ctx.cursor() != observation.rhsStart;
         if (!observation.matchedPrimary || !observation.advancedPrimary) {
           ctx.rewind(checkpoint);
@@ -807,8 +811,10 @@ private:
         const bool previousAllowExtendedDeleteScan =
             ctx.allowExtendedDeleteScan;
         ctx.allowExtendedDeleteScan = false;
+        ctx.noteRecoveryPolicyMutation();
         const bool matchedPrimary = parse(model->primary, ctx);
         ctx.allowExtendedDeleteScan = previousAllowExtendedDeleteScan;
+        ctx.noteRecoveryPolicyMutation();
         assert(matchedPrimary && ctx.cursor() != rhsStart &&
                "Observed editable infix RHS must replay successfully");
         if (!matchedPrimary || ctx.cursor() == rhsStart) {
@@ -827,6 +833,7 @@ private:
                                  std::int32_t minPrecedence) {
         const bool previousSkipAfterDelete = ctx.skipAfterDelete;
         ctx.skipAfterDelete = false;
+        ctx.noteRecoveryPolicyMutation();
         bool stopTail = false;
         const bool recovered =
             has_operator_fast_probe(model, ctx, minPrecedence) &&
@@ -845,6 +852,7 @@ private:
                       ctx.skip_without_builder(matchedCursor) > matchedCursor;
                 });
         ctx.skipAfterDelete = previousSkipAfterDelete;
+        ctx.noteRecoveryPolicyMutation();
         return {.matched = recovered, .stopTail = recovered && stopTail};
       }
 
@@ -870,6 +878,7 @@ private:
         const auto checkpoint = ctx.mark();
         const bool previousSkipAfterDelete = ctx.skipAfterDelete;
         ctx.skipAfterDelete = false;
+        ctx.noteRecoveryPolicyMutation();
         const auto maxProbeDeletes =
             std::min<std::uint32_t>(ctx.maxConsecutiveCodepointDeletes, 4u);
         std::optional<std::uint32_t> observedDeleteCount;
@@ -892,6 +901,7 @@ private:
             },
             {.maxDeletes = maxProbeDeletes, .allowOverflow = false});
         ctx.skipAfterDelete = previousSkipAfterDelete;
+        ctx.noteRecoveryPolicyMutation();
         ctx.rewind(checkpoint);
         return observedDeleteCount;
       }
@@ -904,6 +914,7 @@ private:
         }
         const bool previousSkipAfterDelete = ctx.skipAfterDelete;
         ctx.skipAfterDelete = false;
+        ctx.noteRecoveryPolicyMutation();
         const bool replayed = detail::recover_by_guarded_delete_scan(
             ctx,
             [&]() noexcept {
@@ -916,6 +927,7 @@ private:
             [](const char *) {},
             {.maxDeletes = deleteCount, .allowOverflow = false});
         ctx.skipAfterDelete = previousSkipAfterDelete;
+        ctx.noteRecoveryPolicyMutation();
         return replayed;
       }
 

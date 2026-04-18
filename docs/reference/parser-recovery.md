@@ -29,6 +29,8 @@ The current recovery runtime is built around these rules:
   first edit
 - recovery decisions must be replayable from explicit edits and checkpoints
 - nominal parsing must not pay runtime overhead for recovery bookkeeping
+- repeated recovery-only queries may memoize inside one attempt, but that memo
+  layer stays outside the nominal strict path
 
 ## Global Pipeline
 
@@ -162,6 +164,61 @@ are intentionally accumulative.
 
 Recovery checkpoints restore this state without changing the nominal parse
 context.
+
+### Recovery-Only Memoization
+
+`RecoveryContext` also owns the shared recovery memo table.
+
+This is a selective recovery-packrat layer:
+
+- selective
+  only repeated recovery queries are memoized
+- recovery-local
+  the table exists only on `RecoveryContext`
+- state-qualified
+  memo keys include the recovery-state axes that can change legality or replay
+- replay-based
+  memo values store booleans or normalized replay descriptors, never parse side
+  effects
+
+It is not full PEG packrat. Pegium does not memoize the nominal parser fast
+path, and it does not cache checkpoints, CST-builder state, or mutable replay
+side effects.
+
+The shared key currently includes:
+
+- query kind
+- stable owner identity
+- cursor offset
+- optional furthest-explored offset
+- recovery-policy signature
+- optional active-recovery signature
+- small purpose bits when one query family needs them
+
+When a query family depends on relative failure-history observations, it mixes a
+shared recovery-observation signature into that policy projection instead of
+keeping a private invalidation rule.
+
+The current migrated recovery query families are:
+
+- `fast_probe`
+- `started_without_edits`
+- `probe_recoverable_at_entry`
+- `Group` missing-element replay selection
+- `OrderedChoice` local attempt selection
+- `Repetition` local iteration selection
+
+Probe entries store normalized probe outcomes, including the observed
+furthest-explored projection needed to replay the same recovery signal on a
+memo hit. Local selection entries store normalized replay descriptors.
+
+The runtime uses fixed-size direct-mapped banks for this table. That keeps
+lookup/store cheap and avoids per-query heap work while still letting recovery
+amortize repeated local probes and candidate selection.
+
+Tracked-context utility caches used by strict-failure analysis or skip replay
+are separate from this memo layer. They are not part of recovery-packrat and
+do not widen memoization into the nominal path.
 
 ### Edit Admission
 

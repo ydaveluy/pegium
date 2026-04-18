@@ -53,9 +53,6 @@ struct Repetition : grammar::Repetition {
   }
   std::size_t getMin() const noexcept override { return min; }
   std::size_t getMax() const noexcept override { return max; }
-  [[nodiscard]] constexpr bool isWordLike() const noexcept {
-    return detail::element_is_word_like_terminal(_element);
-  }
 
 private:
   friend struct detail::ParseAccess;
@@ -159,19 +156,28 @@ private:
         return true;
       }
     } else if constexpr (RecoveryParseModeContext<Context>) {
+      if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows()) {
+        TrackedParseContext &strictCtx = ctx;
+        return parse_impl(strictCtx);
+      }
       PEGIUM_STEP_TRACE_INC(detail::StepCounter::RepetitionRecoverCalls);
       if constexpr (is_optional) {
         const auto checkpoint = ctx.mark();
         const char *const savedFurthestExploredCursor =
             ctx.furthestExploredCursor();
-        if (attempt_parse_no_edits(ctx, _element)) {
+        const auto noEditObservation = observe_no_edit_parse(ctx, _element);
+        if (noEditObservation.matched) {
           return finalize_optional_strict_success(ctx, checkpoint,
                                                   savedFurthestExploredCursor);
         }
         ctx.rewind(checkpoint);
         ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+        PEGIUM_STEP_TRACE_INC(detail::StepCounter::RepetitionFastAttempts);
         const bool startedWithoutEdits =
-            probe_started_without_edits(ctx, _element);
+            noEditObservation.startedWithoutEdits;
+        PEGIUM_STEP_TRACE_INC(
+            startedWithoutEdits ? detail::StepCounter::RepetitionFastSuccess
+                                : detail::StepCounter::RepetitionFastFailures);
         const bool entryRecoverable = has_entry_recovery_signal(ctx);
         if (!(startedWithoutEdits || entryRecoverable)) {
           return true;
@@ -208,6 +214,10 @@ private:
         while (true) {
           if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/true)) {
             if (ctx.frontierBlocked()) {
+              if (blocked_frontier_stops_cleanly_after_window_progress(ctx)) {
+                ctx.clearFrontierBlock();
+                break;
+              }
               return false;
             }
             break;
@@ -244,6 +254,10 @@ private:
         for (; repetitionCount < max; ++repetitionCount) {
           if (!try_recovery_iteration(ctx, repetitionCount > 0)) {
             if (ctx.frontierBlocked()) {
+              if (blocked_frontier_stops_cleanly_after_window_progress(ctx)) {
+                ctx.clearFrontierBlock();
+                break;
+              }
               return false;
             }
             break;
@@ -365,6 +379,7 @@ private:
   struct IterationAttempt {
     IterationReplayKind kind = IterationReplayKind::NoInsert;
     detail::StructuralProgressRecoveryCandidate candidate{};
+    bool hasDestructiveEdits = false;
     bool mutatesDestructiveSuffixBeyondStrictExploration = false;
   };
 
@@ -398,6 +413,42 @@ private:
     };
     bool blockedByBoundaryUnsafeRetry = false;
   };
+
+  [[nodiscard]] static RecoveryContext::RepetitionIterationMemoValue
+  capture_iteration_memo_value(const IterationReplayPlan &plan, bool matched,
+                               bool blockFrontier,
+                               TextOffset observedFurthestExploredOffset) noexcept {
+    return {
+        .observedFurthestExploredOffset = observedFurthestExploredOffset,
+        .kind = static_cast<std::uint8_t>(plan.kind),
+        .matched = matched,
+        .blockFrontier = blockFrontier,
+        .allowInsert = plan.allowInsert,
+        .allowDelete = plan.allowDelete,
+        .allowDestructiveWindowContinuation =
+            plan.allowDestructiveWindowContinuation,
+        .scopeLeadingTerminalInsert = plan.scopeLeadingTerminalInsert,
+        .allowExtendedDeleteScan = plan.allowExtendedDeleteScan,
+        .protectParseStartBoundary = plan.protectParseStartBoundary,
+        .protectLaterVisibleBoundary = plan.protectLaterVisibleBoundary,
+    };
+  }
+
+  [[nodiscard]] static IterationReplayPlan replay_cached_iteration_plan(
+      const RecoveryContext::RepetitionIterationMemoValue &cached) noexcept {
+    return {
+        .kind = static_cast<IterationReplayKind>(cached.kind),
+        .legal = cached.matched,
+        .allowInsert = cached.allowInsert,
+        .allowDelete = cached.allowDelete,
+        .allowDestructiveWindowContinuation =
+            cached.allowDestructiveWindowContinuation,
+        .scopeLeadingTerminalInsert = cached.scopeLeadingTerminalInsert,
+        .allowExtendedDeleteScan = cached.allowExtendedDeleteScan,
+        .protectParseStartBoundary = cached.protectParseStartBoundary,
+        .protectLaterVisibleBoundary = cached.protectLaterVisibleBoundary,
+    };
+  }
 
   static void consider_iteration_attempt(IterationSelectionResult &selection,
                                          const IterationAttempt &candidate,
@@ -586,6 +637,15 @@ private:
            parseStartOffset <= ctx.pendingRecoveryWindowMaxCursorOffset();
   }
 
+  [[nodiscard]] static bool
+  blocked_frontier_stops_cleanly_after_window_progress(
+      const RecoveryContext &ctx) noexcept {
+    return ctx.frontierBlocked() && ctx.hasHadEdits() &&
+           ctx.hasPendingRecoveryWindows() &&
+           ctx.furthestExploredOffset() >=
+               ctx.pendingRecoveryWindowMaxCursorOffset();
+  }
+
   bool replay_iteration(RecoveryContext &ctx, const IterationReplayPlan &plan,
                         const char *parseStart) const {
     if (!plan.legal) {
@@ -670,19 +730,21 @@ private:
   insert_retry_candidate_is_valid(RecoveryContext &ctx,
                                   const IterationReplayPlan &plan,
                                   std::size_t recoveryEditCountBefore) const {
-    if (!plan.scopeLeadingTerminalInsert) {
-      return true;
+    if (plan.scopeLeadingTerminalInsert) {
+      const auto insertEditCount = static_cast<std::uint32_t>(
+          ctx.recoveryEditCount() - recoveryEditCountBefore);
+      bool continuesAfterFirstEdit = true;
+      if (insertEditCount > 0u) {
+        const auto edits = ctx.recoveryEditsView();
+        continuesAfterFirstEdit =
+            detail::post_skip_cursor_offset(ctx) >
+            edits[recoveryEditCountBefore].endOffset;
+      }
+      if (insertEditCount != 1u || !continuesAfterFirstEdit) {
+        return false;
+      }
     }
-    const auto insertEditCount = static_cast<std::uint32_t>(
-        ctx.recoveryEditCount() - recoveryEditCountBefore);
-    bool continuesAfterFirstEdit = true;
-    if (insertEditCount > 0u) {
-      const auto edits = ctx.recoveryEditsView();
-      continuesAfterFirstEdit =
-          detail::post_skip_cursor_offset(ctx) >
-          edits[recoveryEditCountBefore].endOffset;
-    }
-    return insertEditCount == 1u && continuesAfterFirstEdit;
+    return true;
   }
 
   IterationAttempt evaluate_no_insert_iteration_attempt(
@@ -793,15 +855,19 @@ private:
         !speculativeBoundaryRetryWithoutEntrySignal &&
         !speculativeContinuedRetryAfterRecoveredIteration &&
         !speculativeSyntheticSingleLeafRetryAfterRecoveredIteration) {
+      const bool entryRetryWithoutPriorEdits =
+          skipBetweenIterations && !ctx.hasHadEdits() &&
+          (observation.startedWithoutEdits || hasLocalRetrySignal());
       deleteRetryLegal =
-          observation.iterationStarted ||
-          (skipBetweenIterations && !ctx.hasHadEdits());
+          observation.iterationStarted || entryRetryWithoutPriorEdits;
       if (!deleteRetryLegal && firstZeroMinIteration && !ctx.hasHadEdits()) {
         deleteRetryLegal = hasLocalRetrySignal();
       }
       if (!deleteRetryLegal && !is_optional &&
           observation.failedInActiveWindow) {
-        deleteRetryLegal = hasEntryRecoverySignal() || hasLocalRetrySignal();
+        deleteRetryLegal =
+            hasLocalRetrySignal() ||
+            (observation.iterationStarted && hasEntryRecoverySignal());
       }
     }
     if (deepStartedOptionalAfterPriorRecovery) {
@@ -907,16 +973,24 @@ private:
       attempt.candidate = capture_iteration_candidate(
           ctx, iterationCheckpoint, plan.kind, parseStartOffset,
           recoveryEditCountBefore);
+      attempt.hasDestructiveEdits =
+          has_destructive_retry_edits(ctx, recoveryEditCountBefore);
       attempt.mutatesDestructiveSuffixBeyondStrictExploration =
           mutates_destructive_suffix_beyond_strict_exploration(
               ctx, strictExploredOffset, recoveryEditCountBefore);
-      const bool rewritesParseStartBoundary =
-          attempt.candidate.matched && attempt.candidate.hadEdits &&
-          attempt.candidate.firstEditOffset < parseStartOffset;
+      const bool deletesProtectedSuffixWithoutVisibleContinuation =
+          plan.protectLaterVisibleBoundary &&
+          attempt.mutatesDestructiveSuffixBeyondStrictExploration &&
+          !attempt.candidate.continuesAfterFirstEdit;
+      const bool insertRetryDeletesProtectedSuffix =
+          plan.protectLaterVisibleBoundary &&
+          plan.kind == IterationReplayKind::InsertRetry &&
+          has_destructive_retry_edits(ctx, recoveryEditCountBefore);
       const bool boundaryUnsafe =
-          (plan.protectParseStartBoundary && rewritesParseStartBoundary) ||
-          (plan.protectLaterVisibleBoundary &&
-           attempt.mutatesDestructiveSuffixBeyondStrictExploration);
+          (plan.protectParseStartBoundary &&
+           attempt.candidate.rewritesParseStartBoundary) ||
+          deletesProtectedSuffixWithoutVisibleContinuation ||
+          insertRetryDeletesProtectedSuffix;
       if (boundaryUnsafe) {
         blockedByBoundaryUnsafeRetry =
             blockedByBoundaryUnsafeRetry || attempt.candidate.matched;
@@ -974,6 +1048,18 @@ private:
         });
   }
 
+  [[nodiscard]] static bool
+  has_destructive_retry_edits(RecoveryContext &ctx,
+                              std::size_t recoveryEditCountBefore) {
+    const auto edits = ctx.recoveryEditsView();
+    return std::ranges::any_of(
+        edits.begin() + static_cast<std::ptrdiff_t>(recoveryEditCountBefore),
+        edits.end(), [](const auto &edit) noexcept {
+          return edit.kind == ParseDiagnosticKind::Deleted ||
+                 edit.kind == ParseDiagnosticKind::Replaced;
+        });
+  }
+
   std::size_t continue_zero_min_recovery_run(
       RecoveryContext &ctx, std::size_t matchedCount,
       std::size_t maxIterationCount) const {
@@ -991,7 +1077,11 @@ private:
     const auto checkpoint = ctx.mark();
     const char *const savedFurthestExploredCursor =
         ctx.furthestExploredCursor();
+    PEGIUM_STEP_TRACE_INC(detail::StepCounter::RepetitionFastAttempts);
     const bool startedWithoutEdits = probe_started_without_edits(ctx, _element);
+    PEGIUM_STEP_TRACE_INC(
+        startedWithoutEdits ? detail::StepCounter::RepetitionFastSuccess
+                            : detail::StepCounter::RepetitionFastFailures);
     if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/false)) {
       if (ctx.frontierBlocked()) {
         ctx.rewind(checkpoint);
@@ -1012,6 +1102,10 @@ private:
       (void)continue_zero_min_recovery_run(ctx, 1u, maxIterationCount);
     }
     if (ctx.frontierBlocked()) {
+      if (blocked_frontier_stops_cleanly_after_window_progress(ctx)) {
+        ctx.clearFrontierBlock();
+        return true;
+      }
       return false;
     }
     return true;
@@ -1021,6 +1115,51 @@ private:
                               bool skipBetweenIterations) const {
     const auto iterationCheckpoint = ctx.mark();
     const auto recoveryEditCountBefore = ctx.recoveryEditCount();
+    const auto iterationEntryOffset = ctx.cursorOffset();
+    const auto entryFurthestExploredOffset = ctx.furthestExploredOffset();
+    const auto policySignature = detail::mix_recovery_memo_signature(
+        ctx.recoveryPolicySignature(), ctx.recoveryObservationSignature());
+    const auto activeRecoverySignature = ctx.activeRecoverySignature();
+    const auto memoKey = RecoveryContext::RecoveryMemoKey{
+        .queryKind =
+            RecoveryContext::RecoveryMemoQueryKind::RepetitionIteration,
+        .purposeBits = static_cast<std::uint8_t>(skipBetweenIterations),
+        .ownerIdentity = static_cast<const void *>(this),
+        .cursorOffset = iterationEntryOffset,
+        .furthestExploredOffset = entryFurthestExploredOffset,
+        .policySignature = policySignature,
+        .activeRecoverySignature = activeRecoverySignature,
+    };
+    RecoveryContext::RepetitionIterationMemoValue cachedIteration;
+    if (ctx.memoTable().template tryGet<
+            RecoveryContext::RecoveryMemoQueryKind::RepetitionIteration>(
+            memoKey, cachedIteration)) {
+      const char *const cachedFurthestExploredCursor =
+          ctx.begin + cachedIteration.observedFurthestExploredOffset;
+      if (cachedFurthestExploredCursor > ctx.furthestExploredCursor()) {
+        ctx.restoreFurthestExploredCursor(cachedFurthestExploredCursor);
+      }
+      if (!cachedIteration.matched) {
+        if (cachedIteration.blockFrontier) {
+          ctx.blockFrontier();
+        }
+        return false;
+      }
+      if (skipBetweenIterations) {
+        ctx.skip();
+      }
+      const auto parseCheckpoint = ctx.mark();
+      const char *const parseStart = ctx.cursor();
+      const auto cachedPlan = replay_cached_iteration_plan(cachedIteration);
+      if (replay_iteration(ctx, cachedPlan, parseStart)) {
+        if (cachedFurthestExploredCursor > ctx.furthestExploredCursor()) {
+          ctx.restoreFurthestExploredCursor(cachedFurthestExploredCursor);
+        }
+        return true;
+      }
+      ctx.rewind(parseCheckpoint);
+      ctx.rewind(iterationCheckpoint);
+    }
     if (skipBetweenIterations) {
       ctx.skip();
     }
@@ -1050,6 +1189,12 @@ private:
         has_legal_iteration_retry_plan(iterationPlans);
     const char *furthestExploredCursor = ctx.furthestExploredCursor();
     if (iterationPlans.front().legal && !hasLegalRetryPlan) {
+      ctx.memoTable().template store<
+          RecoveryContext::RecoveryMemoQueryKind::RepetitionIteration>(
+          memoKey,
+          capture_iteration_memo_value(iterationPlans.front(), true,
+                                       /*blockFrontier=*/false,
+                                       ctx.furthestExploredOffset()));
       return true;
     }
     ctx.rewind(parseCheckpoint);
@@ -1060,27 +1205,48 @@ private:
       if (furthestExploredCursor > ctx.furthestExploredCursor()) {
         ctx.restoreFurthestExploredCursor(furthestExploredCursor);
       }
+      ctx.memoTable().template store<
+          RecoveryContext::RecoveryMemoQueryKind::RepetitionIteration>(
+          memoKey, capture_iteration_memo_value(
+                       {.kind = IterationReplayKind::NoInsert},
+                       /*matched=*/false, /*blockFrontier=*/false,
+                       static_cast<TextOffset>(furthestExploredCursor -
+                                               ctx.begin)));
       return false;
     }
     const auto selection = select_iteration_attempt(
         ctx, iterationPlans, observation, iterationCheckpoint, parseCheckpoint,
         parseStart, parseStartFurthestExploredCursor, parseStartOffset,
         furthestExploredCursor, recoveryEditCountBefore);
+    const bool iterationTouchedActiveWindow =
+        observation.failedInActiveWindow ||
+        iteration_starts_in_active_window(ctx, parseStartOffset);
     if (!selection.bestAttempt.candidate.matched) {
       ctx.rewind(iterationCheckpoint);
+      bool blockedFrontier = false;
       if (selection.blockedByBoundaryUnsafeRetry) {
-        ctx.blockFrontier();
+        const bool mustBlockFrontier =
+            !skipBetweenIterations || recoveryEditCountBefore == 0u ||
+            iterationTouchedActiveWindow;
+        if (mustBlockFrontier) {
+          ctx.blockFrontier();
+          blockedFrontier = true;
+        }
       }
       if (furthestExploredCursor > ctx.furthestExploredCursor()) {
         ctx.restoreFurthestExploredCursor(furthestExploredCursor);
       }
+      ctx.memoTable().template store<
+          RecoveryContext::RecoveryMemoQueryKind::RepetitionIteration>(
+          memoKey, capture_iteration_memo_value(
+                       {.kind = IterationReplayKind::NoInsert},
+                       /*matched=*/false, blockedFrontier,
+                       static_cast<TextOffset>(furthestExploredCursor -
+                                               ctx.begin)));
       return false;
     }
     const auto bestStrength =
         classify_iteration_attempt_strength(selection.bestAttempt);
-    const bool iterationTouchedActiveWindow =
-        observation.failedInActiveWindow ||
-        iteration_starts_in_active_window(ctx, parseStartOffset);
     const bool weakRetryEscapesActiveWindow =
         skipBetweenIterations &&
         recoveryEditCountBefore > 0u &&
@@ -1092,19 +1258,43 @@ private:
       if (furthestExploredCursor > ctx.furthestExploredCursor()) {
         ctx.restoreFurthestExploredCursor(furthestExploredCursor);
       }
+      ctx.memoTable().template store<
+          RecoveryContext::RecoveryMemoQueryKind::RepetitionIteration>(
+          memoKey, capture_iteration_memo_value(
+                       {.kind = IterationReplayKind::NoInsert},
+                       /*matched=*/false, /*blockFrontier=*/false,
+                       static_cast<TextOffset>(furthestExploredCursor -
+                                               ctx.begin)));
       return false;
     }
     // Rebuild only the winning branch from the shared parse checkpoint instead
     // of keeping success checkpoints alive across competing recovery parses.
     ctx.rewind(parseCheckpoint);
     ctx.restoreFurthestExploredCursor(parseStartFurthestExploredCursor);
-    const bool replayed = replay_iteration(ctx, selection.winningPlan, parseStart);
+    const bool replayed =
+        replay_iteration(ctx, selection.winningPlan, parseStart);
     if (!replayed) {
       ctx.rewind(iterationCheckpoint);
       if (furthestExploredCursor > ctx.furthestExploredCursor()) {
         ctx.restoreFurthestExploredCursor(furthestExploredCursor);
       }
+      ctx.memoTable().template store<
+          RecoveryContext::RecoveryMemoQueryKind::RepetitionIteration>(
+          memoKey, capture_iteration_memo_value(
+                       selection.winningPlan, /*matched=*/false,
+                       /*blockFrontier=*/false,
+                       static_cast<TextOffset>(furthestExploredCursor -
+                                               ctx.begin)));
+      return false;
     }
+    const auto observedFurthestExploredOffset = static_cast<TextOffset>(
+        std::max(furthestExploredCursor, ctx.furthestExploredCursor()) -
+        ctx.begin);
+    ctx.memoTable().template store<
+        RecoveryContext::RecoveryMemoQueryKind::RepetitionIteration>(
+        memoKey, capture_iteration_memo_value(selection.winningPlan, true,
+                                              /*blockFrontier=*/false,
+                                              observedFurthestExploredOffset));
     return replayed;
   }
 

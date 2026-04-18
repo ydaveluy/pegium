@@ -337,7 +337,7 @@ private:
 /// Languages can inherit from `NamedAstNode` to let the default naming
 /// services read names directly from the AST without additional customization.
 struct NamedAstNode : AstNode {
-  AstNode::string name;
+  string name;
 };
 
 template <typename T>

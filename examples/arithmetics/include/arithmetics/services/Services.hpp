@@ -10,15 +10,11 @@ class ArithmeticsValidator;
 
 namespace arithmetics {
 
-struct ArithmeticsValidationServices {
-  std::unique_ptr<validation::ArithmeticsValidator> arithmeticsValidator;
-};
-
 struct ArithmeticsAddedServices {
-  ArithmeticsValidationServices validation;
+  std::unique_ptr<validation::ArithmeticsValidator> validator;
 };
 
-struct ArithmeticsServices final : pegium::CoreServices {
+struct ArithmeticsServices final : pegium::CoreServices, ArithmeticsAddedServices {
   explicit ArithmeticsServices(
       const pegium::SharedCoreServices &sharedServices);
   ArithmeticsServices(ArithmeticsServices &&) noexcept;
@@ -27,7 +23,6 @@ struct ArithmeticsServices final : pegium::CoreServices {
   ArithmeticsServices &operator=(const ArithmeticsServices &) = delete;
   ~ArithmeticsServices() noexcept override;
 
-  ArithmeticsAddedServices arithmetics;
 };
 
 [[nodiscard]] inline const ArithmeticsServices *
