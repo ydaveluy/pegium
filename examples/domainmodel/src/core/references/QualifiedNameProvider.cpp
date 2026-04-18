@@ -1,4 +1,4 @@
-#include "QualifiedNameProvider.hpp"
+#include <domainmodel/core/references/QualifiedNameProvider.hpp>
 
 namespace domainmodel::references {
 

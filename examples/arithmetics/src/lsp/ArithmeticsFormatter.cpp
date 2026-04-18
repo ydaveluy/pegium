@@ -1,4 +1,4 @@
-#include "lsp/ArithmeticsFormatter.hpp"
+#include <arithmetics/lsp/ArithmeticsFormatter.hpp>
 
 namespace arithmetics::lsp {
 void ArithmeticsFormatter::formatModule(pegium::FormattingBuilder &builder,

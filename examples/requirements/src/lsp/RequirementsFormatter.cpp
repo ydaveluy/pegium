@@ -1,4 +1,4 @@
-#include "lsp/RequirementsFormatter.hpp"
+#include <requirements/lsp/RequirementsFormatter.hpp>
 
 namespace requirements::lsp {
 void RequirementsFormatter::formatContact(pegium::FormattingBuilder &builder,

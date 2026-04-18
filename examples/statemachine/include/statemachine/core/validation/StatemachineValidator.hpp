@@ -2,7 +2,6 @@
 
 #include <statemachine/ast.hpp>
 
-#include <statemachine/services/Services.hpp>
 #include <pegium/core/validation/ValidationAcceptor.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
 
@@ -22,7 +21,7 @@ public:
 template <typename TServices>
 void registerValidationChecks(TServices &services) {
   auto &registry = *services.validation.validationRegistry;
-  auto &validator = *services.statemachine.validation.statemachineValidator;
+  auto &validator = *services.validator;
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
            &StatemachineValidator::checkStateNameStartsWithCapital>(validator),

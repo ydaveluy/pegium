@@ -1,6 +1,6 @@
 #include "BenchmarkSupport.hpp"
 
-#include <arithmetics/services/Module.hpp>
+#include <arithmetics/core/Module.hpp>
 
 #include <chrono>
 #include <stdexcept>
@@ -76,7 +76,7 @@ std::shared_ptr<BenchmarkFixture> build_scope_fixture(std::string source) {
       .name = "scope",
       .languageId = "arithmetics",
       .extension = ".calc",
-      .registerLanguages = arithmetics::register_language_services,
+      .registerLanguages = arithmetics::registerArithmeticsServices,
       .makeSource = [](std::size_t) { return std::string{}; },
   };
 

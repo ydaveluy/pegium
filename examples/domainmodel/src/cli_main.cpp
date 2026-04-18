@@ -1,6 +1,6 @@
 #include <domainmodel/cli/CliUtils.hpp>
 #include <domainmodel/cli/Generator.hpp>
-#include <domainmodel/services/Module.hpp>
+#include <domainmodel/core/Module.hpp>
 
 #include <pegium/cli/CliUtils.hpp>
 #include <pegium/core/workspace/Documents.hpp>
@@ -48,7 +48,7 @@ std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
 
 int generate_cli(const GenerateOptions &options) {
   auto shared = pegium::cli::make_shared_services();
-  auto services = domainmodel::create_language_services(shared);
+  auto services = domainmodel::createDomainModelServices(shared);
   auto &domainmodelServices = *services;
   shared.serviceRegistry->registerServices(std::move(services));
 

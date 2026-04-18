@@ -1,6 +1,6 @@
-#include "lsp/ArithmeticsCodeActionProvider.hpp"
+#include <arithmetics/lsp/ArithmeticsCodeActionProvider.hpp>
 
-#include "core/validation/ArithmeticsValidator.hpp"
+#include <arithmetics/core/validation/ArithmeticsValidator.hpp>
 
 #include <format>
 #include <string>

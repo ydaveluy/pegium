@@ -1,6 +1,6 @@
 #include "BenchmarkSupport.hpp"
 
-#include <statemachine/services/Module.hpp>
+#include <statemachine/core/Module.hpp>
 
 namespace pegium::bench {
 namespace {
@@ -46,7 +46,7 @@ void register_statemachine_benchmarks(BenchmarkRegistry &registry) {
       {.name = "statemachine",
        .languageId = "statemachine",
        .extension = ".statemachine",
-       .registerLanguages = statemachine::register_language_services,
+       .registerLanguages = statemachine::registerStatemachineServices,
        .makeSource = make_source});
 }
 

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <requirements/ast.hpp>
-#include <requirements/services/Services.hpp>
 
 #include <pegium/core/validation/ValidationAcceptor.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
@@ -22,7 +21,7 @@ public:
 template <typename TServices>
 void registerTestsValidationChecks(TServices &services) {
   auto &registry = *services.validation.validationRegistry;
-  auto &validator = *services.testsLang.validation.testsValidator;
+  auto &validator = *services.validator;
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
            &TestsValidator::checkTestNameContainsANumber>(validator),

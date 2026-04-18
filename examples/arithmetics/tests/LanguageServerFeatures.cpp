@@ -160,7 +160,7 @@ protected:
   }
 
   void SetUp() override {
-    ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+    ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
   }
 
   std::shared_ptr<workspace::Document> openArithmeticsDocument(

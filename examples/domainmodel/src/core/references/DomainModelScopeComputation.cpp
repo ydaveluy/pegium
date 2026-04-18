@@ -1,6 +1,7 @@
-#include "DomainModelScopeComputation.hpp"
+#include <domainmodel/core/references/DomainModelScopeComputation.hpp>
 
-#include "QualifiedNameProvider.hpp"
+#include <domainmodel/core/Services.hpp>
+#include <domainmodel/core/references/QualifiedNameProvider.hpp>
 
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/utils/Cancellation.hpp>
@@ -12,12 +13,11 @@ using namespace domainmodel::ast;
 
 const QualifiedNameProvider *qualified_name_provider(
     const pegium::CoreServices &services) {
-  const auto *domainModelServices =
-      domainmodel::as_domain_model_services(services);
-  if (domainModelServices == nullptr) {
+  const auto *added = domainmodel::asDomainModelAddedServices(services);
+  if (added == nullptr) {
     return nullptr;
   }
-  return domainModelServices->domainModel.references.qualifiedNameProvider.get();
+  return added->qualifiedNameProvider.get();
 }
 
 } // namespace

@@ -5,5 +5,5 @@
 int main(int argc, char **argv) {
   return pegium::runLanguageServerMain(
       argc, argv, "requirements-lsp",
-      requirements::lsp::register_language_services);
+      requirements::lsp::registerRequirementsServices);
 }

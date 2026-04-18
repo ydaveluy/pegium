@@ -3,6 +3,7 @@
 #include <optional>
 #include <string_view>
 
+#include <domainmodel/core/references/QualifiedNameProvider.hpp>
 #include <domainmodel/lsp/Services.hpp>
 
 #include <pegium/lsp/navigation/DefaultRenameProvider.hpp>

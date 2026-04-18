@@ -81,7 +81,7 @@ protected:
 
   void SetUp() override {
     auto services =
-        arithmetics::lsp::create_language_services(*shared, "arithmetics");
+        arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
     services->validation.validationRegistry->registerCheck<AstNode>(
         [this](const AstNode &node,
                const validation::ValidationAcceptor &acceptor,
@@ -112,7 +112,7 @@ protected:
   }
 
   void SetUp() override {
-    ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+    ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
   }
 
   void TearDown() override {

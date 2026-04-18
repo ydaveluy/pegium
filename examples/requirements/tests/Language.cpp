@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <requirements/core/Module.hpp>
 #include <requirements/parser/Parser.hpp>
-#include <requirements/services/Module.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 
@@ -52,7 +52,7 @@ TEST(RequirementsLanguageTest, LinksEnvironmentMultiReferencesAndReportsUnresolv
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(requirements::register_language_services(*shared));
+  ASSERT_TRUE(requirements::registerRequirementsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("linking.req"), "requirements-lang",

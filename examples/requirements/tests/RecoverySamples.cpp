@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <requirements/core/Module.hpp>
 #include <requirements/parser/Parser.hpp>
-#include <requirements/services/Module.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>

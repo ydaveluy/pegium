@@ -1,6 +1,6 @@
 #include "BenchmarkSupport.hpp"
 
-#include <arithmetics/services/Module.hpp>
+#include <arithmetics/core/Module.hpp>
 
 namespace pegium::bench {
 namespace {
@@ -36,7 +36,7 @@ void register_arithmetics_benchmarks(BenchmarkRegistry &registry) {
       {.name = "arithmetics",
        .languageId = "arithmetics",
        .extension = ".calc",
-       .registerLanguages = arithmetics::register_language_services,
+       .registerLanguages = arithmetics::registerArithmeticsServices,
        .makeSource = make_source});
 }
 

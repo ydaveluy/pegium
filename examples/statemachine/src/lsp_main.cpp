@@ -5,5 +5,5 @@
 int main(int argc, char **argv) {
   return pegium::runLanguageServerMain(
       argc, argv, "statemachine-lsp",
-      statemachine::lsp::register_language_services);
+      statemachine::lsp::registerStatemachineServices);
 }
