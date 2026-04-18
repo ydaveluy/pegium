@@ -162,6 +162,10 @@ inline void stepTraceDumpSummary(Stream &stream) noexcept {
   }
 }
 
+template <typename... Args>
+  requires(sizeof...(Args) != 1)
+inline void stepTraceDumpSummary(Args &&...) noexcept {}
+
 #else
 
 #define PEGIUM_STEP_TRACE_INC(...) ((void)0)

@@ -80,6 +80,11 @@ At this stage:
 - `InfixRule.hpp` recovery and `docs/reference/parser-recovery.md` alignment
   now follow the shared local `facts -> legal candidates -> compare -> replay`
   shape and are no longer tracked as a separate residual.
+- shared recovery-only memoization now lives behind one
+  `RecoveryContext`-owned `RecoveryMemoTable`
+- that memoization is now formalized as a selective recovery-packrat layer:
+  recovery-local, state-qualified, replay-based, and strictly out of the
+  nominal fast path
 
 | Phase | Status | What is already true in code | Remaining deviations | What must still be deleted |
 | --- | --- | --- | --- | --- |
@@ -90,6 +95,7 @@ At this stage:
 | 5 | landed | `OrderedChoice` derives no-edit attempts first, no longer keeps entry-start probing in a whole-choice cache or bundled `ChoiceBranchFacts` mini-model, routes replay through the shared structural comparator plus explicit boundary-preservation invariants, no longer needs a dedicated `ChoiceReplayRecoveryCandidate` wrapper, calls the shared clean-boundary invariant directly instead of rewrapping it in local helpers, evaluates `no strict start signal` legality through an explicit filtering predicate over the enumerated attempts instead of storing candidate-local veto flags or applying a post-selection correction, now applies that legality at branch-candidate construction time instead of as a second local filter after candidate construction in the selection loop, no longer keeps separate helper functions just to restate that branch-local legality outside the candidate-construction site, now defers entry-start probes until after no-edit observation so clean-boundary fast paths do not pay for unnecessary branch-entry probing, runs strict-start and no-strict-start selection through one branch-enumeration loop and one candidate-construction path instead of separate local branch families, consumes entry-start probing branch-by-branch directly in that selection loop instead of staging it in a whole-choice cache or precomputed probe table, now performs that branch-by-branch probing only when the candidate actually needs it for restart admission or no-strict-start legality instead of plumbing a per-branch signal through selection, derives that admission from shared editable candidate facts instead of a branch-local post-selection policy block, reuses the same shared structural comparator as `Group` instead of keeping a separate replay-candidate wrapper, no longer carries restart replay through a separate `RestartReplayPlan` bundle, and no longer keeps restart delete-scan state in a dedicated local `RestartScanState` sub-model | no open deviation remains outside the tightening targets listed below | none |
 | 6 | landed | diagnostics are produced from normalized edit scripts and the final parser-facing projection is script-first | no open deviation remains | none |
 | 7 | landed | large legacy blocks are removed, structural ranking is projected through normalized order keys, the specialized candidate families route through one explicit `NormalizedRecoveryOrderKey` comparison entry, repeated shared comparator axes such as `matched / editCost / editCount` are factored once instead of being open-coded in every profile, repeated bidirectional axis decisions now share one helper instead of open-coding `lhs/rhs` checks at each block, the profile-specific key-only comparator wrappers have been deleted in favor of that single entry, runtime comparison now routes only through terminal, structural, and attempt profiles, `choice` candidate ordering goes through the shared structural comparator with explicit clean-boundary / preferred-boundary constraints instead of private wrappers, same-start structural continuation and rewrite rules survive only as named shared invariants inside that comparator, and the structural same-start boundary-literal insert invariant is now owned by the shared structural comparator rather than by `Repetition` | no open deviation remains outside the tightening targets listed below | none |
+| 8 | landed | recovery-only memoization is centralized behind one `RecoveryMemoTable` owned by `RecoveryContext`, repeated recovery queries now use shared state-qualified memo keys instead of private per-combinator tables, `fast_probe`, `started_without_edits`, `probe_recoverable_at_entry`, `Group` missing-element replay selection, `OrderedChoice` local selection, and `Repetition` local selection all project onto the same memo contract, `Group`, `OrderedChoice`, and `Repetition` no longer keep private memo subsystems, the shared keys now carry the recovery-policy and active-recovery signatures needed by legality and replay, and failure-history-sensitive local selection now mixes a shared recovery-observation signature into that policy projection instead of keeping private cache invalidation rules inside `OrderedChoice` or `Repetition`; probe payloads also replay their normalized furthest-explored observation on memo hit, and the two slow arithmetics recovery tests have left the multi-second regime under that shared memoization rather than through language-specific policy | no open deviation remains outside the tightening targets listed below | none |
 
 ## Cross-Phase Deviations
 
@@ -217,12 +223,21 @@ Responsibility:
 
 - hold replay-time state only
 - expose checkpoints and edit primitives
+- own the shared recovery-only memo table
 
 Internal state is limited to:
 
 - `WindowReplayState`
 - `EditBudgetState`
 - `DeleteBridgeState`
+
+Besides replay state, `RecoveryContext` may own exactly one additional
+performance subsystem:
+
+- `RecoveryMemoTable`
+
+That table is recovery-only. It is not parser state, not builder state, and
+not part of the nominal strict parse path.
 
 Mandatory cursor split:
 
@@ -236,6 +251,70 @@ Rules:
 - checkpoints restore replay state only
 - if an internal state fragment cannot be tied to a replay invariant, it must
   not exist
+
+### 3a. RecoveryPackrat
+
+The shared memo layer is a selective recovery-packrat model.
+
+It is:
+
+- selective: only repeated recovery queries are memoized
+- recovery-local: it exists only inside `RecoveryContext`
+- state-qualified: keys include every state axis that can change legality,
+  comparison, or replay
+- replay-based: values store normalized results or replay descriptors only
+
+It is not:
+
+- full PEG packrat across all expressions and positions
+- nominal parse memoization
+- checkpoint, builder, or side-effect caching
+
+The memo rule is strict:
+
+- a memoized result is valid only if its key fully captures every
+  recovery-state axis that can change legality, comparison, or replay
+
+The shared memo key shape is:
+
+- `queryKind`
+- `ownerIdentity`
+- `cursorOffset`
+- optional `furthestExploredOffset`
+- `policySignature`
+- optional `activeRecoverySignature`
+- optional `purposeBits`
+
+When one query family depends on relative recovery observations instead of only
+structural policy state, that query must mix a shared recovery-observation
+signature into its policy projection rather than inventing a private cache key.
+
+The shared memo payload rule is:
+
+- probes store normalized probe outcomes only
+- local candidate selection stores normalized replay descriptors only
+- stable grammar metadata pointers are allowed
+- checkpoints, builder references, vectors, and mutable parse side effects are
+  forbidden
+
+The implementation stays intentionally simple:
+
+- one shared `RecoveryMemoTable` interface
+- fixed-size direct-mapped banks
+- trivially copyable payloads
+- no virtual dispatch
+- no heap allocation per lookup or store
+
+Current migrated query families are:
+
+- `fast_probe`
+- `started_without_edits`
+- `probe_recoverable_at_entry`
+- `OrderedChoice` local attempt selection
+- `Repetition` local iteration selection
+
+Tracked-context utility caches for skip replay or strict-failure analysis are
+not part of this recovery-packrat model.
 
 ### 4. Local Recovery Engine
 
@@ -488,6 +567,28 @@ Exit criteria:
 - no surviving helper exists only to preserve a legacy decomposition
 - no pairwise special rule survives unless it has become a named shared invariant
 
+### Phase 8. Shared Recovery-Only Memoization
+
+Add one shared recovery-only memo layer behind `RecoveryContext`.
+
+This phase formalizes recovery-packrat as a selective optimization layer for
+repeated recovery queries. It must stay generic, replay-safe, and strictly out
+of the nominal fast path.
+
+The migration target is query families, not combinator-private folklore.
+
+Exit criteria:
+
+- the shared memo model is documented in this plan
+- recovery memoization is centralized behind one shared subsystem
+- migrated combinators do not keep private memo tables
+- memo keys include every state axis needed for legality, comparison, or replay
+- cached results replay the same observable outcome as uncached execution
+- no nominal parse API or strict fast path pays a new recovery cost
+- the two slow arithmetics recovery tests are no longer second-scale and
+  profiling shows the main repeated recovery queries are materially amortized by
+  the shared table
+
 ## Per-Phase Review Checklist
 
 Every phase ends with this review:
@@ -555,6 +656,9 @@ The rewrite is complete only if all of the following are true:
 - all local recovery uses the same compare-and-replay model
 - no touched legacy logic survives outside clean projection into the new model
 - no private comparator or private score remains in a combinator
+- no migrated recovery query keeps a private memo subsystem outside the shared
+  recovery-packrat table
+- recovery memoization remains strictly recovery-only
 - the remaining residual concepts are either gone or still justified by a clear
   invariant
 - the final model is simpler to explain than the current one

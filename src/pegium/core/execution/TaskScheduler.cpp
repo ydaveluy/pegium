@@ -161,7 +161,10 @@ void TaskScheduler::join(const std::shared_ptr<TaskGroupState> &group,
     if (group->pending.load() == 0U) {
       break;
     }
-    group->cv.wait_for(lock, std::chrono::milliseconds(1));
+    group->cv.wait(lock, [group]() {
+      return group->pending.load() == 0U ||
+             group->cancelled.load() != 0;
+    });
   }
 
   if (group->exception != nullptr) {
@@ -276,7 +279,7 @@ void TaskScheduler::workerLoop(std::size_t workerIndex,
     }
 
     std::unique_lock lock(_globalMutex);
-    _globalCv.wait_for(lock, std::chrono::milliseconds(1), [this, &stopToken]() {
+    _globalCv.wait(lock, [this, &stopToken]() {
       return stopToken.stop_requested() || _stopping.load() != 0 ||
              !_globalQueue.empty();
     });

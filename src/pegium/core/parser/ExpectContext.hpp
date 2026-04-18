@@ -252,6 +252,9 @@ struct ExpectContext {
   }
 
   [[nodiscard]] constexpr bool canDelete() const noexcept {
+    if (_cursor >= anchor) {
+      return false;
+    }
     return detail::can_delete(allowDelete, canEdit(), consecutiveDeletes,
                               maxConsecutiveCodepointDeletes, *cursor());
   }
@@ -310,6 +313,9 @@ struct ExpectContext {
   }
 
   bool deleteOneCodepoint() noexcept {
+    if (_cursor >= anchor) {
+      return false;
+    }
     if (!trackEditState || !canDelete() ||
         !canAffordEdit(ParseDiagnosticKind::Deleted)) {
       return false;

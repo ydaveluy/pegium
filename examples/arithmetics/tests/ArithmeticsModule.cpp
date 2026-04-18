@@ -119,7 +119,7 @@ TEST(ArithmeticsModuleTest, InstallsLanguageSpecificOverrides) {
       arithmetics::lsp::create_language_services(*shared, "arithmetics");
 
   ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->arithmetics.validation.arithmeticsValidator, nullptr);
+  ASSERT_NE(services->validator, nullptr);
   EXPECT_NE(services->references.scopeProvider, nullptr);
   EXPECT_NE(services->references.linker, nullptr);
   EXPECT_NE(dynamic_cast<pegium::references::DefaultNameProvider *>(
@@ -170,7 +170,7 @@ TEST(ArithmeticsModuleTest, CreateLanguageServicesReturnsTypedServices) {
       arithmetics::lsp::create_language_services(*shared, "arithmetics");
 
   ASSERT_NE(services, nullptr);
-  EXPECT_NE(services->arithmetics.validation.arithmeticsValidator,
+  EXPECT_NE(services->validator,
             nullptr);
   EXPECT_NE(arithmetics::lsp::as_arithmetics_services(*services),
             nullptr);

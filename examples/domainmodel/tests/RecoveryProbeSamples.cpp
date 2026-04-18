@@ -23,11 +23,11 @@ TEST(DomainModelRecoveryProbeBatchTest, ReportsBatchBehavior) {
   pegium::test::expect_recovery_probe_summary(
       "domainmodel", summary,
       {.total = 5u,
-       .withValue = 1u,
-       .fullMatch = 1u,
-       .recovered = 1u,
-       .incomplete = 4u,
-       .completeRecovery = 1u});
+       .withValue = 4u,
+       .fullMatch = 4u,
+       .recovered = 4u,
+       .incomplete = 1u,
+       .completeRecovery = 4u});
 }
 
 } // namespace

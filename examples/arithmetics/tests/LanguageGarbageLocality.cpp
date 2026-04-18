@@ -124,8 +124,10 @@ TEST(ArithmeticsLanguageTest,
       dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression.get());
   ASSERT_NE(lastCall, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
-  EXPECT_EQ(lastCall->func.getRefText(), "root");
-  EXPECT_FALSE(lastCall->args.empty());
+  EXPECT_EQ(lastCall->func.getRefText(), "root")
+      << parseDump << " :: " << summarize_module_statement_shapes(*module);
+  EXPECT_FALSE(lastCall->args.empty())
+      << parseDump << " :: " << summarize_module_statement_shapes(*module);
 }
 
 TEST(ArithmeticsLanguageTest,
@@ -242,8 +244,10 @@ TEST(ArithmeticsLanguageTest,
       dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression.get());
   ASSERT_NE(lastCall, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
-  EXPECT_EQ(lastCall->func.getRefText(), "root");
-  EXPECT_FALSE(lastCall->args.empty());
+  EXPECT_EQ(lastCall->func.getRefText(), "root")
+      << parseDump << " :: " << summarize_module_statement_shapes(*module);
+  EXPECT_FALSE(lastCall->args.empty())
+      << parseDump << " :: " << summarize_module_statement_shapes(*module);
 }
 
 TEST(ArithmeticsLanguageTest,

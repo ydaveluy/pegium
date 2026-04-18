@@ -25,10 +25,10 @@ TEST(StatemachineRecoveryProbeBatchTest, ReportsBatchBehavior) {
       "statemachine", summary,
       {.total = 9u,
        .withValue = 8u,
-       .fullMatch = 3u,
-       .recovered = 3u,
-       .incomplete = 6u,
-       .completeRecovery = 3u});
+       .fullMatch = 6u,
+       .recovered = 6u,
+       .incomplete = 3u,
+       .completeRecovery = 6u});
 }
 
 } // namespace

@@ -11,7 +11,7 @@ void configure_core_services(TServices &services) {
   services.parser =
       std::make_unique<const arithmetics::parser::ArithmeticParser>(services);
   services.languageMetaData.fileExtensions = {".calc"};
-  services.arithmetics.validation.arithmeticsValidator =
+  services.validator =
       std::make_unique<arithmetics::validation::ArithmeticsValidator>();
   arithmetics::validation::registerValidationChecks(services);
 }

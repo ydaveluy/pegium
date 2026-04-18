@@ -2,7 +2,9 @@
 
 /// Helpers that parse or probe expressions while preserving caller state on failure.
 
+#include <algorithm>
 #include <concepts>
+#include <memory>
 #include <type_traits>
 
 #include <pegium/core/parser/ParseContext.hpp>
@@ -90,6 +92,66 @@ inline bool attempt_parse_no_edits(RecoveryContext &ctx, const E &expression) {
 }
 
 template <Expression E>
+inline bool probe_started_without_edits(RecoveryContext &ctx,
+                                        const E &expression);
+
+struct NoEditParseObservation {
+  bool matched = false;
+  bool startedWithoutEdits = false;
+};
+
+template <Expression E>
+inline NoEditParseObservation observe_no_edit_parse(RecoveryContext &ctx,
+                                                    const E &expression) {
+  const auto startOffset = ctx.cursorOffset();
+  const auto furthestExploredOffsetBefore = ctx.furthestExploredOffset();
+  auto noEditGuard = ctx.withEditState(false, false, false);
+  (void)noEditGuard;
+  TrackedParseContext &strictCtx = ctx;
+  bool matched = false;
+  if constexpr (!requires_checkpoint_on_failure_v<E>) {
+    matched = parse(expression, strictCtx);
+  } else {
+    const auto checkpoint = ctx.mark();
+    matched = parse(expression, strictCtx);
+    if (!matched) {
+      bool startedWithoutEdits =
+          ctx.cursorOffset() > startOffset ||
+          ctx.furthestExploredOffset() >
+              std::max(startOffset, furthestExploredOffsetBefore);
+      ctx.rewind(checkpoint);
+      if (!startedWithoutEdits) {
+        startedWithoutEdits = probe_started_without_edits(ctx, expression);
+      }
+      return {
+          .matched = false,
+          .startedWithoutEdits = startedWithoutEdits,
+      };
+    }
+  }
+  if (!matched) {
+    bool startedWithoutEdits =
+        ctx.cursorOffset() > startOffset ||
+        ctx.furthestExploredOffset() >
+            std::max(startOffset, furthestExploredOffsetBefore);
+    if (!startedWithoutEdits) {
+      startedWithoutEdits = probe_started_without_edits(ctx, expression);
+    }
+    return {
+        .matched = false,
+        .startedWithoutEdits = startedWithoutEdits,
+    };
+  }
+  return {
+      .matched = matched,
+      .startedWithoutEdits =
+          matched || ctx.cursorOffset() > startOffset ||
+          ctx.furthestExploredOffset() >
+              std::max(startOffset, furthestExploredOffsetBefore),
+  };
+}
+
+template <Expression E>
 inline bool attempt_parse_editable(RecoveryContext &ctx, const E &expression) {
   if (!ctx.isInRecoveryPhase()) {
     return detail::attempt_parse_recovery_strict_view(ctx, expression);
@@ -117,16 +179,48 @@ inline bool attempt_fast_probe(Context &ctx, const E &expression) {
 
 template <Expression E>
 inline bool attempt_fast_probe(RecoveryContext &ctx, const E &expression) {
-  if constexpr (detail::FastProbeCapableExpression<E, RecoveryContext>) {
-    return detail::FastProbeAccess::probe(expression, ctx);
-  } else if constexpr (detail::FastProbeCapableExpression<E,
-                                                          TrackedParseContext>) {
-    TrackedParseContext &strictCtx = ctx;
-    return detail::FastProbeAccess::probe(expression, strictCtx);
-  } else {
-    TrackedParseContext &strictCtx = ctx;
-    return probe(expression, strictCtx);
+  const auto expressionIdentity =
+      static_cast<const void *>(std::addressof(expression));
+  const auto startOffset = ctx.cursorOffset();
+  const auto memoKey = RecoveryContext::RecoveryMemoKey{
+      .queryKind = RecoveryContext::RecoveryMemoQueryKind::FastProbe,
+      .ownerIdentity = expressionIdentity,
+      .cursorOffset = startOffset,
+      .furthestExploredOffset =
+          RecoveryContext::RecoveryMemoTable::kNoFurthestExploredOffset,
+      .policySignature = ctx.recoveryProbeMemoSignature(),
+  };
+  RecoveryContext::RecoveryMemoTable::ValueFor<
+      RecoveryContext::RecoveryMemoQueryKind::FastProbe>
+      cachedResult{};
+  if (ctx.memoTable().template tryGet<
+          RecoveryContext::RecoveryMemoQueryKind::FastProbe>(memoKey,
+                                                             cachedResult)) {
+    const char *const cachedFurthestExploredCursor =
+        ctx.begin + cachedResult.observedFurthestExploredOffset;
+    if (cachedFurthestExploredCursor > ctx.furthestExploredCursor()) {
+      ctx.restoreFurthestExploredCursor(cachedFurthestExploredCursor);
+    }
+    return cachedResult.result;
   }
+  const auto result = [&]() {
+    if constexpr (detail::FastProbeCapableExpression<E, RecoveryContext>) {
+      return detail::FastProbeAccess::probe(expression, ctx);
+    } else if constexpr (detail::FastProbeCapableExpression<E,
+                                                            TrackedParseContext>) {
+      TrackedParseContext &strictCtx = ctx;
+      return detail::FastProbeAccess::probe(expression, strictCtx);
+    } else {
+      TrackedParseContext &strictCtx = ctx;
+      return probe(expression, strictCtx);
+    }
+  }();
+  ctx.memoTable().template store<
+      RecoveryContext::RecoveryMemoQueryKind::FastProbe>(
+      memoKey,
+      {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
+       .result = result});
+  return result;
 }
 
 template <Expression E>
@@ -152,7 +246,39 @@ inline bool probe_recoverable_at_entry(const E &expression,
                   { expression.probeRecoverableAtEntry(ctx) } ->
                       std::same_as<bool>;
                 }) {
-    return expression.probeRecoverableAtEntry(ctx);
+    const auto expressionIdentity =
+        static_cast<const void *>(std::addressof(expression));
+    const auto startOffset = ctx.cursorOffset();
+    const auto policySignature = ctx.recoveryPolicySignature();
+    const auto memoKey = RecoveryContext::RecoveryMemoKey{
+        .queryKind = RecoveryContext::RecoveryMemoQueryKind::EntryRecoverable,
+        .ownerIdentity = expressionIdentity,
+        .cursorOffset = startOffset,
+        .furthestExploredOffset =
+            RecoveryContext::RecoveryMemoTable::kNoFurthestExploredOffset,
+        .policySignature = policySignature,
+        .activeRecoverySignature = ctx.activeRecoverySignature(),
+    };
+    RecoveryContext::RecoveryMemoTable::ValueFor<
+        RecoveryContext::RecoveryMemoQueryKind::EntryRecoverable>
+        cachedResult{};
+    if (ctx.memoTable().template tryGet<
+            RecoveryContext::RecoveryMemoQueryKind::EntryRecoverable>(
+            memoKey, cachedResult)) {
+      const char *const cachedFurthestExploredCursor =
+          ctx.begin + cachedResult.observedFurthestExploredOffset;
+      if (cachedFurthestExploredCursor > ctx.furthestExploredCursor()) {
+        ctx.restoreFurthestExploredCursor(cachedFurthestExploredCursor);
+      }
+      return cachedResult.result;
+    }
+    const bool result = expression.probeRecoverableAtEntry(ctx);
+    ctx.memoTable().template store<
+        RecoveryContext::RecoveryMemoQueryKind::EntryRecoverable>(
+        memoKey,
+        {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
+         .result = result});
+    return result;
   } else {
     return false;
   }
@@ -161,22 +287,58 @@ inline bool probe_recoverable_at_entry(const E &expression,
 template <Expression E>
 inline bool probe_started_without_edits(RecoveryContext &ctx,
                                         const E &expression) {
+  const auto expressionIdentity =
+      static_cast<const void *>(std::addressof(expression));
+  const auto startOffset = ctx.cursorOffset();
+  const auto memoKey = RecoveryContext::RecoveryMemoKey{
+      .queryKind =
+          RecoveryContext::RecoveryMemoQueryKind::StartedWithoutEdits,
+      .ownerIdentity = expressionIdentity,
+      .cursorOffset = startOffset,
+      .furthestExploredOffset =
+          RecoveryContext::RecoveryMemoTable::kNoFurthestExploredOffset,
+      .policySignature = ctx.recoveryProbeMemoSignature(),
+  };
+  RecoveryContext::RecoveryMemoTable::ValueFor<
+      RecoveryContext::RecoveryMemoQueryKind::StartedWithoutEdits>
+      cachedResult{};
+  if (ctx.memoTable().template tryGet<
+          RecoveryContext::RecoveryMemoQueryKind::StartedWithoutEdits>(
+          memoKey, cachedResult)) {
+    const char *const cachedFurthestExploredCursor =
+        ctx.begin + cachedResult.observedFurthestExploredOffset;
+    if (cachedFurthestExploredCursor > ctx.furthestExploredCursor()) {
+      ctx.restoreFurthestExploredCursor(cachedFurthestExploredCursor);
+    }
+    return cachedResult.result;
+  }
   const auto checkpoint = ctx.mark();
   const char *const savedFurthestExploredCursor =
       ctx.furthestExploredCursor();
   ctx.restoreFurthestExploredCursor(ctx.cursor());
-  const auto startOffset = ctx.cursorOffset();
   if (attempt_fast_probe(ctx, expression)) {
+    const auto observedFurthestExploredOffset = ctx.furthestExploredOffset();
     ctx.rewind(checkpoint);
     ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+    ctx.memoTable().template store<
+        RecoveryContext::RecoveryMemoQueryKind::StartedWithoutEdits>(
+        memoKey,
+        {.observedFurthestExploredOffset = observedFurthestExploredOffset,
+         .result = true});
     return true;
   }
   (void)attempt_parse_no_edits(ctx, expression);
   const bool started =
       ctx.cursorOffset() > startOffset ||
       ctx.furthestExploredOffset() > startOffset;
+  const auto observedFurthestExploredOffset = ctx.furthestExploredOffset();
   ctx.rewind(checkpoint);
   ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+  ctx.memoTable().template store<
+      RecoveryContext::RecoveryMemoQueryKind::StartedWithoutEdits>(
+      memoKey,
+      {.observedFurthestExploredOffset = observedFurthestExploredOffset,
+       .result = started});
   return started;
 }
 

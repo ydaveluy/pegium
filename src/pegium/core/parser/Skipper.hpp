@@ -3,9 +3,12 @@
 /// Generic token skipper wrapper used by parser contexts.
 
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <pegium/core/grammar/AbstractElement.hpp>
 #include <pegium/core/syntax-tree/CstBuilder.hpp>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -27,10 +30,33 @@ concept SkipWithoutBuilderContextType =
       { ctx.skip(begin) } noexcept -> std::same_as<const char *>;
     };
 
+struct HiddenLeafTraceEntry {
+  TextOffset beginOffset = 0;
+  TextOffset endOffset = 0;
+  const grammar::AbstractElement *element = nullptr;
+};
+
+struct SkipTraceResult {
+  const char *end = nullptr;
+  std::uint32_t hiddenLeafCount = 0;
+  bool overflowed = false;
+};
+
+template <typename ContextT>
+concept SkipTraceContextType =
+    requires(const ContextT &ctx, const char *begin,
+             std::span<HiddenLeafTraceEntry> traceEntries) {
+      { ctx.trace_skip(begin, traceEntries) } noexcept ->
+          std::same_as<SkipTraceResult>;
+    };
+
 using SkipHiddenNodesFn =
     const char *(*)(const void *, const char *, CstBuilder &) noexcept;
 using SkipWithoutBuilderFn =
     const char *(*)(const void *, const char *) noexcept;
+using TraceSkipFn =
+    SkipTraceResult (*)(const void *, const char *,
+                        std::span<HiddenLeafTraceEntry>) noexcept;
 
 template <typename ContextT>
   requires ParseContextType<ContextT>
@@ -46,10 +72,19 @@ skip_without_builder_for_context(const void *contextPtr,
   return static_cast<const ContextT *>(contextPtr)->skip(begin);
 }
 
+template <SkipTraceContextType ContextT>
+[[nodiscard]] SkipTraceResult
+trace_skip_for_context(const void *contextPtr, const char *begin,
+                       std::span<HiddenLeafTraceEntry> traceEntries) noexcept {
+  return static_cast<const ContextT *>(contextPtr)->trace_skip(begin,
+                                                               traceEntries);
+}
+
 struct Skipper {
   const void *context = nullptr;
   SkipHiddenNodesFn skipFn = &default_skip;
   SkipWithoutBuilderFn skipWithoutBuilderFn = &default_skip_without_builder;
+  TraceSkipFn traceSkipFn = &default_trace_skip;
   std::shared_ptr<const void> owner;
 
   [[nodiscard]] static const char *default_skip(const void *,
@@ -62,12 +97,28 @@ struct Skipper {
     return begin;
   }
 
+  [[nodiscard]] static SkipTraceResult
+  default_trace_skip(const void *, const char *begin,
+                     std::span<HiddenLeafTraceEntry>) noexcept {
+    return {.end = begin};
+  }
+
+  template <typename ContextT>
+  [[nodiscard]] static consteval TraceSkipFn trace_skip_fn_for() noexcept {
+    if constexpr (SkipTraceContextType<ContextT>) {
+      return &trace_skip_for_context<ContextT>;
+    } else {
+      return &default_trace_skip;
+    }
+  }
+
   template <typename ContextT>
     requires ParseContextType<ContextT>
   [[nodiscard]] static Skipper from(const ContextT &contextInstance) noexcept {
     return {std::addressof(contextInstance),
             &skip_hidden_nodes_for_context<ContextT>,
             &skip_without_builder_for_context<ContextT>,
+            trace_skip_fn_for<ContextT>(),
             {}};
   }
 
@@ -80,6 +131,7 @@ struct Skipper {
     return {ownedContext.get(),
             &skip_hidden_nodes_for_context<StoredContext>,
             &skip_without_builder_for_context<StoredContext>,
+            trace_skip_fn_for<StoredContext>(),
             std::move(ownedContext)};
   }
 
@@ -95,6 +147,16 @@ struct Skipper {
 
   [[nodiscard]] const char *skip(const char *begin) const noexcept {
     return skipWithoutBuilderFn(context, begin);
+  }
+
+  [[nodiscard]] SkipTraceResult
+  trace_skip(const char *begin,
+             std::span<HiddenLeafTraceEntry> traceEntries) const noexcept {
+    return traceSkipFn(context, begin, traceEntries);
+  }
+
+  [[nodiscard]] bool supports_trace_skip() const noexcept {
+    return traceSkipFn != &default_trace_skip;
   }
 
   [[nodiscard]] const char *skip(const std::string &text) const noexcept {

@@ -76,9 +76,6 @@ public:
   constexpr bool isNullable() const noexcept override {
     return nullable;
   }
-  [[nodiscard]] constexpr bool isWordLike() const noexcept {
-    return detail::element_is_word_like_terminal(_element);
-  }
   bool probeRecoverable(RecoveryContext &ctx) const {
     return attempt_fast_probe(ctx, _element) ||
            probe_locally_recoverable(_element, ctx);

@@ -53,6 +53,11 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
     ctx.maxConsecutiveCodepointDeletes = std::numeric_limits<std::uint32_t>::max();
     ctx.maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
     ctx.maxEditCost = std::numeric_limits<std::uint32_t>::max();
+    if constexpr (requires(Context &context) {
+                    context.noteRecoveryPolicyMutation();
+                  }) {
+      ctx.noteRecoveryPolicyMutation();
+    }
     enabled = true;
     return true;
   }
@@ -64,6 +69,11 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
     ctx.maxConsecutiveCodepointDeletes = savedMaxConsecutiveDeletes;
     ctx.maxEditsPerAttempt = savedMaxEditsPerAttempt;
     ctx.maxEditCost = savedMaxEditCost;
+    if constexpr (requires(Context &context) {
+                    context.noteRecoveryPolicyMutation();
+                  }) {
+      ctx.noteRecoveryPolicyMutation();
+    }
     enabled = false;
   }
 
@@ -92,6 +102,11 @@ template <typename Context> struct DeleteRetryReplayScope {
       ctx.allowDeleteRetry = false;
     }
     ctx.skipAfterDelete = false;
+    if constexpr (requires(Context &context) {
+                    context.noteRecoveryPolicyMutation();
+                  }) {
+      ctx.noteRecoveryPolicyMutation();
+    }
   }
 
   DeleteRetryReplayScope(const DeleteRetryReplayScope &) = delete;
@@ -102,6 +117,11 @@ template <typename Context> struct DeleteRetryReplayScope {
     ctx.skipAfterDelete = savedSkipAfterDelete;
     if (disableDeleteRetry) {
       ctx.allowDeleteRetry = savedAllowDeleteRetry;
+    }
+    if constexpr (requires(Context &context) {
+                    context.noteRecoveryPolicyMutation();
+                  }) {
+      ctx.noteRecoveryPolicyMutation();
     }
   }
 
