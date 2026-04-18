@@ -1,7 +1,6 @@
 #pragma once
 
 #include <domainmodel/ast.hpp>
-#include <domainmodel/services/Services.hpp>
 #include <pegium/core/validation/ValidationAcceptor.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
 
@@ -20,7 +19,7 @@ public:
 template <typename TServices>
 void registerValidationChecks(TServices &services) {
   auto &registry = *services.validation.validationRegistry;
-  auto &validator = *services.domainModel.validation.domainModelValidator;
+  auto &validator = *services.validator;
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
            &DomainModelValidator::checkEntityNameStartsWithCapital>(validator),

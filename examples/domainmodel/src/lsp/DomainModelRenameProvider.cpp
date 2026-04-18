@@ -1,4 +1,4 @@
-#include "lsp/DomainModelRenameProvider.hpp"
+#include <domainmodel/lsp/DomainModelRenameProvider.hpp>
 
 #include <domainmodel/ast.hpp>
 
@@ -10,7 +10,7 @@
 #include <typeindex>
 #include <utility>
 
-#include "core/references/QualifiedNameProvider.hpp"
+#include <domainmodel/core/references/QualifiedNameProvider.hpp>
 
 #include <pegium/lsp/support/LspProviderUtils.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
@@ -30,11 +30,11 @@ using namespace pegium::provider_detail;
 const domainmodel::references::QualifiedNameProvider *qualified_name_provider(
     const pegium::Services &services) {
   const auto *domainModelServices =
-      domainmodel::lsp::as_domain_model_services(services);
+      domainmodel::lsp::asDomainModelServices(services);
   if (domainModelServices == nullptr) {
     return nullptr;
   }
-  return domainModelServices->domainModel.references.qualifiedNameProvider.get();
+  return domainModelServices->qualifiedNameProvider.get();
 }
 
 const ast::PackageDeclaration *parent_package(const pegium::AstNode &node) {

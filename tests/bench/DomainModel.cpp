@@ -1,6 +1,6 @@
 #include "BenchmarkSupport.hpp"
 
-#include <domainmodel/services/Module.hpp>
+#include <domainmodel/core/Module.hpp>
 
 namespace pegium::bench {
 namespace {
@@ -61,14 +61,14 @@ void register_domainmodel_benchmarks(BenchmarkRegistry &registry) {
       {.name = "domainmodel",
        .languageId = "domain-model",
        .extension = ".dmodel",
-       .registerLanguages = domainmodel::register_language_services,
+       .registerLanguages = domainmodel::registerDomainModelServices,
        .makeSource = make_source});
   register_full_build_benchmark(
       registry,
       {.name = "domainmodel-polymorphic-links",
        .languageId = "domain-model",
        .extension = ".dmodel",
-       .registerLanguages = domainmodel::register_language_services,
+       .registerLanguages = domainmodel::registerDomainModelServices,
        .makeSource = make_polymorphic_source});
 }
 

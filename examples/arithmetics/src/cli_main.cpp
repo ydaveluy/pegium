@@ -1,4 +1,4 @@
-#include <arithmetics/services/Module.hpp>
+#include <arithmetics/core/Module.hpp>
 
 #include <pegium/cli/CliUtils.hpp>
 
@@ -25,7 +25,7 @@ std::optional<EvalOptions> parse_eval_args(int argc, char **argv) {
 
 int eval_cli(const EvalOptions &options) {
   auto shared = pegium::cli::make_shared_services();
-  auto services = arithmetics::create_language_services(shared);
+  auto services = arithmetics::createArithmeticsServices(shared);
   auto &arithmeticsServices = *services;
   shared.serviceRegistry->registerServices(std::move(services));
   return arithmetics::cli::eval_file(options.fileName, arithmeticsServices);

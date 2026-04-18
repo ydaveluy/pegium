@@ -1,4 +1,4 @@
-#include "DomainModelValidator.hpp"
+#include <domainmodel/core/validation/DomainModelValidator.hpp>
 
 #include <domainmodel/ast.hpp>
 

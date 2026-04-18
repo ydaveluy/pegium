@@ -1,4 +1,4 @@
-#include "lsp/DomainModelFormatter.hpp"
+#include <domainmodel/lsp/DomainModelFormatter.hpp>
 
 namespace domainmodel::lsp {
 

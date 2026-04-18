@@ -961,7 +961,7 @@ TEST(ArithmeticsLanguageTest, CommentProviderReturnsLeadingBlockComment) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
-      arithmetics::lsp::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
   auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
   ASSERT_NE(module, nullptr);
@@ -990,7 +990,7 @@ TEST(ArithmeticsLanguageTest, DocumentationProviderRendersJSDocMarkdown) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
-      arithmetics::lsp::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
   auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
   ASSERT_NE(module, nullptr);
@@ -1009,7 +1009,7 @@ TEST(ArithmeticsLanguageTest, HoverReturnsNoContentWithoutDocumentation) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   const auto uri = pegium::test::make_file_uri("hover.calc");
   auto document = pegium::test::open_and_build_document(
@@ -1047,7 +1047,7 @@ TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForModuleName) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   const auto uri = pegium::test::make_file_uri("root-hover.calc");
   auto document = pegium::test::open_and_build_document(
@@ -1084,7 +1084,7 @@ TEST(ArithmeticsLanguageTest, HoverReturnsDocumentationForDefinitionName) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   const auto uri = pegium::test::make_file_uri("definition-hover.calc");
   auto document = pegium::test::open_and_build_document(
@@ -1120,7 +1120,7 @@ TEST(ArithmeticsLanguageTest, HoverResultSerializesForDocumentedRootAndReference
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   const auto uri = pegium::test::make_file_uri("documented-hover.calc");
   auto document = pegium::test::open_and_build_document(

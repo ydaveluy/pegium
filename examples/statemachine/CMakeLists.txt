@@ -1,5 +1,4 @@
 add_library(pegium_example_statemachine_core
-    src/core/StatemachineModule.cpp
     src/core/validation/StatemachineValidator.cpp
 )
 
@@ -19,7 +18,6 @@ target_link_libraries(pegium_example_statemachine_core
 )
 
 add_library(pegium_example_statemachine_lsp
-    src/lsp/StatemachineModule.cpp
     src/lsp/StatemachineFormatter.cpp
 )
 

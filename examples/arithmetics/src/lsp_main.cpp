@@ -5,5 +5,5 @@
 int main(int argc, char **argv) {
   return pegium::runLanguageServerMain(
       argc, argv, "arithmetics-lsp",
-      arithmetics::lsp::register_language_services);
+      arithmetics::lsp::registerArithmeticsServices);
 }

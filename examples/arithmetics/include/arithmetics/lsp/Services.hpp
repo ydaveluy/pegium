@@ -1,25 +1,18 @@
 #pragma once
 
-#include <memory>
-
-#include <arithmetics/services/Services.hpp>
+#include <arithmetics/core/Services.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
 namespace arithmetics::lsp {
 
-struct ArithmeticsServices final : pegium::Services, arithmetics::ArithmeticsAddedServices {
-  explicit ArithmeticsServices(
-      const pegium::SharedServices &sharedServices);
-  ArithmeticsServices(ArithmeticsServices &&) noexcept;
-  ArithmeticsServices &operator=(ArithmeticsServices &&) noexcept = delete;
-  ArithmeticsServices(const ArithmeticsServices &) = delete;
-  ArithmeticsServices &operator=(const ArithmeticsServices &) = delete;
-  ~ArithmeticsServices() noexcept override;
-
+/// LSP-enabled arithmetics language services.
+struct ArithmeticsServices final : pegium::Services,
+                                   arithmetics::ArithmeticsAddedServices {
+  using pegium::Services::Services;
 };
 
 [[nodiscard]] inline const ArithmeticsServices *
-as_arithmetics_services(const pegium::Services &services) noexcept {
+asArithmeticsServices(const pegium::Services &services) noexcept {
   return dynamic_cast<const ArithmeticsServices *>(&services);
 }
 

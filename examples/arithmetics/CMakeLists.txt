@@ -1,5 +1,4 @@
 add_library(pegium_example_arithmetics_core
-    src/core/ArithmeticsModule.cpp
     src/core/Language.cpp
     src/core/validation/ArithmeticsValidator.cpp
 )
@@ -20,7 +19,6 @@ target_link_libraries(pegium_example_arithmetics_core
 )
 
 add_library(pegium_example_arithmetics_lsp
-    src/lsp/ArithmeticsModule.cpp
     src/lsp/ArithmeticsCodeActionProvider.cpp
     src/lsp/ArithmeticsFormatter.cpp
 )

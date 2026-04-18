@@ -15,9 +15,9 @@
 #include <lsp/json/json.h>
 
 #include <pegium/core/references/DefaultNameProvider.hpp>
-#include "../src/lsp/ArithmeticsCodeActionProvider.hpp"
-#include "../src/lsp/ArithmeticsFormatter.hpp"
-#include "../src/core/validation/ArithmeticsValidator.hpp"
+#include <arithmetics/lsp/ArithmeticsCodeActionProvider.hpp>
+#include <arithmetics/lsp/ArithmeticsFormatter.hpp>
+#include <arithmetics/core/validation/ArithmeticsValidator.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
@@ -116,7 +116,7 @@ TEST(ArithmeticsModuleTest, InstallsLanguageSpecificOverrides) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
-      arithmetics::lsp::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->validator, nullptr);
@@ -144,7 +144,7 @@ TEST(ArithmeticsModuleTest, RegistersLanguagesAndPublishesValidationDiagnostic) 
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
   EXPECT_NO_THROW((void)shared->serviceRegistry->getServices(
       pegium::test::make_file_uri("arithmetics-module.calc")));
   EXPECT_EQ(shared->serviceRegistry->findServices(
@@ -167,12 +167,12 @@ TEST(ArithmeticsModuleTest, CreateLanguageServicesReturnsTypedServices) {
   pegium::installDefaultSharedLspServices(*shared);
 
   auto services =
-      arithmetics::lsp::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
   ASSERT_NE(services, nullptr);
   EXPECT_NE(services->validator,
             nullptr);
-  EXPECT_NE(arithmetics::lsp::as_arithmetics_services(*services),
+  EXPECT_NE(arithmetics::lsp::asArithmeticsServices(*services),
             nullptr);
 }
 
@@ -238,7 +238,7 @@ TEST(ArithmeticsModuleTest, DoesNotWarnWhenDefinitionIsAlreadyAConstantLiteral) 
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("arithmetics-constant-literal.calc"),
@@ -263,7 +263,7 @@ TEST(ArithmeticsModuleTest, DivisionByZeroTargetsRightOperand) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("arithmetics-div-zero.calc"),
@@ -293,7 +293,7 @@ TEST(ArithmeticsModuleTest, ModuloByZeroIsDetected) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("arithmetics-mod-zero.calc"),
@@ -311,7 +311,7 @@ TEST(ArithmeticsModuleTest, ExpressionNormalizationUsesExpectedIssueCode) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("arithmetics-normalizable.calc"),
@@ -340,7 +340,7 @@ TEST(ArithmeticsModuleTest, DuplicateDefinitionNamesAreDetectedOnNameRanges) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("arithmetics-duplicate-def.calc"),
@@ -375,7 +375,7 @@ TEST(ArithmeticsModuleTest, DirectFunctionRecursionIsReportedOnFunctionReference
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("arithmetics-direct-recursion.calc"),
@@ -405,7 +405,7 @@ TEST(ArithmeticsModuleTest, MutualFunctionRecursionReportsBothCalls) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("arithmetics-mutual-recursion.calc"),
@@ -424,7 +424,7 @@ TEST(ArithmeticsModuleTest, DuplicateParameterNamesMatchExpectedMessage) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("arithmetics-duplicate-param.calc"),
@@ -442,7 +442,7 @@ TEST(ArithmeticsModuleTest, FunctionCallArityMismatchTargetsArgumentsRange) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("arithmetics-arity-mismatch.calc"),
@@ -477,7 +477,7 @@ TEST(ArithmeticsModuleTest, ValidFunctionCallsDoNotEmitDiagnostics) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("arithmetics-valid-call.calc"),
@@ -495,7 +495,7 @@ TEST(ArithmeticsModuleTest, InitializeResultSerializesForLspTransport) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::register_language_services(*shared));
+  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
   ASSERT_NE(shared->lsp.languageServer, nullptr);
 
   ::lsp::InitializeParams params{};
@@ -517,7 +517,7 @@ TEST(ArithmeticsModuleTest, FormatterFormatsCompactModule) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      arithmetics::lsp::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
   ASSERT_NE(registeredServices, nullptr);
   shared->serviceRegistry->registerServices(std::move(registeredServices));
@@ -553,7 +553,7 @@ TEST(ArithmeticsModuleTest, FormatterNormalizesBinaryOperatorSpacing) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      arithmetics::lsp::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
   ASSERT_NE(registeredServices, nullptr);
   shared->serviceRegistry->registerServices(std::move(registeredServices));
@@ -587,7 +587,7 @@ TEST(ArithmeticsModuleTest, FormatterNormalizesRootIndentationWithLeadingComment
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      arithmetics::lsp::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
   ASSERT_NE(registeredServices, nullptr);
   shared->serviceRegistry->registerServices(std::move(registeredServices));
@@ -630,7 +630,7 @@ TEST(ArithmeticsModuleTest, CodeActionsKeepRecoveryAndLanguageSpecificFixes) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      arithmetics::lsp::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
   ASSERT_NE(registeredServices, nullptr);
   shared->serviceRegistry->registerServices(std::move(registeredServices));
@@ -677,7 +677,7 @@ TEST(ArithmeticsModuleTest, FormatterNormalizesDocCommentsAndTags) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      arithmetics::lsp::create_language_services(*shared, "arithmetics");
+      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
   ASSERT_NE(registeredServices, nullptr);
   shared->serviceRegistry->registerServices(std::move(registeredServices));

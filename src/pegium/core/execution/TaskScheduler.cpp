@@ -46,7 +46,15 @@ TaskScheduler::TaskScheduler(std::size_t workerCount) {
 }
 
 TaskScheduler::~TaskScheduler() noexcept {
-  _stopping.store(1);
+  // Serialize the stop flag write with the worker predicate check under
+  // _globalMutex to avoid a lost wakeup: without the lock, a worker that has
+  // already evaluated the predicate (seeing _stopping==0) but not yet entered
+  // cv.wait() would miss this notify_all and block forever, deadlocking the
+  // jthread join below.
+  {
+    std::scoped_lock lock(_globalMutex);
+    _stopping.store(1);
+  }
   _globalCv.notify_all();
 }
 

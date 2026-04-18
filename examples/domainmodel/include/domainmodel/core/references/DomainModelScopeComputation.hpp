@@ -3,7 +3,7 @@
 #include <vector>
 
 #include <domainmodel/ast.hpp>
-#include <domainmodel/services/Services.hpp>
+#include <domainmodel/core/references/QualifiedNameProvider.hpp>
 
 #include <pegium/core/references/DefaultScopeComputation.hpp>
 

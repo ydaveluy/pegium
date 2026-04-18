@@ -5,5 +5,5 @@
 int main(int argc, char **argv) {
   return pegium::runLanguageServerMain(
       argc, argv, "domainmodel-lsp",
-      domainmodel::lsp::register_language_services);
+      domainmodel::lsp::registerDomainModelServices);
 }

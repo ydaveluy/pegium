@@ -1,4 +1,4 @@
-#include "lsp/StatemachineFormatter.hpp"
+#include <statemachine/lsp/StatemachineFormatter.hpp>
 
 namespace statemachine::lsp {
 void StatemachineFormatter::formatStatemachine(

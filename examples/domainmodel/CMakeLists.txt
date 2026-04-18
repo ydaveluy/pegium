@@ -1,5 +1,4 @@
 add_library(pegium_example_domainmodel_core
-    src/core/DomainModelModule.cpp
     src/core/references/DomainModelScopeComputation.cpp
     src/core/references/QualifiedNameProvider.cpp
     src/core/validation/DomainModelValidator.cpp
@@ -21,7 +20,6 @@ target_link_libraries(pegium_example_domainmodel_core
 )
 
 add_library(pegium_example_domainmodel_lsp
-    src/lsp/DomainModelModule.cpp
     src/lsp/DomainModelFormatter.cpp
     src/lsp/DomainModelRenameProvider.cpp
 )

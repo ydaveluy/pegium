@@ -1,6 +1,5 @@
 add_library(pegium_example_requirements_core
     src/core/Language.cpp
-    src/core/RequirementsModule.cpp
     src/core/validation/RequirementsValidator.cpp
     src/core/validation/TestsValidator.cpp
 )
@@ -21,7 +20,6 @@ target_link_libraries(pegium_example_requirements_core
 )
 
 add_library(pegium_example_requirements_lsp
-    src/lsp/RequirementsModule.cpp
     src/lsp/RequirementsFormatter.cpp
 )
 
