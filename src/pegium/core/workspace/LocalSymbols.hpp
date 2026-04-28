@@ -1,8 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <unordered_map>
-#include <utility>
 
 #include <pegium/core/workspace/AstDescriptions.hpp>
 
@@ -12,44 +12,80 @@ struct AstNode;
 
 namespace pegium::workspace {
 
-/// Multimap of local scope entries keyed by their AST container node.
+/// Local scope entries of a document, bucketed by container AST node and
+/// indexed by symbol type and name.
+///
+/// Descriptions are stored once, in a `BucketedScopeEntries` per container.
+/// The `ScopeProvider` consumes the bucketed view directly via
+/// `forContainer`, eliminating the per-document rebuild that previously ran
+/// on first lookup.
+///
+/// Copy is disabled because the per-bucket name index holds raw pointers and
+/// `string_view`s into the owned descriptions — duplicating the storage would
+/// silently leave the indexes pointing at the original deque elements. Move
+/// is safe because both the outer `unordered_map` and inner `std::deque`s
+/// preserve element addresses on transfer.
 class LocalSymbols {
 public:
-  using storage_type =
-      std::unordered_multimap<const AstNode *, AstNodeDescription>;
-  using iterator = storage_type::iterator;
-  using const_iterator = storage_type::const_iterator;
+  using map_type =
+      std::unordered_map<const AstNode *, BucketedScopeEntries>;
+  using const_iterator = map_type::const_iterator;
 
   LocalSymbols() = default;
+  LocalSymbols(const LocalSymbols &) = delete;
+  LocalSymbols &operator=(const LocalSymbols &) = delete;
+  LocalSymbols(LocalSymbols &&) noexcept = default;
+  LocalSymbols &operator=(LocalSymbols &&) noexcept = default;
 
-  [[nodiscard]] bool empty() const noexcept { return _symbols.empty(); }
-  [[nodiscard]] std::size_t size() const noexcept { return _symbols.size(); }
-  void clear() noexcept { _symbols.clear(); }
+  /// Adds `description` under `container`, dispatched to the bucket whose
+  /// type matches `description.type`. The returned reference is stable for
+  /// the lifetime of this `LocalSymbols` instance.
+  const AstNodeDescription &emplace(const AstNode *container,
+                                    AstNodeDescription description);
 
-  template <class... Args>
-  std::pair<iterator, bool> emplace(Args &&...args) {
-    auto it = _symbols.emplace(std::forward<Args>(args)...);
-    return {it, true};
+  [[nodiscard]] bool empty() const noexcept { return _byContainer.empty(); }
+  /// Total number of descriptions held across all containers (not the number
+  /// of containers). Tests rely on this entry-count semantic.
+  [[nodiscard]] std::size_t size() const noexcept { return _totalSize; }
+  void clear() noexcept {
+    _byContainer.clear();
+    _totalSize = 0;
   }
 
-  [[nodiscard]] std::pair<iterator, iterator>
-  equal_range(const AstNode *node) noexcept {
-    return _symbols.equal_range(node);
+  /// Returns the bucketed entries for `container`, or nullptr if no symbol is
+  /// bound to it. Lazily populates the per-bucket name index on first call,
+  /// so collection-time `emplace` only has to push to the deque.
+  ///
+  /// The lazy build is single-threaded by contract: it runs once per document
+  /// when the linker first probes `container`, before any parallel reader can
+  /// observe this `BucketedScopeEntries`. May throw `std::bad_alloc` if the
+  /// name-index hash map cannot grow.
+  [[nodiscard]] const BucketedScopeEntries *
+  forContainer(const AstNode *container) const {
+    const auto it = _byContainer.find(container);
+    if (it == _byContainer.end()) {
+      return nullptr;
+    }
+    if (!it->second.indexed) {
+      buildNameIndex(it->second);
+    }
+    return std::addressof(it->second);
   }
 
-  [[nodiscard]] std::pair<const_iterator, const_iterator>
-  equal_range(const AstNode *node) const noexcept {
-    return _symbols.equal_range(node);
+  [[nodiscard]] const_iterator begin() const noexcept {
+    return _byContainer.begin();
+  }
+  [[nodiscard]] const_iterator end() const noexcept {
+    return _byContainer.end();
   }
 
-  [[nodiscard]] iterator begin() noexcept { return _symbols.begin(); }
-  [[nodiscard]] const_iterator begin() const noexcept { return _symbols.begin(); }
-  [[nodiscard]] const_iterator cbegin() const noexcept { return _symbols.cbegin(); }
-  [[nodiscard]] iterator end() noexcept { return _symbols.end(); }
-  [[nodiscard]] const_iterator end() const noexcept { return _symbols.end(); }
-  [[nodiscard]] const_iterator cend() const noexcept { return _symbols.cend(); }
 private:
-  storage_type _symbols;
+  /// Populates `bucketed.entriesByName` for every bucket. Mutates the cache
+  /// state through `mutable` members on a logically-const accessor.
+  static void buildNameIndex(const BucketedScopeEntries &bucketed);
+
+  map_type _byContainer;
+  std::size_t _totalSize = 0;
 };
 
 } // namespace pegium::workspace

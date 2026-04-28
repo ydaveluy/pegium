@@ -148,9 +148,13 @@ collect_names(const std::vector<workspace::AstNodeDescription> &descriptions) {
 std::vector<std::string> collect_local_names(const workspace::LocalSymbols &symbols) {
   std::vector<std::string> names;
   names.reserve(symbols.size());
-  for (const auto &[container, description] : symbols) {
+  for (const auto &[container, entries] : symbols) {
     (void)container;
-    names.push_back(description.name);
+    for (const auto &bucket : entries.buckets) {
+      for (const auto &description : bucket.ownedEntries) {
+        names.push_back(description.name);
+      }
+    }
   }
   std::ranges::sort(names);
   return names;

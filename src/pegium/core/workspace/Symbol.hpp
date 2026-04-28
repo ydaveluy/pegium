@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -44,11 +45,6 @@ struct AstNodeDescription {
   TextOffset nameLength = 0;
 };
 
-/// Flat collection of scope entries.
-struct IndexedScopeEntries {
-  std::vector<const AstNodeDescription *> entries;
-};
-
 /// Name-indexed scope entries preserving the first declaration separately.
 struct NamedScopeEntries {
   const AstNodeDescription *first = nullptr;
@@ -66,6 +62,10 @@ struct NamedScopeEntries {
 };
 
 /// Scope entries grouped by assignable target type.
+///
+/// `ownedEntries` provides stable storage for the descriptions; `entriesByName`
+/// indexes them by name. `std::deque` is used so that adding a new description
+/// never invalidates the pointers held by the name index.
 struct ScopeEntryBucket {
   using NameIndex =
       std::unordered_map<std::string_view,
@@ -73,13 +73,26 @@ struct ScopeEntryBucket {
                          utils::TransparentStringHash, std::equal_to<>>;
 
   std::type_index type = std::type_index(typeid(void));
-  std::vector<const AstNodeDescription *> entries;
-  NameIndex entriesByName;
+  std::deque<AstNodeDescription> ownedEntries;
+  /// Marked mutable so `LocalSymbols::forContainer` can populate it lazily on
+  /// first read without giving up the const-qualified accessor pattern.
+  mutable NameIndex entriesByName;
 };
 
 /// Collection of typed scope entry buckets.
+///
+/// `std::deque` keeps existing buckets at stable addresses when a new one is
+/// appended, so the description pointers held by `entriesByName` remain valid.
+/// In practice each container has only a handful of distinct symbol types, so
+/// a linear scan over `buckets` is faster than maintaining a side index.
+///
+/// `indexed` is false while the structure is being populated by `LocalSymbols`
+/// — only `ownedEntries` are filled. The name index inside each bucket is
+/// built lazily on the first `forContainer` lookup, so the symbol-collection
+/// phase pays one hash-map insertion per symbol instead of two.
 struct BucketedScopeEntries {
-  std::vector<ScopeEntryBucket> buckets;
+  std::deque<ScopeEntryBucket> buckets;
+  mutable bool indexed = false;
 };
 
 /// Stable key identifying one AST node across workspace indexes.

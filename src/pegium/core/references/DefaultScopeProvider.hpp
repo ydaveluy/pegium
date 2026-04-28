@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdint>
 #include <memory>
 #include <typeindex>
 #include <unordered_map>
@@ -50,21 +49,10 @@ protected:
     NameIndex entriesByName;
   };
 
-  using LocalScopeLevels =
-      std::unordered_map<const AstNode *,
-                         workspace::BucketedScopeEntries>;
-  static constexpr std::uint8_t LocalScopeCacheKey = 0;
-
-  /// Returns the local scope entries grouped by AST container for `document`.
-  [[nodiscard]] virtual std::shared_ptr<const LocalScopeLevels>
-  getLocalScopeLevels(const workspace::Document &document) const;
   /// Returns the globally indexed entries accepted by `referenceType`.
   [[nodiscard]] virtual std::shared_ptr<const CompiledGlobalEntries>
   getGlobalEntries(std::type_index referenceType) const;
 
-  mutable utils::DocumentCache<std::uint8_t,
-                               std::shared_ptr<const LocalScopeLevels>>
-      _localScopeCache;
   mutable utils::WorkspaceCache<std::type_index,
                                 std::shared_ptr<const CompiledGlobalEntries>>
       _globalScopeCache;
