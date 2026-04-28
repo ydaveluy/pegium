@@ -208,10 +208,14 @@ DefaultDocumentationProvider::findNameInLocalSymbols(const AstNode &node,
   }
 
   for (auto current = &node; current != nullptr; current = current->getContainer()) {
-    const auto [begin, end] = document.localSymbols.equal_range(current);
-    for (auto it = begin; it != end; ++it) {
-      if (it->second.name == name) {
-        return it->second;
+    const auto *entries = document.localSymbols.forContainer(current);
+    if (entries == nullptr) {
+      continue;
+    }
+    for (const auto &bucket : entries->buckets) {
+      const auto it = bucket.entriesByName.find(name);
+      if (it != bucket.entriesByName.end() && !it->second.empty()) {
+        return *it->second.first;
       }
     }
   }

@@ -5,8 +5,6 @@
 #include <memory>
 #include <typeindex>
 #include <typeinfo>
-#include <unordered_map>
-#include <utility>
 
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
@@ -27,6 +25,13 @@ using DescriptionVisitor =
   return std::ranges::all_of(entries, [&visitor](const auto *entry) {
     return visitor(*entry);
   });
+}
+
+[[nodiscard]] bool visit_owned_entries(
+    const std::deque<AstNodeDescription> &entries,
+    DescriptionVisitor visitor) {
+  return std::ranges::all_of(
+      entries, [&visitor](const auto &entry) { return visitor(entry); });
 }
 
 [[nodiscard]] bool visit_named_entries(
@@ -81,7 +86,7 @@ find_scope_entry(const pegium::SharedCoreServices &shared,
       continue;
     }
     if (name.empty()) {
-      if (!visit_entry_pointers(bucket.entries, visitor)) {
+      if (!visit_owned_entries(bucket.ownedEntries, visitor)) {
         return false;
       }
       continue;
@@ -98,16 +103,16 @@ find_scope_entry(const pegium::SharedCoreServices &shared,
   return true;
 }
 
-template <typename Levels, typename Visitor>
-bool visit_local_scope_levels(const Levels &levels, const AstNode *container,
-                              Visitor &&visitor) {
+template <typename Visitor>
+bool visit_local_scope_levels(const workspace::LocalSymbols &localSymbols,
+                              const AstNode *container, Visitor &&visitor) {
   for (auto *current = container; current != nullptr;
        current = current->getContainer()) {
-    const auto it = levels.find(current);
-    if (it == levels.end()) {
+    const auto *entries = localSymbols.forContainer(current);
+    if (entries == nullptr) {
       continue;
     }
-    if (!visitor(it->second)) {
+    if (!visitor(*entries)) {
       return false;
     }
   }
@@ -118,8 +123,7 @@ bool visit_local_scope_levels(const Levels &levels, const AstNode *container,
 
 DefaultScopeProvider::DefaultScopeProvider(
     const pegium::CoreServices &services)
-    : pegium::DefaultCoreService(services), _localScopeCache(services.shared),
-      _globalScopeCache(services.shared) {}
+    : pegium::DefaultCoreService(services), _globalScopeCache(services.shared) {}
 
 const workspace::AstNodeDescription *DefaultScopeProvider::getScopeEntry(
     const ReferenceInfo &context) const {
@@ -129,10 +133,10 @@ const workspace::AstNodeDescription *DefaultScopeProvider::getScopeEntry(
 
   const auto referenceType = context.getReferenceType();
   if (const auto *container = context.container; container != nullptr) {
-    const auto localScopes = getLocalScopeLevels(getDocument(*container));
+    const auto &localSymbols = getDocument(*container).localSymbols;
     const AstNodeDescription *entry = nullptr;
     (void)visit_local_scope_levels(
-        *localScopes, container,
+        localSymbols, container,
         [this, referenceType, &context,
          &entry](const workspace::BucketedScopeEntries &entries) {
           entry = find_scope_entry(services.shared, entries, referenceType,
@@ -159,9 +163,9 @@ bool DefaultScopeProvider::visitScopeEntries(
     const {
   const auto referenceType = context.getReferenceType();
   if (const auto *container = context.container; container != nullptr) {
-    const auto localScopes = getLocalScopeLevels(getDocument(*container));
+    const auto &localSymbols = getDocument(*container).localSymbols;
     if (!visit_local_scope_levels(
-            *localScopes, container,
+            localSymbols, container,
             [this, referenceType, &context,
              visitor](const workspace::BucketedScopeEntries &entries) {
               return visit_entries(services.shared, entries, referenceType,
@@ -181,47 +185,6 @@ bool DefaultScopeProvider::visitScopeEntries(
     return true;
   }
   return visit_named_entries(globalIt->second, visitor);
-}
-
-std::shared_ptr<const DefaultScopeProvider::LocalScopeLevels>
-DefaultScopeProvider::getLocalScopeLevels(
-    const workspace::Document &document) const {
-  assert(document.id != workspace::InvalidDocumentId);
-  return _localScopeCache.get(document.id, LocalScopeCacheKey, [&document]() {
-    struct LocalScopeBuilder {
-      workspace::BucketedScopeEntries entries;
-      std::unordered_map<std::type_index, std::size_t> bucketIndexByType;
-    };
-
-    auto levels = std::make_shared<LocalScopeLevels>();
-    if (document.localSymbols.empty()) {
-      return levels;
-    }
-
-    std::unordered_map<const AstNode *, LocalScopeBuilder> builders;
-    builders.reserve(document.localSymbols.size());
-
-    for (const auto &[container, description] : document.localSymbols) {
-      auto &builder = builders[container];
-      const auto *entry = std::addressof(description);
-      const auto [bucketIt, inserted] = builder.bucketIndexByType.try_emplace(
-          entry->type, builder.entries.buckets.size());
-      if (inserted) {
-        auto &bucket = builder.entries.buckets.emplace_back();
-        bucket.type = entry->type;
-      }
-
-      auto &bucket = builder.entries.buckets[bucketIt->second];
-      bucket.entries.push_back(entry);
-      bucket.entriesByName[entry->name].add(*entry);
-    }
-
-    levels->reserve(builders.size());
-    for (auto &[container, builder] : builders) {
-      levels->emplace(container, std::move(builder.entries));
-    }
-    return levels;
-  });
 }
 
 std::shared_ptr<const DefaultScopeProvider::CompiledGlobalEntries>

@@ -102,9 +102,12 @@ std::vector<std::string>
 collect_local_symbol_names(const pegium::workspace::LocalSymbols &symbols,
                            const pegium::AstNode *container) {
   std::vector<std::string> names;
-  const auto [begin, end] = symbols.equal_range(container);
-  for (auto it = begin; it != end; ++it) {
-    names.push_back(it->second.name);
+  if (const auto *entries = symbols.forContainer(container)) {
+    for (const auto &bucket : entries->buckets) {
+      for (const auto &description : bucket.ownedEntries) {
+        names.push_back(description.name);
+      }
+    }
   }
   std::ranges::sort(names);
   return names;
