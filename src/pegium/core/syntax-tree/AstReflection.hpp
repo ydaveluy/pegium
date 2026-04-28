@@ -3,9 +3,15 @@
 #include <typeindex>
 #include <unordered_set>
 
+#include <pegium/core/utils/TypeIndexHash.hpp>
+
 namespace pegium {
 
 class AstNode;
+
+/// Set of `std::type_index`es using a fast pointer-based hash.
+using TypeIndexSet =
+    std::unordered_set<std::type_index, utils::FastTypeIndexHash>;
 
 /// Runtime registry describing subtype relationships between AST types.
 ///
@@ -24,7 +30,7 @@ public:
   ///
   /// The returned reference stays valid until the registry is mutated. Order is
   /// intentionally unspecified.
-  [[nodiscard]] virtual const std::unordered_set<std::type_index> &
+  [[nodiscard]] virtual const TypeIndexSet &
   getAllTypes() const = 0;
 
   /// Registers one AST type in the reflection registry.
@@ -50,7 +56,7 @@ public:
   /// Asking for `pegium::AstNode` returns the registered AST root type plus all
   /// currently known AST subtypes. The returned reference stays valid until
   /// the registry is mutated. Order is intentionally unspecified.
-  [[nodiscard]] virtual const std::unordered_set<std::type_index> &
+  [[nodiscard]] virtual const TypeIndexSet &
   getAllSubTypes(std::type_index type) const = 0;
 };
 

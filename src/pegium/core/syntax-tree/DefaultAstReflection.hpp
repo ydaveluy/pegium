@@ -4,9 +4,9 @@
 
 #include <typeindex>
 #include <unordered_map>
-#include <unordered_set>
 
 #include <pegium/core/syntax-tree/AstReflection.hpp>
+#include <pegium/core/utils/TypeIndexHash.hpp>
 
 namespace pegium {
 
@@ -14,8 +14,7 @@ class DefaultAstReflection final : public AstReflection {
 public:
   DefaultAstReflection() = default;
 
-  [[nodiscard]] const std::unordered_set<std::type_index> &
-  getAllTypes() const override;
+  [[nodiscard]] const TypeIndexSet &getAllTypes() const override;
   void registerType(std::type_index type) override;
   void registerSubtype(std::type_index subtype,
                        std::type_index supertype) override;
@@ -23,16 +22,16 @@ public:
                                 std::type_index type) const override;
   [[nodiscard]] bool isSubtype(std::type_index subtype,
                                std::type_index supertype) const override;
-  [[nodiscard]] const std::unordered_set<std::type_index> &
+  [[nodiscard]] const TypeIndexSet &
   getAllSubTypes(std::type_index type) const override;
 
 private:
   void registerTypeInternal(std::type_index type);
 
-  std::unordered_set<std::type_index> _types;
-  std::unordered_map<std::type_index, std::unordered_set<std::type_index>>
+  TypeIndexSet _types;
+  std::unordered_map<std::type_index, TypeIndexSet, utils::FastTypeIndexHash>
       _supertypesByType;
-  std::unordered_map<std::type_index, std::unordered_set<std::type_index>>
+  std::unordered_map<std::type_index, TypeIndexSet, utils::FastTypeIndexHash>
       _subtypesByType;
 };
 
