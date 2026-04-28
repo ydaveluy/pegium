@@ -20,16 +20,14 @@ namespace {
   return std::type_index(typeid(AstNode));
 }
 
-[[nodiscard]] const std::unordered_set<std::type_index> &
-empty_type_set() noexcept {
-  static const std::unordered_set<std::type_index> empty;
+[[nodiscard]] const TypeIndexSet &empty_type_set() noexcept {
+  static const TypeIndexSet empty;
   return empty;
 }
 
 } // namespace
 
-const std::unordered_set<std::type_index> &
-DefaultAstReflection::getAllTypes() const {
+const TypeIndexSet &DefaultAstReflection::getAllTypes() const {
   return _types;
 }
 
@@ -51,7 +49,7 @@ bool DefaultAstReflection::isSubtype(std::type_index subtype,
   return false;
 }
 
-const std::unordered_set<std::type_index> &
+const TypeIndexSet &
 DefaultAstReflection::getAllSubTypes(std::type_index type) const {
   if (type == invalid_type() || !_types.contains(type)) {
     return empty_type_set();
