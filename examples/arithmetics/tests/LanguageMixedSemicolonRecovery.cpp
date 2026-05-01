@@ -6,6 +6,8 @@
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 
+#include <ranges>
+
 namespace arithmetics::tests {
 namespace {
 
@@ -37,6 +39,8 @@ TEST(ArithmeticsLanguageTest,
   ASSERT_TRUE(parsed.value) << parseDump;
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
+  EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
+      << "recoveryAttemptRuns regressed\n" << parseDump;
 
   auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
   ASSERT_NE(module, nullptr) << parseDump;
@@ -69,10 +73,21 @@ TEST(ArithmeticsLanguageTest,
 
   const auto &parsed = document->parseResult;
   const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
-  EXPECT_EQ(parsed.recoveryReport.recoveryCount, 2u) << parseDump;
+  const auto insertedSemicolonCount = std::ranges::count_if(
+      parsed.parseDiagnostics,
+      [](const pegium::parser::ParseDiagnostic &diagnostic) {
+        return diagnostic.kind ==
+                   pegium::parser::ParseDiagnosticKind::Inserted &&
+               diagnostic.element != nullptr &&
+               diagnostic.element->getKind() ==
+                   pegium::grammar::ElementKind::Literal;
+      });
+  EXPECT_EQ(insertedSemicolonCount, 2) << parseDump;
   ASSERT_TRUE(parsed.value) << parseDump;
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
+  EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
+      << "recoveryAttemptRuns regressed\n" << parseDump;
 
   auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
   ASSERT_NE(module, nullptr) << parseDump;
@@ -104,6 +119,8 @@ TEST(ArithmeticsLanguageTest,
   ASSERT_TRUE(parsed.value) << parseDump;
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
+  EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
+      << "recoveryAttemptRuns regressed\n" << parseDump;
 
   auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
   ASSERT_NE(module, nullptr) << parseDump;
@@ -147,11 +164,201 @@ TEST(ArithmeticsLanguageTest,
   ASSERT_TRUE(parsed.value) << parseDump;
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
+  EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
+      << "recoveryAttemptRuns regressed\n" << parseDump;
 
   auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(summarize_module_statements(*module),
             "def:a | def:b | def:c | def:d | def:root | def:sqrt | eval | eval | eval | eval | eval")
+      << parseDump << " :: " << summarize_module_statement_shapes(*module);
+}
+
+TEST(ArithmeticsLanguageTest,
+     MissingDefinitionSemicolonsKeepTrailingFunctionsAndCallsRecoverable) {
+  parser::ArithmeticParser parser;
+  const std::string text =
+      "Module basicMath\n"
+      "\n"
+      "def a: 5\n"
+      "def b: 3\n"
+      "def c: a + b // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y):\n"
+      "    x^(1/y);\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; // 1\n"
+      "\n"
+      "// This language is case-insensitive regarding symbol names\n"
+      "Root(D, 3); // 32\n"
+      "Root(64, 3); // 4\n"
+      "Sqrt(81); // 9\n";
+
+  auto document = pegium::test::parse_document(
+      parser, text,
+      pegium::test::make_file_uri(
+          "missing-definition-semicolons-keep-trailing-functions-and-calls-recoverable.calc"),
+      "arithmetics");
+
+  const auto &parsed = document->parseResult;
+  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
+  ASSERT_TRUE(parsed.value) << parseDump;
+  EXPECT_TRUE(parsed.fullMatch) << parseDump;
+  EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
+  EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
+      << "recoveryAttemptRuns regressed\n" << parseDump;
+
+  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  ASSERT_NE(module, nullptr) << parseDump;
+  EXPECT_EQ(
+      summarize_module_statements(*module),
+      "def:a | def:b | def:c | def:d | def:root | def:sqrt | eval | eval | eval | eval | eval")
+      << parseDump << " :: " << summarize_module_statement_shapes(*module);
+}
+
+TEST(ArithmeticsLanguageTest,
+     MixedDefinitionSemicolonsKeepTrailingFunctionsAndCallsRecoverable) {
+  parser::ArithmeticParser parser;
+  const std::string text =
+      "Module basicMath\n"
+      "\n"
+      "def a: 5;\n"
+      "def b: 3;\n"
+      "def b1: 3\n"
+      "def b2: 3\n"
+      "def c: a + b // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y)\n"
+      "    x^(1/y)\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; // 1\n"
+      "\n"
+      "// This language is case-insensitive regarding symbol names\n"
+      "Root(D, 3); // 32\n"
+      "Root(64, 3); // 4\n"
+      "Sqrt(81); // 9\n";
+
+  auto document = pegium::test::parse_document(
+      parser, text,
+      pegium::test::make_file_uri(
+          "mixed-definition-semicolons-keep-trailing-functions-and-calls-recoverable.calc"),
+      "arithmetics");
+
+  const auto &parsed = document->parseResult;
+  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
+  ASSERT_TRUE(parsed.value) << parseDump;
+  EXPECT_TRUE(parsed.fullMatch) << parseDump;
+  EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
+  EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
+      << "recoveryAttemptRuns regressed\n" << parseDump;
+
+  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  ASSERT_NE(module, nullptr) << parseDump;
+  EXPECT_EQ(
+      summarize_module_statements(*module),
+      "def:a | def:b | def:b1 | def:b2 | def:c | def:d | def:root | def:sqrt | eval | eval | eval | eval | eval")
+      << parseDump << " :: " << summarize_module_statement_shapes(*module);
+}
+
+TEST(ArithmeticsLanguageTest,
+     MixedDefinitionColonSemicolonsKeepTrailingFunctionsAndCallsRecoverable) {
+  parser::ArithmeticParser parser;
+  const std::string text =
+      "Module basicMath\n"
+      "\n"
+      "def a 5\n"
+      "def b 3\n"
+      "def b1 3\n"
+      "def b2: 3\n"
+      "def c: a + b // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y)\n"
+      "    x^(1/y)\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; // 1\n"
+      "\n"
+      "// This language is case-insensitive regarding symbol names\n"
+      "Root(D, 3); // 32\n"
+      "Root(64, 3); // 4\n"
+      "Sqrt(81); // 9\n";
+
+  auto document = pegium::test::parse_document(
+      parser, text,
+      pegium::test::make_file_uri(
+          "mixed-definition-colon-semicolons-keep-trailing-functions-and-calls-recoverable.calc"),
+      "arithmetics");
+
+  const auto &parsed = document->parseResult;
+  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
+  ASSERT_TRUE(parsed.value) << parseDump;
+  EXPECT_TRUE(parsed.fullMatch) << parseDump;
+  EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
+  EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
+      << "recoveryAttemptRuns regressed\n" << parseDump;
+
+  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  ASSERT_NE(module, nullptr) << parseDump;
+  EXPECT_EQ(
+      summarize_module_statements(*module),
+      "def:a | def:b | def:b1 | def:b2 | def:c | def:d | def:root | def:sqrt | eval | eval | eval | eval | eval")
+      << parseDump << " :: " << summarize_module_statement_shapes(*module);
+}
+
+TEST(ArithmeticsLanguageTest,
+     MixedMissingDefinitionColonKeepsTrailingFunctionsAndEvaluationsRecoverable) {
+  parser::ArithmeticParser parser;
+  const std::string text =
+      "Module basicMath\n"
+      "\n"
+      "def a: 5\n"
+      "def b: 3\n"
+      "def b1 3\n"
+      "def b2: 3\n"
+      "def c: a + b // 8\n"
+      "def d: (a ^ b); // 164\n"
+      "\n"
+      "def root(x, y)\n"
+      "    x^(1/y)\n"
+      "\n"
+      "def sqrt(x):\n"
+      "    root(x, 2);\n"
+      "\n"
+      "2 * c; // 16\n"
+      "b % 2; // 1\n";
+
+  auto document = pegium::test::parse_document(
+      parser, text,
+      pegium::test::make_file_uri(
+          "mixed-missing-definition-colon-keeps-trailing-functions-and-evaluations-recoverable.calc"),
+      "arithmetics");
+
+  const auto &parsed = document->parseResult;
+  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
+  ASSERT_TRUE(parsed.value) << parseDump;
+  EXPECT_TRUE(parsed.fullMatch) << parseDump;
+  EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
+  EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
+      << "recoveryAttemptRuns regressed\n" << parseDump;
+
+  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  ASSERT_NE(module, nullptr) << parseDump;
+  EXPECT_EQ(summarize_module_statements(*module),
+            "def:a | def:b | def:b1 | def:b2 | def:c | def:d | def:root | def:sqrt | eval | eval")
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 }
 

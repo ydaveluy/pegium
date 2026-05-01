@@ -23,12 +23,12 @@ TEST(StatemachineRecoveryProbeBatchTest, ReportsBatchBehavior) {
       parser, samples, "statemachine", "statemachine");
   pegium::test::expect_recovery_probe_summary(
       "statemachine", summary,
-      {.total = 9u,
-       .withValue = 8u,
-       .fullMatch = 6u,
-       .recovered = 6u,
-       .incomplete = 3u,
-       .completeRecovery = 6u});
+      {.total = 3u,
+       .withValue = 2u,
+       .fullMatch = 2u,
+       .recovered = 2u,
+       .incomplete = 1u,
+       .completeRecovery = 2u});
 }
 
 } // namespace

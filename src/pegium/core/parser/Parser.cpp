@@ -105,7 +105,7 @@ detail::materialize_syntax_diagnostics(
                             .beginOffset = entry.beginOffset,
                             .endOffset = entry.endOffset,
                             .element = entry.element,
-                            .message = entry.message});
+                            .message = std::string{entry.message}});
   }
   return materialized;
 }

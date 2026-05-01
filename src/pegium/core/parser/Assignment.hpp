@@ -88,6 +88,13 @@ public:
     return probe_recoverable_at_entry(_element, ctx);
   }
 
+  bool probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const {
+    if (attempt_fast_probe(ctx, _element)) {
+      return true;
+    }
+    return probe_recoverable_at_entry_consumes_visible(_element, ctx);
+  }
+
   void execute(AstNode *current, const CstNodeView &node,
                const ValueBuildContext &context) const override {
     detail::AssignmentRuntimeSupport<feature, Element>::execute(

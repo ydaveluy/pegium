@@ -10,17 +10,20 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <type_traits>
 #include <pegium/core/grammar/AbstractElement.hpp>
+#include <pegium/core/grammar/Literal.hpp>
+#include <pegium/core/parser/ChoiceAttempt.hpp>
 #include <pegium/core/parser/ContextShared.hpp>
+#include <pegium/core/parser/LiteralFuzzyMatcher.hpp>
 #include <pegium/core/parser/ParseDiagnostics.hpp>
 #include <pegium/core/parser/Parser.hpp>
 #include <pegium/core/parser/RecoveryAnalysis.hpp>
-#include <pegium/core/parser/RecoveryMemoTable.hpp>
 #include <pegium/core/parser/RecoveryTrace.hpp>
 #include <pegium/core/parser/Skipper.hpp>
 #include <pegium/core/parser/StepTrace.hpp>
-#include <pegium/core/parser/TextUtils.hpp>
+#include <pegium/core/utils/TextUtils.hpp>
 #include <pegium/core/utils/Cancellation.hpp>
 #include <utility>
 #include <vector>
@@ -66,6 +69,9 @@ struct ParseContext {
 
   [[nodiscard]] SkipperGuard
   with_skipper(const Skipper &overrideSkipper) noexcept {
+    // Invalidate the no-builder skip cache: a different skipper can map the
+    // same cursor to a different end.
+    _skipCacheBegin = nullptr;
     return SkipperGuard{*this, _skipper, overrideSkipper};
   }
 
@@ -74,6 +80,15 @@ struct ParseContext {
     _builder.enter();
 
     return _cursor;
+  }
+
+  /// Invalidate the no-builder skip-cache. Call when the underlying input is
+  /// (logically) modified relative to `begin` — e.g. recovery deletions /
+  /// insertions — so that a subsequent `skip_without_builder(begin)` re-runs
+  /// the skipper. Pure-cursor advancements do not need to invalidate, since
+  /// the cache is keyed on the precise cursor position.
+  inline void invalidate_skip_cache() const noexcept {
+    _skipCacheBegin = nullptr;
   }
 
   inline void exit(const char *checkpoint,
@@ -98,7 +113,17 @@ struct ParseContext {
     return _cursor;
   }
   [[nodiscard]] const char *skip_without_builder(const char *begin) const noexcept {
-    return _skipper->skip(begin);
+    // 1-entry cache: the no-builder skipper is purely a function of (begin,
+    // _skipper) and is called heavily during recovery exploration at
+    // overlapping positions. Caching the most recent (begin -> end) result
+    // avoids re-walking the same trivia run dozens of times per offset.
+    if (begin == _skipCacheBegin) {
+      return _skipCacheEnd;
+    }
+    const char *const end = _skipper->skip(begin);
+    _skipCacheBegin = begin;
+    _skipCacheEnd = end;
+    return end;
   }
   [[nodiscard]] constexpr const char *maxCursor() const noexcept {
     return _maxCursor;
@@ -106,6 +131,14 @@ struct ParseContext {
 
   constexpr void restoreMaxCursor(const char *cursor) noexcept {
     _maxCursor = cursor;
+  }
+
+  /// Monotonically raise `_maxCursor` to replay the cumulative side effect
+  /// of a memoized exploration that was skipped on cache hit.
+  constexpr void bumpMaxCursor(const char *cursor) noexcept {
+    if (cursor > _maxCursor) {
+      _maxCursor = cursor;
+    }
   }
 
   [[nodiscard]] constexpr TextOffset cursorOffset() const noexcept {
@@ -125,7 +158,13 @@ struct ParseContext {
     return _cancelToken;
   }
   inline void skip() noexcept {
+    const char *const before = _cursor;
     _cursor = _skipper->skip(_cursor, _builder);
+    // The two skipper variants converge to the same end for a given begin;
+    // populate the no-builder cache so subsequent recovery probes at this
+    // position skip the underlying terminal scan.
+    _skipCacheBegin = before;
+    _skipCacheEnd = _cursor;
     if (_cursor > _maxCursor) [[likely]] {
       _maxCursor = _cursor;
     }
@@ -168,11 +207,36 @@ struct ParseContext {
   CstBuilder &_builder;
   const Skipper *_skipper;
   const utils::CancellationToken &_cancelToken;
+  // 1-entry no-builder skip cache. `mutable` so const callers can populate
+  // it without compromising the logical const-ness of `skip_without_builder`.
+  mutable const char *_skipCacheBegin = nullptr;
+  mutable const char *_skipCacheEnd = nullptr;
 
 
 };
 
 struct RecoveryContext;
+
+[[nodiscard]] inline constexpr bool elements_equivalent_for_replay(
+    const grammar::AbstractElement *lhs,
+    const grammar::AbstractElement *rhs) noexcept {
+  if (lhs == rhs) {
+    return true;
+  }
+  if (lhs == nullptr || rhs == nullptr) {
+    return false;
+  }
+  if (lhs->getKind() != rhs->getKind()) {
+    return false;
+  }
+  if (lhs->getKind() == grammar::ElementKind::Literal) {
+    const auto *lhsLit = static_cast<const grammar::Literal *>(lhs);
+    const auto *rhsLit = static_cast<const grammar::Literal *>(rhs);
+    return lhsLit->getValue() == rhsLit->getValue() &&
+           lhsLit->isCaseSensitive() == rhsLit->isCaseSensitive();
+  }
+  return false;
+}
 
 // Strict parse context with failure-history tracking.
 //
@@ -207,7 +271,7 @@ struct TrackedParseContext : ParseContext {
   inline void rewind(const Checkpoint &checkpoint) noexcept {
     ParseContext::rewind(checkpoint.parseCheckpoint);
     _recordFailureHistory = checkpoint.recordFailureHistory;
-    if (_recordFailureHistory) [[unlikely]] {
+    if (_recordFailureHistory) [[likely]] {
       _failureRecorder.rewind(checkpoint.failureHistorySize);
     }
   }
@@ -232,6 +296,18 @@ struct TrackedParseContext : ParseContext {
     return _failureRecorder.furthestVisibleLeafCount();
   }
 
+  void bumpFurthestFailureHistorySize(std::size_t value) noexcept {
+    _failureRecorder.bumpFurthestVisibleLeafCount(value);
+  }
+
+  void bumpFurthestFailureOffset(TextOffset value) noexcept {
+    _failureRecorder.bumpFurthestOffset(value);
+  }
+
+  [[nodiscard]] TextOffset furthestFailureOffset() const noexcept {
+    return _failureRecorder.furthestOffset();
+  }
+
 protected:
   detail::FailureHistoryRecorder &_failureRecorder;
   bool _recordFailureHistory = true;
@@ -239,9 +315,6 @@ protected:
 };
 
 struct RecoveryContext : TrackedParseContext {
-  static constexpr std::size_t kDefaultMaxConsecutiveCodepointDeletes = 8;
-  static constexpr std::uint32_t kInternalRecoveryStabilityTokenCount = 2;
-
   struct EditWindow {
     TextOffset beginOffset = 0;
     TextOffset editFloorOffset = 0;
@@ -263,7 +336,6 @@ struct RecoveryContext : TrackedParseContext {
   struct WindowReplayState {
     std::uint32_t activeWindowEditCostBase = 0;
     std::uint32_t activeWindowEditCountBase = 0;
-    std::uint32_t activeEditWindowIndex = 0;
     std::uint32_t currentForwardVisibleLeafCount = 0;
     std::uint32_t strictVisibleLeafCountAfterRecovery = 0;
     std::uint32_t completedRecoveryWindows = 0;
@@ -272,6 +344,7 @@ struct RecoveryContext : TrackedParseContext {
     bool stableAfterRecovery = false;
     bool awaitingStrictStability = false;
     bool recoveryBookkeepingEnabled = true;
+    bool activeEditWindowCompleted = false;
   };
 
   struct DeleteBridgeState {
@@ -285,14 +358,6 @@ struct RecoveryContext : TrackedParseContext {
     bool frontierBlocked = false;
   };
 
-  using RecoveryMemoKey = detail::RecoveryMemoKey;
-  using RecoveryMemoQueryKind = detail::RecoveryMemoQueryKind;
-  using RecoveryMemoTable = detail::RecoveryMemoTable;
-  using OrderedChoiceAttemptMemoValue = detail::OrderedChoiceAttemptMemoValue;
-  using RepetitionIterationMemoValue = detail::RepetitionIterationMemoValue;
-  using GroupMissingElementInsertMemoValue =
-      detail::GroupMissingElementInsertMemoValue;
-
   static_assert(std::is_trivially_copyable_v<EditBudgetState>);
   static_assert(std::is_trivially_copyable_v<WindowReplayState>);
   static_assert(std::is_trivially_copyable_v<DeleteBridgeState>);
@@ -301,117 +366,10 @@ struct RecoveryContext : TrackedParseContext {
   struct Checkpoint {
     TrackedParseContext::Checkpoint parseCheckpoint;
     RecoveryState recoveryState;
-    std::uint32_t recoveryStateVersion;
     std::uint32_t recoveryEditCount;
-    std::uint32_t replayForwardTokenHistorySize;
-    const char *localReplayMaxCursor;
+    std::uint32_t committedRecoveryEditIndex;
+    std::uint32_t editWindowReplayForwardTokenCount;
     DeleteBridgeState deleteBridge;
-  };
-
-  class LeadingTerminalInsertScopeGuard {
-  public:
-    LeadingTerminalInsertScopeGuard(const LeadingTerminalInsertScopeGuard &) =
-        delete;
-    LeadingTerminalInsertScopeGuard &
-    operator=(const LeadingTerminalInsertScopeGuard &) = delete;
-
-    LeadingTerminalInsertScopeGuard(
-        LeadingTerminalInsertScopeGuard &&other) noexcept
-        : _ctx(other._ctx), _active(other._active) {
-      other._active = false;
-    }
-
-    ~LeadingTerminalInsertScopeGuard() noexcept {
-      if (_active) {
-        --_ctx._scopedLeadingTerminalInsertDepth;
-        _ctx.noteRecoveryPolicyMutation();
-      }
-    }
-
-  private:
-    friend struct RecoveryContext;
-
-    explicit LeadingTerminalInsertScopeGuard(RecoveryContext &ctx) noexcept
-        : _ctx(ctx) {
-      ++_ctx._scopedLeadingTerminalInsertDepth;
-      _ctx.noteRecoveryPolicyMutation();
-    }
-
-    RecoveryContext &_ctx;
-    bool _active = true;
-  };
-
-  class DestructiveWindowContinuationGuard {
-  public:
-    DestructiveWindowContinuationGuard(
-        const DestructiveWindowContinuationGuard &) = delete;
-    DestructiveWindowContinuationGuard &
-    operator=(const DestructiveWindowContinuationGuard &) = delete;
-
-    DestructiveWindowContinuationGuard(
-        DestructiveWindowContinuationGuard &&other) noexcept
-        : _ctx(other._ctx), _active(other._active) {
-      other._active = false;
-    }
-
-    ~DestructiveWindowContinuationGuard() noexcept {
-      if (_active) {
-        --_ctx._destructiveWindowContinuationDepth;
-        _ctx.noteRecoveryPolicyMutation();
-      }
-    }
-
-  private:
-    friend struct RecoveryContext;
-
-    explicit DestructiveWindowContinuationGuard(
-        RecoveryContext &ctx) noexcept
-        : _ctx(ctx) {
-      ++_ctx._destructiveWindowContinuationDepth;
-      _ctx.noteRecoveryPolicyMutation();
-    }
-
-    RecoveryContext &_ctx;
-    bool _active = true;
-  };
-
-  class EditFloorRelaxationGuard {
-  public:
-    EditFloorRelaxationGuard(const EditFloorRelaxationGuard &) = delete;
-    EditFloorRelaxationGuard &
-    operator=(const EditFloorRelaxationGuard &) = delete;
-
-    EditFloorRelaxationGuard(EditFloorRelaxationGuard &&other) noexcept
-        : _ctx(other._ctx), _active(other._active),
-          _savedScopedEditFloorOffset(other._savedScopedEditFloorOffset) {
-      other._active = false;
-    }
-
-    ~EditFloorRelaxationGuard() noexcept {
-      if (_active) {
-        _ctx._scopedEditFloorOffset = _savedScopedEditFloorOffset;
-        _ctx.noteRecoveryPolicyMutation();
-      }
-    }
-
-  private:
-    friend struct RecoveryContext;
-
-    explicit EditFloorRelaxationGuard(RecoveryContext &ctx,
-                                      TextOffset relaxedFloorOffset) noexcept
-        : _ctx(ctx), _savedScopedEditFloorOffset(ctx._scopedEditFloorOffset) {
-      if (_savedScopedEditFloorOffset.has_value()) {
-        ctx._scopedEditFloorOffset =
-            std::min(*_savedScopedEditFloorOffset, relaxedFloorOffset);
-      } else {
-        ctx._scopedEditFloorOffset = relaxedFloorOffset;
-      }
-      ctx.noteRecoveryPolicyMutation();
-    }
-
-    RecoveryContext &_ctx;
-    bool _active = true;
-    std::optional<TextOffset> _savedScopedEditFloorOffset;
   };
 
   using EditStateGuard = detail::EditStateGuard<RecoveryContext>;
@@ -423,8 +381,6 @@ struct RecoveryContext : TrackedParseContext {
           utils::default_cancel_token) noexcept
       : TrackedParseContext(builder, skipper, failureRecorder, cancelToken) {
     _runRecoveryBookkeeping = true;
-    _localReplayMaxCursor = begin;
-    _recoveryMemoTable = std::make_unique<RecoveryMemoTable>();
   }
 
   bool allowInsert = true;
@@ -435,31 +391,215 @@ struct RecoveryContext : TrackedParseContext {
   bool trackEditState = true;
   std::uint32_t maxConsecutiveCodepointDeletes =
       kDefaultMaxConsecutiveCodepointDeletes;
+  std::uint32_t stabilityTokenCount = 2;
   std::uint32_t maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
   std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
+  std::uint32_t maxResyncSkipBytes = 4096;
   TextOffset editFloorOffset = 0;
-  std::vector<EditWindow> editWindows;
+  std::optional<EditWindow> editWindow;
   bool allowTopLevelPartialSuccess = false;
+  bool allowProvisionalFuzzyReplace = false;
+  TextOffset provisionalFuzzyReplaceAnchorOffset = 0;
   std::vector<RecoveryEdit> recoveryEdits;
+  std::vector<RecoveryEdit> committedRecoveryEdits;
+  std::uint32_t committedRecoveryEditIndex = 0;
+  TextOffset committedRecoveryResumeFloor = 0;
   RecoveryState recoveryState;
-  std::uint32_t recoveryStateVersion = 0;
-  std::uint32_t _recoveryPolicyMutationVersion = 0;
-  std::uint32_t _scopedLeadingTerminalInsertDepth = 0;
-  std::uint32_t _destructiveWindowContinuationDepth = 0;
-  std::optional<TextOffset> _scopedEditFloorOffset;
-  const char *_localReplayMaxCursor = nullptr;
+  bool allowDestructiveWindowContinuation = false;
+  bool allowLeadingTerminalInsertScope = false;
   DeleteBridgeState _deleteBridge{};
-  // Recovery-packrat stays local to recovery attempts. The nominal strict path
-  // never touches this table.
-  std::unique_ptr<RecoveryMemoTable> _recoveryMemoTable;
-  struct ReplayForwardTokenDelta {
-    std::uint32_t windowIndex = 0;
-    std::uint32_t previousReplayForwardTokenCount = 1;
+
+  detail::ChoiceRecoverCache choiceRecoverCache{};
+
+  /// Per-parse cache memoizing fuzzy-keyword DP results. Lives on the
+  /// recovery context so its lifetime tracks one parse exactly: stable
+  /// pointers (grammar literal storage, immutable text snapshot) make
+  /// identity-based lookup safe within that scope, and resetting the parse
+  /// context clears the cache for free. See
+  /// `LiteralFuzzyCandidatesCache` documentation for why this must not be
+  /// promoted to a global or thread-local.
+  detail::LiteralFuzzyCandidatesCache literalFuzzyCandidatesCache{};
+
+  using FollowProbeFn = bool (*)(RecoveryContext &, const void *);
+  FollowProbeFn _followProbeFn = nullptr;
+  const void *_followProbeData = nullptr;
+  FollowProbeFn _recoverableFollowProbeFn = nullptr;
+  const void *_recoverableFollowProbeData = nullptr;
+  FollowProbeFn _recoverableFollowConsumesVisibleProbeFn = nullptr;
+  const void *_recoverableFollowConsumesVisibleProbeData = nullptr;
+
+  // Returns true when the immediately-enclosing Group's successor element would
+  // accept the current cursor. Grammar-agnostic: relies only on structural
+  // probing installed by Group around each element's parse.
+  [[nodiscard]] bool probeFollowAcceptsHere() noexcept {
+    if (_followProbeFn == nullptr) {
+      return false;
+    }
+    return _followProbeFn(*this, _followProbeData);
+  }
+
+  // Returns true when the immediately-enclosing Group's successor can recover
+  // locally from the current cursor, even if it does not accept strictly yet.
+  [[nodiscard]] bool probeRecoverableFollowHere() noexcept {
+    if (_recoverableFollowProbeFn == nullptr) {
+      return false;
+    }
+    return _recoverableFollowProbeFn(*this, _recoverableFollowProbeData);
+  }
+
+  // Stronger recoverable-follow probe: true only when the enclosing suffix can
+  // recover from this cursor and commit visible source after the recovery site.
+  // Repetition uses this to avoid stealing a parent boundary with a synthetic
+  // local separator when the parent can prove real continuation.
+  [[nodiscard]] bool probeRecoverableFollowConsumesVisibleHere() noexcept {
+    if (_recoverableFollowConsumesVisibleProbeFn == nullptr) {
+      return false;
+    }
+    return _recoverableFollowConsumesVisibleProbeFn(
+        *this, _recoverableFollowConsumesVisibleProbeData);
+  }
+
+  // Two install modes for the follow probe guard:
+  //   - Local: the new probe replaces the outer probe; queries do not
+  //     chain. Use for non-last Group elements where the immediate
+  //     successor is the only valid follow (chaining to the OUTER
+  //     would let outer-scope continuations mask in-group failures).
+  //   - PassThroughOuter: the new probe is null; queries fall through
+  //     to the previously-installed (outer) probe. Use for the LAST
+  //     element of a Group, where the semantic follow is the OUTER
+  //     scope's follow — without this chain, the Group's tail-probe
+  //     returns "past end -> false" and a repeated tail nested inside
+  //     an optional parent cannot see the parent's next structural
+  //     element, cascading into a panic-mode delete.
+  enum class FollowProbeMode : std::uint8_t {
+    Local,
+    PassThroughOuter,
   };
-  std::vector<ReplayForwardTokenDelta> _replayForwardTokenHistory;
-  mutable std::uint64_t _cachedRecoveryPolicySignatureStamp =
-      std::numeric_limits<std::uint64_t>::max();
-  mutable std::uint64_t _cachedRecoveryPolicySignature = 0;
+
+  struct [[nodiscard]] FollowProbeGuard {
+    FollowProbeGuard(RecoveryContext &c, FollowProbeFn fn, const void *data,
+                     FollowProbeFn recoverableFn = nullptr,
+                     const void *recoverableData = nullptr,
+                     FollowProbeFn recoverableConsumesVisibleFn = nullptr,
+                     const void *recoverableConsumesVisibleData = nullptr,
+                     FollowProbeMode mode = FollowProbeMode::Local) noexcept
+        : ctx(&c), newFn(fn), newData(data), prevFn(c._followProbeFn),
+          prevData(c._followProbeData), newRecoverableFn(recoverableFn),
+          newRecoverableData(recoverableData),
+          prevRecoverableFn(c._recoverableFollowProbeFn),
+          prevRecoverableData(c._recoverableFollowProbeData),
+          newRecoverableConsumesVisibleFn(recoverableConsumesVisibleFn),
+          newRecoverableConsumesVisibleData(recoverableConsumesVisibleData),
+          prevRecoverableConsumesVisibleFn(
+              c._recoverableFollowConsumesVisibleProbeFn),
+          prevRecoverableConsumesVisibleData(
+              c._recoverableFollowConsumesVisibleProbeData) {
+      if (mode == FollowProbeMode::PassThroughOuter) {
+        // Pass-through: queries skip the (always-false) local probe
+        // and go straight to the outer one. The newFn slot is unused.
+        c._followProbeFn =
+            prevFn == nullptr ? nullptr : &passThroughStrictWrapper;
+        c._followProbeData = prevFn == nullptr ? nullptr : this;
+        c._recoverableFollowProbeFn = prevRecoverableFn == nullptr
+                                          ? nullptr
+                                          : &passThroughRecoverableWrapper;
+        c._recoverableFollowProbeData =
+            prevRecoverableFn == nullptr ? nullptr : this;
+        c._recoverableFollowConsumesVisibleProbeFn =
+            prevRecoverableConsumesVisibleFn == nullptr
+                ? nullptr
+                : &passThroughRecoverableConsumesVisibleWrapper;
+        c._recoverableFollowConsumesVisibleProbeData =
+            prevRecoverableConsumesVisibleFn == nullptr ? nullptr : this;
+      } else {
+        c._followProbeFn = fn;
+        c._followProbeData = data;
+        c._recoverableFollowProbeFn = recoverableFn;
+        c._recoverableFollowProbeData = recoverableData;
+        c._recoverableFollowConsumesVisibleProbeFn =
+            recoverableConsumesVisibleFn;
+        c._recoverableFollowConsumesVisibleProbeData =
+            recoverableConsumesVisibleData;
+      }
+    }
+    FollowProbeGuard(const FollowProbeGuard &) = delete;
+    FollowProbeGuard &operator=(const FollowProbeGuard &) = delete;
+    FollowProbeGuard(FollowProbeGuard &&) = delete;
+    FollowProbeGuard &operator=(FollowProbeGuard &&) = delete;
+    ~FollowProbeGuard() noexcept {
+      if (ctx) {
+        ctx->_followProbeFn = prevFn;
+        ctx->_followProbeData = prevData;
+        ctx->_recoverableFollowProbeFn = prevRecoverableFn;
+        ctx->_recoverableFollowProbeData = prevRecoverableData;
+        ctx->_recoverableFollowConsumesVisibleProbeFn =
+            prevRecoverableConsumesVisibleFn;
+        ctx->_recoverableFollowConsumesVisibleProbeData =
+            prevRecoverableConsumesVisibleData;
+      }
+    }
+
+  private:
+    static bool passThroughStrictWrapper(RecoveryContext &c,
+                                         const void *data) noexcept {
+      const auto *self = static_cast<const FollowProbeGuard *>(data);
+      return self->prevFn != nullptr && self->prevFn(c, self->prevData);
+    }
+
+    static bool passThroughRecoverableWrapper(RecoveryContext &c,
+                                              const void *data) noexcept {
+      const auto *self = static_cast<const FollowProbeGuard *>(data);
+      return self->prevRecoverableFn != nullptr &&
+             self->prevRecoverableFn(c, self->prevRecoverableData);
+    }
+
+    static bool
+    passThroughRecoverableConsumesVisibleWrapper(RecoveryContext &c,
+                                                 const void *data) noexcept {
+      const auto *self = static_cast<const FollowProbeGuard *>(data);
+      return self->prevRecoverableConsumesVisibleFn != nullptr &&
+             self->prevRecoverableConsumesVisibleFn(
+                 c, self->prevRecoverableConsumesVisibleData);
+    }
+
+    RecoveryContext *ctx;
+    FollowProbeFn newFn;
+    const void *newData;
+    FollowProbeFn prevFn;
+    const void *prevData;
+    FollowProbeFn newRecoverableFn;
+    const void *newRecoverableData;
+    FollowProbeFn prevRecoverableFn;
+    const void *prevRecoverableData;
+    FollowProbeFn newRecoverableConsumesVisibleFn;
+    const void *newRecoverableConsumesVisibleData;
+    FollowProbeFn prevRecoverableConsumesVisibleFn;
+    const void *prevRecoverableConsumesVisibleData;
+  };
+
+  [[nodiscard]] FollowProbeGuard
+  withFollowProbe(FollowProbeFn fn, const void *data,
+                  FollowProbeFn recoverableFn = nullptr,
+                  const void *recoverableData = nullptr,
+                  FollowProbeFn recoverableConsumesVisibleFn = nullptr,
+                  const void *recoverableConsumesVisibleData = nullptr,
+                  FollowProbeMode mode = FollowProbeMode::Local) noexcept {
+    return FollowProbeGuard{*this,
+                            fn,
+                            data,
+                            recoverableFn,
+                            recoverableData,
+                            recoverableConsumesVisibleFn,
+                            recoverableConsumesVisibleData,
+                            mode};
+  }
+
+  [[nodiscard]] FollowProbeGuard
+  withPassThroughOuterFollowProbe() noexcept {
+    return FollowProbeGuard{
+        *this,   nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, FollowProbeMode::PassThroughOuter};
+  }
 
   [[nodiscard]] constexpr const char *furthestExploredCursor() const noexcept {
     return maxCursor();
@@ -469,90 +609,32 @@ struct RecoveryContext : TrackedParseContext {
     return maxCursorOffset();
   }
 
-  [[nodiscard]] constexpr const char *localReplayMaxCursor() const noexcept {
-    return _localReplayMaxCursor;
-  }
-
-  [[nodiscard]] constexpr TextOffset localReplayMaxOffset() const noexcept {
-    return static_cast<TextOffset>(_localReplayMaxCursor - begin);
-  }
-
   constexpr void restoreFurthestExploredCursor(const char *cursor) noexcept {
     restoreMaxCursor(cursor);
-    if (_localReplayMaxCursor > maxCursor()) {
-      _localReplayMaxCursor = maxCursor();
-    }
-  }
-
-  constexpr void
-  restoreLocalReplayMaxCursor(const char *cursorValue) noexcept {
-    _localReplayMaxCursor =
-        std::max(cursor(),
-                 std::min(cursorValue, furthestExploredCursor()));
   }
 
   inline void refreshRecoveryPhase() noexcept {
     auto &windowReplay = recoveryState.windowReplay;
-    if (!windowReplay.recoveryBookkeepingEnabled) {
+    if (!windowReplay.recoveryBookkeepingEnabled) [[likely]] {
       return;
     }
-    if (windowReplay.awaitingStrictStability && cursor() == end) {
-      windowReplay.stableAfterRecovery = true;
-      windowReplay.awaitingStrictStability = false;
-      ++recoveryStateVersion;
-      maybeDisableRecoveryBookkeeping();
-    }
-
-    const auto windowCount = editWindows.size();
-    if (windowCount == 0u) {
-      return;
-    }
-    const auto *const windows = editWindows.data();
-
-    while (true) {
-      if (windowReplay.inRecoveryPhase) {
-        const auto activeWindowIndex = windowReplay.activeEditWindowIndex;
-        if (activeWindowIndex >= windowCount) {
-          windowReplay.inRecoveryPhase = false;
-          ++recoveryStateVersion;
-          continue;
-        }
-        const auto &window = windows[activeWindowIndex];
-        const auto nextWindowIndex = activeWindowIndex + 1u;
-        if (nextWindowIndex < windowCount &&
-            cursorOffset() >= windows[nextWindowIndex].editFloorOffset) {
-          completeActiveRecoveryWindow(false, true);
-          continue;
-        }
-        if (windowReplay.currentForwardVisibleLeafCount >=
-            active_window_forward_token_budget(window)) {
-          completeActiveRecoveryWindow(false);
-          continue;
-        }
-        return;
-      }
-
-      const auto activeWindowIndex = windowReplay.activeEditWindowIndex;
-      if (activeWindowIndex >= windowCount) {
-        return;
-      }
-      if (cursorOffset() < windows[activeWindowIndex].beginOffset) {
-        return;
-      }
-      beginActiveRecoveryWindow();
-      return;
-    }
+    refreshRecoveryPhaseSlow();
   }
+
+private:
+  void refreshRecoveryPhaseSlow() noexcept;
+
+public:
 
   [[nodiscard]] inline Checkpoint mark() const noexcept {
     return {.parseCheckpoint = TrackedParseContext::mark(),
             .recoveryState = recoveryState,
-            .recoveryStateVersion = recoveryStateVersion,
             .recoveryEditCount =
                 static_cast<std::uint32_t>(recoveryEdits.size()),
-            .replayForwardTokenHistorySize =
-                static_cast<std::uint32_t>(_replayForwardTokenHistory.size()),
-            .localReplayMaxCursor = _localReplayMaxCursor,
+            .committedRecoveryEditIndex = committedRecoveryEditIndex,
+            .editWindowReplayForwardTokenCount =
+                editWindow.has_value() ? editWindow->replayForwardTokenCount
+                                       : 0u,
             .deleteBridge = _deleteBridge};
   }
 
@@ -560,15 +642,19 @@ struct RecoveryContext : TrackedParseContext {
 
   inline void rewind(const Checkpoint &checkpoint) noexcept {
     TrackedParseContext::rewind(checkpoint.parseCheckpoint);
-    _localReplayMaxCursor = checkpoint.localReplayMaxCursor;
     _deleteBridge = checkpoint.deleteBridge;
-    restoreReplayForwardTokenCounts(checkpoint.replayForwardTokenHistorySize);
-    if (recoveryStateVersion == checkpoint.recoveryStateVersion) {
-      return;
+    committedRecoveryEditIndex = checkpoint.committedRecoveryEditIndex;
+    if (editWindow.has_value()) [[likely]] {
+      editWindow->replayForwardTokenCount =
+          checkpoint.editWindowReplayForwardTokenCount;
     }
     recoveryState = checkpoint.recoveryState;
-    recoveryEdits.resize(checkpoint.recoveryEditCount);
-    recoveryStateVersion = checkpoint.recoveryStateVersion;
+    // Speculative parses that didn't push an edit dominate the rewind path;
+    // skip the resize call (and the underlying destructor loop / size-store
+    // sequence) when the count is unchanged.
+    if (recoveryEdits.size() != checkpoint.recoveryEditCount) [[unlikely]] {
+      recoveryEdits.resize(checkpoint.recoveryEditCount);
+    }
   }
 
   inline void exit(const char *checkpoint,
@@ -577,7 +663,6 @@ struct RecoveryContext : TrackedParseContext {
     if (trackEditState && recoveryState.editBudget.consecutiveDeletes != 0)
         [[unlikely]] {
       recoveryState.editBudget.consecutiveDeletes = 0;
-      ++recoveryStateVersion;
     }
   }
 
@@ -590,7 +675,6 @@ struct RecoveryContext : TrackedParseContext {
       return;
     }
     recoveryState.frontierBlocked = false;
-    ++recoveryStateVersion;
   }
 
   void blockFrontier() noexcept {
@@ -598,17 +682,15 @@ struct RecoveryContext : TrackedParseContext {
       return;
     }
     recoveryState.frontierBlocked = true;
-    ++recoveryStateVersion;
   }
 
-  void setEditWindows(std::vector<EditWindow> windows) noexcept {
-    editWindows = std::move(windows);
-    _replayForwardTokenHistory.clear();
+  void setEditWindow(std::optional<EditWindow> window) noexcept {
+    editWindow = std::move(window);
     recoveryState.windowReplay.activeWindowEditCostBase =
         recoveryState.editBudget.editCost;
     recoveryState.windowReplay.activeWindowEditCountBase =
         recoveryState.editBudget.editCount;
-    recoveryState.windowReplay.activeEditWindowIndex = 0;
+    recoveryState.windowReplay.activeEditWindowCompleted = false;
     recoveryState.windowReplay.currentForwardVisibleLeafCount = 0;
     recoveryState.windowReplay.strictVisibleLeafCountAfterRecovery = 0;
     recoveryState.windowReplay.completedRecoveryWindows = 0;
@@ -616,17 +698,20 @@ struct RecoveryContext : TrackedParseContext {
     recoveryState.windowReplay.stableAfterRecovery = false;
     recoveryState.windowReplay.awaitingStrictStability = false;
     recoveryState.windowReplay.inRecoveryPhase = false;
-    recoveryState.windowReplay.recoveryBookkeepingEnabled = !editWindows.empty();
+    recoveryState.windowReplay.recoveryBookkeepingEnabled = editWindow.has_value();
     _recordFailureHistory = recoveryState.windowReplay.recoveryBookkeepingEnabled;
-    if (!editWindows.empty()) {
-      editFloorOffset = editWindows.front().editFloorOffset;
-    } else {
-      editFloorOffset = 0;
-    }
-    _localReplayMaxCursor = cursor();
+    editFloorOffset = editWindow.has_value() ? editWindow->editFloorOffset
+                                             : TextOffset{0};
     _deleteBridge = {};
-    ++recoveryStateVersion;
   }
+
+  void setCommittedRecoveryPrefix(std::vector<RecoveryEdit> edits,
+                                  TextOffset resumeFloor) noexcept {
+    committedRecoveryEdits = std::move(edits);
+    committedRecoveryEditIndex = 0;
+    committedRecoveryResumeFloor = resumeFloor;
+  }
+
   inline void finalizeRecoveryAtEof() noexcept {
     if (cursor() != end) {
       return;
@@ -639,7 +724,6 @@ struct RecoveryContext : TrackedParseContext {
     if (recoveryState.windowReplay.awaitingStrictStability) {
       recoveryState.windowReplay.stableAfterRecovery = true;
       recoveryState.windowReplay.awaitingStrictStability = false;
-      ++recoveryStateVersion;
       maybeDisableRecoveryBookkeeping();
     }
   }
@@ -647,132 +731,44 @@ struct RecoveryContext : TrackedParseContext {
     return recoveryState.windowReplay.inRecoveryPhase;
   }
   [[nodiscard]] constexpr bool hasPendingRecoveryWindows() const noexcept {
-    return recoveryState.windowReplay.activeEditWindowIndex < editWindows.size();
-  }
-
-  [[nodiscard]] RecoveryMemoTable &memoTable() noexcept {
-    return *_recoveryMemoTable;
-  }
-
-  [[nodiscard]] const RecoveryMemoTable &memoTable() const noexcept {
-    return *_recoveryMemoTable;
-  }
-
-  [[nodiscard]] std::uint64_t recoveryProbeMemoSignature() const noexcept {
-    return static_cast<std::uint64_t>(
-        reinterpret_cast<std::uintptr_t>(_skipper));
-  }
-
-  void noteRecoveryPolicyMutation() noexcept {
-    ++_recoveryPolicyMutationVersion;
-  }
-
-  [[nodiscard]] std::uint64_t recoveryPolicySignature() const noexcept {
-    const auto stamp =
-        (static_cast<std::uint64_t>(recoveryStateVersion) << 32u) |
-        static_cast<std::uint64_t>(_recoveryPolicyMutationVersion);
-    if (_cachedRecoveryPolicySignatureStamp == stamp) {
-      return _cachedRecoveryPolicySignature;
-    }
-
-    constexpr auto noScopedEditFloor =
-        std::numeric_limits<TextOffset>::max();
-    const auto scopedEditFloor =
-        _scopedEditFloorOffset.value_or(noScopedEditFloor);
-    const auto &windowReplay = recoveryState.windowReplay;
-    std::uint64_t mixed =
-        static_cast<std::uint64_t>(recoveryStateVersion) * 1469598103934665603ull;
-    mixed ^= static_cast<std::uint64_t>(
-                 reinterpret_cast<std::uintptr_t>(_skipper)) *
-             1609587929392839161ull;
-    mixed ^= static_cast<std::uint64_t>(editFloorOffset) * 1099511628211ull;
-    mixed ^= static_cast<std::uint64_t>(scopedEditFloor) * 7809847782465536323ull;
-    mixed ^= static_cast<std::uint64_t>(maxConsecutiveCodepointDeletes) << 1u;
-    mixed ^= static_cast<std::uint64_t>(maxEditsPerAttempt) << 7u;
-    mixed ^= static_cast<std::uint64_t>(maxEditCost) << 13u;
-    mixed ^= static_cast<std::uint64_t>(_scopedLeadingTerminalInsertDepth) << 19u;
-    mixed ^=
-        static_cast<std::uint64_t>(_destructiveWindowContinuationDepth) << 25u;
-    mixed ^= static_cast<std::uint64_t>(allowInsert) << 33u;
-    mixed ^= static_cast<std::uint64_t>(allowDelete) << 34u;
-    mixed ^= static_cast<std::uint64_t>(allowExtendedDeleteScan) << 35u;
-    mixed ^= static_cast<std::uint64_t>(allowDeleteRetry) << 36u;
-    mixed ^= static_cast<std::uint64_t>(skipAfterDelete) << 37u;
-    mixed ^= static_cast<std::uint64_t>(trackEditState) << 38u;
-    mixed ^= static_cast<std::uint64_t>(allowTopLevelPartialSuccess) << 39u;
-    mixed ^= static_cast<std::uint64_t>(windowReplay.activeWindowEditCostBase) *
-             11400714819323198485ull;
-    mixed ^= static_cast<std::uint64_t>(windowReplay.activeWindowEditCountBase) *
-             7809847782465536323ull;
-    mixed ^= static_cast<std::uint64_t>(windowReplay.activeEditWindowIndex) *
-             2946739916269131511ull;
-    mixed ^=
-        static_cast<std::uint64_t>(windowReplay.currentForwardVisibleLeafCount) *
-        1609587929392839161ull;
-    mixed ^= static_cast<std::uint64_t>(
-                 windowReplay.strictVisibleLeafCountAfterRecovery) *
-             1099511628211ull;
-    mixed ^= static_cast<std::uint64_t>(windowReplay.completedRecoveryWindows)
-             << 40u;
-    mixed ^= static_cast<std::uint64_t>(windowReplay.inRecoveryPhase) << 48u;
-    mixed ^= static_cast<std::uint64_t>(windowReplay.reachedRecoveryTarget)
-             << 49u;
-    mixed ^= static_cast<std::uint64_t>(windowReplay.stableAfterRecovery)
-             << 50u;
-    mixed ^= static_cast<std::uint64_t>(windowReplay.awaitingStrictStability)
-             << 51u;
-    mixed ^= static_cast<std::uint64_t>(windowReplay.recoveryBookkeepingEnabled)
-             << 52u;
-    if (windowReplay.activeEditWindowIndex < editWindows.size()) {
-      const auto &window = editWindows[windowReplay.activeEditWindowIndex];
-      mixed ^= static_cast<std::uint64_t>(window.beginOffset) *
-               7046029254386353131ull;
-      mixed ^= static_cast<std::uint64_t>(window.editFloorOffset) *
-               11400714819323198485ull;
-      mixed ^= static_cast<std::uint64_t>(window.maxCursorOffset) *
-               7809847782465536323ull;
-      mixed ^= static_cast<std::uint64_t>(window.forwardTokenCount) << 53u;
-      mixed ^= static_cast<std::uint64_t>(window.replayForwardTokenCount)
-               << 55u;
-    }
-    _cachedRecoveryPolicySignatureStamp = stamp;
-    _cachedRecoveryPolicySignature = mixed;
-    return mixed;
-  }
-
-  [[nodiscard]] std::uint64_t activeRecoverySignature() const noexcept {
-    return detail::active_recovery_signature(_activeRecoveries, begin);
-  }
-
-  [[nodiscard]] std::uint64_t recoveryObservationSignature() const noexcept {
-    std::uint64_t mixed =
-        static_cast<std::uint64_t>(failureHistorySize()) *
-        11400714819323198485ull;
-    mixed = detail::mix_recovery_memo_signature(
-        mixed, static_cast<std::uint64_t>(furthestFailureHistorySize()) *
-                   7809847782465536323ull);
-    return mixed;
+    return editWindow.has_value() &&
+           !recoveryState.windowReplay.activeEditWindowCompleted;
   }
 
   [[nodiscard]] constexpr TextOffset
   pendingRecoveryWindowBeginOffset() const noexcept {
-    return recoveryState.windowReplay.activeEditWindowIndex < editWindows.size()
-               ? editWindows[recoveryState.windowReplay.activeEditWindowIndex]
-                     .beginOffset
+    return hasPendingRecoveryWindows()
+               ? std::max(editWindow->beginOffset, committedRecoveryResumeFloor)
                : 0;
   }
   [[nodiscard]] constexpr TextOffset
+  pendingRecoveryWindowActivationOffset() const noexcept {
+    if (!hasPendingRecoveryWindows()) {
+      return 0;
+    }
+    return pendingRecoveryWindowBeginOffset();
+  }
+  [[nodiscard]] constexpr TextOffset
   pendingRecoveryWindowMaxCursorOffset() const noexcept {
-    return recoveryState.windowReplay.activeEditWindowIndex < editWindows.size()
-               ? editWindows[recoveryState.windowReplay.activeEditWindowIndex]
-                     .maxCursorOffset
-               : 0;
+    return hasPendingRecoveryWindows() ? editWindow->maxCursorOffset : 0;
   }
   [[nodiscard]] std::size_t activeRecoveryDepth() const noexcept {
     return _activeRecoveries.size();
   }
   [[nodiscard]] constexpr bool hasHadEdits() const noexcept {
     return recoveryState.editBudget.hadEdits;
+  }
+  [[nodiscard]] constexpr bool hasPendingCommittedRecoveryEdits() const
+      noexcept {
+    return committedRecoveryEditIndex < committedRecoveryEdits.size();
+  }
+  [[nodiscard]] constexpr bool hasPendingCommittedRecoveryEditWithin(
+      TextOffset beginOffset, TextOffset endOffset) const noexcept {
+    const auto *entry = nextCommittedRecoveryEdit();
+    if (entry == nullptr || endOffset < beginOffset) {
+      return false;
+    }
+    return entry->beginOffset <= endOffset && entry->endOffset >= beginOffset;
   }
   [[nodiscard]] constexpr std::uint32_t
   completedRecoveryWindowCount() const noexcept {
@@ -809,52 +805,41 @@ struct RecoveryContext : TrackedParseContext {
                                          nextTrackEditState);
   }
 
-  [[nodiscard]] LeadingTerminalInsertScopeGuard
-  withLeadingTerminalInsertScope() noexcept {
-    return LeadingTerminalInsertScopeGuard{*this};
-  }
-
-  [[nodiscard]] DestructiveWindowContinuationGuard
-  withDestructiveWindowContinuation() noexcept {
-    return DestructiveWindowContinuationGuard{*this};
-  }
-
-  [[nodiscard]] EditFloorRelaxationGuard
-  withRelaxedEditFloor(TextOffset relaxedFloorOffset) noexcept {
-    return EditFloorRelaxationGuard{*this, relaxedFloorOffset};
+  [[nodiscard]] constexpr bool
+  allowsScopedLeadingTerminalInsertRecovery() const noexcept {
+    return allowLeadingTerminalInsertScope;
   }
 
   [[nodiscard]] constexpr bool
-  allowsScopedLeadingTerminalInsertRecovery() const noexcept {
-    return _scopedLeadingTerminalInsertDepth != 0u;
+  allowsCompletedWindowContinuationRecovery() const noexcept {
+    return editWindow.has_value() && allowDestructiveWindowContinuation &&
+           recoveryState.editBudget.hadEdits &&
+           recoveryState.windowReplay.activeEditWindowCompleted &&
+           !hasPendingCommittedRecoveryEdits();
+  }
+
+  [[nodiscard]] bool
+  allowsCompletedWindowInsertionClusterAtCursor() const noexcept {
+    return editWindow.has_value() && recoveryState.editBudget.hadEdits &&
+           recoveryState.windowReplay.activeEditWindowCompleted &&
+           !hasPendingCommittedRecoveryEdits() &&
+           cursorOffset() >= editWindow->editFloorOffset &&
+           continues_local_edit_cluster_at_cursor();
   }
 
   [[nodiscard]] constexpr bool canEditAtOffset(TextOffset offset) const noexcept {
-    const auto activeFloorOffset = [this]() noexcept {
-      if (editWindows.empty()) {
-        return recoveryState.windowReplay.inRecoveryPhase ? editFloorOffset
-                                                          : TextOffset{0};
-      }
-      if (recoveryState.windowReplay.inRecoveryPhase &&
-          recoveryState.windowReplay.activeEditWindowIndex < editWindows.size()) {
-        return editWindows[recoveryState.windowReplay.activeEditWindowIndex]
-            .editFloorOffset;
-      }
-      return TextOffset{0};
-    }();
-    const auto effectiveFloorOffset =
-        _scopedEditFloorOffset.has_value()
-            ? std::min(activeFloorOffset, *_scopedEditFloorOffset)
-            : activeFloorOffset;
-    if (editWindows.empty()) {
+    if (hasPendingCommittedRecoveryEdits()) {
+      return canReplayCommittedEditAtOffset(offset);
+    }
+    if (!editWindow.has_value()) {
       return recoveryState.windowReplay.inRecoveryPhase &&
-             offset >= effectiveFloorOffset;
+             offset >= editFloorOffset;
     }
-    if (recoveryState.windowReplay.inRecoveryPhase &&
-        recoveryState.windowReplay.activeEditWindowIndex < editWindows.size()) {
-      return offset >= effectiveFloorOffset;
+    if (!hasPendingRecoveryWindows()) {
+      return allowsCompletedWindowContinuationRecovery() &&
+             offset >= editWindow->editFloorOffset;
     }
-    return false;
+    return offset >= editWindow->editFloorOffset;
   }
 
   [[nodiscard]] constexpr bool canEdit() const noexcept {
@@ -869,6 +854,16 @@ struct RecoveryContext : TrackedParseContext {
   [[nodiscard]] constexpr bool canDelete() const noexcept {
     if (_cursor >= end) {
       return false;
+    }
+    // A pending committed delete at the cursor must remain replayable even
+    // when the active window's editFloor would otherwise refuse new edits:
+    // committed edits were already accepted by an earlier window and replay
+    // them is not a fresh edit. Without this every recovery decision point
+    // upstream of `deleteOneCodepoint` (legality checks, scans, family
+    // selection) would refuse to engage at offsets below editFloor, and the
+    // committed prefix could not be threaded across windows.
+    if (matching_committed_delete(cursorOffset()) != nullptr) {
+      return true;
     }
     return detail::can_delete(allowDelete, canEdit(),
                               recoveryState.editBudget.consecutiveDeletes,
@@ -918,10 +913,10 @@ struct RecoveryContext : TrackedParseContext {
   [[nodiscard]] std::vector<std::uint32_t>
   replayForwardTokenCounts() const {
     std::vector<std::uint32_t> replayCounts;
-    replayCounts.reserve(editWindows.size());
-    for (const auto &window : editWindows) {
+    if (editWindow.has_value()) {
       replayCounts.push_back(
-          std::max(window.forwardTokenCount, window.replayForwardTokenCount));
+          std::max(editWindow->forwardTokenCount,
+                   editWindow->replayForwardTokenCount));
     }
     return replayCounts;
   }
@@ -962,184 +957,20 @@ struct RecoveryContext : TrackedParseContext {
   inline void allowBudgetOverflowEdits() noexcept {
     if (!recoveryState.editBudget.allowBudgetOverflowEdits) {
       recoveryState.editBudget.allowBudgetOverflowEdits = true;
-      ++recoveryStateVersion;
     }
   }
 
-  bool insertSynthetic(const grammar::AbstractElement *element) {
-    if (!trackEditState) {
-      return false;
-    }
-    clearPendingDeleteHiddenTriviaBridge();
-    if (!canInsert() || !canAffordEdit(ParseDiagnosticKind::Inserted)) {
-      PEGIUM_RECOVERY_TRACE("[rule] insert blocked offset=", cursorOffset(),
-                            " floor=", editFloorOffset);
-      return false;
-    }
-    recoveryEdits.push_back({.kind = ParseDiagnosticKind::Inserted,
-                             .offset = cursorOffset(),
-                             .beginOffset = cursorOffset(),
-                             .endOffset = cursorOffset(),
-                             .element = element});
-    detail::apply_insert_edit_state(
-        detail::default_edit_cost(ParseDiagnosticKind::Inserted),
-        recoveryState.editBudget.editCost, recoveryState.editBudget.editCount,
-        recoveryState.editBudget.hadEdits,
-        recoveryState.editBudget.consecutiveDeletes);
-    noteReplayForwardRequirementForCurrentWindow(ParseDiagnosticKind::Inserted);
-    PEGIUM_STEP_TRACE_INC(detail::StepCounter::ParseContextInsert);
-    PEGIUM_RECOVERY_TRACE("[rule] insert synthetic offset=", cursorOffset(),
-                          " kind=", static_cast<int>(element->getKind()));
-    ++recoveryStateVersion;
-    return true;
-  }
+  bool insertSynthetic(const grammar::AbstractElement *element);
 
   bool insertSyntheticGapAt(const char *position,
-                            const char *message = nullptr) {
-    if (!trackEditState || position < begin || position > end) {
-      return false;
-    }
-    clearPendingDeleteHiddenTriviaBridge();
-    const auto offset = static_cast<TextOffset>(position - begin);
-    if (!detail::can_insert(allowInsert, canEditAtOffset(offset)) ||
-        !canAffordEdit(ParseDiagnosticKind::Inserted)) {
-      PEGIUM_RECOVERY_TRACE("[rule] insert synthetic gap blocked offset=", offset,
-                            " floor=", editFloorOffset);
-      return false;
-    }
-    recoveryEdits.push_back({.kind = ParseDiagnosticKind::Inserted,
-                             .offset = offset,
-                             .beginOffset = offset,
-                             .endOffset = offset,
-                             .element = nullptr,
-                             .message =
-                                 message == nullptr ? std::string{}
-                                                    : std::string(message)});
-    detail::apply_insert_edit_state(
-        detail::default_edit_cost(ParseDiagnosticKind::Inserted),
-        recoveryState.editBudget.editCost, recoveryState.editBudget.editCount,
-        recoveryState.editBudget.hadEdits,
-        recoveryState.editBudget.consecutiveDeletes);
-    noteReplayForwardRequirementForCurrentWindow(ParseDiagnosticKind::Inserted);
-    PEGIUM_STEP_TRACE_INC(detail::StepCounter::ParseContextInsert);
-    PEGIUM_RECOVERY_TRACE("[rule] insert synthetic gap offset=", offset);
-    ++recoveryStateVersion;
-    return true;
-  }
+                            const char *message = nullptr);
 
-  bool deleteOneCodepoint() noexcept {
-    if (!trackEditState) {
-      return false;
-    }
-    if (cursor() >= end) {
-      clearPendingDeleteHiddenTriviaBridge();
-      return false;
-    }
-    auto *mergedDeleteEdit = pendingHiddenTriviaDeleteEdit();
-    const auto *window = currentEditWindow();
-    const bool destructiveEditOutsideActiveWindow =
-        recoveryState.windowReplay.inRecoveryPhase && window != nullptr &&
-        cursorOffset() > window->maxCursorOffset &&
-        recoveryState.editBudget.hadEdits &&
-        _destructiveWindowContinuationDepth == 0u &&
-        !continues_local_edit_cluster_at_cursor() &&
-        recoveryState.editBudget.consecutiveDeletes == 0u;
-    if (!canDelete() || destructiveEditOutsideActiveWindow ||
-        !canAffordEdit(ParseDiagnosticKind::Deleted)) {
-      clearPendingDeleteHiddenTriviaBridge();
-      PEGIUM_RECOVERY_TRACE("[rule] delete blocked offset=", cursorOffset(),
-                            " floor=", editFloorOffset,
-                            " consecutive=",
-                            recoveryState.editBudget.consecutiveDeletes,
-                            "/",
-                            maxConsecutiveCodepointDeletes);
-      return false;
-    }
-    const auto beforeOffset = cursorOffset();
-    (void)beforeOffset;
-    const char *const deletedEnd = detail::next_codepoint_cursor(cursor());
-    const char *const next = deletedEnd;
-    if (next <= cursor()) [[unlikely]] {
-      clearPendingDeleteHiddenTriviaBridge();
-      return false;
-    }
-    if (mergedDeleteEdit != nullptr) {
-      mergedDeleteEdit->endOffset =
-          static_cast<TextOffset>(deletedEnd - begin);
-      _deleteBridge = {};
-    } else {
-      recoveryEdits.push_back({.kind = ParseDiagnosticKind::Deleted,
-                               .offset = cursorOffset(),
-                               .beginOffset = cursorOffset(),
-                               .endOffset =
-                                   static_cast<TextOffset>(deletedEnd - begin),
-                               .element = nullptr});
-    }
-    detail::apply_delete_edit_state(
-        detail::default_edit_cost(ParseDiagnosticKind::Deleted),
-        recoveryState.editBudget.editCost, recoveryState.editBudget.editCount,
-        recoveryState.editBudget.hadEdits,
-        recoveryState.editBudget.consecutiveDeletes);
-    noteReplayForwardRequirementForCurrentWindow(ParseDiagnosticKind::Deleted);
-    PEGIUM_STEP_TRACE_INC(detail::StepCounter::ParseContextDelete);
+  bool deleteOneCodepoint() noexcept;
 
-    _cursor = next;
-    if (_cursor > _maxCursor) {
-      _maxCursor = _cursor;
-    }
-    noteLocalReplayCursorAdvance();
-    ++recoveryStateVersion;
-    if (skipAfterDelete) {
-      skip();
-    } else {
-      refreshRecoveryPhase();
-    }
-    PEGIUM_RECOVERY_TRACE("[rule] delete offset=", beforeOffset, " -> ",
-                          cursorOffset());
-    return true;
-  }
-
-  bool extendLastDeleteThroughHiddenTrivia() noexcept {
-    if (!trackEditState || recoveryEdits.empty() || cursor() >= end) {
-      return false;
-    }
-    clearPendingDeleteHiddenTriviaBridge();
-    auto &lastEdit = recoveryEdits.back();
-    if (lastEdit.kind != ParseDiagnosticKind::Deleted ||
-        lastEdit.endOffset != cursorOffset()) {
-      return false;
-    }
-
-    const char *const hiddenEnd = skip_without_builder(cursor());
-    if (hiddenEnd <= cursor()) {
-      return false;
-    }
-    if (hiddenEnd >= end) {
-      return false;
-    }
-    _deleteBridge.pendingHiddenTriviaStart = cursor();
-    _deleteBridge.pendingHiddenTriviaEnd = hiddenEnd;
-    _cursor = hiddenEnd;
-    if (_cursor > _maxCursor) {
-      _maxCursor = _cursor;
-    }
-    noteLocalReplayCursorAdvance();
-    ++recoveryStateVersion;
-    refreshRecoveryPhase();
-    PEGIUM_RECOVERY_TRACE("[rule] bridge delete through hidden trivia -> ",
-                          cursorOffset());
-    return true;
-  }
+  bool extendLastDeleteThroughHiddenTrivia() noexcept;
 
   bool replaceLeaf(const char *endPtr, const grammar::AbstractElement *element,
-                   bool hidden = false) {
-    return replaceLeaf(endPtr, element,
-                       detail::default_edit_cost(ParseDiagnosticKind::Replaced),
-                       hidden);
-  }
-
-  bool replaceLeaf(const char *endPtr, const grammar::AbstractElement *element,
-                   std::uint32_t replacementCost, bool hidden) {
+                   std::uint32_t replacementCost, bool hidden = false) {
     if (!trackEditState) {
       return false;
     }
@@ -1150,12 +981,19 @@ struct RecoveryContext : TrackedParseContext {
       return false;
     }
     const auto endOffset = static_cast<TextOffset>(endPtr - begin);
+    const bool replayingCommittedReplace =
+        matches_committed_replace(cursorOffset(), endOffset, element);
+    if (hasPendingCommittedRecoveryEdits() && !replayingCommittedReplace) {
+      PEGIUM_RECOVERY_TRACE("[rule] replace blocked pending committed offset=",
+                            cursorOffset(), " floor=", editFloorOffset);
+      return false;
+    }
     const auto *window = currentEditWindow();
     const bool destructiveEditOutsideActiveWindow =
         recoveryState.windowReplay.inRecoveryPhase && window != nullptr &&
         cursorOffset() > window->maxCursorOffset &&
         recoveryState.editBudget.hadEdits &&
-        _destructiveWindowContinuationDepth == 0u &&
+        !allowDestructiveWindowContinuation &&
         !continues_local_edit_cluster_at_cursor();
     if (!canEdit() || destructiveEditOutsideActiveWindow ||
         !canEditAtOffset(endOffset) ||
@@ -1176,10 +1014,12 @@ struct RecoveryContext : TrackedParseContext {
         recoveryState.editBudget.editCount,
         recoveryState.editBudget.hadEdits,
         recoveryState.editBudget.consecutiveDeletes);
+    if (replayingCommittedReplace) {
+      consumeCommittedRecoveryEdit();
+    }
     noteReplayForwardRequirementForCurrentWindow(ParseDiagnosticKind::Replaced);
     PEGIUM_STEP_TRACE_INC(detail::StepCounter::ParseContextReplace);
     leaf(endPtr, element, hidden, true);
-    ++recoveryStateVersion;
     PEGIUM_RECOVERY_TRACE("[rule] replace offset=", beforeOffset, " -> ",
                           cursorOffset(),
                           " kind=", static_cast<int>(element->getKind()));
@@ -1191,14 +1031,12 @@ private:
 
   inline void afterTrackedSkip() noexcept {
     clearPendingDeleteHiddenTriviaBridge();
-    noteLocalReplayCursorAdvance();
     refreshRecoveryPhase();
   }
 
   inline void afterTrackedLeaf(TextOffset beginOffset, TextOffset endOffset,
                                bool hidden) noexcept {
     clearPendingDeleteHiddenTriviaBridge();
-    noteLocalReplayCursorAdvance();
     if (recoveryState.windowReplay.recoveryBookkeepingEnabled && !hidden &&
         endOffset > beginOffset) {
       onVisibleLeaf(beginOffset, endOffset);
@@ -1206,22 +1044,94 @@ private:
     refreshRecoveryPhase();
     if (trackEditState && recoveryState.editBudget.consecutiveDeletes != 0) {
       recoveryState.editBudget.consecutiveDeletes = 0;
-      ++recoveryStateVersion;
     }
   }
 
   [[nodiscard]] constexpr const EditWindow *currentEditWindow() const noexcept {
-    const auto activeWindowIndex = recoveryState.windowReplay.activeEditWindowIndex;
-    return activeWindowIndex < editWindows.size()
-               ? editWindows.data() + activeWindowIndex
-               : nullptr;
+    return hasPendingRecoveryWindows() ? &*editWindow : nullptr;
   }
 
   [[nodiscard]] constexpr EditWindow *currentEditWindowMutable() noexcept {
-    const auto activeWindowIndex = recoveryState.windowReplay.activeEditWindowIndex;
-    return activeWindowIndex < editWindows.size()
-               ? editWindows.data() + activeWindowIndex
+    return hasPendingRecoveryWindows() ? &*editWindow : nullptr;
+  }
+
+  [[nodiscard]] constexpr const RecoveryEdit *nextCommittedRecoveryEdit() const
+      noexcept {
+    return hasPendingCommittedRecoveryEdits()
+               ? std::addressof(committedRecoveryEdits[committedRecoveryEditIndex])
                : nullptr;
+  }
+
+  [[nodiscard]] constexpr bool
+  canReplayCommittedEditAtOffset(TextOffset offset) const noexcept {
+    const auto *entry = nextCommittedRecoveryEdit();
+    if (entry == nullptr) {
+      return false;
+    }
+    switch (entry->kind) {
+    case ParseDiagnosticKind::Inserted:
+      return entry->beginOffset == offset && entry->endOffset == offset;
+    case ParseDiagnosticKind::Deleted:
+      // A committed Delete at [b, e) may replay from any cursor position
+      // c < e: cursors c < b consume the gap between the prior edit and the
+      // original delete span, producing a single merged Delete@[c, e) that
+      // matches the behavior of the original accepted attempt.
+      return offset < entry->endOffset;
+    case ParseDiagnosticKind::Replaced:
+      return offset >= entry->beginOffset && offset <= entry->endOffset;
+    case ParseDiagnosticKind::Incomplete:
+    case ParseDiagnosticKind::Recovered:
+    case ParseDiagnosticKind::ConversionError:
+      return false;
+    }
+    return false;
+  }
+
+  [[nodiscard]] constexpr bool
+  matches_committed_insert(TextOffset offset,
+                           const grammar::AbstractElement *element,
+                           std::string_view message) const noexcept {
+    const auto *entry = nextCommittedRecoveryEdit();
+    return entry != nullptr && entry->kind == ParseDiagnosticKind::Inserted &&
+           entry->beginOffset == offset && entry->endOffset == offset &&
+           elements_equivalent_for_replay(entry->element, element) &&
+           entry->message == message;
+  }
+
+  [[nodiscard]] constexpr const RecoveryEdit *
+  matching_committed_delete(TextOffset offset) const noexcept {
+    const auto *entry = nextCommittedRecoveryEdit();
+    return entry != nullptr && entry->kind == ParseDiagnosticKind::Deleted &&
+                   offset >= entry->beginOffset && offset < entry->endOffset
+               ? entry
+               : nullptr;
+  }
+
+  [[nodiscard]] constexpr bool
+  matches_committed_replace(TextOffset beginOffset, TextOffset endOffset,
+                            const grammar::AbstractElement *element) const
+      noexcept {
+    const auto *entry = nextCommittedRecoveryEdit();
+    return entry != nullptr && entry->kind == ParseDiagnosticKind::Replaced &&
+           entry->beginOffset == beginOffset && entry->endOffset == endOffset &&
+           elements_equivalent_for_replay(entry->element, element);
+  }
+
+  inline void consumeCommittedRecoveryEdit() noexcept {
+    if (!hasPendingCommittedRecoveryEdits()) {
+      return;
+    }
+    ++committedRecoveryEditIndex;
+  }
+
+  inline void advanceCommittedDeleteReplay() noexcept {
+    const auto *entry = nextCommittedRecoveryEdit();
+    if (entry == nullptr || entry->kind != ParseDiagnosticKind::Deleted) {
+      return;
+    }
+    if (cursorOffset() >= entry->endOffset) {
+      consumeCommittedRecoveryEdit();
+    }
   }
 
   [[nodiscard]] inline bool
@@ -1251,7 +1161,7 @@ private:
     }
     const auto replayExtensionBase =
         editKind == ParseDiagnosticKind::Inserted
-            ? kInternalRecoveryStabilityTokenCount
+            ? stabilityTokenCount
             : window->forwardTokenCount;
     const auto extendedForwardTokenCount =
         static_cast<std::uint64_t>(
@@ -1264,22 +1174,7 @@ private:
     if (nextReplayForwardTokenCount <= window->replayForwardTokenCount) {
       return;
     }
-    const auto windowIndex =
-        recoveryState.windowReplay.activeEditWindowIndex;
-    if (windowIndex >= editWindows.size()) {
-      return;
-    }
-    _replayForwardTokenHistory.push_back(
-        {.windowIndex = windowIndex,
-         .previousReplayForwardTokenCount = window->replayForwardTokenCount});
     window->replayForwardTokenCount = nextReplayForwardTokenCount;
-    ++recoveryStateVersion;
-  }
-
-  inline void noteLocalReplayCursorAdvance() noexcept {
-    if (_localReplayMaxCursor < cursor()) {
-      _localReplayMaxCursor = cursor();
-    }
   }
 
   [[nodiscard]] inline RecoveryEdit *pendingHiddenTriviaDeleteEdit() noexcept {
@@ -1308,7 +1203,6 @@ private:
       return;
     }
     _deleteBridge = {};
-    ++recoveryStateVersion;
   }
 
   inline void beginActiveRecoveryWindow() noexcept {
@@ -1324,21 +1218,16 @@ private:
     recoveryState.windowReplay.reachedRecoveryTarget = false;
     recoveryState.windowReplay.stableAfterRecovery = false;
     recoveryState.windowReplay.awaitingStrictStability = false;
-    editFloorOffset =
-        editWindows[recoveryState.windowReplay.activeEditWindowIndex]
-            .editFloorOffset;
-    ++recoveryStateVersion;
+    editFloorOffset = editWindow->editFloorOffset;
   }
 
   inline void completeActiveRecoveryWindow(bool reachedEof,
                                            bool handedOffToNextWindow = false) noexcept {
     ++recoveryState.windowReplay.completedRecoveryWindows;
-    const auto &window =
-        editWindows[recoveryState.windowReplay.activeEditWindowIndex];
     recoveryState.windowReplay.reachedRecoveryTarget =
         handedOffToNextWindow || reachedEof ||
         recoveryState.windowReplay.currentForwardVisibleLeafCount >=
-            active_window_forward_token_budget(window);
+            active_window_forward_token_budget(*editWindow);
     recoveryState.windowReplay.stableAfterRecovery = reachedEof;
     recoveryState.windowReplay.awaitingStrictStability =
         recoveryState.windowReplay.reachedRecoveryTarget &&
@@ -1347,13 +1236,7 @@ private:
     recoveryState.windowReplay.strictVisibleLeafCountAfterRecovery = 0;
     recoveryState.windowReplay.currentForwardVisibleLeafCount = 0;
     recoveryState.windowReplay.inRecoveryPhase = false;
-    ++recoveryState.windowReplay.activeEditWindowIndex;
-    if (recoveryState.windowReplay.activeEditWindowIndex < editWindows.size()) {
-      editFloorOffset =
-          editWindows[recoveryState.windowReplay.activeEditWindowIndex]
-              .editFloorOffset;
-    }
-    ++recoveryStateVersion;
+    recoveryState.windowReplay.activeEditWindowCompleted = true;
     maybeDisableRecoveryBookkeeping();
   }
 
@@ -1368,47 +1251,28 @@ private:
       const auto *window = currentEditWindow();
       if (window != nullptr && beginOffset >= window->maxCursorOffset) {
         ++recoveryState.windowReplay.currentForwardVisibleLeafCount;
-        ++recoveryStateVersion;
       }
       return;
     }
     if (recoveryState.windowReplay.awaitingStrictStability) {
       ++recoveryState.windowReplay.strictVisibleLeafCountAfterRecovery;
       if (recoveryState.windowReplay.strictVisibleLeafCountAfterRecovery >=
-          kInternalRecoveryStabilityTokenCount) {
+          stabilityTokenCount) {
         recoveryState.windowReplay.stableAfterRecovery = true;
         recoveryState.windowReplay.awaitingStrictStability = false;
-        ++recoveryStateVersion;
         maybeDisableRecoveryBookkeeping();
         return;
       }
-      ++recoveryStateVersion;
     }
   }
 
   inline void maybeDisableRecoveryBookkeeping() noexcept {
     if (recoveryState.windowReplay.inRecoveryPhase ||
         recoveryState.windowReplay.awaitingStrictStability ||
-        recoveryState.windowReplay.activeEditWindowIndex < editWindows.size()) {
+        hasPendingRecoveryWindows()) {
       return;
     }
     recoveryState.windowReplay.recoveryBookkeepingEnabled = false;
-    ++recoveryStateVersion;
-  }
-
-  void restoreReplayForwardTokenCounts(
-      std::uint32_t replayForwardTokenHistorySize) noexcept {
-    if (_replayForwardTokenHistory.size() <= replayForwardTokenHistorySize) {
-      return;
-    }
-    while (_replayForwardTokenHistory.size() > replayForwardTokenHistorySize) {
-      const auto delta = _replayForwardTokenHistory.back();
-      _replayForwardTokenHistory.pop_back();
-      if (delta.windowIndex < editWindows.size()) {
-        editWindows[delta.windowIndex].replayForwardTokenCount =
-            delta.previousReplayForwardTokenCount;
-      }
-    }
   }
 
   detail::ActiveRecoveryStack _activeRecoveries;
@@ -1416,10 +1280,10 @@ private:
 
 inline void TrackedParseContext::skip() noexcept {
   ParseContext::skip();
-  if (_recordFailureHistory) [[unlikely]] {
+  if (_recordFailureHistory) [[likely]] {
     _failureRecorder.onCursor(cursor());
   }
-  if (_runRecoveryBookkeeping) [[unlikely]] {
+  if (_runRecoveryBookkeeping) [[likely]] {
     static_cast<RecoveryContext &>(*this).afterTrackedSkip();
   }
 }
@@ -1429,11 +1293,11 @@ inline void TrackedParseContext::leaf(
     bool recovered) {
   const auto beginOffset = cursorOffset();
   const auto endOffset = static_cast<TextOffset>(endPtr - begin);
-  if (_recordFailureHistory) [[unlikely]] {
+  if (_recordFailureHistory) [[likely]] {
     _failureRecorder.onLeaf(cursor(), endPtr, element, hidden);
   }
   ParseContext::leaf(endPtr, element, hidden, recovered);
-  if (_runRecoveryBookkeeping) [[unlikely]] {
+  if (_runRecoveryBookkeeping) [[likely]] {
     static_cast<RecoveryContext &>(*this).afterTrackedLeaf(beginOffset,
                                                            endOffset, hidden);
   }
@@ -1444,11 +1308,11 @@ inline void TrackedParseContext::leaf(
     const grammar::AbstractElement *element, bool hidden, bool recovered) {
   const auto beginOffset = static_cast<TextOffset>(beginPtr - begin);
   const auto endOffset = static_cast<TextOffset>(endPtr - begin);
-  if (_recordFailureHistory) [[unlikely]] {
+  if (_recordFailureHistory) [[likely]] {
     _failureRecorder.onLeaf(beginPtr, endPtr, element, hidden);
   }
   ParseContext::leaf(beginPtr, endPtr, element, hidden, recovered);
-  if (_runRecoveryBookkeeping) [[unlikely]] {
+  if (_runRecoveryBookkeeping) [[likely]] {
     static_cast<RecoveryContext &>(*this).afterTrackedLeaf(beginOffset,
                                                            endOffset, hidden);
   }

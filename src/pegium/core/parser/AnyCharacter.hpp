@@ -8,7 +8,7 @@
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/TerminalRecoverySupport.hpp>
-#include <pegium/core/parser/TextUtils.hpp>
+#include <pegium/core/utils/TextUtils.hpp>
 #include <string>
 
 namespace pegium::parser {

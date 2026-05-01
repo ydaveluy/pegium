@@ -13,6 +13,7 @@
 #include <pegium/core/grammar/AbstractRule.hpp>
 #include <pegium/core/grammar/Assignment.hpp>
 #include <pegium/core/grammar/Literal.hpp>
+#include <pegium/core/parser/RecoveryConstants.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
 #include <pegium/core/syntax-tree/RootCstNode.hpp>
 #include <pegium/core/text/TextSnapshot.hpp>
@@ -105,12 +106,18 @@ struct ParseOptions {
   ///
   /// Delete-scan recovery may temporarily continue past this limit when the
   /// normal budget still allows more deletions and no earlier match was found.
-  std::uint32_t maxConsecutiveCodepointDeletes = 8;
+  std::uint32_t maxConsecutiveCodepointDeletes =
+      kDefaultMaxConsecutiveCodepointDeletes;
 
   /// Initial number of visible tokens included before the failure point.
-  std::uint32_t recoveryWindowTokenCount = 8;
+  std::uint32_t recoveryWindowTokenCount = 16;
 
-  /// Upper bound used when widening the recovery window after failed attempts.
+  /// Upper bound for the in-window forward-widening retry.
+  ///
+  /// When the first attempt at a failure site is rejected as non-credible,
+  /// the recovery pass reruns the local pipeline with a larger forward
+  /// window (up to this cap) before advancing to the next site. The
+  /// cap must be at least `recoveryWindowTokenCount`.
   std::uint32_t maxRecoveryWindowTokenCount = 64;
 
   /// Maximum number of candidate attempts explored inside one recovery window.
@@ -127,11 +134,45 @@ struct ParseOptions {
   /// selectable when they keep a stable prefix before the first edit.
   std::uint32_t maxRecoveryEditCost = 256;
 
-  /// Maximum number of recovery windows tried for one parse.
-  std::uint32_t maxRecoveryWindows = 32;
+  /// Hard global safety valve on total recovery attempt runs (budgeted and
+  /// validation-only). Prevents pathological inputs or fuzzer cases from
+  /// driving unbounded recovery work.
+  std::uint32_t maxTotalRecoveryAttemptRuns = 1024;
+
+  /// Number of strict visible leaves that must parse after a recovery edit
+  /// before the edit is considered stable.
+  std::uint32_t recoveryStabilityTokenCount = 2;
+
+  /// Maximum bytes a `Repetition` may skip when no normal recovery plan can
+  /// bridge the current iteration. Acts as the last-resort panic-mode budget:
+  /// the iteration scans forward up to this many codepoints looking for a
+  /// clean restart of its element, emitting one fused `Delete` on success.
+  /// Set to `0` to disable the panic-mode candidate entirely.
+  std::uint32_t maxResyncSkipBytes = 4096;
 
   /// Enables recovery-aware parsing and expectation tracing after strict failure.
   bool recoveryEnabled = true;
+
+  /// Test-only / diagnostic options. Nested under a dedicated
+  /// substruct so production paths can ignore them and the test
+  /// harness has an explicit address for them. These MUST NOT
+  /// change the chosen recovery candidate; their only role is to
+  /// give tests access to internal optimisations (e.g. caches).
+  ///
+  /// Production callers should leave this at default. The substruct
+  /// is public because C++ has no friend-namespace mechanism that
+  /// would let a test header mutate a private field cleanly; the
+  /// `Diagnostics` name + documentation are the contract that
+  /// production code does not touch them.
+  struct Diagnostics {
+    /// Disables the `ChoiceRecoverCache` used to memoize
+    /// `OrderedChoice` recovery attempts. The cache is purely an
+    /// optimisation; the cache-neutrality harness flips this to
+    /// prove that disabling the cache never changes the chosen
+    /// candidate. Production code MUST leave this at `false`.
+    bool recoveryCacheDisabled = false;
+  };
+  Diagnostics diagnostics;
 };
 
 /// One expectation alternative as an ordered grammar derivation path.
@@ -292,6 +333,12 @@ struct RecoveryReport {
 
   /// Number of edits kept in the selected recovery attempt.
   std::uint32_t recoveryEdits = 0;
+
+  /// OrderedChoice recovery cache hits during this parse.
+  std::uint64_t choiceRecoverCacheHits = 0;
+
+  /// OrderedChoice recovery cache misses during this parse.
+  std::uint64_t choiceRecoverCacheMisses = 0;
 
   /// Last accepted recovery window, if recovery happened.
   std::optional<RecoveryWindowReport> lastRecoveryWindow;

@@ -7,7 +7,7 @@
 #include <pegium/core/grammar/InfixRule.hpp>
 #include <pegium/core/grammar/Literal.hpp>
 #include <pegium/core/grammar/TerminalRule.hpp>
-#include <pegium/core/parser/TextUtils.hpp>
+#include <pegium/core/utils/TextUtils.hpp>
 
 namespace pegium {
 

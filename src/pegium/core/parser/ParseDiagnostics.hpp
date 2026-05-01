@@ -3,6 +3,7 @@
 /// Canonical syntax-script helpers and parser-facing diagnostic projection.
 
 #include <algorithm>
+#include <string_view>
 #include <vector>
 
 #include <pegium/core/parser/Parser.hpp>
@@ -10,18 +11,34 @@
 
 namespace pegium::parser::detail {
 
+/// Internal recovery-script entry. Kept trivially copyable / trivially
+/// destructible: a recovery probe pushes entries speculatively and a
+/// rewind shrinks the vector hundreds of times in a typical parse,
+/// so any non-trivial destructor here multiplies into measurable cost.
+///
+/// `message` is a non-owning view. Every producer in the codebase
+/// passes either `nullptr` (empty view) or a string literal, both of
+/// which outlive the parse. The view is converted to an owned
+/// `std::string` only at materialisation time
+/// (`materialize_syntax_diagnostics`), where the diagnostic crosses
+/// the parse boundary.
 struct SyntaxScriptEntry {
   ParseDiagnosticKind kind = ParseDiagnosticKind::Deleted;
   TextOffset offset = 0;
   TextOffset beginOffset = 0;
   TextOffset endOffset = 0;
   const grammar::AbstractElement *element = nullptr;
-  std::string message;
+  std::string_view message;
 
   [[nodiscard]] constexpr bool isSyntax() const noexcept {
     return isSyntaxParseDiagnostic(kind);
   }
 };
+
+static_assert(std::is_trivially_copyable_v<SyntaxScriptEntry>,
+              "SyntaxScriptEntry must stay trivially copyable so that "
+              "speculative recoveryEdits.resize() during recovery probes "
+              "is a cheap shrink, not an N×destructor walk.");
 
 [[nodiscard]] std::vector<SyntaxScriptEntry>
 normalize_syntax_script(std::span<const SyntaxScriptEntry> entries);
@@ -84,8 +101,8 @@ append_syntax_summary_entry(std::vector<SyntaxScriptEntry> &entries,
                                                    : incompleteOffset,
                        .element = nullptr,
                        .message = trailingUnexpectedInput
-                                      ? std::string("Unexpected input.")
-                                      : std::string()});
+                                      ? std::string_view{"Unexpected input."}
+                                      : std::string_view{}});
     return;
   }
   if (has_syntax_diagnostic(entries)) {

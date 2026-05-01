@@ -2,14 +2,13 @@
 
 /// Expectation-tracing parse context used for completion and diagnostics.
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <pegium/core/parser/Parser.hpp>
 #include <pegium/core/parser/ContextShared.hpp>
+#include <pegium/core/parser/RecoveryConstants.hpp>
 #include <pegium/core/parser/Skipper.hpp>
-#include <pegium/core/parser/TextUtils.hpp>
 #include <span>
 #include <pegium/core/utils/Cancellation.hpp>
 #include <utility>
@@ -284,75 +283,15 @@ struct ExpectContext {
                                    maxEditCost, customCost);
   }
 
-  bool insertSynthetic(const grammar::AbstractElement *) {
-    if (!trackEditState || !canInsert() ||
-        !canAffordEdit(ParseDiagnosticKind::Inserted)) {
-      return false;
-    }
-    detail::apply_insert_edit_state(
-        detail::default_edit_cost(ParseDiagnosticKind::Inserted), editCost,
-        editCount, hadEdits, consecutiveDeletes);
-    return true;
-  }
+  bool insertSynthetic(const grammar::AbstractElement *);
 
   bool insertSyntheticGapAt(const char *position,
-                            const char *message = nullptr) {
-    (void)message;
-    if (!trackEditState || position < begin || position > anchor) {
-      return false;
-    }
-    if (const auto offset = static_cast<TextOffset>(position - begin);
-        !detail::can_insert(allowInsert, canEditAtOffset(offset)) ||
-        !canAffordEdit(ParseDiagnosticKind::Inserted)) {
-      return false;
-    }
-    detail::apply_insert_edit_state(
-        detail::default_edit_cost(ParseDiagnosticKind::Inserted), editCost,
-        editCount, hadEdits, consecutiveDeletes);
-    return true;
-  }
+                            const char *message = nullptr);
 
-  bool deleteOneCodepoint() noexcept {
-    if (_cursor >= anchor) {
-      return false;
-    }
-    if (!trackEditState || !canDelete() ||
-        !canAffordEdit(ParseDiagnosticKind::Deleted)) {
-      return false;
-    }
-    const char *const next = detail::next_codepoint_cursor(cursor());
-    if (next <= cursor() || next > anchor) {
-      return false;
-    }
-    _cursor = next;
-    if (_cursor > _maxCursor) {
-      _maxCursor = _cursor;
-    }
-    detail::apply_delete_edit_state(
-        detail::default_edit_cost(ParseDiagnosticKind::Deleted), editCost,
-        editCount, hadEdits, consecutiveDeletes);
-    skip();
-    return true;
-  }
+  bool deleteOneCodepoint() noexcept;
 
   bool replaceLeaf(const char *endPtr, const grammar::AbstractElement *element,
-                   bool hidden = false) {
-    return replaceLeaf(endPtr, element,
-                       detail::default_edit_cost(ParseDiagnosticKind::Replaced),
-                       hidden);
-  }
-
-  bool replaceLeaf(const char *endPtr, const grammar::AbstractElement *element,
-                   std::uint32_t replacementCost, bool hidden) {
-    if (!trackEditState || endPtr <= cursor() || endPtr > anchor ||
-        !canEdit() || !canAffordEdit(replacementCost)) {
-      return false;
-    }
-    detail::apply_replace_edit_state(replacementCost, editCost, editCount,
-                                     hadEdits, consecutiveDeletes);
-    leaf(endPtr, element, hidden, true);
-    return true;
-  }
+                   std::uint32_t replacementCost, bool hidden = false);
 
   [[nodiscard]] bool frontierBlocked() const noexcept { return _frontierBlocked; }
 
@@ -360,30 +299,13 @@ struct ExpectContext {
 
   void blockFrontier() noexcept { _frontierBlocked = true; }
 
-  void addKeyword(const grammar::Literal *literal) {
-    addFrontier(makePath(literal));
-  }
+  void addKeyword(const grammar::Literal *literal);
 
-  void addRule(const grammar::AbstractRule *rule) {
-    addFrontier(makePath(rule));
-  }
+  void addRule(const grammar::AbstractRule *rule);
 
-  void addReference(const grammar::Assignment *assignment) {
-    addFrontier(makePath(assignment));
-  }
+  void addReference(const grammar::Assignment *assignment);
 
-  void mergeFrontier(std::span<const ExpectPath> items) {
-    if (items.empty()) {
-      return;
-    }
-    if (items.size() == 1) {
-      addFrontier(items.front());
-      return;
-    }
-    for (const auto &item : items) {
-      addFrontier(item);
-    }
-  }
+  void mergeFrontier(std::span<const ExpectPath> items);
 
   std::vector<ExpectPath> frontier;
   bool allowInsert = true;
@@ -392,7 +314,8 @@ struct ExpectContext {
   bool inRecoveryPhase = true;
   bool hadEdits = false;
   std::uint32_t consecutiveDeletes = 0;
-  std::uint32_t maxConsecutiveCodepointDeletes = 8;
+  std::uint32_t maxConsecutiveCodepointDeletes =
+      kDefaultMaxConsecutiveCodepointDeletes;
   std::uint32_t maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
   std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
   TextOffset editFloorOffset = 0;
@@ -401,100 +324,24 @@ struct ExpectContext {
 
 private:
   static void restore_rule(ExpectContext &ctx,
-                           const grammar::AbstractElement *previous) noexcept {
-    ctx._currentRule = static_cast<const grammar::AbstractRule *>(previous);
-    ctx.popContextElement();
-  }
+                           const grammar::AbstractElement *previous) noexcept;
 
-  static void restore_assignment(ExpectContext &ctx,
-                                 const grammar::AbstractElement *previous) noexcept {
-    ctx._currentAssignment =
-        static_cast<const grammar::Assignment *>(previous);
-    ctx.popContextElement();
-  }
+  static void restore_assignment(
+      ExpectContext &ctx,
+      const grammar::AbstractElement *previous) noexcept;
 
-  void addFrontier(ExpectPath path) {
-    if (!path.isValid()) {
-      return;
-    }
-    if (frontier.empty()) [[likely]] {
-      frontier.push_back(std::move(path));
-      _frontierBlocked = true;
-      return;
-    }
-    for (const auto &existing : frontier) {
-      if (existing.elements.size() != path.elements.size()) {
-        continue;
-      }
-      if (std::ranges::equal(
-              existing.elements, path.elements,
-              [this](const auto *lhs, const auto *rhs) {
-                return sameContextElement(lhs, rhs);
-              })) {
-        _frontierBlocked = true;
-        return;
-      }
-    }
-    frontier.push_back(std::move(path));
-    _frontierBlocked = true;
-  }
+  void addFrontier(ExpectPath path);
 
   [[nodiscard]] ExpectPath
-  makePath(const grammar::AbstractElement *leaf) const {
-    ExpectPath path{.elements = _contextPath};
-    if (leaf != nullptr &&
-        (path.elements.empty() || path.elements.back() != leaf)) {
-      path.elements.push_back(leaf);
-    }
-    return path;
-  }
+  makePath(const grammar::AbstractElement *leaf) const;
 
-  void pushContextElement(const grammar::AbstractElement *element) {
-    if (element != nullptr) {
-      _contextPath.push_back(element);
-    }
-  }
+  void pushContextElement(const grammar::AbstractElement *element);
 
-  void popContextElement() noexcept {
-    if (!_contextPath.empty()) {
-      _contextPath.pop_back();
-    }
-  }
+  void popContextElement() noexcept;
 
-  [[nodiscard]] bool sameContextElement(const grammar::AbstractElement *lhs,
-                                        const grammar::AbstractElement *rhs)
-      const noexcept {
-    if (lhs == rhs) {
-      return true;
-    }
-    if (lhs == nullptr || rhs == nullptr || lhs->getKind() != rhs->getKind()) {
-      return false;
-    }
-    using enum grammar::ElementKind;
-    switch (lhs->getKind()) {
-    case Literal:
-      return static_cast<const grammar::Literal *>(lhs)->getValue() ==
-             static_cast<const grammar::Literal *>(rhs)->getValue();
-    case Assignment: {
-      const auto *lhsAssignment = static_cast<const grammar::Assignment *>(lhs);
-      const auto *rhsAssignment = static_cast<const grammar::Assignment *>(rhs);
-      return lhsAssignment->getOperator() == rhsAssignment->getOperator() &&
-             lhsAssignment->getFeature() == rhsAssignment->getFeature() &&
-             lhsAssignment->isReference() == rhsAssignment->isReference() &&
-             lhsAssignment->isMultiReference() ==
-                 rhsAssignment->isMultiReference() &&
-             lhsAssignment->getType() == rhsAssignment->getType();
-    }
-    case DataTypeRule:
-    case ParserRule:
-    case TerminalRule:
-    case InfixRule:
-      return static_cast<const grammar::AbstractRule *>(lhs)->getName() ==
-             static_cast<const grammar::AbstractRule *>(rhs)->getName();
-    default:
-      return false;
-    }
-  }
+  [[nodiscard]] bool sameContextElement(
+      const grammar::AbstractElement *lhs,
+      const grammar::AbstractElement *rhs) const noexcept;
 
   const char *_cursor = nullptr;
   const char *_maxCursor = nullptr;

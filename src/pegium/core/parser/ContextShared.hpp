@@ -8,8 +8,9 @@
 #include <limits>
 #include <pegium/core/grammar/AbstractElement.hpp>
 #include <pegium/core/parser/Parser.hpp>
+#include <pegium/core/parser/RecoveryConstants.hpp>
 #include <pegium/core/parser/Skipper.hpp>
-#include <pegium/core/parser/TextUtils.hpp>
+#include <pegium/core/utils/TextUtils.hpp>
 #include <ranges>
 #include <string_view>
 #include <type_traits>
@@ -17,15 +18,18 @@
 
 namespace pegium::parser::detail {
 
+/// True iff `codepoint` is part of an identifier-like token. Accepts:
+///   - ASCII letters, digits, underscore (looked up in the 256-byte
+///     `is_word_lookup` table from TextUtils);
+///   - Any non-ASCII codepoint (≥ 0x80). This is a recovery heuristic,
+///     not a strict Unicode classification: it covers letters of every
+///     script (Latin-extended, Cyrillic, CJK, Arabic, …) without
+///     embedding the Unicode XID tables. False positives on Unicode
+///     punctuation are acceptable; the strict parse path uses the
+///     grammar's own terminal charsets.
 [[nodiscard]] constexpr bool
-is_identifier_like_codepoint(unsigned char codepoint) noexcept {
-  return (codepoint >= static_cast<unsigned char>('a') &&
-          codepoint <= static_cast<unsigned char>('z')) ||
-         (codepoint >= static_cast<unsigned char>('A') &&
-          codepoint <= static_cast<unsigned char>('Z')) ||
-         (codepoint >= static_cast<unsigned char>('0') &&
-          codepoint <= static_cast<unsigned char>('9')) ||
-         codepoint == static_cast<unsigned char>('_');
+is_identifier_like_codepoint(std::uint32_t codepoint) noexcept {
+  return codepoint >= 0x80 || isWord(static_cast<char>(codepoint));
 }
 
 [[nodiscard]] constexpr bool
@@ -33,10 +37,17 @@ is_word_like_terminal(std::string_view value) noexcept {
   if (value.empty()) {
     return false;
   }
-  for (const char ch : value) {
-    if (!is_identifier_like_codepoint(static_cast<unsigned char>(ch))) {
+  const char *cursor = value.data();
+  const char *const end = cursor + value.size();
+  while (cursor < end) {
+    const auto length = utf8_codepoint_length(*cursor);
+    if (length == 0 || cursor + length > end) {
       return false;
     }
+    if (!is_identifier_like_codepoint(decode_utf8_codepoint(cursor))) {
+      return false;
+    }
+    cursor += length;
   }
   return true;
 }
@@ -49,7 +60,8 @@ struct EditCheckpointState {
   std::uint32_t consecutiveDeletes = 0;
   std::uint32_t editCost = 0;
   std::uint32_t editCount = 0;
-  std::uint32_t maxConsecutiveCodepointDeletes = 8;
+  std::uint32_t maxConsecutiveCodepointDeletes =
+      kDefaultMaxConsecutiveCodepointDeletes;
   std::uint32_t maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
   std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
 };
@@ -73,6 +85,61 @@ concept FlatEditStateContext =
       mutableCtx.allowDelete = state.allowDelete;
     };
 
+/// Save a bool reference at construction, restore it at destruction.
+class ScopedBoolOverride {
+public:
+  ScopedBoolOverride(bool &slot, bool next) noexcept
+      : _slot(slot), _saved(slot) {
+    _slot = next;
+  }
+  ScopedBoolOverride(const ScopedBoolOverride &) = delete;
+  ScopedBoolOverride &operator=(const ScopedBoolOverride &) = delete;
+  ScopedBoolOverride(ScopedBoolOverride &&) = delete;
+  ScopedBoolOverride &operator=(ScopedBoolOverride &&) = delete;
+  ~ScopedBoolOverride() noexcept { _slot = _saved; }
+
+private:
+  bool &_slot;
+  bool _saved;
+};
+
+/// RAII guard for speculative parser exploration. Captures the recovery
+/// checkpoint and the furthest-explored cursor on construction; restores
+/// both on destruction unless `commit()` was called. Replaces the manual
+/// `mark` + `furthestExploredCursor` save/restore boilerplate that
+/// previously lived inline at every speculative call site.
+template <typename Context> class ProbeRestoreScope {
+public:
+  explicit ProbeRestoreScope(Context &ctx) noexcept
+      : _ctx(&ctx), _checkpoint(ctx.mark()),
+        _savedFurthestExploredCursor(ctx.furthestExploredCursor()) {}
+
+  ProbeRestoreScope(const ProbeRestoreScope &) = delete;
+  ProbeRestoreScope &operator=(const ProbeRestoreScope &) = delete;
+  ProbeRestoreScope(ProbeRestoreScope &&) = delete;
+  ProbeRestoreScope &operator=(ProbeRestoreScope &&) = delete;
+
+  ~ProbeRestoreScope() noexcept {
+    if (_ctx == nullptr) {
+      return;
+    }
+    _ctx->rewind(_checkpoint);
+    _ctx->restoreFurthestExploredCursor(_savedFurthestExploredCursor);
+  }
+
+  /// Suppress the restore. The mutations performed inside the guarded
+  /// region stay committed to the context.
+  void commit() noexcept { _ctx = nullptr; }
+
+private:
+  Context *_ctx;
+  typename Context::Checkpoint _checkpoint;
+  const char *_savedFurthestExploredCursor;
+};
+
+template <typename Context>
+ProbeRestoreScope(Context &) -> ProbeRestoreScope<Context>;
+
 template <typename Context> class EditStateGuard {
 public:
   EditStateGuard(Context &ctx, bool nextAllowInsert, bool nextAllowDelete,
@@ -83,11 +150,6 @@ public:
     _ctx.allowInsert = nextAllowInsert;
     _ctx.allowDelete = nextAllowDelete;
     _ctx.trackEditState = nextTrackEditState;
-    if constexpr (requires(Context &context) {
-                    context.noteRecoveryPolicyMutation();
-                  }) {
-      _ctx.noteRecoveryPolicyMutation();
-    }
   }
 
   EditStateGuard(const EditStateGuard &) = delete;
@@ -106,11 +168,6 @@ public:
       _ctx.trackEditState = _prevTrackEditState;
       _ctx.allowInsert = _prevAllowInsert;
       _ctx.allowDelete = _prevAllowDelete;
-      if constexpr (requires(Context &context) {
-                      context.noteRecoveryPolicyMutation();
-                    }) {
-        _ctx.noteRecoveryPolicyMutation();
-      }
     }
   }
 
@@ -198,11 +255,6 @@ inline void restore_edit_checkpoint(Context &ctx,
   ctx.maxConsecutiveCodepointDeletes = state.maxConsecutiveCodepointDeletes;
   ctx.maxEditsPerAttempt = state.maxEditsPerAttempt;
   ctx.maxEditCost = state.maxEditCost;
-  if constexpr (requires(Context &mutableCtx) {
-                  mutableCtx.noteRecoveryPolicyMutation();
-                }) {
-    ctx.noteRecoveryPolicyMutation();
-  }
 }
 
 [[nodiscard]] constexpr std::uint32_t
@@ -311,12 +363,9 @@ inline void apply_replace_edit_state(std::uint32_t cost,
 }
 
 struct ActiveRecoveryStack {
-  static constexpr std::uint64_t kInitialSignature = 1469598103934665603ull;
-
   struct Entry {
     const grammar::AbstractElement *element = nullptr;
     const char *cursor = nullptr;
-    std::uint64_t previousSignature = kInitialSignature;
   };
 
   template <typename Context> class Guard {
@@ -324,7 +373,7 @@ struct ActiveRecoveryStack {
     Guard(ActiveRecoveryStack &stack, Context &ctx,
           const grammar::AbstractElement *element) noexcept
         : _stack(stack) {
-      _stack.push(ctx.begin, ctx.cursor(), element);
+      _stack.push(ctx.cursor(), element);
     }
 
     Guard(const Guard &) = delete;
@@ -356,45 +405,15 @@ struct ActiveRecoveryStack {
 
   [[nodiscard]] std::size_t size() const noexcept { return entries.size(); }
 
-  [[nodiscard]] std::uint64_t signature() const noexcept {
-    return _signature;
-  }
-
-  void push(const char *inputBegin, const char *cursor,
+  void push(const char *cursor,
             const grammar::AbstractElement *element) noexcept {
-    const auto previousSignature = _signature;
-    auto mixed = previousSignature;
-    const auto elementBits = static_cast<std::uint64_t>(
-        reinterpret_cast<std::uintptr_t>(element));
-    const auto cursorOffset =
-        static_cast<std::uint64_t>(cursor - inputBegin);
-    mixed ^= elementBits * 1099511628211ull;
-    mixed ^= cursorOffset * 11400714819323198485ull;
-    mixed ^= mixed >> 33u;
-    mixed *= 14029467366897019727ull;
-    entries.push_back({.element = element,
-                       .cursor = cursor,
-                       .previousSignature = previousSignature});
-    _signature = mixed;
+    entries.push_back({.element = element, .cursor = cursor});
   }
 
-  void pop() noexcept {
-    _signature = entries.back().previousSignature;
-    entries.pop_back();
-  }
+  void pop() noexcept { entries.pop_back(); }
 
   std::vector<Entry> entries;
-
-private:
-  std::uint64_t _signature = kInitialSignature;
 };
-
-[[nodiscard]] inline std::uint64_t
-active_recovery_signature(const ActiveRecoveryStack &stack,
-                          const char *inputBegin) noexcept {
-  (void)inputBegin;
-  return stack.signature();
-}
 
 template <typename Context>
 [[nodiscard]] inline bool

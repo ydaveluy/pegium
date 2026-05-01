@@ -16,11 +16,9 @@ using namespace pegium::parser;
 namespace {
 
 detail::RecoveryAttemptSpec
-build_attempt_spec(std::span<const detail::RecoveryWindow> selectedWindows,
+build_attempt_spec(std::span<const detail::RecoveryWindow> /*selectedWindows*/,
                    const detail::RecoveryWindow &window) {
-  detail::WindowPlanner planner{ParseOptions{}};
-  planner.seedAcceptedWindows(selectedWindows);
-  return planner.buildAttemptSpec(window);
+  return detail::RecoveryAttemptSpec{.window = window};
 }
 
 struct RecoveryDebugNode : pegium::AstNode {
@@ -62,15 +60,13 @@ bestRecoveryAttempt(const RuleType &entryRule, std::string_view text,
   RecoveryAttemptHarness harness;
   const auto snapshot = pegium::text::TextSnapshot::copy(text);
 
-  const detail::StrictFailureEngine strictFailureEngine;
-  const auto strictResult =
-      strictFailureEngine.runStrictParse(entryRule, skipper, snapshot);
-  const auto failureAnalysis = strictFailureEngine.inspectFailure(
-      entryRule, skipper, snapshot, strictResult.summary);
+  const auto failureAnalysis = detail::run_strict_parse_with_failure_snapshot(
+      entryRule, skipper, snapshot);
+  const auto &strictSummary = failureAnalysis.strictResult.summary;
   const auto editFloorOffset =
-      strictResult.summary.parsedLength != 0 ||
+      strictSummary.parsedLength != 0 ||
               !failureAnalysis.snapshot.hasFailureToken
-          ? strictResult.summary.parsedLength
+          ? strictSummary.parsedLength
           : failureAnalysis.snapshot
                 .failureLeafHistory[failureAnalysis.snapshot.failureTokenIndex]
                 .beginOffset;
@@ -82,7 +78,7 @@ bestRecoveryAttempt(const RuleType &entryRule, std::string_view text,
   const auto spec = build_attempt_spec({}, window);
 
   auto attempt =
-      detail::run_recovery_attempt(entryRule, skipper, options, snapshot, spec);
+      detail::execute_recovery_parse(entryRule, skipper, options, snapshot, spec);
   detail::classify_recovery_attempt(attempt);
   if (!harness.attempt.cst ||
       detail::is_better_recovery_attempt(attempt, harness.attempt)) {
@@ -173,24 +169,18 @@ TEST(RecoveryDebugTest,
 
   ASSERT_TRUE(object.at("orderKey").isObject());
   const auto &orderKey = object.at("orderKey").object();
-  ASSERT_TRUE(orderKey.at("prefix").isObject());
-  const auto &prefix = orderKey.at("prefix").object();
-  EXPECT_TRUE(prefix.at("stable").boolean());
-  EXPECT_FALSE(prefix.contains("dominatesCostAndPrefix"));
-  EXPECT_FALSE(prefix.contains("preferredFirstEditCredible"));
-  EXPECT_FALSE(prefix.contains("preferredFirstEditElement"));
-  ASSERT_TRUE(orderKey.at("edits").isObject());
-  const auto &edits = orderKey.at("edits").object();
-  EXPECT_GT(edits.at("editCost").integer(), 0);
-  EXPECT_EQ(edits.at("entryCount").integer(), 1);
+  EXPECT_TRUE(orderKey.at("matched").boolean());
+  EXPECT_GE(orderKey.at("firstEditOffset").integer(), 0);
+  EXPECT_GT(orderKey.at("editCost").integer(), 0);
+  EXPECT_GE(orderKey.at("progressAfterEdits").integer(), 0);
 
   ASSERT_TRUE(object.at("spec").isObject());
   const auto &spec = object.at("spec").object();
   ASSERT_TRUE(spec.at("windows").isArray());
   ASSERT_EQ(spec.at("windows").array().size(), 1u);
   const auto &window = spec.at("windows").array().front().object();
-  EXPECT_EQ(window.at("backwardTokenCount").integer(), 8);
-  EXPECT_EQ(window.at("forwardTokenCount").integer(), 8);
+  EXPECT_EQ(window.at("backwardTokenCount").integer(), 16);
+  EXPECT_EQ(window.at("forwardTokenCount").integer(), 16);
   ASSERT_TRUE(object.at("replayWindows").isArray());
   ASSERT_EQ(object.at("replayWindows").array().size(), 1u);
   const auto &replayWindow =
@@ -207,10 +197,9 @@ TEST(RecoveryDebugTest,
 
   ParseOptions options;
   options.recoveryWindowTokenCount = 4;
-  options.maxRecoveryWindowTokenCount = 8;
   const auto text = pegium::text::TextSnapshot::copy("hello");
   const auto search =
-      detail::run_recovery_search(entry, NoOpSkipper(), options, text);
+      detail::orchestrate_recovery_search(entry, NoOpSkipper(), options, text);
   const auto json = detail::recovery_search_run_to_json(search);
   const auto &object = json.object();
 
@@ -231,7 +220,7 @@ TEST(RecoveryDebugTest,
   EXPECT_EQ(selectedAttempt.at("status").string(), "Stable");
   ASSERT_TRUE(selectedAttempt.at("replayWindows").isArray());
   EXPECT_EQ(selectedAttempt.at("replayWindows").array().size(),
-            search.selectedAttempt.replayWindows.size());
+            search.selectedAttempt.replayWindow.has_value() ? 1u : 0u);
 }
 
 TEST(RecoveryDebugTest,
@@ -246,13 +235,11 @@ TEST(RecoveryDebugTest,
 
   ParseOptions options;
   options.recoveryWindowTokenCount = 2;
-  options.maxRecoveryWindowTokenCount = 2;
-  options.maxRecoveryWindows = 1;
   options.maxRecoveryEditsPerAttempt = 1;
 
   const auto text = pegium::text::TextSnapshot::copy("one two three");
   const auto search =
-      detail::run_recovery_search(entry, skipper, options, text);
+      detail::orchestrate_recovery_search(entry, skipper, options, text);
   const auto json = detail::recovery_search_run_to_json(search);
   const auto &object = json.object();
 

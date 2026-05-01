@@ -13,7 +13,7 @@
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/TerminalRecoverySupport.hpp>
-#include <pegium/core/parser/TextUtils.hpp>
+#include <pegium/core/utils/TextUtils.hpp>
 #include <ranges>
 #include <string>
 

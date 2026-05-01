@@ -52,6 +52,8 @@ TEST(ArithmeticsLanguageTest,
   ASSERT_TRUE(parsed.value) << parseDump;
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
+  EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 512u)
+      << "recoveryAttemptRuns regressed\n" << parseDump;
 
   auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
   ASSERT_NE(module, nullptr) << parseDump;

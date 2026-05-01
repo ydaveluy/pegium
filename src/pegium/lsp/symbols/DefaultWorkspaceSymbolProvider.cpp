@@ -1,11 +1,11 @@
 #include <pegium/lsp/symbols/DefaultWorkspaceSymbolProvider.hpp>
 
 #include <cassert>
-#include <cctype>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include <pegium/core/utils/TextUtils.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 
 namespace pegium {
@@ -39,9 +39,8 @@ DefaultWorkspaceSymbolProvider::getSymbols(
   const auto &fuzzyMatcher = *shared.lsp.fuzzyMatcher;
 
   std::string query = params.query;
-  std::ranges::transform(query, query.begin(), [](unsigned char value) {
-    return static_cast<char>(std::tolower(value));
-  });
+  std::ranges::transform(query, query.begin(),
+                         [](char value) { return utils::tolower(value); });
 
   std::vector<::lsp::WorkspaceSymbol> symbols;
   auto allElements = indexManager.allElements();

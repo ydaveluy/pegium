@@ -117,6 +117,26 @@ struct ParserRule final : AbstractRule<grammar::ParserRule>,
     return probeAtEntry();
   }
 
+  bool probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const {
+    if (ctx.isActiveRecovery(this)) {
+      return false;
+    }
+    auto activeRecoveryGuard = ctx.enterActiveRecovery(this);
+    (void)activeRecoveryGuard;
+    const auto probeAtEntry = [this, &ctx]() {
+      if (_wrapper.fast_probe(ctx)) {
+        return true;
+      }
+      return _wrapper.probe_recoverable_at_entry_consumes_visible(ctx);
+    };
+    if (_localSkipper.has_value()) {
+      auto localSkipperGuard = ctx.with_skipper(*_localSkipper);
+      (void)localSkipperGuard;
+      return probeAtEntry();
+    }
+    return probeAtEntry();
+  }
+
   [[nodiscard]] const Skipper *
   getCompletionSkipper() const noexcept override {
     return _localSkipper.has_value() ? std::addressof(*_localSkipper) : nullptr;
@@ -163,7 +183,8 @@ private:
                             " offset=", ctx.cursorOffset());
       return true;
     } else if constexpr (RecoveryParseModeContext<Context>) {
-      if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows()) {
+      if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows() &&
+          !ctx.allowsCompletedWindowContinuationRecovery()) {
         return parse_impl(static_cast<TrackedParseContext &>(ctx));
       }
       if (ctx.isActiveRecovery(this)) {
@@ -188,13 +209,20 @@ private:
       if (!matched) {
         bool canCommitPartialTopLevelRecovery = false;
         if (ctx.allowTopLevelPartialSuccess && ctx.activeRecoveryDepth() == 1 &&
-            ctx.hasHadEdits()) {
+            ctx.hasHadEdits() && !ctx.hasPendingCommittedRecoveryEdits()) {
           TextOffset lastEditOffset = 0;
           for (const auto &edit : ctx.snapshotRecoveryEdits()) {
             lastEditOffset = std::max(lastEditOffset, edit.endOffset);
           }
+          const bool currentWindowContributed =
+              !ctx.hasPendingRecoveryWindows() ||
+              ctx.completedRecoveryWindowCount() > 0u ||
+              lastEditOffset >= ctx.pendingRecoveryWindowBeginOffset();
+          const auto partialRecoveryFloor =
+              std::max(lastEditOffset, ctx.pendingRecoveryWindowBeginOffset());
           canCommitPartialTopLevelRecovery =
-              ctx.maxCursorOffset() > lastEditOffset;
+              currentWindowContributed &&
+              ctx.maxCursorOffset() > partialRecoveryFloor;
         }
         if (canCommitPartialTopLevelRecovery) {
           ctx.exit(nodeStartCheckpoint, this);

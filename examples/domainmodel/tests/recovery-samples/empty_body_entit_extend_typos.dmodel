@@ -1,0 +1,5 @@
+entit B {}
+
+entity C extend B {
+    name: String
+}

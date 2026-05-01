@@ -190,19 +190,6 @@ TEST(RecoveryWindowTest, ComputesBackwardWindowStartFromFailureSnapshot) {
   EXPECT_EQ(window.visibleLeafBeginIndex, 0u);
 }
 
-TEST(RecoveryWindowTest, DoublesWindowTokenCountUntilConfiguredCap) {
-  ParseOptions options;
-  options.recoveryWindowTokenCount = 8;
-  options.maxRecoveryWindowTokenCount = 32;
-
-  EXPECT_EQ(pegium::parser::detail::next_recovery_window_token_count(8, options),
-            std::optional<std::uint32_t>(16));
-  EXPECT_EQ(pegium::parser::detail::next_recovery_window_token_count(16, options),
-            std::optional<std::uint32_t>(32));
-  EXPECT_EQ(pegium::parser::detail::next_recovery_window_token_count(32, options),
-            std::nullopt);
-}
-
 TEST(RecoveryWindowTest, FallsBackToMaxCursorWhenNoVisibleLeafIsAvailable) {
   pegium::parser::detail::FailureSnapshot snapshot;
   snapshot.maxCursorOffset = 17;
@@ -250,6 +237,27 @@ TEST(RecoveryWindowTest, UsesVisibleLeafHistoryBeyondMaxCursorAsForwardLimit) {
   EXPECT_EQ(window.beginOffset, 0u);
   EXPECT_EQ(window.editFloorOffset, 0u);
   EXPECT_EQ(window.maxCursorOffset, 23u);
+}
+
+TEST(RecoveryWindowTest,
+     StartsAtStablePrefixFloorWhenItPrecedesNaturalBackwardWindow) {
+  pegium::parser::detail::FailureSnapshot snapshot;
+  snapshot.maxCursorOffset = 23;
+  snapshot.failureLeafHistory = {
+      {.beginOffset = 0, .endOffset = 5, .element = nullptr},
+      {.beginOffset = 6, .endOffset = 11, .element = nullptr},
+      {.beginOffset = 12, .endOffset = 17, .element = nullptr},
+      {.beginOffset = 18, .endOffset = 23, .element = nullptr},
+  };
+  snapshot.failureTokenIndex = 3;
+  snapshot.hasFailureToken = true;
+
+  const auto window =
+      pegium::parser::detail::compute_recovery_window(snapshot, 1, 1, 6u);
+  EXPECT_EQ(window.beginOffset, 6u);
+  EXPECT_EQ(window.editFloorOffset, 12u);
+  EXPECT_EQ(window.maxCursorOffset, 23u);
+  EXPECT_EQ(window.visibleLeafBeginIndex, 1u);
 }
 
 } // namespace

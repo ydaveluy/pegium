@@ -4,7 +4,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <vector>
 
 #include <pegium/core/grammar/AbstractElement.hpp>
@@ -75,14 +74,59 @@ public:
     return _furthestVisibleLeafCount;
   }
 
-  void rewind(Checkpoint checkpoint) noexcept;
-  void onLeaf(const char *begin, const char *end,
-              const grammar::AbstractElement *element, bool hidden) noexcept;
-  void onCursor(const char *cursor) noexcept;
+  /// Monotonically raise `_furthestVisibleLeafCount` to replay the cumulative
+  /// side effect of a memoized exploration that was skipped on cache hit.
+  void bumpFurthestVisibleLeafCount(std::size_t value) noexcept {
+    if (value > _furthestVisibleLeafCount) {
+      _furthestVisibleLeafCount = value;
+    }
+  }
+
+  /// Monotonically raise `_furthestOffset` to replay the cumulative side
+  /// effect of a memoized exploration that was skipped on cache hit.
+  void bumpFurthestOffset(TextOffset value) noexcept {
+    if (value > _furthestOffset) {
+      _furthestOffset = value;
+    }
+  }
+
+  inline void rewind(Checkpoint checkpoint) noexcept {
+    _currentVisibleLeafCount = checkpoint;
+  }
+
+  inline void onLeaf(const char *begin, const char *end,
+                     const grammar::AbstractElement *element,
+                     bool hidden) noexcept {
+    if (hidden || begin == nullptr || end == nullptr || end <= begin) {
+      return;
+    }
+    const FailureLeaf leaf{
+        .beginOffset = static_cast<TextOffset>(begin - _inputBegin),
+        .endOffset = static_cast<TextOffset>(end - _inputBegin),
+        .element = element,
+    };
+    if (_currentVisibleLeafCount < _visibleLeaves.size()) {
+      _visibleLeaves[_currentVisibleLeafCount] = leaf;
+    } else {
+      _visibleLeaves.push_back(leaf);
+    }
+    ++_currentVisibleLeafCount;
+    updateFurthest(end);
+  }
+
+  inline void onCursor(const char *cursor) noexcept { updateFurthest(cursor); }
+
   [[nodiscard]] FailureSnapshot snapshot(TextOffset maxCursorOffset) const;
 
 private:
-  void updateFurthest(const char *cursor) noexcept;
+  inline void updateFurthest(const char *cursor) noexcept {
+    const auto offset = static_cast<TextOffset>(cursor - _inputBegin);
+    if (offset < _furthestOffset) {
+      return;
+    }
+    _furthestOffset = offset;
+    _furthestVisibleLeafCount = _currentVisibleLeafCount;
+  }
 
   const char *_inputBegin = nullptr;
   TextOffset _furthestOffset = 0;
@@ -98,17 +142,21 @@ public:
                  const text::TextSnapshot &text,
                  const utils::CancellationToken &cancelToken = {},
                  FailureHistoryRecorder *failureRecorder = nullptr) const;
-
-  [[nodiscard]] StrictFailureEngineResult
-  inspectFailure(const grammar::ParserRule &entryRule, const Skipper &skipper,
-                 const text::TextSnapshot &text,
-                 const StrictParseSummary &strictSummary,
-                 const utils::CancellationToken &cancelToken = {}) const;
 };
+
+[[nodiscard]] StrictFailureEngineResult
+run_strict_parse_with_failure_snapshot(
+    const grammar::ParserRule &entryRule, const Skipper &skipper,
+    const text::TextSnapshot &text,
+    const utils::CancellationToken &cancelToken = {});
 
 [[nodiscard]] FailureSnapshot
 snapshot_from_committed_cst(const RootCstNode &cst,
                             TextOffset maxCursorOffset) noexcept;
+
+[[nodiscard]] bool
+should_fallback_to_parsed_length_snapshot(const FailureSnapshot &snapshot,
+                                          TextOffset parsedLength) noexcept;
 
 void finalize_failure_token_index(FailureSnapshot &snapshot) noexcept;
 
@@ -122,8 +170,18 @@ compute_recovery_window(const FailureSnapshot &snapshot,
 compute_recovery_window(const FailureSnapshot &snapshot,
                         std::uint32_t tokenCount) noexcept;
 
-[[nodiscard]] std::optional<std::uint32_t>
-next_recovery_window_token_count(std::uint32_t currentTokenCount,
-                                 const ParseOptions &options) noexcept;
+/// True iff `entryRule`'s leading visible terminal is reachable without
+/// crossing an `AndPredicate` / `NotPredicate` guard. Recovery uses this
+/// to decide whether a "delete one codepoint at offset 0 then retry the
+/// entry rule" probe is admissible: a predicate-guarded leading entry
+/// would observe the deleted prefix and reject, so the retry is only
+/// useful when the leading entry is unguarded. The function is purely
+/// grammar-structural and has no recovery state — it lives here next to
+/// the other failure-analysis helpers rather than in `RecoverySearch`.
+///
+/// Returns false for non-`ParserRule` entries (the grammar shape on
+/// which this property is defined).
+[[nodiscard]] bool entry_rule_has_unguarded_leading_visible_entry(
+    const grammar::ParserRule &entryRule) noexcept;
 
 } // namespace pegium::parser::detail
