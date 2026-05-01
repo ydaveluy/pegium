@@ -1689,11 +1689,27 @@ private:
         return plans;
       }
     }
+    // For repetitions whose body is a single terminal atom (Literal /
+    // TerminalRule), also yield to a recoverable follow that proves it
+    // will commit visible source. Without this, `some(ID) + "}"` whose
+    // closing `}` is missing keeps eating identifiers (e.g. transition
+    // events) past the missing delimiter, and the parent's local Insert
+    // at the failure cursor lands too late to repair the structure.
+    // Restricted to body=terminal-atom because complex Rule bodies (e.g.
+    // `many(Statement)`) commonly have a recoverable follow at every
+    // iteration boundary (a synthetic insert or skip would always be
+    // possible), so the probe would prematurely terminate legitimate
+    // greedy repetitions.
+    constexpr bool bodyIsTerminalAtom =
+        detail::IsTerminalAtom_v<std::remove_cvref_t<Element>>;
     const bool parentFollowAbsorbsIterationBoundary =
         atLocalIterationBoundary && observation.startedWithoutEdits &&
         !observation.noInsertProgressed &&
         !visibleOptionalEntryRepairAtStrictFollow &&
-        !iterationTouchesActiveWindow && ctx.probeFollowAcceptsHere();
+        !iterationTouchesActiveWindow &&
+        (ctx.probeFollowAcceptsHere() ||
+         (bodyIsTerminalAtom &&
+          ctx.probeRecoverableFollowConsumesVisibleHere()));
     const bool parentFollowOwnsUnstartedIterationBoundary =
         atLocalIterationBoundary && !observation.startedWithoutEdits &&
         !observation.noInsertProgressed &&

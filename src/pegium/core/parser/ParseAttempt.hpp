@@ -220,6 +220,27 @@ inline bool probe_locally_recoverable(const E &expression, RecoveryContext &ctx)
   }
 }
 
+/// Strict-or-fuzzy "match at the cursor" probe used by `NotPredicate`.
+/// Elements implementing `probeMatchHere` (Literal, OrderedChoice) report a
+/// low-cost fuzzy candidate as a match without scanning past the cursor;
+/// everything else falls back to the strict probe so the negative-lookahead
+/// semantics stay tight. Available in both strict (TrackedParseContext) and
+/// recovery (RecoveryContext) modes so a `many(!K + Item)` doesn't gobble a
+/// truncated/typoed keyword in either pass.
+template <Expression E, typename Context>
+inline bool probe_match_here(const E &expression, Context &ctx) {
+  if constexpr (requires {
+                  { expression.probeMatchHere(ctx) } -> std::same_as<bool>;
+                }) {
+    return expression.probeMatchHere(ctx);
+  } else if constexpr (StrictParseModeContext<Context>) {
+    return parser::probe(expression, ctx);
+  } else {
+    TrackedParseContext &strictCtx = ctx;
+    return parser::probe(expression, strictCtx);
+  }
+}
+
 template <Expression E>
 inline bool probe_recoverable_at_entry(const E &expression,
                                        RecoveryContext &ctx) {

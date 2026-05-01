@@ -989,12 +989,43 @@ public:
       return false;
     }
     const auto *window = currentEditWindow();
+    // Carve-out for the canonical "truncated/typoed word keyword" Replace.
+    // We allow such a Replace to bypass the destructive-outside-window
+    // guard because cascading recoveries (e.g. `statemachin` +
+    // `initialStat` both typoed) otherwise hit the wall: the first commit
+    // moves the active window past the second typo, so the second Replace
+    // falls back to a synthetic Insert at a higher rule level which
+    // leaves the typoed token unconsumed.
+    //
+    // Thresholds: cost ≤ 1 (single-codepoint edit), span ≤ 16 (bounded),
+    // and the target literal must be a word (≥ 3 codepoints). The literal
+    // gate is what keeps the symbolic-literal guards in place — `>` →
+    // `=>` (literal length 2) stays gated, `re` → `req` (length 3) and
+    // `initialStat` → `initialState` (length 12) go through.
+    constexpr std::uint32_t kSingleEditReplaceCostLimit = 1u;
+    constexpr TextOffset kSingleEditReplaceSpanCeiling = 16;
+    constexpr std::size_t kWordLiteralLengthFloor = 3u;
+    const TextOffset replaceSpan =
+        endOffset > cursorOffset() ? endOffset - cursorOffset() : 0;
+    const auto *literalElement =
+        element != nullptr &&
+                element->getKind() == grammar::ElementKind::Literal
+            ? static_cast<const grammar::Literal *>(element)
+            : nullptr;
+    const bool targetsWordKeyword =
+        literalElement != nullptr &&
+        literalElement->getValue().size() >= kWordLiteralLengthFloor;
+    const bool singleEditFuzzyKeywordReplace =
+        targetsWordKeyword &&
+        replacementCost <= kSingleEditReplaceCostLimit &&
+        replaceSpan > 0 && replaceSpan <= kSingleEditReplaceSpanCeiling;
     const bool destructiveEditOutsideActiveWindow =
         recoveryState.windowReplay.inRecoveryPhase && window != nullptr &&
         cursorOffset() > window->maxCursorOffset &&
         recoveryState.editBudget.hadEdits &&
         !allowDestructiveWindowContinuation &&
-        !continues_local_edit_cluster_at_cursor();
+        !continues_local_edit_cluster_at_cursor() &&
+        !singleEditFuzzyKeywordReplace;
     if (!canEdit() || destructiveEditOutsideActiveWindow ||
         !canEditAtOffset(endOffset) ||
         !canAffordEdit(replacementCost)) {

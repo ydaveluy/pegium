@@ -295,6 +295,20 @@ allows_provisional_fuzzy_replace_here(const Context &ctx) noexcept {
   if (facts.triviaGap.hasHiddenGap() && candidate.substitutionCount != 0u) {
     return false;
   }
+  // For longer keywords (5+ codepoints), require the candidate to consume
+  // at least half of the literal length. Without this, a desperate
+  // 2-character match like `re` -> `environment` (cost ≤ rank limit but
+  // 9 inserts) can be accepted on par with a tighter 1-edit candidate at
+  // a different position, and the grammar-order tiebreaker can route
+  // around the real typo. The half-length floor leaves all single-edit
+  // truncation / insertion / substitution cases intact (those consume
+  // `len` or `len±1` codepoints).
+  if (shape.canonicalTextLength >= 5u) {
+    const std::uint32_t halfLength = shape.canonicalTextLength / 2u;
+    if (candidate.consumed < halfLength) {
+      return false;
+    }
+  }
   return true;
 }
 

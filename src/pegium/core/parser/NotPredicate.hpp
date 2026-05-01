@@ -5,9 +5,9 @@
 #include <pegium/core/grammar/NotPredicate.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/ParseAttempt.hpp>
-#include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
+#include <pegium/core/parser/ParseMode.hpp>
 #include <string>
 #include <string_view>
 
@@ -63,9 +63,20 @@ private:
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     if constexpr (!ExpectParseModeContext<Context>) {
-      if constexpr (RecoveryParseModeContext<Context>) {
-        TrackedParseContext &strictCtx = ctx;
-        return !parser::probe(_element, strictCtx);
+      if constexpr (RecoveryParseModeContext<Context> ||
+                    std::same_as<std::remove_cvref_t<Context>,
+                                 TrackedParseContext>) {
+        // Reject low-cost fuzzy matches of the inner element at the cursor
+        // in both the failure-tracking strict pass and the recovery pass.
+        // Without this, `many(!"keyword"_kw + Item)` greedily consumes a
+        // truncated/typoed keyword (e.g. `initialStat`) as an Item because
+        // the strict literal probe misses it; the recovery dispatch then
+        // commits the strict prefix (which already swallowed the typo) and
+        // has nothing left to repair. Plain `ParseContext` (used by inner
+        // probes such as `OrderedChoice` branch selection) keeps strict
+        // semantics so legitimate near-keyword identifiers continue to
+        // match where the surrounding rule expects them.
+        return !parser::probe_match_here(_element, ctx);
       } else {
         ParseContext &strictCtx = ctx;
         return !parser::probe(_element, strictCtx);
