@@ -692,6 +692,156 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
     }
   }
 
+  // Phase F/A2 — alternative-strategy probes. When the primary attempt
+  // settles for `RecoveredButNotCredible` because its greedy local
+  // recovery picked the wrong cascade (consumed past a missing closing
+  // delimiter, then resorted to delete-scan), alternative attempts
+  // with different edit-budget configurations can let an Insert-only
+  // path reach `fullMatch`. The probes stay cheap: they only run when
+  // the primary is incomplete and they reuse the same window. Like the
+  // minimal probe, they are intentionally NOT counted against the
+  // attempt budget.
+  // Run alternative-strategy probes for any non-fullMatch primary that
+  // wasn't classified as a clean Stable. Specifically, also probe for
+  // `StrictFailure` outcomes — these arise when the dispatcher's first
+  // pass through a continuing-recovery window cannot place a single
+  // edit cleanly inside the editFloor and the original edit budget is
+  // not enough to cascade through the structure. The widened budget /
+  // relaxed stability probes give the dispatcher a chance to find a
+  // credible cascade in this scenario.
+  const bool alternativeProbeWorthRunning =
+      !primaryAttempt.fullMatch &&
+      (primaryAttempt.status ==
+           RecoveryAttemptStatus::RecoveredButNotCredible ||
+       primaryAttempt.status == RecoveryAttemptStatus::StrictFailure);
+  if (alternativeProbeWorthRunning) {
+    const bool primaryHasDeletes = std::ranges::any_of(
+        primaryAttempt.recoveryEdits, [](const auto &edit) noexcept {
+          return edit.kind == ParseDiagnosticKind::Deleted;
+        });
+    if (primaryHasDeletes && options.maxConsecutiveCodepointDeletes > 0u) {
+      // Probe 1: forbid consecutive deletes. Targets cases where the
+      // primary's delete-scan produced a non-credible "skip ahead"
+      // path while an Insert-only repair would actually reach
+      // `fullMatch` (e.g. a missing `}` whose Insert lands cleanly
+      // when the dispatcher cannot fall back to deleting bytes).
+      PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
+      ParseOptions deleteSuppressedOptions = options;
+      deleteSuppressedOptions.maxConsecutiveCodepointDeletes = 0u;
+      auto deleteSuppressedAttempt = execute_recovery_parse(
+          entryRule, skipper, deleteSuppressedOptions, text, spec,
+          cancelToken);
+      classify_recovery_attempt(deleteSuppressedAttempt);
+      trace_recovery_attempt(deleteSuppressedAttempt, spec);
+      choiceRecoverCacheHits += deleteSuppressedAttempt.choiceRecoverCacheHits;
+      choiceRecoverCacheMisses +=
+          deleteSuppressedAttempt.choiceRecoverCacheMisses;
+      if (deleteSuppressedAttempt.fullMatch &&
+          is_better_recovery_attempt(deleteSuppressedAttempt,
+                                       primaryAttempt)) {
+        primaryAttempt = std::move(deleteSuppressedAttempt);
+      }
+    }
+    if (!primaryAttempt.fullMatch &&
+        options.maxRecoveryEditCost <
+            std::numeric_limits<std::uint32_t>::max() / 4u) {
+      // Probe 2: 4x cost budget. Targets cascade cases where the
+      // primary stopped short because the cumulative edit cost across
+      // multiple typoed tokens exceeded the per-attempt budget. The
+      // wider budget lets a longer Replace cascade reach `fullMatch`
+      // when each individual Replace is cheap (cost 1) but there are
+      // many of them.
+      PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
+      ParseOptions extendedBudgetOptions = options;
+      extendedBudgetOptions.maxRecoveryEditCost =
+          options.maxRecoveryEditCost * 4u;
+      auto extendedAttempt = execute_recovery_parse(
+          entryRule, skipper, extendedBudgetOptions, text, spec, cancelToken);
+      classify_recovery_attempt(extendedAttempt);
+      trace_recovery_attempt(extendedAttempt, spec);
+      choiceRecoverCacheHits += extendedAttempt.choiceRecoverCacheHits;
+      choiceRecoverCacheMisses += extendedAttempt.choiceRecoverCacheMisses;
+      if (extendedAttempt.fullMatch &&
+          is_better_recovery_attempt(extendedAttempt, primaryAttempt)) {
+        primaryAttempt = std::move(extendedAttempt);
+      }
+    }
+    if (!primaryAttempt.fullMatch &&
+        options.recoveryWindowTokenCount <
+            options.maxRecoveryWindowTokenCount) {
+      // Probe 3: full-width window. Targets cascade cases where the
+      // primary's narrow initial window committed to a path that
+      // cannot reach the latest typo before exhausting its forward
+      // stability budget. Re-running with the upper-bound forward
+      // window from the start gives the dispatcher more visible
+      // tokens to evaluate alternatives against.
+      PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
+      ParseOptions widenedWindowOptions = options;
+      widenedWindowOptions.recoveryWindowTokenCount =
+          options.maxRecoveryWindowTokenCount;
+      auto widenedAttempt = execute_recovery_parse(
+          entryRule, skipper, widenedWindowOptions, text, spec, cancelToken);
+      classify_recovery_attempt(widenedAttempt);
+      trace_recovery_attempt(widenedAttempt, spec);
+      choiceRecoverCacheHits += widenedAttempt.choiceRecoverCacheHits;
+      choiceRecoverCacheMisses += widenedAttempt.choiceRecoverCacheMisses;
+      if (widenedAttempt.fullMatch &&
+          is_better_recovery_attempt(widenedAttempt, primaryAttempt)) {
+        primaryAttempt = std::move(widenedAttempt);
+      }
+    }
+    if (!primaryAttempt.fullMatch && options.recoveryStabilityTokenCount > 0u) {
+      // Probe 4: relaxed stability requirement. Targets cascade cases
+      // where the primary's `RecoveredButNotCredible` verdict came from
+      // the strict 2-token stability check rejecting a partial repair
+      // that could have continued. Lowering the bar lets the recovery
+      // accept attempts that progress further before stalling.
+      PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
+      ParseOptions relaxedStabilityOptions = options;
+      relaxedStabilityOptions.recoveryStabilityTokenCount = 0u;
+      auto relaxedAttempt = execute_recovery_parse(
+          entryRule, skipper, relaxedStabilityOptions, text, spec,
+          cancelToken);
+      classify_recovery_attempt(relaxedAttempt);
+      trace_recovery_attempt(relaxedAttempt, spec);
+      choiceRecoverCacheHits += relaxedAttempt.choiceRecoverCacheHits;
+      choiceRecoverCacheMisses += relaxedAttempt.choiceRecoverCacheMisses;
+      if (relaxedAttempt.fullMatch &&
+          is_better_recovery_attempt(relaxedAttempt, primaryAttempt)) {
+        primaryAttempt = std::move(relaxedAttempt);
+      }
+    }
+    if (!primaryAttempt.fullMatch &&
+        options.maxRecoveryAttempts <
+            std::numeric_limits<std::uint32_t>::max() / 4u) {
+      // Probe 5: extended attempt budget. Targets cascade cases where
+      // the dispatcher exhausted its per-attempt candidate budget
+      // before finding the path that reaches `fullMatch`. Combining
+      // this with the relaxed stability and extended cost budget gives
+      // the deepest cascade explorations a chance to succeed.
+      PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
+      ParseOptions extendedAttemptOptions = options;
+      extendedAttemptOptions.maxRecoveryAttempts =
+          options.maxRecoveryAttempts * 4u;
+      extendedAttemptOptions.maxRecoveryEditCost =
+          options.maxRecoveryEditCost * 4u;
+      extendedAttemptOptions.recoveryStabilityTokenCount = 0u;
+      extendedAttemptOptions.recoveryWindowTokenCount =
+          options.maxRecoveryWindowTokenCount;
+      auto extendedAttempt = execute_recovery_parse(
+          entryRule, skipper, extendedAttemptOptions, text, spec,
+          cancelToken);
+      classify_recovery_attempt(extendedAttempt);
+      trace_recovery_attempt(extendedAttempt, spec);
+      choiceRecoverCacheHits += extendedAttempt.choiceRecoverCacheHits;
+      choiceRecoverCacheMisses += extendedAttempt.choiceRecoverCacheMisses;
+      if (extendedAttempt.fullMatch &&
+          is_better_recovery_attempt(extendedAttempt, primaryAttempt)) {
+        primaryAttempt = std::move(extendedAttempt);
+      }
+    }
+  }
+
   consider_window_attempt_candidate(result, std::move(primaryAttempt),
                                     selectedAttempt, continuingRecovery);
   return result;

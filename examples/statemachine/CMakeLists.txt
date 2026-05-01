@@ -111,4 +111,17 @@ if(BUILD_TESTING)
     set_tests_properties(PegiumRecoveryCorpusStatemachine PROPERTIES
         LABELS "recovery-corpus"
     )
+
+    if(PEGIUM_ENABLE_FUZZ_CORPUS)
+        add_test(
+            NAME PegiumStatemachineKeywordFuzz
+            COMMAND $<TARGET_FILE:pegium-example-statemachine-test>
+                --gtest_filter=StatemachineKeywordFuzzTest.*
+        )
+        set_tests_properties(PegiumStatemachineKeywordFuzz PROPERTIES
+            LABELS "fuzz-corpus"
+            ENVIRONMENT "PEGIUM_STATEMACHINE_FUZZ_EXHAUSTIVE=1"
+            TIMEOUT 600
+        )
+    endif()
 endif()

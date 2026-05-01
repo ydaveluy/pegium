@@ -125,5 +125,15 @@ if(BUILD_TESTING)
             ENVIRONMENT "PEGIUM_ARITHMETICS_FUZZ_EXHAUSTIVE=1"
             TIMEOUT 300
         )
+        add_test(
+            NAME PegiumArithmeticsKeywordFuzz
+            COMMAND $<TARGET_FILE:pegium-example-arithmetics-test>
+                --gtest_filter=ArithmeticsKeywordFuzzTest.*
+        )
+        set_tests_properties(PegiumArithmeticsKeywordFuzz PROPERTIES
+            LABELS "fuzz-corpus"
+            ENVIRONMENT "PEGIUM_ARITHMETICS_FUZZ_EXHAUSTIVE=1"
+            TIMEOUT 600
+        )
     endif()
 endif()

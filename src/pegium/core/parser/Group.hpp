@@ -483,7 +483,16 @@ private:
       return false;
     } else {
       const auto &current = std::get<I>(elements);
-      return current.getKind() != ElementKind::Create;
+      // Predicates (NotPredicate / AndPredicate) are nullable — they
+      // consume nothing — but they are guards, not optional content. The
+      // recovery skip-nullable transition would treat them as ε and
+      // bypass them entirely, which silently drops the lookahead check.
+      // For example, `many(!"K"_kw + Item)` would let `Item` swallow `K`
+      // because the surrounding skip-nullable path never evaluates the
+      // NotPredicate. Same hazard applies to AndPredicate guards.
+      return current.getKind() != ElementKind::Create &&
+             current.getKind() != ElementKind::NotPredicate &&
+             current.getKind() != ElementKind::AndPredicate;
     }
   }
 

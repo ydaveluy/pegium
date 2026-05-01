@@ -114,4 +114,17 @@ if(BUILD_TESTING)
     set_tests_properties(PegiumRecoveryCorpusRequirements PROPERTIES
         LABELS "recovery-corpus"
     )
+
+    if(PEGIUM_ENABLE_FUZZ_CORPUS)
+        add_test(
+            NAME PegiumRequirementsKeywordFuzz
+            COMMAND $<TARGET_FILE:pegium-example-requirements-test>
+                --gtest_filter=*RequirementsKeywordFuzzTest.*:*RequirementsTestsKeywordFuzzTest.*
+        )
+        set_tests_properties(PegiumRequirementsKeywordFuzz PROPERTIES
+            LABELS "fuzz-corpus"
+            ENVIRONMENT "PEGIUM_REQUIREMENTS_FUZZ_EXHAUSTIVE=1"
+            TIMEOUT 600
+        )
+    endif()
 endif()

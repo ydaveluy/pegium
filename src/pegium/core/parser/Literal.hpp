@@ -348,6 +348,80 @@ private:
   }
 
 public:
+  /// True iff the literal matches AT the cursor either strictly or via a
+  /// low-cost fuzzy candidate. Unlike `probeRecoverable`, this never scans
+  /// past the cursor (no delete-scan, no entry-probe gating). Used by
+  /// `NotPredicate` in recovery mode so a many-loop guarded by
+  /// `!"keyword"_kw` stops at a truncated/typoed occurrence of that keyword
+  /// instead of greedily consuming it as an identifier.
+  bool probeMatchHere(RecoveryContext &ctx) const noexcept {
+    const char *const cursorStart = ctx.cursor();
+    if (const char *const matchedEnd = terminal(cursorStart);
+        matchedEnd != nullptr && !has_word_boundary_violation(ctx, matchedEnd)) {
+      return true;
+    }
+    if (ctx.hasHadEdits() &&
+        !detail::allows_fuzzy_replace_after_prior_edits(terminalShape)) {
+      return false;
+    }
+    if constexpr (allow_replace) {
+      const auto fuzzyCandidates = findReplaceCandidates(ctx, cursorStart);
+      if (!fuzzyCandidates.empty()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Strict-pass overload: same shape as the recovery probe but bypasses the
+  /// edit-state machinery and never consults caches that only exist in
+  /// recovery contexts. The fuzzy window is sized from the literal length
+  /// alone so the failure-tracking pass can detect a near-keyword (e.g.
+  /// `initialStat` for `initialState`) and bail out instead of letting an
+  /// outer `many(!K + Item)` swallow it as an identifier. The acceptance
+  /// threshold here is intentionally tighter than recovery's: only single-
+  /// edit candidates with a length close to the literal qualify, otherwise
+  /// the strict pass would over-reject identifiers that happen to share a
+  /// prefix with a keyword.
+  template <typename Context>
+    requires StrictParseModeContext<Context>
+  bool probeMatchHere(Context &ctx) const noexcept {
+    const char *const cursorStart = ctx.cursor();
+    if (const char *const matchedEnd = terminal(cursorStart);
+        matchedEnd != nullptr && !has_word_boundary_violation(ctx, matchedEnd)) {
+      return true;
+    }
+    if constexpr (allow_replace) {
+      constexpr std::size_t kLiteralSize = literal.size();
+      // Single-edit threshold: only worth running the DP for keywords long
+      // enough that a 1-edit near-match is meaningful (4+ chars). Below that
+      // most identifiers would fuzzy-match every short keyword and a number
+      // of existing recovery unit tests intentionally cover the
+      // delete-prefix-then-low-confidence-replace path.
+      if constexpr (kLiteralSize < 4U) {
+        return false;
+      }
+      constexpr std::size_t kSlack = 1U;
+      const std::size_t window = kLiteralSize + kSlack;
+      const auto remaining = static_cast<std::size_t>(ctx.end - cursorStart);
+      const std::string_view view{cursorStart, std::min(window, remaining)};
+      const auto best = detail::find_best_literal_fuzzy_candidate(
+          getValue(), view, case_sensitive);
+      if (!best.has_value()) {
+        return false;
+      }
+      // Only accept high-confidence single-edit near-matches: distance == 1
+      // and the consumed window is within 1 char of the literal length.
+      // Anything looser starts rejecting legitimate identifiers that just
+      // happen to share a prefix with a keyword.
+      const auto consumed = best->consumed;
+      const auto delta = consumed > kLiteralSize ? consumed - kLiteralSize
+                                                  : kLiteralSize - consumed;
+      return best->distance == 1U && delta <= 1U;
+    }
+    return false;
+  }
+
   bool probeRecoverable(RecoveryContext &ctx) const noexcept {
     constexpr auto terminalShape =
         detail::classify_literal_recovery_profile(

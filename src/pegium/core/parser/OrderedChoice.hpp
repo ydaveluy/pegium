@@ -146,6 +146,11 @@ public:
         ctx, std::make_index_sequence<sizeof...(Elements)>{});
   }
 
+  template <typename Context> bool probeMatchHere(Context &ctx) const {
+    return probe_match_here_choices(
+        ctx, std::make_index_sequence<sizeof...(Elements)>{});
+  }
+
   bool probeRecoverableAtEntry(RecoveryContext &ctx) const {
     return probe_recoverable_entry_choices(
         ctx, std::make_index_sequence<sizeof...(Elements)>{});
@@ -548,6 +553,12 @@ private:
     return (... ||
             (parser::attempt_fast_probe(ctx, std::get<Is>(choices)) ||
              probe_locally_recoverable(std::get<Is>(choices), ctx)));
+  }
+
+  template <typename Context, std::size_t... Is>
+  bool probe_match_here_choices(Context &ctx,
+                                std::index_sequence<Is...>) const {
+    return (... || parser::probe_match_here(std::get<Is>(choices), ctx));
   }
 
   template <std::size_t... Is>
