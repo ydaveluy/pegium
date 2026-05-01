@@ -12,6 +12,7 @@
 #include <pegium/core/grammar/Group.hpp>
 #include <pegium/core/parser/CompletionSupport.hpp>
 #include <pegium/core/parser/EditableRecoverySupport.hpp>
+#include <pegium/core/parser/GroupTransition.hpp>
 #include <pegium/core/parser/ExpectFrontier.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/ParseAttempt.hpp>
@@ -19,15 +20,44 @@
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/RecoveryEditSupport.hpp>
+#include <pegium/core/parser/RecoveryTrace.hpp>
 #include <pegium/core/parser/SkipperBuilder.hpp>
 #include <pegium/core/parser/TerminalRecoverySupport.hpp>
-#include <pegium/core/parser/TextUtils.hpp>
+#include <pegium/core/utils/TextUtils.hpp>
 #include <string>
 #include <string_view>
 
 namespace pegium::parser {
 
 template <Expression... Elements> struct GroupWithSkipper;
+template <std::size_t min, std::size_t max, NonNullableExpression Element>
+struct Repetition;
+template <std::size_t min, std::size_t max, NonNullableExpression Element>
+struct RepetitionWithSkipper;
+
+namespace detail {
+
+template <typename Element>
+struct NullableSiblingOwnershipPolicy {
+  static constexpr bool allowRecoverableContinuation = true;
+};
+
+template <std::size_t min, std::size_t max, NonNullableExpression Element>
+struct NullableSiblingOwnershipPolicy<Repetition<min, max, Element>> {
+  static constexpr bool allowRecoverableContinuation = max != 1u;
+};
+
+template <std::size_t min, std::size_t max, NonNullableExpression Element>
+struct NullableSiblingOwnershipPolicy<RepetitionWithSkipper<min, max, Element>> {
+  static constexpr bool allowRecoverableContinuation = max != 1u;
+};
+
+template <typename Element>
+inline constexpr bool nullable_sibling_allows_recoverable_continuation_v =
+    NullableSiblingOwnershipPolicy<std::remove_cvref_t<Element>>::
+        allowRecoverableContinuation;
+
+} // namespace detail
 
 template <Expression... Elements> struct Group : grammar::Group {
   static constexpr bool nullable =
@@ -55,6 +85,10 @@ public:
 
   bool probeRecoverableAtEntry(RecoveryContext &ctx) const {
     return probe_recoverable_entry_elements<0>(ctx);
+  }
+
+  bool probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const {
+    return probe_recoverable_entry_consumes_visible_elements<0>(ctx);
   }
 
   constexpr const char *terminal(const char *begin) const noexcept
@@ -130,6 +164,28 @@ public:
            element.getKind() == ElementKind::TerminalRule;
   }
 
+  /// Per-call upper bound on temporary recovery candidates evaluated
+  /// inside one dispatch site (one element index `I`) of
+  /// `parse_elements`. At a single dispatch site the recovery flow
+  /// considers, in mutually-exclusive paths:
+  ///
+  ///   - `select_missing_element_insert_replay` evaluates 2 candidates
+  ///     internally (the synthetic insert + the actual parse).
+  ///   - `select_current_failure_sequence_attempt` evaluates up to 4
+  ///     candidates (2 terminal current-failure + 1 reparse-without-
+  ///     delete + 1 skip-nullable).
+  ///   - `recover_after_tail_parse_failure` evaluates one in-place
+  ///     `RepairTail` attempt plus up to 2 fallback candidates
+  ///     (reparse-without-delete + skip-nullable).
+  ///
+  /// The dispatch enters at most one of these per site, so the bound
+  /// per site is `max(2, 4, 3) = 4`. The bound is the per-site
+  /// figure: the recursive call `parse_elements<I+1>` opens a new
+  /// runtime counter session, so cumulative growth across elements
+  /// is bounded site-by-site rather than amortized into a single
+  /// ceiling. Independent of arity and input length.
+  static constexpr std::size_t kMaxRecoveryCandidatesPerCall = 4U;
+
 public:
   friend struct detail::ParseAccess;
   friend struct detail::ProbeAccess;
@@ -149,8 +205,16 @@ public:
     init_elements<0>(ctx);
   }
 
+  /// Sequential dispatcher per-mode. Each mode's logic lives in a
+  /// dedicated helper (`parse_elements_strict`, `parse_elements_recovery`,
+  /// `parse_elements_expect`) so the strict-only path is physically
+  /// separated from the recovery branch (the lint
+  /// `check_strict_path` verifies the strict helper does not touch
+  /// any recovery symbol).
   template <ParseModeContext Context, std::size_t I>
-  bool parse_elements(Context &ctx) const {
+  bool parse_elements(
+      Context &ctx,
+      bool previousNullableSiblingConsumedVisible = false) const {
     if constexpr (I == sizeof...(Elements)) {
       return true;
     } else {
@@ -160,106 +224,170 @@ public:
         ctx.skip();
       }
       if constexpr (StrictParseModeContext<Context>) {
-        if (!parse(std::get<I>(elements), ctx)) {
-          return false;
-        }
-        return parse_elements<Context, I + 1>(ctx);
+        return parse_elements_strict<Context, I>(ctx);
       } else if constexpr (RecoveryParseModeContext<Context>) {
-        if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows()) {
-          if (TrackedParseContext &strictCtx = ctx;
-              !parse(std::get<I>(elements), strictCtx)) {
-            return false;
-          }
-          return parse_elements<Context, I + 1>(ctx);
-        }
-        if (this->template select_missing_element_insert_replay<I>(ctx)) {
-          bool matchedCleanTail = false;
-          return this->template replay_insert_missing_element_attempt<I>(
-              ctx, matchedCleanTail);
-        }
-        const auto checkpoint = ctx.mark();
-        const auto &current = std::get<I>(elements);
-        const bool nullableCurrentLooksStarted =
-            [&]() {
-              if constexpr (!std::remove_cvref_t<
-                                decltype(std::get<I>(elements))>::nullable) {
-                return false;
-              } else {
-                if (current.getKind() == ElementKind::AndPredicate ||
-                    current.getKind() == ElementKind::NotPredicate) {
-                  return false;
-                }
-                const auto probeCheckpoint = ctx.mark();
-                const char *const savedFurthestExploredCursor =
-                    ctx.furthestExploredCursor();
-                const bool started = attempt_fast_probe(ctx, current);
-                ctx.rewind(probeCheckpoint);
-                ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
-                return started;
-              }
-            }();
-        const auto terminalRecoveryState =
-            (current.getKind() == ElementKind::Literal ||
-             current.getKind() == ElementKind::TerminalRule)
-                ? build_terminal_recovery_state<I>(ctx, checkpoint, cursorBeforeSkip)
-                : TerminalRecoveryState{};
-        if constexpr (std::remove_cvref_t<
-                          decltype(std::get<I>(elements))>::nullable) {
-          if (!nullableCurrentLooksStarted &&
-              this->template suffix_starts_without_edits<I + 1>(ctx)) {
-            const auto skipNullableCheckpoint = ctx.mark();
-            const bool matched =
-                this->template nullable_element_allows_recovery_skip<I>()
-                    ? this->template parse_elements<Context, I + 1>(ctx)
-                    : (parse(current, ctx) &&
-                       this->template parse_elements<Context, I + 1>(ctx));
-            if (matched) {
-              return true;
-            }
-            ctx.rewind(skipNullableCheckpoint);
-          }
-        }
-        if (!parse_current_sequence_element<I>(ctx, terminalRecoveryState.facts)) {
-          return recover_after_current_parse_failure<Context, I>(
-              ctx, checkpoint, terminalRecoveryState, nullableCurrentLooksStarted);
-        }
-        const auto checkpointAfterCurrent = ctx.mark();
+        return parse_elements_recovery<Context, I>(
+            ctx, cursorBeforeSkip, previousNullableSiblingConsumedVisible);
+      } else {
+        return parse_elements_expect<Context, I>(ctx);
+      }
+    }
+  }
+
+private:
+  template <StrictParseModeContext Context, std::size_t I>
+  bool parse_elements_strict(Context &ctx) const {
+    if (!parse(std::get<I>(elements), ctx)) {
+      return false;
+    }
+    return parse_elements<Context, I + 1>(ctx);
+  }
+
+  template <RecoveryParseModeContext Context, std::size_t I>
+  bool parse_elements_recovery(Context &ctx,
+                                const char *cursorBeforeSkip,
+                                bool previousNullableSiblingConsumedVisible) const {
+    if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows() &&
+        !ctx.allowsCompletedWindowContinuationRecovery()) {
+      if (TrackedParseContext &strictCtx = ctx;
+          !parse(std::get<I>(elements), strictCtx)) {
+        return false;
+      }
+      return parse_elements<Context, I + 1>(ctx);
+    }
+    const bool nullableCurrentLooksStarted =
+        this->template probe_nullable_current_looks_started<I>(ctx);
+    const bool previousNullableSiblingOwnsCursor =
+        this->template previous_nullable_sibling_owns_cursor<I>(
+            ctx, previousNullableSiblingConsumedVisible);
+    // Transition: InsertMissingCurrent (early-exit replay path).
+    if (this->template select_missing_element_insert_replay<I>(
+            ctx, previousNullableSiblingOwnsCursor)) {
+      bool matchedCleanTail = false;
+      return this->template replay_insert_missing_element_attempt<I>(
+          ctx, matchedCleanTail);
+    }
+    const auto checkpoint = ctx.mark();
+    const auto &current = std::get<I>(elements);
+    const auto terminalRecoveryState =
+        (current.getKind() == ElementKind::Literal ||
+         current.getKind() == ElementKind::TerminalRule)
+            ? build_terminal_recovery_state<I>(
+                  ctx, checkpoint, cursorBeforeSkip,
+                  previousNullableSiblingOwnsCursor)
+            : TerminalRecoveryState{};
+    bool strictSuffixStartsAtEntry = false;
+    if constexpr (std::remove_cvref_t<
+                      decltype(std::get<I>(elements))>::nullable) {
+      strictSuffixStartsAtEntry =
+          this->template suffix_starts_without_edits<I + 1>(ctx);
+    }
+    const bool visibleNullableRepairCompetesWithStrictSuffix =
+        this->template nullable_current_visible_repair_competes_with_strict_suffix<
+            I>(ctx, strictSuffixStartsAtEntry);
+    if (visibleNullableRepairCompetesWithStrictSuffix) {
+      ctx.rewind(checkpoint);
+      if (this->template parse_competing_nullable_current_repair<I>(
+              ctx, terminalRecoveryState.facts)) {
         const bool currentCommittedProgress =
             ctx.cursor() != checkpoint.parseCheckpoint.parseCheckpoint.cursor ||
             ctx.currentEditCount() !=
                 checkpoint.recoveryState.editBudget.editCount ||
             ctx.currentEditCost() !=
                 checkpoint.recoveryState.editBudget.editCost;
-        if (parse_elements<Context, I + 1>(ctx)) {
-          return true;
-        }
-        return recover_after_tail_parse_failure<Context, I>(
-            ctx, checkpoint, checkpointAfterCurrent, terminalRecoveryState.facts,
-            currentCommittedProgress);
-      } else {
-        const auto checkpoint = ctx.mark();
-        if (!parse(std::get<I>(elements), ctx)) {
-          return false;
-        }
-        if (!ctx.frontierBlocked()) {
-          return parse_elements<Context, I + 1>(ctx);
-        }
-        if constexpr (std::remove_cvref_t<
-                          decltype(std::get<I>(elements))>::nullable) {
-          auto currentFrontier = capture_frontier_since(ctx, checkpoint);
-          ctx.clearFrontierBlock();
-          if (parse_elements<Context, I + 1>(ctx)) {
-            const bool tailBlocked = ctx.frontierBlocked();
-            merge_captured_frontier(ctx, currentFrontier, !tailBlocked);
+        if (currentCommittedProgress) {
+          const bool currentNullableConsumedVisible =
+              this->template nullable_current_consumed_visible_since<I>(
+                  ctx, checkpoint);
+          if (parse_elements<Context, I + 1>(ctx,
+                                             currentNullableConsumedVisible)) {
             return true;
           }
-          ctx.rewind(checkpoint);
-          merge_captured_frontier(ctx, currentFrontier, false);
         }
+      }
+      ctx.rewind(checkpoint);
+    }
+    // Transition: SkipNullable.
+    if (!visibleNullableRepairCompetesWithStrictSuffix &&
+        this->template try_skip_nullable_transition<Context, I>(
+            ctx, nullableCurrentLooksStarted, strictSuffixStartsAtEntry)) {
+      return true;
+    }
+    // Transition: KeepCurrent (no-edit) when the strict suffix is
+    // already visible at entry, otherwise the regular strict attempt
+    // that may trigger RepairCurrent on failure.
+    if (strictSuffixStartsAtEntry) {
+      auto noEditGuard = ctx.withEditState(false, false, false);
+      (void)noEditGuard;
+      if (!parse_current_sequence_element<I>(ctx,
+                                              terminalRecoveryState.facts)) {
+        return recover_after_current_parse_failure<Context, I>(
+            ctx, checkpoint, terminalRecoveryState,
+            nullableCurrentLooksStarted,
+            previousNullableSiblingOwnsCursor);
+      }
+    } else if (!parse_current_sequence_element<I>(
+                    ctx, terminalRecoveryState.facts)) {
+      return recover_after_current_parse_failure<Context, I>(
+          ctx, checkpoint, terminalRecoveryState,
+          nullableCurrentLooksStarted,
+          previousNullableSiblingOwnsCursor);
+    }
+    const auto checkpointAfterCurrent = ctx.mark();
+    const bool currentCommittedProgress =
+        ctx.cursor() != checkpoint.parseCheckpoint.parseCheckpoint.cursor ||
+        ctx.currentEditCount() !=
+            checkpoint.recoveryState.editBudget.editCount ||
+        ctx.currentEditCost() !=
+            checkpoint.recoveryState.editBudget.editCost;
+    const bool currentNullableConsumedVisible =
+        this->template nullable_current_consumed_visible_since<I>(
+            ctx, checkpoint);
+    if (parse_elements<Context, I + 1>(
+            ctx, currentNullableConsumedVisible)) {
+      return true;
+    }
+    // Transition: RepairTail. The closed predicate gates this path:
+    // admissible iff currentStrictlyAcquired (Current actually committed
+    // something — cursor advanced or edits accumulated). A nullable
+    // Current that matched ε falls through here without admission so
+    // that the equivalent SkipNullable path (already tried earlier) is
+    // not wastefully retried.
+    detail::GroupTransitionLegalityFacts repairTailFacts;
+    repairTailFacts.currentStrictlyAcquired = currentCommittedProgress;
+    if (!detail::is_repair_tail_legal(repairTailFacts)) {
+      return false;
+    }
+    return recover_after_tail_parse_failure<Context, I>(
+        ctx, checkpoint, checkpointAfterCurrent, terminalRecoveryState.facts,
+        currentCommittedProgress, nullableCurrentLooksStarted);
+  }
+
+  template <ParseModeContext Context, std::size_t I>
+  bool parse_elements_expect(Context &ctx) const {
+    const auto checkpoint = ctx.mark();
+    if (!parse(std::get<I>(elements), ctx)) {
+      return false;
+    }
+    if (!ctx.frontierBlocked()) {
+      return parse_elements<Context, I + 1>(ctx);
+    }
+    if constexpr (std::remove_cvref_t<
+                      decltype(std::get<I>(elements))>::nullable) {
+      auto currentFrontier = capture_frontier_since(ctx, checkpoint);
+      ctx.clearFrontierBlock();
+      if (parse_elements<Context, I + 1>(ctx)) {
+        const bool tailBlocked = ctx.frontierBlocked();
+        merge_captured_frontier(ctx, currentFrontier, !tailBlocked);
         return true;
       }
+      ctx.rewind(checkpoint);
+      merge_captured_frontier(ctx, currentFrontier, false);
     }
+    return true;
   }
+
+public:
 
 private:
   struct SequenceRecoveryReplayPlan {
@@ -282,6 +410,7 @@ private:
   struct TerminalRecoveryState {
     detail::TerminalRecoveryFacts facts{};
     bool hasRecoveredPrefixBeforeCurrent = false;
+    bool skippedFromRecoveryWindowBeforeCurrent = false;
     std::uint32_t sequenceEditCountBase = 0u;
   };
 
@@ -290,6 +419,7 @@ private:
     bool strictSuffixStartsAtCurrentCursor = false;
     bool recoverableSuffixStartsAtCurrentCursor = false;
     bool currentOffsetWithinRecoveryWindow = false;
+    bool previousNullableSiblingOwnsCursor = false;
   };
 
   struct SequenceSuffixEntryFacts {
@@ -297,19 +427,28 @@ private:
     bool recoverableStartsAtCurrentCursor = false;
   };
 
+  struct RecoverableFollowConsumesVisibleProbe {
+    const Group *self = nullptr;
+    RecoveryContext::FollowProbeFn outerRecoverableConsumesVisible = nullptr;
+    const void *outerRecoverableConsumesVisibleData = nullptr;
+  };
+
   static void consider_sequence_recovery_candidate(
       SequenceRecoveryReplayPlan &bestPlan,
       detail::EditableRecoveryCandidate &bestCandidate,
       const SequenceRecoveryReplayPlan &candidatePlan,
-      const detail::EditableRecoveryCandidate &candidate,
-      const AbstractElement *preferredFirstEditElement) noexcept {
+      const detail::EditableRecoveryCandidate &candidate) noexcept {
     if (!candidate.matched) {
       return;
     }
+    // Ranking via central `is_better_recovery_key` on the
+    // candidate-derived `RecoveryKey`. Group has no family-redundancy
+    // step (each plan is its own family), so the pipeline reduces to
+    // admission + ranking.
     if (!bestCandidate.matched ||
-        detail::is_better_choice_recovery_candidate(
-            candidate, bestCandidate,
-            {.preferredBoundaryElement = preferredFirstEditElement})) {
+        detail::is_better_recovery_key(
+            detail::editable_recovery_key(candidate),
+            detail::editable_recovery_key(bestCandidate))) {
       bestPlan = candidatePlan;
       bestCandidate = candidate;
     }
@@ -407,6 +546,77 @@ private:
   }
 
   template <std::size_t I>
+  bool probe_recoverable_entry_consumes_visible_elements(
+      RecoveryContext &ctx,
+      bool allowSyntheticLeadingTerminalContinuation = false,
+      RecoveryContext::FollowProbeFn outerRecoverableConsumesVisible = nullptr,
+      const void *outerRecoverableConsumesVisibleData = nullptr) const {
+    if constexpr (I == sizeof...(Elements)) {
+      return outerRecoverableConsumesVisible != nullptr &&
+             outerRecoverableConsumesVisible(
+                 ctx, outerRecoverableConsumesVisibleData);
+    } else {
+      const auto &current = std::get<I>(elements);
+      if (attempt_fast_probe(ctx, current) ||
+          probe_recoverable_at_entry_consumes_visible(current, ctx)) {
+        return true;
+      }
+      if (ctx.allowsScopedLeadingTerminalInsertRecovery() &&
+          element_is_terminal_like_for_missing_insert(current) &&
+          allows_synthetic_terminal_insert(ctx, current) &&
+          detail::cursor_starts_visible_source(ctx)) {
+        const bool suffixConsumesVisible =
+            this->template suffix_starts_without_edits<I + 1>(ctx) ||
+            (I + 1 == sizeof...(Elements) &&
+             outerRecoverableConsumesVisible != nullptr &&
+             outerRecoverableConsumesVisible(
+                 ctx, outerRecoverableConsumesVisibleData));
+        if (suffixConsumesVisible) {
+          return true;
+        }
+      }
+      if (allowSyntheticLeadingTerminalContinuation &&
+          element_is_terminal_like_for_missing_insert(current) &&
+          allows_synthetic_terminal_insert(
+              ctx, current, /*allowSequenceLiteralInsert=*/true) &&
+          detail::cursor_starts_visible_source(ctx)) {
+        const bool suffixConsumesVisible =
+            this->template suffix_starts_without_edits<I + 1>(ctx) ||
+            (I + 1 == sizeof...(Elements) &&
+             outerRecoverableConsumesVisible != nullptr &&
+             outerRecoverableConsumesVisible(
+                 ctx, outerRecoverableConsumesVisibleData));
+        if (suffixConsumesVisible) {
+          return true;
+        }
+      }
+      if (current.getKind() == ElementKind::AndPredicate) {
+        return false;
+      }
+      if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
+        return probe_recoverable_entry_consumes_visible_elements<I + 1>(
+            ctx, allowSyntheticLeadingTerminalContinuation,
+            outerRecoverableConsumesVisible,
+            outerRecoverableConsumesVisibleData);
+      } else {
+        return false;
+      }
+    }
+  }
+
+  template <std::size_t I>
+  static bool recoverable_follow_consumes_visible_probe(RecoveryContext &ctx,
+                                                        const void *data) {
+    const auto &probe =
+        *static_cast<const RecoverableFollowConsumesVisibleProbe *>(data);
+    return probe.self
+        ->template probe_recoverable_entry_consumes_visible_elements<I>(
+            ctx, /*allowSyntheticLeadingTerminalContinuation=*/true,
+            probe.outerRecoverableConsumesVisible,
+            probe.outerRecoverableConsumesVisibleData);
+  }
+
+  template <std::size_t I>
   [[nodiscard]] SequenceSuffixEntryFacts
   analyze_suffix_entry_facts(RecoveryContext &ctx) const {
     if constexpr (I == sizeof...(Elements)) {
@@ -455,9 +665,35 @@ private:
     }
   }
 
+  /// Probe whether the nullable current element appears to have
+  /// started accepting at the cursor. For non-nullable elements,
+  /// structurally false. For predicate elements (`AndPredicate`,
+  /// `NotPredicate`), false because predicates do not consume input.
+  /// Probe is non-mutating: cursor and furthest explored cursor
+  /// are restored.
+  template <std::size_t I>
+  [[nodiscard]] bool
+  probe_nullable_current_looks_started(RecoveryContext &ctx) const {
+    if constexpr (!std::remove_cvref_t<
+                      decltype(std::get<I>(elements))>::nullable) {
+      (void)ctx;
+      return false;
+    } else {
+      const auto &current = std::get<I>(elements);
+      if (current.getKind() == ElementKind::AndPredicate ||
+          current.getKind() == ElementKind::NotPredicate) {
+        return false;
+      }
+      detail::ProbeRestoreScope guard{ctx};
+      return attempt_fast_probe(ctx, current);
+    }
+  }
+
   template <std::size_t I>
   [[nodiscard]] SequenceFacts
-  build_sequence_facts(RecoveryContext &ctx) const {
+  build_sequence_facts(
+      RecoveryContext &ctx,
+      bool previousNullableSiblingOwnsCursor = false) const {
     const auto suffixEntryFacts =
         this->template analyze_suffix_entry_facts<I + 1>(ctx);
     return {
@@ -468,14 +704,17 @@ private:
             suffixEntryFacts.recoverableStartsAtCurrentCursor,
         .currentOffsetWithinRecoveryWindow =
             ctx.hasPendingRecoveryWindows() &&
-            ctx.cursorOffset() <= ctx.pendingRecoveryWindowMaxCursorOffset(),
+            (ctx.cursorOffset() <= ctx.pendingRecoveryWindowMaxCursorOffset() ||
+             ctx.isInRecoveryPhase()),
+        .previousNullableSiblingOwnsCursor = previousNullableSiblingOwnsCursor,
     };
   }
 
   template <std::size_t I, typename Checkpoint>
   [[nodiscard]] TerminalRecoveryState build_terminal_recovery_state(
       const RecoveryContext &ctx, const Checkpoint &checkpoint,
-      const char *cursorBeforeSkip) const {
+      const char *cursorBeforeSkip,
+      bool previousNullableSiblingOwnsCursor) const {
     constexpr bool suffixFullyNullable = suffix_after_is_fully_nullable<I + 1>();
     const bool hasCommittedVisiblePrefixBeforeCurrent =
         (cursorBeforeSkip != nullptr &&
@@ -509,6 +748,12 @@ private:
           previous.getKind() == ElementKind::Literal ||
           previous.getKind() == ElementKind::TerminalRule;
     }
+    const bool skippedFromRecoveryWindowBeforeCurrent =
+        cursorBeforeSkip != nullptr && ctx.hasPendingRecoveryWindows() &&
+        ctx.cursor() > cursorBeforeSkip &&
+        ctx.skip_without_builder(cursorBeforeSkip) == ctx.cursor() &&
+        static_cast<TextOffset>(cursorBeforeSkip - ctx.begin) <=
+            ctx.pendingRecoveryWindowMaxCursorOffset();
     return {
         .facts =
             {
@@ -516,20 +761,187 @@ private:
                 .previousElementIsTerminalish = previousIsTerminalish,
                 .allowStructuredVisibleContinuationInsert =
                     hasCommittedVisiblePrefixBeforeCurrent,
+                .localRecoveryBlocked =
+                    previousNullableSiblingOwnsCursor,
             },
         .hasRecoveredPrefixBeforeCurrent = hasRecoveredPrefixBeforeCurrent,
+        .skippedFromRecoveryWindowBeforeCurrent =
+            skippedFromRecoveryWindowBeforeCurrent,
         .sequenceEditCountBase = checkpoint.recoveryState.editBudget.editCount,
     };
+  }
+
+  template <std::size_t I, typename Fn>
+  bool with_current_follow_probe(RecoveryContext &ctx, Fn &&fn) const {
+    // Install the current element's follow only while the current element
+    // itself is parsed or probed. Keeping this guard alive while parsing the
+    // recursive tail would make a last child pass through to the previous
+    // sibling's local follow instead of the enclosing follow.
+    if constexpr (I + 1 == sizeof...(Elements)) {
+      auto followGuard = ctx.withPassThroughOuterFollowProbe();
+      (void)followGuard;
+      return std::forward<Fn>(fn)();
+    } else {
+      constexpr auto strictProbeFn =
+          +[](RecoveryContext &c, const void *data) -> bool {
+        const auto *self = static_cast<const Group *>(data);
+        return self->template suffix_starts_without_edits<I + 1>(c);
+      };
+      constexpr auto recoverableProbeFn =
+          +[](RecoveryContext &c, const void *data) -> bool {
+        const auto *self = static_cast<const Group *>(data);
+        return self->template probe_recoverable_entry_elements<I + 1>(c);
+      };
+      constexpr auto recoverableConsumesVisibleProbeFn =
+          &Group::template recoverable_follow_consumes_visible_probe<I + 1>;
+      RecoverableFollowConsumesVisibleProbe recoverableConsumesVisibleProbe{
+          .self = this,
+          .outerRecoverableConsumesVisible =
+              ctx._recoverableFollowConsumesVisibleProbeFn,
+          .outerRecoverableConsumesVisibleData =
+              ctx._recoverableFollowConsumesVisibleProbeData,
+      };
+      auto followGuard = ctx.withFollowProbe(
+          strictProbeFn, this, recoverableProbeFn, this,
+          recoverableConsumesVisibleProbeFn, &recoverableConsumesVisibleProbe);
+      (void)followGuard;
+      return std::forward<Fn>(fn)();
+    }
+  }
+
+  template <std::size_t I>
+  [[nodiscard]] bool
+  previous_nullable_sibling_owns_cursor(
+      RecoveryContext &ctx,
+      bool previousNullableSiblingConsumedVisible) const {
+    if constexpr (I == 0) {
+      (void)ctx;
+      return false;
+    } else {
+      const auto &previous = std::get<I - 1>(elements);
+      using Previous = std::remove_cvref_t<decltype(previous)>;
+      if constexpr (!Previous::nullable) {
+        (void)ctx;
+        (void)previousNullableSiblingConsumedVisible;
+        return false;
+      } else {
+        detail::ProbeRestoreScope guard{ctx};
+        return this->template with_current_follow_probe<I - 1>(ctx, [&]() {
+          auto deleteObservationGuard =
+              ctx.withEditPermissions(ctx.allowInsert, true);
+          (void)deleteObservationGuard;
+          if (previousNullableSiblingConsumedVisible &&
+              !detail::nullable_sibling_allows_recoverable_continuation_v<
+                  Previous>) {
+            return false;
+          }
+          bool previousStrictProgress = false;
+          {
+            detail::ProbeRestoreScope strictGuard{ctx};
+            const TextOffset previousStrictStartOffset = ctx.cursorOffset();
+            previousStrictProgress =
+                attempt_parse_no_edits(ctx, previous) &&
+                ctx.cursorOffset() > previousStrictStartOffset;
+          }
+          if (previousStrictProgress) {
+            return true;
+          }
+          const auto &current = std::get<I>(elements);
+          if (element_is_terminal_like_for_missing_insert(current) &&
+              allows_synthetic_terminal_insert(
+                  ctx, current, /*allowSequenceLiteralInsert=*/true) &&
+              detail::cursor_starts_visible_source(ctx)) {
+            const auto suffixEntryFacts =
+                this->template analyze_suffix_entry_facts<I + 1>(ctx);
+            if (suffix_after_is_fully_nullable<I + 1>() ||
+                suffixEntryFacts.strictStartsAtCurrentCursor ||
+                suffixEntryFacts.recoverableStartsAtCurrentCursor) {
+              return false;
+            }
+          }
+          if (attempt_fast_probe(ctx, previous)) {
+            return true;
+          }
+          return probe_recoverable_at_entry_consumes_visible(previous, ctx);
+        });
+      }
+    }
+  }
+
+  template <std::size_t I>
+  [[nodiscard]] bool nullable_current_consumed_visible_since(
+      const RecoveryContext &ctx,
+      const RecoveryContext::Checkpoint &checkpoint) const noexcept {
+    if constexpr (!std::remove_cvref_t<
+                      decltype(std::get<I>(elements))>::nullable) {
+      (void)ctx;
+      (void)checkpoint;
+      return false;
+    } else {
+      return ctx.lastVisibleCursorOffset() >
+             static_cast<TextOffset>(
+                 checkpoint.parseCheckpoint.parseCheckpoint.lastVisibleCursor -
+                 ctx.begin);
+    }
   }
 
   template <std::size_t I>
   bool parse_current_sequence_element(
       RecoveryContext &ctx, const detail::TerminalRecoveryFacts &facts) const {
-    const auto &current = std::get<I>(elements);
-    if constexpr (requires { current.parse_terminal_recovery_impl(ctx, facts); }) {
-      return current.parse_terminal_recovery_impl(ctx, facts);
+    return with_current_follow_probe<I>(ctx, [&]() {
+      const auto &current = std::get<I>(elements);
+      if constexpr (requires {
+                      current.parse_terminal_recovery_impl(ctx, facts);
+                    }) {
+        return current.parse_terminal_recovery_impl(ctx, facts);
+      } else {
+        return parse(current, ctx);
+      }
+    });
+  }
+
+  template <std::size_t I>
+  bool parse_competing_nullable_current_repair(
+      RecoveryContext &ctx, const detail::TerminalRecoveryFacts &facts) const {
+    if constexpr (!std::remove_cvref_t<decltype(std::get<I>(
+                      elements))>::nullable) {
+      (void)ctx;
+      (void)facts;
+      return false;
     } else {
-      return parse(current, ctx);
+      const auto &current = std::get<I>(elements);
+      auto noFollowGuard = ctx.withFollowProbe(nullptr, nullptr, nullptr,
+                                               nullptr, nullptr, nullptr);
+      (void)noFollowGuard;
+      if constexpr (requires {
+                      current.parse_terminal_recovery_impl(ctx, facts);
+                    }) {
+        return current.parse_terminal_recovery_impl(ctx, facts);
+      } else {
+        return parse(current, ctx);
+      }
+    }
+  }
+
+  template <std::size_t I>
+  [[nodiscard]] bool
+  nullable_current_visible_repair_competes_with_strict_suffix(
+      RecoveryContext &ctx, bool strictSuffixStartsAtEntry) const {
+    if constexpr (!std::remove_cvref_t<decltype(std::get<I>(
+                      elements))>::nullable) {
+      (void)ctx;
+      (void)strictSuffixStartsAtEntry;
+      return false;
+    } else {
+      if (!strictSuffixStartsAtEntry) {
+        return false;
+      }
+      detail::ProbeRestoreScope guard{ctx};
+      const auto &current = std::get<I>(elements);
+      auto noFollowGuard = ctx.withFollowProbe(nullptr, nullptr, nullptr,
+                                               nullptr, nullptr, nullptr);
+      (void)noFollowGuard;
+      return probe_recoverable_at_entry_consumes_visible(current, ctx);
     }
   }
 
@@ -557,7 +969,8 @@ private:
     if (!preferTailEntryInsert) {
       return this->template nullable_element_allows_recovery_skip<I>()
                  ? parseTail()
-                 : (parse(current, ctx) && parseTail());
+                 : (this->template parse_current_sequence_element<I>(ctx, {}) &&
+                    parseTail());
     }
     auto noDeleteGuard = ctx.withEditPermissions(ctx.allowInsert, false);
     (void)noDeleteGuard;
@@ -569,13 +982,16 @@ private:
     if (!tailStartsWithTerminal) {
       return this->template nullable_element_allows_recovery_skip<I>()
                  ? parseTail()
-                 : (parse(current, ctx) && parseTail());
+                 : (this->template parse_current_sequence_element<I>(ctx, {}) &&
+                    parseTail());
     }
-    auto leadingInsertGuard = ctx.withLeadingTerminalInsertScope();
+    detail::ScopedBoolOverride leadingInsertGuard{
+        ctx.allowLeadingTerminalInsertScope, true};
     (void)leadingInsertGuard;
     return this->template nullable_element_allows_recovery_skip<I>()
                ? parseTail()
-               : (parse(current, ctx) && parseTail());
+               : (this->template parse_current_sequence_element<I>(ctx, {}) &&
+                  parseTail());
   }
 
   template <RecoveryParseModeContext Context, std::size_t I,
@@ -603,11 +1019,22 @@ private:
                  ctx, terminalRecoveryFacts) &&
              this->template parse_elements<Context, I + 1>(ctx);
     }
+    {
+      auto noDeleteGuard = ctx.withEditPermissions(ctx.allowInsert, false);
+      (void)noDeleteGuard;
+      if (!this->template parse_current_sequence_element<I>(
+              ctx, terminalRecoveryFacts)) {
+        return false;
+      }
+    }
+    return this->template parse_elements<Context, I + 1>(ctx);
+  }
+
+  template <RecoveryParseModeContext Context, std::size_t I>
+  bool replay_tail_after_current_attempt(Context &ctx) const {
     auto noDeleteGuard = ctx.withEditPermissions(ctx.allowInsert, false);
     (void)noDeleteGuard;
-    return this->template parse_current_sequence_element<I>(
-               ctx, terminalRecoveryFacts) &&
-           this->template parse_elements<Context, I + 1>(ctx);
+    return this->template parse_elements<Context, I + 1>(ctx);
   }
 
   template <RecoveryParseModeContext Context, std::size_t I>
@@ -664,8 +1091,16 @@ private:
     const auto &current = std::get<I>(elements);
     const bool cursorStartsVisibleSource =
         detail::cursor_starts_visible_source(ctx);
+    const bool sequenceLiteralInsertHasContinuation =
+        ctx.cursor() >= ctx.end || sequenceFacts.suffixFullyNullable ||
+        sequenceFacts.strictSuffixStartsAtCurrentCursor ||
+        sequenceFacts.recoverableSuffixStartsAtCurrentCursor;
     const bool currentAllowsSyntheticInsert =
-        allows_synthetic_terminal_insert(ctx, current);
+        allows_synthetic_terminal_insert(
+            ctx, current, sequenceLiteralInsertHasContinuation);
+    const bool currentSiteWithinRecoveryWindow =
+        sequenceFacts.currentOffsetWithinRecoveryWindow ||
+        state.skippedFromRecoveryWindowBeforeCurrent;
     const bool hasLocalSequenceEdits =
         ctx.currentEditCount() != state.sequenceEditCountBase;
     const bool scopedLeadingInitialInsertAllowed =
@@ -677,7 +1112,7 @@ private:
         detail::cursor_reaches_visible_source_after_local_skip(ctx);
     const bool recoveredPrefixImmediateInsertAllowed =
         ((state.hasRecoveredPrefixBeforeCurrent &&
-          sequenceFacts.currentOffsetWithinRecoveryWindow) ||
+          currentSiteWithinRecoveryWindow) ||
          (state.hasRecoveredPrefixBeforeCurrent &&
           sequenceFacts.suffixFullyNullable &&
           (state.facts.triviaGap.hasHiddenGap() || cursorStartsVisibleSource ||
@@ -687,6 +1122,11 @@ private:
         I == 0u && ctx.allowsScopedLeadingTerminalInsertRecovery() &&
         !ctx.allowDelete && sequenceFacts.currentOffsetWithinRecoveryWindow &&
         visibleSourceAvailableForScopedContinuation;
+    const bool committedPrefixContinuationInsertAllowed =
+        state.facts.allowStructuredVisibleContinuationInsert &&
+        !hasLocalSequenceEdits && visibleSourceAvailableForScopedContinuation &&
+        (sequenceFacts.strictSuffixStartsAtCurrentCursor ||
+         sequenceFacts.recoverableSuffixStartsAtCurrentCursor);
     const bool continuedRecoveredPrefixInsertAllowed =
         state.hasRecoveredPrefixBeforeCurrent &&
         ctx.currentWindowEditCount() > 0u && !hasLocalSequenceEdits &&
@@ -694,62 +1134,83 @@ private:
         sequenceFacts.strictSuffixStartsAtCurrentCursor &&
         (I != 0u || (!ctx.allowDelete &&
                      ctx.allowsScopedLeadingTerminalInsertRecovery()));
-    return {
+    const bool currentTerminalInsertionAllowed =
         currentAllowsSyntheticInsert &&
+        !sequenceFacts.previousNullableSiblingOwnsCursor;
+    return {
+        currentTerminalInsertionAllowed &&
             (recoveredPrefixImmediateInsertAllowed ||
              continuedRecoveredPrefixInsertAllowed ||
              scopedLeadingInitialInsertAllowed ||
-             scopedLeadingContinuationInsertAllowed) &&
+             scopedLeadingContinuationInsertAllowed ||
+             committedPrefixContinuationInsertAllowed) &&
             (sequenceFacts.suffixFullyNullable ||
              sequenceFacts.strictSuffixStartsAtCurrentCursor ||
              sequenceFacts.recoverableSuffixStartsAtCurrentCursor),
-        currentAllowsSyntheticInsert && I != 0u &&
+        currentTerminalInsertionAllowed && I != 0u &&
             sequenceFacts.suffixFullyNullable &&
             state.hasRecoveredPrefixBeforeCurrent &&
-            sequenceFacts.currentOffsetWithinRecoveryWindow &&
+            currentSiteWithinRecoveryWindow &&
             !(cursorStartsVisibleSource && ctx.currentWindowEditCount() > 0u),
     };
   }
 
-  template <std::size_t I>
-  [[nodiscard]] const AbstractElement *
-  preferred_tail_failure_first_edit_element(
-      bool currentCommittedProgress,
-      const SequenceFacts &sequenceFacts) const noexcept {
-    const auto &current = std::get<I>(elements);
-    const auto *preferredFirstEditElement =
-        (!currentCommittedProgress ||
-         sequenceFacts.recoverableSuffixStartsAtCurrentCursor)
-            ? first_required_tail_element<I + 1>()
-            : std::addressof(current);
-    return preferredFirstEditElement != nullptr ? preferredFirstEditElement
-                                                : std::addressof(current);
-  }
-
   template <typename Current>
   [[nodiscard]] static constexpr bool
-  allows_synthetic_terminal_insert(RecoveryContext &ctx,
-                                   const Current &current) noexcept {
-    if constexpr (requires { current._lexicalRecoveryProfile; }) {
+  allows_synthetic_terminal_insert(
+      RecoveryContext &ctx, const Current &current,
+      bool allowSequenceLiteralInsert = false) noexcept {
+    const auto allowsEofLiteralInsert =
+        [&ctx](detail::TerminalShape shape) constexpr noexcept {
+          return ctx.cursor() >= ctx.end && shape.hasCanonicalText;
+        };
+    const auto allowsSequenceLiteralInsert =
+        [allowSequenceLiteralInsert](
+            detail::TerminalShape shape) constexpr noexcept {
+          return allowSequenceLiteralInsert && shape.hasCanonicalText;
+        };
+    const auto allowsScopedCompactInsert =
+        [&ctx](detail::TerminalShape shape) constexpr noexcept {
+          return ctx.allowsScopedLeadingTerminalInsertRecovery() &&
+                 shape.hasCanonicalText &&
+                 shape.canonicalTextLength <=
+                     detail::kMaxScopedSyntheticInsertCanonicalTextLength;
+        };
+    using CurrentType = std::remove_cvref_t<Current>;
+    if constexpr (requires { CurrentType::terminalShape; }) {
+      (void)current;
+      return CurrentType::terminalShape.allowsInsert() ||
+             allowsSequenceLiteralInsert(CurrentType::terminalShape) ||
+             allowsEofLiteralInsert(CurrentType::terminalShape) ||
+             allowsScopedCompactInsert(CurrentType::terminalShape);
+    } else if constexpr (requires {
+                           current._literalRecoveryMetadata;
+                           current._terminalShape;
+                         }) {
+      if (current._literalRecoveryMetadata.has_value() &&
+          !current._terminalShape.allowsInsert() &&
+          !allowsSequenceLiteralInsert(current._terminalShape) &&
+          !allowsEofLiteralInsert(current._terminalShape) &&
+          !allowsScopedCompactInsert(current._terminalShape)) {
+        return false;
+      }
       return detail::allows_terminal_rule_insert(ctx,
-                                                 current._lexicalRecoveryProfile);
+                                                 current._terminalShape);
     }
     return true;
   }
 
   template <std::size_t I, typename Checkpoint>
-  bool current_locally_recoverable_from_entry(RecoveryContext &ctx,
-                                              const Checkpoint &checkpoint) const {
+  bool current_recoverable_entry_signal(RecoveryContext &ctx,
+                                        const Checkpoint &checkpoint) const {
     const auto &current = std::get<I>(elements);
     ctx.rewind(checkpoint);
-    const char *const savedFurthestExploredCursor =
-        ctx.furthestExploredCursor();
-    const bool recoverable = attempt_fast_probe(ctx, current) ||
-                             probe_recoverable_at_entry(current, ctx) ||
-                             probe_locally_recoverable(current, ctx);
-    ctx.rewind(checkpoint);
-    ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
-    return recoverable;
+    detail::ProbeRestoreScope guard{ctx};
+    return this->template with_current_follow_probe<I>(ctx, [&]() {
+      return attempt_fast_probe(ctx, current) ||
+             probe_recoverable_at_entry(current, ctx) ||
+             probe_locally_recoverable(current, ctx);
+    });
   }
 
   template <std::size_t I, typename Checkpoint>
@@ -799,8 +1260,7 @@ private:
              .allowDeleteRecovery = true},
             evaluate_current_without_delete_attempt<Context, I>(
                 ctx, checkpoint, terminalRecoveryState.facts,
-                /*allowDeleteRecovery=*/true),
-            std::addressof(current));
+                /*allowDeleteRecovery=*/true));
       }
       if (allowSkipNullableAttempt) {
         ctx.rewind(checkpoint);
@@ -810,8 +1270,7 @@ private:
              .skipNullable = true,
              .preferTailEntryInsert = preferTailEntryInsert},
             evaluate_skip_nullable_attempt<Context, I>(
-                ctx, checkpoint, preferTailEntryInsert),
-            std::addressof(current));
+                ctx, checkpoint, preferTailEntryInsert));
       }
     }
     return bestPlan;
@@ -822,11 +1281,12 @@ private:
   bool recover_after_current_parse_failure(
       Context &ctx, const Checkpoint &checkpoint,
       const TerminalRecoveryState &terminalRecoveryState,
-      bool nullableCurrentLooksStarted) const {
+      bool nullableCurrentLooksStarted,
+      bool previousNullableSiblingOwnsCursor) const {
     const auto &current = std::get<I>(elements);
-    const auto sequenceFacts = build_sequence_facts<I>(ctx);
-    const auto [allowInsertCurrentTerminal,
-                allowInsertCurrentAfterDeleteRun] =
+    const auto sequenceFacts =
+        build_sequence_facts<I>(ctx, previousNullableSiblingOwnsCursor);
+    const auto [allowInsertCurrentTerminal, allowInsertCurrentAfterDeleteRun] =
         this->template build_current_failure_terminal_legality<I>(
             ctx, checkpoint, terminalRecoveryState, sequenceFacts);
     const bool preferTailEntryInsert =
@@ -845,8 +1305,19 @@ private:
       if (nullableCurrentLooksStarted) {
         allowCurrentWithoutDeleteAttempt =
             !allowSkipNullableAttempt ||
-            this->template current_locally_recoverable_from_entry<I>(
+            this->template current_recoverable_entry_signal<I>(
                 ctx, checkpoint);
+      }
+    }
+    if constexpr (!std::remove_cvref_t<decltype(std::get<I>(
+                      elements))>::nullable) {
+      if (allowInsertCurrentTerminal && !allowInsertCurrentAfterDeleteRun) {
+        ctx.rewind(checkpoint);
+        if (this->template replay_insert_current_terminal_attempt<I>(
+                ctx, {}, allowTerminalNullableTailStop)) {
+          return true;
+        }
+        ctx.rewind(checkpoint);
       }
     }
     const auto bestPlan =
@@ -867,7 +1338,6 @@ private:
   SequenceRecoveryReplayPlan select_tail_failure_sequence_attempt(
       Context &ctx, const Checkpoint &checkpoint,
       const detail::TerminalRecoveryFacts &terminalRecoveryFacts,
-      const AbstractElement *preferredFirstEditElement,
       bool preferTailEntryInsert, bool allowDeleteRecovery,
       bool allowReparseCurrentAttempt,
       bool allowSkipNullableAttempt) const {
@@ -882,8 +1352,7 @@ private:
            .allowDeleteRecovery = allowDeleteRecovery},
           evaluate_current_without_delete_attempt<Context, I>(
               ctx, checkpoint, terminalRecoveryFacts,
-              allowDeleteRecovery),
-          preferredFirstEditElement);
+              allowDeleteRecovery));
     }
     if (allowSkipNullableAttempt) {
       ctx.rewind(checkpoint);
@@ -893,8 +1362,7 @@ private:
            .skipNullable = true,
            .preferTailEntryInsert = preferTailEntryInsert},
           evaluate_skip_nullable_attempt<Context, I>(
-              ctx, checkpoint, preferTailEntryInsert),
-          preferredFirstEditElement);
+              ctx, checkpoint, preferTailEntryInsert));
     }
     return bestPlan;
   }
@@ -905,31 +1373,35 @@ private:
       Context &ctx, const Checkpoint &checkpoint,
       const Checkpoint &checkpointAfterCurrent,
       const detail::TerminalRecoveryFacts &terminalRecoveryFacts,
-      bool currentCommittedProgress) const {
+      bool currentCommittedProgress,
+      bool nullableCurrentLooksStarted) const {
     if constexpr (!std::remove_cvref_t<
                       decltype(std::get<I>(elements))>::nullable) {
       return false;
     } else {
+      if (currentCommittedProgress) {
+        ctx.rewind(checkpointAfterCurrent);
+        if (this->template replay_tail_after_current_attempt<Context, I>(ctx)) {
+          return true;
+        }
+        ctx.rewind(checkpointAfterCurrent);
+      }
       const auto sequenceFacts = build_sequence_facts<I>(ctx);
-      const auto *preferredFirstEditElement =
-          this->template preferred_tail_failure_first_edit_element<I>(
-              currentCommittedProgress, sequenceFacts);
       const bool preferTailEntryInsert =
           sequenceFacts.recoverableSuffixStartsAtCurrentCursor;
       const bool allowDeleteRecovery = !currentCommittedProgress;
+      const bool currentEntrySignal =
+          this->template current_recoverable_entry_signal<I>(ctx, checkpoint);
       const bool allowReparseCurrentAttempt =
           currentCommittedProgress ||
-          sequenceFacts.strictSuffixStartsAtCurrentCursor ||
-          (!currentCommittedProgress &&
-           this->template current_locally_recoverable_from_entry<I>(
-               ctx, checkpoint));
+          (nullableCurrentLooksStarted && currentEntrySignal);
       const bool allowSkipNullableAttempt =
           sequenceFacts.recoverableSuffixStartsAtCurrentCursor ||
           (!currentCommittedProgress && !allowReparseCurrentAttempt);
       const auto bestPlan =
           this->template select_tail_failure_sequence_attempt<Context, I>(
               ctx, checkpoint, terminalRecoveryFacts,
-              preferredFirstEditElement, preferTailEntryInsert,
+              preferTailEntryInsert,
               allowDeleteRecovery, allowReparseCurrentAttempt,
               allowSkipNullableAttempt);
       if (!bestPlan.valid &&
@@ -998,9 +1470,52 @@ private:
     }
   }
 
+  /// Encapsulates the `SkipNullable` transition. Returns `true` iff
+  /// the skip succeeded; returns `false` when admission
+  /// (`is_skip_nullable_legal`) is not satisfied, when the strict
+  /// suffix entry trigger is not available, or when the skip attempt
+  /// failed (in which case the cursor was rewound).
+  template <ParseModeContext Context, std::size_t I>
+  [[nodiscard]] bool
+  try_skip_nullable_transition(Context &ctx,
+                                bool nullableCurrentLooksStarted,
+                                bool strictSuffixStartsAtEntry) const {
+    if constexpr (!std::remove_cvref_t<
+                      decltype(std::get<I>(elements))>::nullable) {
+      (void)ctx;
+      (void)nullableCurrentLooksStarted;
+      (void)strictSuffixStartsAtEntry;
+      return false;
+    } else {
+      detail::GroupTransitionLegalityFacts admissionFacts;
+      admissionFacts.currentNullable = true;
+      admissionFacts.currentVisibleLeafConsumed = nullableCurrentLooksStarted;
+      if (!detail::is_skip_nullable_legal(admissionFacts)) {
+        return false;
+      }
+      if (!strictSuffixStartsAtEntry) {
+        return false;
+      }
+      const auto skipNullableCheckpoint = ctx.mark();
+      const auto &current = std::get<I>(elements);
+      const bool matched =
+          this->template nullable_element_allows_recovery_skip<I>()
+              ? this->template parse_elements<Context, I + 1>(ctx)
+              : (parse(current, ctx) &&
+                 this->template parse_elements<Context, I + 1>(ctx));
+      if (matched) {
+        return true;
+      }
+      ctx.rewind(skipNullableCheckpoint);
+      return false;
+    }
+  }
+
   template <std::size_t I>
   [[nodiscard]] bool
-  select_missing_element_insert_replay(RecoveryContext &ctx) const {
+  select_missing_element_insert_replay(
+      RecoveryContext &ctx,
+      bool previousNullableSiblingOwnsCursor) const {
     if constexpr (std::remove_cvref_t<
                       decltype(std::get<I>(elements))>::nullable) {
       return false;
@@ -1010,39 +1525,22 @@ private:
         return false;
       }
       if constexpr (requires { current.getElement(); }) {
-        if (const auto *inner = current.getElement();
-            inner != nullptr &&
-            element_is_terminal_like_for_missing_insert(*inner)) {
+        const auto &inner = *current.getElement();
+        if (inner.getKind() == ElementKind::Literal) {
           return false;
         }
       }
-      const auto memoKey = RecoveryContext::RecoveryMemoKey{
-          .queryKind =
-              RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert,
-          .ownerIdentity = static_cast<const void *>(std::addressof(current)),
-          .cursorOffset = ctx.cursorOffset(),
-          .furthestExploredOffset = ctx.furthestExploredOffset(),
-          .policySignature = ctx.recoveryPolicySignature(),
-          .activeRecoverySignature = ctx.activeRecoverySignature(),
-      };
-      RecoveryContext::GroupMissingElementInsertMemoValue cachedSelection;
-      if (ctx.memoTable().template tryGet<
-              RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
-              memoKey, cachedSelection)) {
-        const char *const cachedFurthestExploredCursor =
-            ctx.begin + cachedSelection.observedFurthestExploredOffset;
-        if (cachedFurthestExploredCursor > ctx.furthestExploredCursor()) {
-          ctx.restoreFurthestExploredCursor(cachedFurthestExploredCursor);
+      const bool currentMatchesStrict =
+          detail::attempt_parse_without_side_effects(ctx, current);
+      if (currentMatchesStrict) {
+        if constexpr (I + 1 == sizeof...(Elements)) {
+          return false;
         }
-        return cachedSelection.selectInsertReplay;
-      }
-      if (detail::attempt_parse_without_side_effects(ctx, current)) {
-        ctx.memoTable().template store<
-            RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
-            memoKey,
-            {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
-             .selectInsertReplay = false});
-        return false;
+        const auto suffixEntryFacts =
+            this->template analyze_suffix_entry_facts<I + 1>(ctx);
+        if (!suffixEntryFacts.strictStartsAtCurrentCursor) {
+          return false;
+        }
       }
       const auto checkpoint = ctx.mark();
       const auto baseEditCost = ctx.currentEditCost();
@@ -1057,11 +1555,14 @@ private:
       if (!insertCandidate.matched ||
           insertCandidate.postSkipCursorOffset <=
               insertCandidate.firstEditOffset) {
-        ctx.memoTable().template store<
-            RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
-            memoKey,
-            {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
-             .selectInsertReplay = false});
+        return false;
+      }
+      detail::GroupTransitionLegalityFacts admissionFacts;
+      admissionFacts.insertionReplayable = true;
+      admissionFacts.tailEntrySignalIndependent = true;
+      admissionFacts.previousNullableSiblingOwnsCursor =
+          previousNullableSiblingOwnsCursor;
+      if (!detail::is_insert_missing_current_legal(admissionFacts)) {
         return false;
       }
       const bool singleInsertedElementWithCleanTail =
@@ -1081,44 +1582,25 @@ private:
             const bool previousAllowDeleteRetry = ctx.allowDeleteRetry;
             if (singleInsertedElementWithCleanTail) {
               ctx.allowDeleteRetry = false;
-              ctx.noteRecoveryPolicyMutation();
             }
             const bool matched =
-                parse(current, ctx) &&
+                this->template parse_current_sequence_element<I>(ctx, {}) &&
                 this->template parse_elements<RecoveryContext, I + 1>(ctx);
             ctx.allowDeleteRetry = previousAllowDeleteRetry;
-            if (singleInsertedElementWithCleanTail) {
-              ctx.noteRecoveryPolicyMutation();
-            }
             return matched;
           });
       if (parseCandidate.matched && parseCandidate.editCost == 0 &&
           parseCandidate.editCount == 0) {
-        ctx.memoTable().template store<
-            RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
-            memoKey,
-            {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
-             .selectInsertReplay = false});
         return false;
       }
       if (leadingMissingElementSupportedOnlyBySingleTerminalTail) {
-        ctx.memoTable().template store<
-            RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
-            memoKey,
-            {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
-             .selectInsertReplay = false});
         return false;
       }
       const bool selectInsertReplay =
           !parseCandidate.matched ||
-          detail::is_better_choice_recovery_candidate(
-              insertCandidate, parseCandidate,
-              {.preferredBoundaryElement = std::addressof(current)});
-      ctx.memoTable().template store<
-          RecoveryContext::RecoveryMemoQueryKind::GroupMissingElementInsert>(
-          memoKey,
-          {.observedFurthestExploredOffset = ctx.furthestExploredOffset(),
-           .selectInsertReplay = selectInsertReplay});
+          detail::is_better_recovery_key(
+              detail::editable_recovery_key(insertCandidate),
+              detail::editable_recovery_key(parseCandidate));
       return selectInsertReplay;
     }
   }
@@ -1139,13 +1621,12 @@ private:
     if (!this->template tail_supports_single_terminal_recovery<I + 1>()) {
       return false;
     }
-    const auto tailCheckpoint = ctx.mark();
-    const char *const savedFurthestExploredCursor =
-        ctx.furthestExploredCursor();
-    const bool tailRecoverable =
-        this->template probe_recoverable_entry_elements<I + 1>(ctx);
-    ctx.rewind(tailCheckpoint);
-    ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+    bool tailRecoverable = false;
+    {
+      detail::ProbeRestoreScope guard{ctx};
+      tailRecoverable =
+          this->template probe_recoverable_entry_elements<I + 1>(ctx);
+    }
     return tailRecoverable &&
            this->template parse_elements<RecoveryContext, I + 1>(ctx);
   }
@@ -1164,9 +1645,6 @@ private:
   bool try_insert_current_terminal_with_clean_tail(
       RecoveryContext &ctx, bool allowNullableTailStop) const {
     const auto &current = std::get<I>(elements);
-    if (!allows_synthetic_terminal_insert(ctx, current)) {
-      return false;
-    }
     const auto checkpoint = ctx.mark();
     const auto parseStartOffset = ctx.cursorOffset();
     auto allowLocalInsertGuard =
@@ -1206,11 +1684,15 @@ private:
   observe_current_terminal_delete_run(RecoveryContext &ctx) const {
     const auto checkpoint = ctx.mark();
     const bool previousSkipAfterDelete = ctx.skipAfterDelete;
+    const char *const cursorStart = ctx.cursor();
     ctx.skipAfterDelete = false;
-    ctx.noteRecoveryPolicyMutation();
     std::optional<TerminalDeleteRunObservation> observation;
     (void)detail::visit_guarded_delete_scan_positions(
-        ctx, []() noexcept { return true; },
+        ctx,
+        [&ctx, cursorStart]() noexcept {
+          return detail::allows_extended_terminal_delete_scan_match(
+              ctx, cursorStart, ctx.cursor());
+        },
         [&observation](const detail::DeleteScanVisitState &state) {
           observation = {
               .deleteCount = state.deleteCount,
@@ -1218,12 +1700,10 @@ private:
           };
           return detail::DeleteScanVisitResult::Continue;
         },
-        {.scan = {.allowOverflow = false},
-         .extendThroughHiddenTrivia = true,
+        {.extendThroughHiddenTrivia = true,
          .stopAtHiddenTriviaBoundary = true,
          .visitAfterHiddenTriviaExtension = true});
     ctx.skipAfterDelete = previousSkipAfterDelete;
-    ctx.noteRecoveryPolicyMutation();
     ctx.rewind(checkpoint);
     return observation;
   }
@@ -1236,11 +1716,15 @@ private:
       return true;
     }
     const bool previousSkipAfterDelete = ctx.skipAfterDelete;
+    const char *const cursorStart = ctx.cursor();
     ctx.skipAfterDelete = false;
-    ctx.noteRecoveryPolicyMutation();
     const bool replayed =
         detail::visit_guarded_delete_scan_positions(
-            ctx, []() noexcept { return true; },
+            ctx,
+            [&ctx, cursorStart]() noexcept {
+              return detail::allows_extended_terminal_delete_scan_match(
+                  ctx, cursorStart, ctx.cursor());
+            },
             [&observation](const detail::DeleteScanVisitState &state) {
               if (state.deleteCount == observation.deleteCount &&
                   state.hiddenTriviaExtended ==
@@ -1249,14 +1733,12 @@ private:
               }
               return detail::DeleteScanVisitResult::Continue;
             },
-            {.scan = {.maxDeletes = observation.deleteCount,
-                      .allowOverflow = false},
+            {.scan = {.maxDeletes = observation.deleteCount},
              .extendThroughHiddenTrivia = true,
              .stopAtHiddenTriviaBoundary = true,
              .visitAfterHiddenTriviaExtension = true}) ==
         detail::DeleteScanVisitResult::Accept;
     ctx.skipAfterDelete = previousSkipAfterDelete;
-    ctx.noteRecoveryPolicyMutation();
     return replayed;
   }
 
@@ -1302,8 +1784,7 @@ private:
               [this, &ctx, allowNullableTailStop]() {
                 return this->template replay_insert_current_terminal_attempt<I>(
                     ctx, {}, allowNullableTailStop);
-              }),
-          std::addressof(current));
+              }));
     }
     if (allowInsertCurrentAfterDeleteRun) {
       const auto deleteRun =
@@ -1324,8 +1805,7 @@ private:
               [this, &ctx, deleteRun, allowNullableTailStop]() {
                 return this->template replay_insert_current_terminal_attempt<I>(
                     ctx, *deleteRun, allowNullableTailStop);
-              }),
-          std::addressof(current));
+              }));
     }
   }
 

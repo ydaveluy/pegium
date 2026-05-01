@@ -97,6 +97,18 @@ public:
             (_depth >= cp.depth && frames[cp.depth].parent == cp.parentAtLevel)) &&
            "Cannot rewind to a checkpoint whose open node was already exited");
 
+    // Speculative parses that fail their first probe rewind without having
+    // created any node — the dominant case during recovery exploration.
+    // When no nodes were appended, depth/current/frame are already at their
+    // checkpoint values and there is no sibling link to cut.
+    if (_root._nodeCount == cp.nodeCount) [[likely]] {
+      assert(_current == cp.current);
+      assert(_depth == cp.depth);
+      assert(_frames.data()[_depth].parent == cp.parentAtLevel);
+      assert(_frames.data()[_depth].last == cp.lastAtLevel);
+      return;
+    }
+
     _root._nodeCount = cp.nodeCount;
     _current = cp.current;
     _depth = cp.depth;

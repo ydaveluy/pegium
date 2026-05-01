@@ -567,12 +567,12 @@ TEST_F(DocumentPipelineIntegrationTest,
   const auto nextDefinitionOffset = document->textDocument().getText().find("def ID");
   ASSERT_FALSE(diagnostics.empty());
   EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto *diagnostic) {
-    return diagnostic->message == "Expecting ;" ||
+    return diagnostic->message.starts_with("Expecting ;") ||
            diagnostic->message.find("Unexpected token") != std::string::npos;
   })) << parseDump;
   EXPECT_TRUE(std::ranges::any_of(
       diagnostics, [nextDefinitionOffset](const auto *diagnostic) {
-        return diagnostic->message == "Expecting ;" &&
+        return diagnostic->message.starts_with("Expecting ;") &&
                    diagnostic->begin == diagnostic->end ||
                (diagnostic->message.find("Unexpected token") !=
                     std::string::npos &&
@@ -870,7 +870,7 @@ TEST_F(DocumentPipelineIntegrationTest,
   const auto expectedStatementOffset = static_cast<TextOffset>(
       std::string_view{"module name\n\n"}.size());
   EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto *diagnostic) {
-    return diagnostic->message == "Expecting ;" ||
+    return diagnostic->message.starts_with("Expecting ;") ||
            diagnostic->message.find("Unexpected token") != std::string::npos;
   })) << parseDump;
   EXPECT_TRUE(std::ranges::any_of(
@@ -1063,7 +1063,7 @@ TEST_F(DocumentPipelineIntegrationTest,
 }
 
 TEST_F(DocumentPipelineIntegrationTest,
-       RecoveredIdentifierOperatorAndAngleLinesStillPublishLateParseDiagnostics) {
+       RecoveredIdentifierOperatorAndAngleLinesStillKeepLateCallAndValidation) {
   auto document = updateDocument(
       "pipeline-recovered-identifier-operator-angle-lines.calc",
       "Module basicMath\n"
@@ -1113,8 +1113,16 @@ TEST_F(DocumentPipelineIntegrationTest,
   const auto parseDump = dumpDiagnostics(parseDiagnostics(*document));
   const auto lateGarbageOffset =
       document->textDocument().getText().find("<<<<<<<<<<<<");
-  const auto lateCallOffset =
-      document->textDocument().getText().find("Sqrt(81/0);");
+  EXPECT_GE(module->statements.size(), 14u) << parseDump;
+
+  auto *lastEvaluation =
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+  ASSERT_NE(lastEvaluation, nullptr) << parseDump;
+  auto *lastCall = dynamic_cast<arithmetics::ast::FunctionCall *>(
+      lastEvaluation->expression.get());
+  ASSERT_NE(lastCall, nullptr) << parseDump;
+  EXPECT_EQ(lastCall->func.getRefText(), "sqrt") << parseDump;
+  ASSERT_EQ(lastCall->args.size(), 1u) << parseDump;
 
   EXPECT_TRUE(test::has_diagnostic_message(*document, "Expecting ;"))
       << parseDump;
@@ -1128,14 +1136,11 @@ TEST_F(DocumentPipelineIntegrationTest,
                    static_cast<pegium::TextOffset>(lateGarbageOffset);
       }))
       << parseDump;
-  EXPECT_TRUE(std::ranges::any_of(
-      parseDiagnostics(*document), [lateCallOffset](const auto *diagnostic) {
-        return lateCallOffset != std::string::npos &&
-               diagnostic->end >=
-                   static_cast<pegium::TextOffset>(lateCallOffset) &&
-               diagnostic->message.find("Sqrt") != std::string::npos;
-      }))
+  EXPECT_FALSE(
+      test::has_diagnostic_message(*document, "Unexpected token `Sqrt(81/0)`"))
       << parseDump;
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Unresolved reference: sada"));
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "Division by zero"));
 }
 
 TEST_F(DocumentPipelineIntegrationTest,

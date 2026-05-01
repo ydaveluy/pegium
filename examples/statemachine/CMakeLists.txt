@@ -1,12 +1,11 @@
 add_library(pegium_example_statemachine_core
-    src/core/validation/StatemachineValidator.cpp
+    src/statemachine/core/Module.cpp
+    src/statemachine/core/validation/StatemachineValidator.cpp
 )
 
 target_include_directories(pegium_example_statemachine_core
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_statemachine_core PUBLIC cxx_std_20)
@@ -18,14 +17,13 @@ target_link_libraries(pegium_example_statemachine_core
 )
 
 add_library(pegium_example_statemachine_lsp
-    src/lsp/StatemachineFormatter.cpp
+    src/statemachine/lsp/Module.cpp
+    src/statemachine/lsp/StatemachineFormatter.cpp
 )
 
 target_include_directories(pegium_example_statemachine_lsp
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_statemachine_lsp PUBLIC cxx_std_20)
@@ -38,14 +36,12 @@ target_link_libraries(pegium_example_statemachine_lsp
 )
 
 add_library(pegium_example_statemachine_cli
-    src/cli/Generator.cpp
+    src/statemachine/cli/Generator.cpp
 )
 
 target_include_directories(pegium_example_statemachine_cli
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_statemachine_cli PUBLIC cxx_std_20)
@@ -58,7 +54,7 @@ target_link_libraries(pegium_example_statemachine_cli
 )
 
 add_executable(pegium-example-statemachine-cli
-    src/cli_main.cpp
+    src/statemachine/cli_main.cpp
 )
 target_compile_features(pegium-example-statemachine-cli PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-statemachine-cli PRIVATE
@@ -68,7 +64,7 @@ target_link_libraries(pegium-example-statemachine-cli PRIVATE
 )
 
 add_executable(pegium-example-statemachine-lsp
-    src/lsp_main.cpp
+    src/statemachine/lsp_main.cpp
 )
 target_compile_features(pegium-example-statemachine-lsp PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-statemachine-lsp PRIVATE

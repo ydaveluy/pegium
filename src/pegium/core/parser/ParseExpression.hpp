@@ -74,6 +74,14 @@ concept EntryRecoveryProbeCapableExpression =
       { expression.probeRecoverableAtEntry(ctx) } -> std::same_as<bool>;
     };
 
+template <typename E>
+concept EntryRecoveryConsumesVisibleProbeCapableExpression =
+    Expression<E> &&
+    requires(const std::remove_cvref_t<E> &expression, RecoveryContext &ctx) {
+      { expression.probeRecoverableAtEntryConsumesVisible(ctx) } ->
+          std::same_as<bool>;
+    };
+
 template <Expression E>
 using ExpressionHolder = std::conditional_t<std::is_lvalue_reference_v<E>, E,
                                             std::remove_cvref_t<E>>;
@@ -102,6 +110,8 @@ struct Wrapper {
     using ExpectParseFn = bool (*)(const void *, ExpectContext &);
     using RecoveryProbeFn = bool (*)(const void *, RecoveryContext &);
     using RecoveryEntryProbeFn = bool (*)(const void *, RecoveryContext &);
+    using RecoveryEntryConsumesVisibleProbeFn =
+        bool (*)(const void *, RecoveryContext &);
     using TerminalFn = const char *(*)(const void *, const char *) noexcept;
     using ElemFn = const grammar::AbstractElement *(*)(const void *) noexcept;
     using InitFn = void (*)(const void *, AstReflectionInitContext &);
@@ -115,6 +125,8 @@ struct Wrapper {
     ExpectParseFn parseExpect = nullptr;
     RecoveryProbeFn probeRecoverable = nullptr;
     RecoveryEntryProbeFn probeRecoverableAtEntry = nullptr;
+    RecoveryEntryConsumesVisibleProbeFn probeRecoverableAtEntryConsumesVisible =
+        nullptr;
     TerminalFn terminal = nullptr;
     ElemFn elem = nullptr;
     InitFn init = nullptr;
@@ -177,6 +189,11 @@ struct Wrapper {
     return _obj != nullptr && _ops.probeRecoverableAtEntry != nullptr;
   }
 
+  bool has_entry_recovery_consumes_visible_probe() const noexcept {
+    return _obj != nullptr &&
+           _ops.probeRecoverableAtEntryConsumesVisible != nullptr;
+  }
+
   bool has_fast_probe() const noexcept {
     return _obj != nullptr && _ops.fastProbeTracked != nullptr;
   }
@@ -196,6 +213,12 @@ struct Wrapper {
   bool probe_recoverable_at_entry(RecoveryContext &ctx) const {
     return has_entry_recovery_probe() ? _ops.probeRecoverableAtEntry(_obj, ctx)
                                       : false;
+  }
+
+  bool probe_recoverable_at_entry_consumes_visible(RecoveryContext &ctx) const {
+    return has_entry_recovery_consumes_visible_probe()
+               ? _ops.probeRecoverableAtEntryConsumesVisible(_obj, ctx)
+               : false;
   }
 
   bool fast_probe(TrackedParseContext &ctx) const {
@@ -284,6 +307,13 @@ private:
     {
       return static_cast<const Model *>(self)->value.probeRecoverableAtEntry(ctx);
     }
+    static bool probeRecoverableAtEntryConsumesVisible(const void *self,
+                                                       RecoveryContext &ctx)
+      requires EntryRecoveryConsumesVisibleProbeCapableExpression<T>
+    {
+      return static_cast<const Model *>(self)
+          ->value.probeRecoverableAtEntryConsumesVisible(ctx);
+    }
     static const char *terminal(const void *self, const char *b) noexcept
       requires TerminalCapableExpression<T>
     {
@@ -319,6 +349,10 @@ private:
       }
       if constexpr (EntryRecoveryProbeCapableExpression<T>) {
         ops.probeRecoverableAtEntry = &Model::probeRecoverableAtEntry;
+      }
+      if constexpr (EntryRecoveryConsumesVisibleProbeCapableExpression<T>) {
+        ops.probeRecoverableAtEntryConsumesVisible =
+            &Model::probeRecoverableAtEntryConsumesVisible;
       }
       if constexpr (TerminalCapableExpression<T>) {
         ops.terminal = &Model::terminal;

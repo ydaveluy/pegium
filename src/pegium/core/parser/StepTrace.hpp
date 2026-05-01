@@ -44,6 +44,29 @@ enum class StepCounter : std::size_t {
   RepetitionFastAttempts,
   RepetitionFastSuccess,
   RepetitionFastFailures,
+  /// Each `minimize_recovery_edits` invocation increments this
+  /// counter. `MinimizeRecoveryEditsRuns` measures *how often* the
+  /// global compensation runs; `MinimizeRecoveryEditsDropped` totals
+  /// the number of edits the compensation actually removed across
+  /// all runs (the value the compensation provides). The ratio
+  /// answers "is the global pruning pass still earning its keep, or
+  /// is the local enumeration tight enough to retire it?".
+  MinimizeRecoveryEditsRuns,
+  MinimizeRecoveryEditsDropped,
+  /// The minimal-edit strategy probe runs when the primary attempt
+  /// produced multi-edit output; `MinimalEditProbeRuns` counts every
+  /// probe invocation, `MinimalEditProbeWins` counts the cases where
+  /// the probe's single-edit attempt actually beat the primary on
+  /// the shared `RecoveryKey` ranker.
+  MinimalEditProbeRuns,
+  MinimalEditProbeWins,
+  /// The root-prefix delete-retry global compensation runs when the
+  /// primary attempt did not match the entry rule (or matched only
+  /// a weak zero-prefix). `RootPrefixRetryRuns` counts every
+  /// invocation; `RootPrefixRetryWins` counts the cases where the
+  /// retry actually unblocked an entry-rule match.
+  RootPrefixRetryRuns,
+  RootPrefixRetryWins,
   Count
 };
 
@@ -128,6 +151,18 @@ inline const char *step_trace_name(StepCounter counter) noexcept {
     return "RepetitionFastSuccess";
   case StepCounter::RepetitionFastFailures:
     return "RepetitionFastFailures";
+  case StepCounter::MinimizeRecoveryEditsRuns:
+    return "MinimizeRecoveryEditsRuns";
+  case StepCounter::MinimizeRecoveryEditsDropped:
+    return "MinimizeRecoveryEditsDropped";
+  case StepCounter::MinimalEditProbeRuns:
+    return "MinimalEditProbeRuns";
+  case StepCounter::MinimalEditProbeWins:
+    return "MinimalEditProbeWins";
+  case StepCounter::RootPrefixRetryRuns:
+    return "RootPrefixRetryRuns";
+  case StepCounter::RootPrefixRetryWins:
+    return "RootPrefixRetryWins";
   case StepCounter::Count:
     return "Count";
   }
@@ -174,6 +209,7 @@ inline void stepTraceDumpSummary(Args &&...) noexcept {}
 
 inline void stepTraceReset() noexcept {}
 inline void stepTraceInc(StepCounter, std::uint64_t = 1) noexcept {}
+inline std::uint64_t stepTraceValue(StepCounter) noexcept { return 0; }
 template <typename... Args>
 inline void stepTraceDumpSummary(Args &&...) noexcept {}
 

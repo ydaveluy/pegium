@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <pegium/core/TestCstBuilderHarness.hpp>
+#include <pegium/core/TestRuleParser.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <limits>
 
@@ -16,6 +17,7 @@ struct RepetitionProbeModel : pegium::AstNode {
 };
 
 struct RepetitionProbeTransition : pegium::AstNode {
+  bool many = false;
   std::string event;
   std::string target;
 };
@@ -23,6 +25,7 @@ struct RepetitionProbeTransition : pegium::AstNode {
 struct RepetitionProbeState : pegium::AstNode {
   std::string name;
   std::vector<pointer<RepetitionProbeTransition>> transitions;
+  std::vector<pointer<RepetitionProbeTransition>> nextTransitions;
 };
 
 } // namespace
@@ -371,12 +374,12 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   detail::FailureHistoryRecorder windowedRecorder(windowedBuilder.input_begin());
   RecoveryContext windowedCtx{windowedBuilder, skipper, windowedRecorder};
   windowedCtx.trackEditState = true;
-  windowedCtx.setEditWindows({RecoveryContext::EditWindow{
+  windowedCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
       .maxCursorOffset = 0,
       .forwardTokenCount = 1,
-  }});
+  });
   windowedCtx.skip();
 
   EXPECT_TRUE(parse(repeatedTransitions, windowedCtx));
@@ -388,12 +391,12 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   detail::FailureHistoryRecorder assignedRecorder(assignedBuilder.input_begin());
   RecoveryContext assignedCtx{assignedBuilder, skipper, assignedRecorder};
   assignedCtx.trackEditState = true;
-  assignedCtx.setEditWindows({RecoveryContext::EditWindow{
+  assignedCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
       .maxCursorOffset = 0,
       .forwardTokenCount = 1,
-  }});
+  });
   assignedCtx.skip();
 
   EXPECT_TRUE(probe_locally_recoverable(assignedTransitions, assignedCtx));
@@ -421,12 +424,12 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   RecoveryContext stateWindowedCtx{stateWindowedBuilder, skipper,
                                    stateWindowedRecorder};
   stateWindowedCtx.trackEditState = true;
-  stateWindowedCtx.setEditWindows({RecoveryContext::EditWindow{
+  stateWindowedCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 11,
       .editFloorOffset = 11,
       .maxCursorOffset = 11,
       .forwardTokenCount = 1,
-  }});
+  });
   stateWindowedCtx.skip();
 
   EXPECT_TRUE(parse(stateRule, stateWindowedCtx));
@@ -440,12 +443,12 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   RecoveryContext stateEarlyWindowCtx{stateEarlyWindowBuilder, skipper,
                                       stateEarlyWindowRecorder};
   stateEarlyWindowCtx.trackEditState = true;
-  stateEarlyWindowCtx.setEditWindows({RecoveryContext::EditWindow{
+  stateEarlyWindowCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
       .maxCursorOffset = 11,
       .forwardTokenCount = 1,
-  }});
+  });
   stateEarlyWindowCtx.skip();
 
   EXPECT_TRUE(parse(stateRule, stateEarlyWindowCtx));
@@ -460,12 +463,12 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
                                   statePartialRecorder};
   statePartialCtx.trackEditState = true;
   statePartialCtx.allowTopLevelPartialSuccess = true;
-  statePartialCtx.setEditWindows({RecoveryContext::EditWindow{
+  statePartialCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
       .maxCursorOffset = 11,
       .forwardTokenCount = 1,
-  }});
+  });
   statePartialCtx.skip();
 
   EXPECT_TRUE(parse(stateRule, statePartialCtx));
@@ -480,12 +483,12 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
                                       stateLatePartialRecorder};
   stateLatePartialCtx.trackEditState = true;
   stateLatePartialCtx.allowTopLevelPartialSuccess = true;
-  stateLatePartialCtx.setEditWindows({RecoveryContext::EditWindow{
+  stateLatePartialCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 11,
       .editFloorOffset = 11,
       .maxCursorOffset = 11,
       .forwardTokenCount = 1,
-  }});
+  });
   stateLatePartialCtx.skip();
 
   EXPECT_TRUE(parse(stateRule, stateLatePartialCtx));
@@ -504,15 +507,46 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   stateDefaultBudgetCtx.maxConsecutiveCodepointDeletes = 8;
   stateDefaultBudgetCtx.maxEditsPerAttempt = 10;
   stateDefaultBudgetCtx.maxEditCost = 64;
-  stateDefaultBudgetCtx.setEditWindows({RecoveryContext::EditWindow{
+  stateDefaultBudgetCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
       .maxCursorOffset = 11,
       .forwardTokenCount = 8,
-  }});
+  });
   stateDefaultBudgetCtx.skip();
 
   EXPECT_TRUE(parse(stateRule, stateDefaultBudgetCtx));
   EXPECT_EQ(stateDefaultBudgetCtx.cursorOffset(),
             static_cast<pegium::TextOffset>(stateText.size()));
+}
+
+TEST(RepetitionTest,
+     WeakStartedIterationWithVisibleEntryRepairBeatsRecoverableParentFollow) {
+  auto skipper = SkipperBuilder().ignore(some(s)).build();
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  ParserRule<RepetitionProbeTransition> transitionRule{
+      "Transition",
+      option(enable_if<&RepetitionProbeTransition::many>("many"_kw.i())) +
+          assign<&RepetitionProbeTransition::event>(id) + ":"_kw +
+          assign<&RepetitionProbeTransition::target>(id)};
+  ParserRule<RepetitionProbeState> stateRule{
+      "State",
+      "state"_kw + assign<&RepetitionProbeState::name>(id) +
+          many(append<&RepetitionProbeState::transitions>(transitionRule)) +
+          "next"_kw +
+          many(append<&RepetitionProbeState::nextTransitions>(transitionRule)) +
+          "end"_kw};
+
+  const auto result = pegium::test::parse_rule_result(
+      stateRule, "state S\nman tags: String\nnext\nend", skipper);
+  ASSERT_TRUE(result.value);
+  EXPECT_TRUE(result.fullMatch);
+
+  auto *state = dynamic_cast<RepetitionProbeState *>(result.value.get());
+  ASSERT_NE(state, nullptr);
+  ASSERT_EQ(state->transitions.size(), 1u);
+  ASSERT_NE(state->transitions[0], nullptr);
+  EXPECT_TRUE(state->transitions[0]->many);
+  EXPECT_EQ(state->transitions[0]->event, "tags");
+  EXPECT_TRUE(state->nextTransitions.empty());
 }

@@ -18,24 +18,9 @@
 #include <pegium/core/parser/RecoveryCost.hpp>
 #include <pegium/core/parser/RecoveryEditSupport.hpp>
 #include <pegium/core/parser/RecoveryUtils.hpp>
+#include <pegium/core/parser/TerminalShape.hpp>
 
 namespace pegium::parser::detail {
-
-inline constexpr std::uint32_t kCompactHiddenTriviaGapSpan = 8u;
-
-struct LexicalRecoveryProfile {
-  bool literalBacked = false;
-  bool singleCodepoint = false;
-  std::uint32_t textLength = 0u;
-
-  [[nodiscard]] constexpr bool allowsReplace() const noexcept {
-    return literalBacked && !singleCodepoint;
-  }
-
-  [[nodiscard]] constexpr bool allowsInsert() const noexcept {
-    return literalBacked && singleCodepoint;
-  }
-};
 
 struct TriviaGapProfile {
   std::uint32_t hiddenCodepointSpan = 0u;
@@ -44,42 +29,21 @@ struct TriviaGapProfile {
   [[nodiscard]] constexpr bool hasHiddenGap() const noexcept {
     return hiddenCodepointSpan > 0u;
   }
-
-  [[nodiscard]] constexpr bool isCompact(
-      std::uint32_t maxSpan = kCompactHiddenTriviaGapSpan) const noexcept {
-    return hasHiddenGap() && hiddenCodepointSpan <= maxSpan;
-  }
 };
 
-[[nodiscard]] constexpr TerminalAnchorQuality
-terminal_anchor_quality(const TriviaGapProfile &profile) noexcept {
-  return profile.hasHiddenGap() ? TerminalAnchorQuality::AfterHiddenTrivia
-                                : TerminalAnchorQuality::DirectVisible;
-}
-
-[[nodiscard]] constexpr std::uint32_t
-terminal_anchor_rank_penalty(const TriviaGapProfile &profile) noexcept {
-  switch (terminal_anchor_quality(profile)) {
-  case TerminalAnchorQuality::DirectVisible:
-    return 0u;
-  case TerminalAnchorQuality::AfterHiddenTrivia:
-    return 1u;
-  }
-  return 1u;
-}
-
-[[nodiscard]] constexpr LexicalRecoveryProfile
+[[nodiscard]] constexpr TerminalShape
 classify_literal_recovery_profile(std::string_view value) noexcept {
-  if (value.empty()) {
-    return {};
-  }
-  return {.literalBacked = true,
-          .singleCodepoint = value.size() == 1u,
-          .textLength = static_cast<std::uint32_t>(value.size())};
+  // The canonical lexical shape is the single origin. The two
+  // boundary flags (`startsLikeWord`, `endsLikeWord`) are left at
+  // `false` here because legacy callers do not consume them — they
+  // read boundary information separately via
+  // `literal_has_word_boundary_violation`.
+  return make_terminal_shape_from_literal(
+      value, /*startsLikeWord=*/false, /*endsLikeWord=*/false);
 }
 
 template <typename Element>
-[[nodiscard]] constexpr LexicalRecoveryProfile
+[[nodiscard]] constexpr TerminalShape
 infer_terminal_rule_recovery_profile(const Element &element) noexcept {
   if constexpr (requires {
                   {
@@ -98,7 +62,7 @@ literal_has_word_boundary_violation(std::string_view literalValue,
                                     const char *end) noexcept {
   return !literalValue.empty() && is_word_like_terminal(literalValue) &&
          end != nullptr &&
-         is_identifier_like_codepoint(static_cast<unsigned char>(*end));
+         is_identifier_like_codepoint(decode_utf8_codepoint(end));
 }
 
 struct DirectLiteralRecoveryMetadata {
@@ -128,6 +92,15 @@ struct TerminalRecoveryFacts {
   TriviaGapProfile triviaGap{};
   bool previousElementIsTerminalish = false;
   bool allowStructuredVisibleContinuationInsert = false;
+  /// Direct strict terminal matches still win before this fact is read.
+  /// When true, local edit recovery for this terminal is suppressed because
+  /// the surrounding sequence has established that another sibling owns the
+  /// current cursor.
+  bool localRecoveryBlocked = false;
+  /// Allows a low-confidence fuzzy replacement to be enumerated at a
+  /// structurally protected site. The caller must validate the enclosing
+  /// candidate afterwards; terminal ranking alone must stay conservative.
+  bool allowProvisionalLowConfidenceReplace = false;
 };
 
 template <typename Context>
@@ -142,8 +115,8 @@ make_trivia_gap_profile(const Context &ctx, const char *gapBegin,
 template <typename Context>
 [[nodiscard]] constexpr bool
 allows_terminal_rule_insert(const Context &ctx,
-                            const LexicalRecoveryProfile &profile) noexcept {
-  return profile.literalBacked || !cursor_starts_visible_source(ctx);
+                            const TerminalShape &shape) noexcept {
+  return shape.hasCanonicalText || !cursor_starts_visible_source(ctx);
 }
 
 template <typename Context>
@@ -159,26 +132,25 @@ current_local_skip_trivia_gap_profile(const Context &ctx) noexcept {
 
 [[nodiscard]] constexpr bool
 allows_nearby_delete_scan(const TerminalRecoveryFacts &facts,
-                          const LexicalRecoveryProfile &profile) noexcept {
+                          const TerminalShape &shape) noexcept {
   if (!facts.triviaGap.hasHiddenGap()) {
     return true;
   }
-  return facts.triviaGap.isCompact() && profile.literalBacked &&
-         !profile.allowsInsert();
+  return shape.hasCanonicalText && !shape.allowsInsert();
 }
 
 template <typename Context>
 [[nodiscard]] constexpr bool
 allows_terminal_entry_probe(const Context &ctx,
-                            const LexicalRecoveryProfile &profile) noexcept {
-  if (!profile.allowsInsert()) {
+                            const TerminalShape &shape) noexcept {
+  if (!shape.allowsInsert()) {
     return false;
   }
   if (cursor_starts_visible_source(ctx)) {
     return true;
   }
   const auto localGap = current_local_skip_trivia_gap_profile(ctx);
-  return localGap.visibleSourceAfterLocalSkip && localGap.isCompact();
+  return localGap.visibleSourceAfterLocalSkip && localGap.hasHiddenGap();
 }
 
 template <typename Context>
@@ -196,15 +168,31 @@ cursor_starts_visible_source(const Context &ctx) noexcept {
 template <typename Context>
 [[nodiscard]] constexpr bool
 cursor_starts_structured_visible_source(const Context &ctx) noexcept {
+  // True iff the cursor is on a non-trivia codepoint that could initiate
+  // an identifier or word-like token of the target language. Gates fuzzy
+  // substitutions on long keywords and disambiguates insert-vs-delete-scan
+  // candidate selection: a fuzzy keyword swap or a synthetic insert is
+  // only sensible on a word-like codepoint, not on bare punctuation that
+  // is more likely to be stray noise.
   if (!cursor_starts_visible_source(ctx) || ctx.cursor() >= ctx.end) {
     return false;
   }
-  const auto codepoint = static_cast<unsigned char>(*ctx.cursor());
-  return is_identifier_like_codepoint(codepoint) ||
-         (codepoint >= static_cast<unsigned char>('0') &&
-          codepoint <= static_cast<unsigned char>('9')) ||
-         codepoint == '"' || codepoint == '\'' || codepoint == '(' ||
-         codepoint == '[' || codepoint == '{';
+  return is_identifier_like_codepoint(decode_utf8_codepoint(ctx.cursor()));
+}
+
+template <typename Context>
+[[nodiscard]] constexpr bool
+position_starts_structured_visible_source(const Context &ctx,
+                                          const char *position) noexcept {
+  if (position == nullptr || position >= ctx.end) {
+    return false;
+  }
+  if constexpr (requires { ctx.skip_without_builder(position); }) {
+    if (ctx.skip_without_builder(position) != position) {
+      return false;
+    }
+  }
+  return is_identifier_like_codepoint(decode_utf8_codepoint(position));
 }
 
 template <typename Context>
@@ -240,7 +228,7 @@ template <typename Context>
 allows_compact_local_gap_terminal_recovery(const Context &ctx) noexcept {
   if (!cursor_starts_visible_source(ctx) &&
       cursor_reaches_visible_source_after_local_skip(ctx)) {
-    return current_local_skip_trivia_gap_profile(ctx).isCompact();
+    return current_local_skip_trivia_gap_profile(ctx).hasHiddenGap();
   }
   return true;
 }
@@ -251,24 +239,53 @@ allows_compact_local_gap_terminal_recovery(const Context &ctx) noexcept {
 }
 
 [[nodiscard]] constexpr std::uint32_t literal_fuzzy_primary_rank_limit(
-    const LexicalRecoveryProfile &profile) noexcept {
-  return std::min<std::uint32_t>(5u, saturating_add(profile.textLength, 3u));
+    const TerminalShape &shape) noexcept {
+  return std::min<std::uint32_t>(5u, shape.canonicalTextLength + 3u);
+}
+
+[[nodiscard]] constexpr std::uint32_t
+literal_provisional_fuzzy_primary_rank_limit(
+    const TerminalShape &shape) noexcept {
+  return shape.canonicalTextLength + 3u;
 }
 
 [[nodiscard]] constexpr bool
-allows_fuzzy_replace_after_prior_edits(
-    const LexicalRecoveryProfile &profile) noexcept {
-  return profile.allowsReplace();
+allows_fuzzy_replace_after_prior_edits(const TerminalShape &shape) noexcept {
+  return shape.allowsReplace();
+}
+
+template <typename Context>
+[[nodiscard]] constexpr bool
+allows_provisional_fuzzy_replace_here(const Context &ctx) noexcept {
+  if constexpr (requires {
+                  ctx.allowProvisionalFuzzyReplace;
+                  ctx.provisionalFuzzyReplaceAnchorOffset;
+                  ctx.cursorOffset();
+                }) {
+    return ctx.allowProvisionalFuzzyReplace &&
+           ctx.cursorOffset() == ctx.provisionalFuzzyReplaceAnchorOffset;
+  } else {
+    return false;
+  }
 }
 
 [[nodiscard]] constexpr bool allows_literal_fuzzy_candidate(
-    const LiteralFuzzyCandidate &candidate,
-    const LexicalRecoveryProfile &profile, const TerminalRecoveryFacts &facts,
+    const LiteralFuzzyCandidate &candidate, const TerminalShape &shape,
+    const TerminalRecoveryFacts &facts,
     bool cursorStartsStructuredVisibleSource) noexcept {
-  if (!profile.allowsReplace()) {
+  TerminalLegalityFacts legality;
+  const bool withinPrimaryRankLimit =
+      candidate.cost.primaryRankCost <= literal_fuzzy_primary_rank_limit(shape);
+  const bool withinProvisionalRankLimit =
+      facts.allowProvisionalLowConfidenceReplace &&
+      candidate.cost.primaryRankCost <=
+          literal_provisional_fuzzy_primary_rank_limit(shape);
+  legality.budgetAllowsReplace =
+      withinPrimaryRankLimit || withinProvisionalRankLimit;
+  if (!is_terminal_replace_legal(shape, legality)) {
     return false;
   }
-  if (profile.textLength <= 2u) {
+  if (shape.canonicalTextLength <= 2u) {
     return candidate.distance == 1u && candidate.operationCount == 1u &&
            candidate.substitutionCount == 0u;
   }
@@ -278,23 +295,34 @@ allows_fuzzy_replace_after_prior_edits(
   if (facts.triviaGap.hasHiddenGap() && candidate.substitutionCount != 0u) {
     return false;
   }
-  return candidate.cost.primaryRankCost <=
-         literal_fuzzy_primary_rank_limit(profile);
+  return true;
 }
 
 template <EditableParseModeContext Context>
 [[nodiscard]] const char *literal_fuzzy_input_end(
     const Context &ctx, const char *cursor, const char *limit,
     std::uint32_t textLength) noexcept {
-  constexpr std::size_t kExtraWindow = 4u;
+  // Route the fuzzy window through the canonical formula
+  // `maxLookahead = canonicalTextLength + affordableDeleteSpan`. The
+  // legacy hardcoded "extra window" is preserved as the
+  // affordable-delete-span input; routing through
+  // `compute_terminal_max_lookahead` makes the formula the single
+  // source of truth so a future migration to a real budget-derived
+  // span only changes the input, not the formula.
+  constexpr std::uint32_t kAffordableDeleteSpan = 4U;
   if (cursor == nullptr || cursor >= limit) {
     return cursor;
   }
 
+  TerminalShape windowShape;
+  windowShape.hasCanonicalText = textLength > 0U;
+  windowShape.canonicalTextLength = textLength;
+  const auto maxLookahead =
+      compute_terminal_max_lookahead(windowShape, kAffordableDeleteSpan);
   const auto span = static_cast<std::size_t>(limit - cursor);
   const char *const boundedLimit =
-      cursor + std::min(span, static_cast<std::size_t>(textLength) +
-                                  kExtraWindow);
+      cursor +
+      std::min(span, static_cast<std::size_t>(maxLookahead));
   if constexpr (requires { ctx.skip_without_builder(cursor); }) {
     const char *it = cursor;
     while (it < boundedLimit) {
@@ -327,26 +355,40 @@ literal_fuzzy_input_limit(const Context &ctx) noexcept {
   }
 }
 
+template <typename Context>
+[[nodiscard]] LiteralFuzzyCandidatesCache *
+literal_fuzzy_candidates_cache_for(Context &ctx) noexcept {
+  if constexpr (requires {
+                  { ctx.literalFuzzyCandidatesCache } ->
+                      std::same_as<LiteralFuzzyCandidatesCache &>;
+                }) {
+    return &ctx.literalFuzzyCandidatesCache;
+  } else {
+    (void)ctx;
+    return nullptr;
+  }
+}
+
 template <EditableParseModeContext Context>
 [[nodiscard]] LiteralFuzzyCandidates collect_literal_replace_candidates(
     Context &ctx, const char *cursorStart, std::string_view literalValue,
-    bool caseSensitive, const LexicalRecoveryProfile &profile,
+    bool caseSensitive, const TerminalShape &shape,
     TerminalRecoveryFacts facts = {}) noexcept {
   LiteralFuzzyCandidates filteredCandidates;
-  if (!profile.allowsReplace()) {
+  if (!shape.allowsReplace()) {
     return filteredCandidates;
   }
 
   const auto candidates = find_literal_fuzzy_candidates(
       literalValue,
       literal_fuzzy_input_view(ctx, cursorStart, literal_fuzzy_input_limit(ctx),
-                               profile.textLength),
-      caseSensitive);
+                               shape.canonicalTextLength),
+      caseSensitive, literal_fuzzy_candidates_cache_for(ctx));
   const bool cursorStartsStructuredVisibleSource =
       cursor_starts_structured_visible_source(ctx);
   filteredCandidates.reserve(candidates.size());
   for (const auto &candidate : candidates) {
-    if (!allows_literal_fuzzy_candidate(candidate, profile, facts,
+    if (!allows_literal_fuzzy_candidate(candidate, shape, facts,
                                         cursorStartsStructuredVisibleSource)) {
       continue;
     }
@@ -374,10 +416,8 @@ allows_extended_terminal_delete_scan_match(const Context &ctx,
       }
     }
 
-    if constexpr (requires { ctx.currentEditCount(); }) {
-      if (ctx.currentEditCount() > 0) {
-        return true;
-      }
+    if (!position_starts_structured_visible_source(ctx, scanStart)) {
+      return true;
     }
 
     if constexpr (requires { ctx.maxEditCost; }) {
@@ -396,8 +436,8 @@ template <EditableParseModeContext Context, typename MatchFn>
 [[nodiscard]] inline bool
 probe_nearby_delete_scan_match(Context &ctx, MatchFn &&matchFn,
                                TerminalRecoveryFacts facts = {},
-                               LexicalRecoveryProfile profile = {}) {
-  if (!allows_nearby_delete_scan(facts, profile)) {
+                               TerminalShape shape = {}) {
+  if (!allows_nearby_delete_scan(facts, shape)) {
     return false;
   }
   if constexpr (requires { ctx.canDelete(); }) {
@@ -429,14 +469,6 @@ probe_nearby_delete_scan_match(Context &ctx, MatchFn &&matchFn,
       return true;
     }
   }
-  if (!detail::allows_extended_delete_scan(ctx)) {
-    return false;
-  }
-  for (; scanCursor < ctx.end; ++scanCursor) {
-    if (std::forward<MatchFn>(matchFn)(scanCursor) != nullptr) {
-      return true;
-    }
-  }
   return false;
 }
 
@@ -445,7 +477,6 @@ template <EditableParseModeContext Context, typename ApplyFn>
     Context &ctx, const char *cursorStart, TerminalRecoveryChoiceKind kind,
     std::uint32_t distance, std::uint32_t substitutionCount,
     std::uint32_t operationCount, ApplyFn &&applyFn,
-    TerminalAnchorQuality anchorQuality = TerminalAnchorQuality::DirectVisible,
     std::uint32_t extraPrimaryRankCost = 0u,
     std::uint32_t extraSecondaryRankCost = 0u) {
   TerminalRecoveryCandidate candidate;
@@ -454,10 +485,9 @@ template <EditableParseModeContext Context, typename ApplyFn>
     const auto budgetCost = ctx.editCostDelta(checkpoint);
     candidate = {
         .kind = kind,
-        .anchorQuality = anchorQuality,
-        .cost = make_recovery_cost(
-            budgetCost, saturating_add(distance, extraPrimaryRankCost),
-            saturating_add(budgetCost, extraSecondaryRankCost)),
+        .cost = make_recovery_cost(budgetCost,
+                                   distance + extraPrimaryRankCost,
+                                   budgetCost + extraSecondaryRankCost),
         .distance = distance,
         .consumed = static_cast<std::size_t>(ctx.cursor() - cursorStart),
         .substitutionCount = substitutionCount,
@@ -472,14 +502,13 @@ template <EditableParseModeContext Context, typename Element>
 [[nodiscard]] TerminalRecoveryCandidate
 evaluate_insert_synthetic_terminal_candidate(
     Context &ctx, const char *cursorStart, const Element *element,
-    TerminalAnchorQuality anchorQuality = TerminalAnchorQuality::DirectVisible,
     std::uint32_t extraPrimaryRankCost = 0u) {
   return evaluate_terminal_recovery_candidate(
       ctx, cursorStart, TerminalRecoveryChoiceKind::Insert, 1u, 0u, 1u,
       [&ctx, element]() {
         return apply_insert_synthetic_recovery_edit(ctx, element);
       },
-      anchorQuality, extraPrimaryRankCost);
+      extraPrimaryRankCost);
 }
 
 template <EditableParseModeContext Context, typename Element>
@@ -494,8 +523,7 @@ evaluate_insert_synthetic_gap_terminal_candidate(
         return apply_insert_synthetic_gap_and_match_recovery_edit(ctx, position,
                                                                   element);
       },
-      TerminalAnchorQuality::DirectVisible, extraPrimaryRankCost,
-      extraSecondaryRankCost);
+      extraPrimaryRankCost, extraSecondaryRankCost);
 }
 
 template <EditableParseModeContext Context, typename Element>
@@ -503,17 +531,14 @@ template <EditableParseModeContext Context, typename Element>
 evaluate_replace_leaf_terminal_candidate(
     Context &ctx, const char *cursorStart, const char *endPtr,
     const Element *element, RecoveryCost cost, std::uint32_t distance,
-    std::uint32_t substitutionCount, std::uint32_t operationCount,
-    TerminalAnchorQuality anchorQuality =
-        TerminalAnchorQuality::DirectVisible) {
+    std::uint32_t substitutionCount, std::uint32_t operationCount) {
   auto candidate = evaluate_terminal_recovery_candidate(
       ctx, cursorStart, TerminalRecoveryChoiceKind::Replace, distance,
       substitutionCount, operationCount,
       [&ctx, endPtr, element, budgetCost = cost.budgetCost]() {
         return apply_replace_leaf_recovery_edit(ctx, endPtr, element,
                                                 budgetCost);
-      },
-      anchorQuality);
+      });
   if (candidate.kind == TerminalRecoveryChoiceKind::Replace) {
     candidate.cost = cost;
   }
@@ -525,20 +550,18 @@ template <EditableParseModeContext Context, typename MatchFn,
 [[nodiscard]] TerminalRecoveryCandidate evaluate_delete_scan_terminal_candidate(
     Context &ctx, const char *cursorStart, MatchFn &&matchFn,
     OnMatchFn &&onMatchFn, TerminalRecoveryFacts facts = {},
-    LexicalRecoveryProfile profile = {});
+    TerminalShape shape = {});
 
 template <EditableParseModeContext Context, typename Element, typename MatchFn,
           typename OnMatchFn>
 [[nodiscard]] TerminalRecoveryCandidate complete_terminal_recovery_choice(
     Context &ctx, const char *cursorStart, const Element *element,
-    TerminalRecoveryFacts facts, LexicalRecoveryProfile lexicalProfile,
+    TerminalRecoveryFacts facts, TerminalShape shape,
     bool allowInsert, TerminalRecoveryCandidate bestChoice, MatchFn &&matchFn,
     OnMatchFn &&onMatchFn) {
   auto considerChoice = [&bestChoice](const TerminalRecoveryCandidate &choice) {
-    if (is_better_normalized_recovery_order_key(
-            terminal_recovery_order_key(choice),
-            terminal_recovery_order_key(bestChoice),
-            RecoveryOrderProfile::Terminal)) {
+    if (is_better_recovery_key(terminal_recovery_key(choice),
+                                terminal_recovery_key(bestChoice))) {
       bestChoice = choice;
     }
   };
@@ -578,10 +601,10 @@ template <EditableParseModeContext Context, typename Element, typename MatchFn,
 
   TerminalRecoveryCandidate deleteScanChoice;
   if (!preferStructuredVisibleInsertOverDeleteScan &&
-      probe_nearby_delete_scan_match(ctx, matchFn, facts, lexicalProfile)) {
+      probe_nearby_delete_scan_match(ctx, matchFn, facts, shape)) {
     deleteScanChoice = evaluate_delete_scan_terminal_candidate(
         ctx, cursorStart, std::forward<MatchFn>(matchFn),
-        std::forward<OnMatchFn>(onMatchFn), facts, lexicalProfile);
+        std::forward<OnMatchFn>(onMatchFn), facts, shape);
     considerChoice(deleteScanChoice);
   }
 
@@ -597,9 +620,8 @@ template <EditableParseModeContext Context, typename Element, typename MatchFn,
          structuredVisibleContinuationInsertAllowed) &&
         !deleteScanBlocksVisibleInsert));
   if (allowInsertCandidate) {
-    const auto insertChoice = evaluate_insert_synthetic_terminal_candidate(
-        ctx, cursorStart, element, terminal_anchor_quality(facts.triviaGap),
-        terminal_anchor_rank_penalty(facts.triviaGap));
+    const auto insertChoice =
+        evaluate_insert_synthetic_terminal_candidate(ctx, cursorStart, element);
     considerChoice(insertChoice);
   }
 
@@ -610,12 +632,14 @@ template <EditableParseModeContext Context, typename MatchFn,
           typename OnMatchFn>
 [[nodiscard]] bool recover_by_terminal_delete_scan(
     Context &ctx, MatchFn &&matchFn, OnMatchFn &&onMatchFn,
-    TerminalRecoveryFacts facts = {}, LexicalRecoveryProfile profile = {}) {
-  if (!allows_nearby_delete_scan(facts, profile)) {
+    TerminalRecoveryFacts facts = {}, TerminalShape shape = {}) {
+  if (!allows_nearby_delete_scan(facts, shape)) {
     return false;
   }
+  bool budgetAllowsDeleteScan = true;
   if constexpr (requires { ctx.canDelete(); }) {
-    if (!ctx.canDelete()) {
+    budgetAllowsDeleteScan = ctx.canDelete();
+    if (!budgetAllowsDeleteScan) {
       return false;
     }
   }
@@ -625,16 +649,10 @@ template <EditableParseModeContext Context, typename MatchFn,
   if constexpr (requires { ctx.skipAfterDelete; }) {
     previousSkipAfterDelete = ctx.skipAfterDelete;
     ctx.skipAfterDelete = false;
-    if constexpr (requires { ctx.noteRecoveryPolicyMutation(); }) {
-      ctx.noteRecoveryPolicyMutation();
-    }
   }
   const auto restore_skip_after_delete = [&]() {
     if constexpr (requires { ctx.skipAfterDelete; }) {
       ctx.skipAfterDelete = previousSkipAfterDelete;
-      if constexpr (requires { ctx.noteRecoveryPolicyMutation(); }) {
-        ctx.noteRecoveryPolicyMutation();
-      }
     }
   };
   auto &&match = matchFn;
@@ -642,7 +660,11 @@ template <EditableParseModeContext Context, typename MatchFn,
   const char *matchedEnd = nullptr;
   std::uint32_t matchedDeleteCount = 0u;
   const auto result = detail::visit_guarded_delete_scan_positions(
-      ctx, []() noexcept { return true; },
+      ctx,
+      [&ctx, cursorStart]() noexcept {
+        return detail::allows_extended_terminal_delete_scan_match(
+            ctx, cursorStart, ctx.cursor());
+      },
       [&](const detail::DeleteScanVisitState &state) {
         const char *const scanCursor = ctx.cursor();
         if constexpr (requires { ctx.skip_without_builder(scanCursor); }) {
@@ -682,6 +704,12 @@ template <EditableParseModeContext Context, typename MatchFn,
   if (result != detail::DeleteScanVisitResult::Accept) {
     return false;
   }
+  TerminalLegalityFacts legality;
+  legality.budgetAllowsDeleteScan = budgetAllowsDeleteScan;
+  legality.strictTerminalOrFollowAfterScan = matchedEnd != nullptr;
+  if (!is_terminal_delete_scan_legal(shape, legality)) {
+    return false;
+  }
   detail::invoke_delete_scan_on_match(onMatch, matchedEnd, matchedDeleteCount);
   return true;
 }
@@ -691,17 +719,16 @@ template <EditableParseModeContext Context, typename MatchFn,
 [[nodiscard]] TerminalRecoveryCandidate evaluate_delete_scan_terminal_candidate(
     Context &ctx, const char *cursorStart, MatchFn &&matchFn,
     OnMatchFn &&onMatchFn, TerminalRecoveryFacts facts,
-    LexicalRecoveryProfile profile) {
+    TerminalShape shape) {
   TerminalRecoveryCandidate candidate;
   const auto checkpoint = ctx.mark();
   if (recover_by_terminal_delete_scan(ctx, std::forward<MatchFn>(matchFn),
                                       std::forward<OnMatchFn>(onMatchFn), facts,
-                                      profile)) {
+                                      shape)) {
     const auto cost = ctx.editCostDelta(checkpoint);
     const auto deletedCost = default_edit_cost(ParseDiagnosticKind::Deleted);
     const auto distance = deletedCost == 0u ? 0u : cost / deletedCost;
     candidate.kind = TerminalRecoveryChoiceKind::DeleteScan;
-    candidate.anchorQuality = terminal_anchor_quality(facts.triviaGap);
     candidate.cost = make_recovery_cost(cost, distance, cost);
     candidate.distance = distance;
     candidate.consumed = static_cast<std::size_t>(ctx.cursor() - cursorStart);
@@ -716,10 +743,10 @@ template <EditableParseModeContext Context, typename MatchFn,
           typename OnMatchFn>
 [[nodiscard]] bool apply_delete_scan_terminal_candidate(
     Context &ctx, MatchFn &&matchFn, OnMatchFn &&onMatchFn,
-    TerminalRecoveryFacts facts = {}, LexicalRecoveryProfile profile = {}) {
+    TerminalRecoveryFacts facts = {}, TerminalShape shape = {}) {
   return recover_by_terminal_delete_scan(ctx, std::forward<MatchFn>(matchFn),
                                          std::forward<OnMatchFn>(onMatchFn),
-                                         facts, profile);
+                                         facts, shape);
 }
 
 template <EditableParseModeContext Context, typename Element,

@@ -1,14 +1,13 @@
 add_library(pegium_example_requirements_core
-    src/core/Language.cpp
-    src/core/validation/RequirementsValidator.cpp
-    src/core/validation/TestsValidator.cpp
+    src/requirements/core/Language.cpp
+    src/requirements/core/Module.cpp
+    src/requirements/core/validation/RequirementsValidator.cpp
+    src/requirements/core/validation/TestsValidator.cpp
 )
 
 target_include_directories(pegium_example_requirements_core
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_requirements_core PUBLIC cxx_std_20)
@@ -20,14 +19,13 @@ target_link_libraries(pegium_example_requirements_core
 )
 
 add_library(pegium_example_requirements_lsp
-    src/lsp/RequirementsFormatter.cpp
+    src/requirements/lsp/Module.cpp
+    src/requirements/lsp/RequirementsFormatter.cpp
 )
 
 target_include_directories(pegium_example_requirements_lsp
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_requirements_lsp PUBLIC cxx_std_20)
@@ -40,15 +38,13 @@ target_link_libraries(pegium_example_requirements_lsp
 )
 
 add_library(pegium_example_requirements_cli
-    src/cli/CliUtils.cpp
-    src/cli/Generator.cpp
+    src/requirements/cli/CliUtils.cpp
+    src/requirements/cli/Generator.cpp
 )
 
 target_include_directories(pegium_example_requirements_cli
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_requirements_cli PUBLIC cxx_std_20)
@@ -61,7 +57,7 @@ target_link_libraries(pegium_example_requirements_cli
 )
 
 add_executable(pegium-example-requirements-cli
-    src/cli_main.cpp
+    src/requirements/cli_main.cpp
 )
 target_compile_features(pegium-example-requirements-cli PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-requirements-cli PRIVATE
@@ -71,7 +67,7 @@ target_link_libraries(pegium-example-requirements-cli PRIVATE
 )
 
 add_executable(pegium-example-requirements-lsp
-    src/lsp_main.cpp
+    src/requirements/lsp_main.cpp
 )
 target_compile_features(pegium-example-requirements-lsp PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-requirements-lsp PRIVATE

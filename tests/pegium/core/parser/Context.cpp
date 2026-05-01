@@ -230,12 +230,12 @@ TEST(ContextTest,
   detail::FailureHistoryRecorder recorder(input.begin());
   RecoveryContext ctx{builder, skipper, recorder,
                       pegium::utils::default_cancel_token};
-  ctx.setEditWindows({RecoveryContext::EditWindow{
+  ctx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
       .maxCursorOffset = 0,
       .forwardTokenCount = 2,
-  }});
+  });
 
   ctx.skip();
   ASSERT_TRUE(ctx.isInRecoveryPhase());
@@ -266,12 +266,12 @@ TEST(ContextTest, RecoveryDeleteCanBridgeAdjacentHiddenTriviaIntoSameEdit) {
   detail::FailureHistoryRecorder recorder(input.begin());
   RecoveryContext ctx{builder, skipper, recorder,
                       pegium::utils::default_cancel_token};
-  ctx.setEditWindows({RecoveryContext::EditWindow{
+  ctx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
       .maxCursorOffset = static_cast<pegium::TextOffset>(input.size()),
       .forwardTokenCount = 1,
-  }});
+  });
 
   ctx.skip();
   ctx.skipAfterDelete = false;
@@ -355,7 +355,7 @@ TEST(ContextTest,
 
 TEST(
     ContextTest,
-    RecoveryContextRewindRestoresLocalReplayFrontierWithoutRestoringFurthestExploredCursor) {
+    RecoveryContextRewindRestoresCursorWithoutRestoringFurthestExploredCursor) {
   auto builderHarness = pegium::test::makeCstBuilderHarness("ab");
   auto &builder = builderHarness.builder;
   const auto input = builder.getText();
@@ -365,24 +365,21 @@ TEST(
   RecoveryContext ctx{builder, skipper, recorder};
 
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.localReplayMaxOffset(), 0u);
   EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
 
   const auto checkpoint = ctx.mark();
   ctx.leaf(input.begin() + 1, std::addressof(literal));
   EXPECT_EQ(ctx.cursorOffset(), 1u);
-  EXPECT_EQ(ctx.localReplayMaxOffset(), 1u);
   EXPECT_EQ(ctx.furthestExploredOffset(), 1u);
 
   ctx.rewind(checkpoint);
 
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.localReplayMaxOffset(), 0u);
   EXPECT_EQ(ctx.furthestExploredOffset(), 1u);
 }
 
 TEST(ContextTest,
-     RecoveryHelpersProbeAndSideEffectFreeParseRestoreLocalAndGlobalFrontiers) {
+     RecoveryHelpersProbeAndSideEffectFreeParseRestoreCursorAndFrontier) {
   auto builderHarness = pegium::test::makeCstBuilderHarness("()");
   auto &builder = builderHarness.builder;
   const auto input = builder.getText();
@@ -393,16 +390,77 @@ TEST(ContextTest,
   auto literal = "("_kw;
 
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.localReplayMaxOffset(), 0u);
   EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
 
   EXPECT_TRUE(probe_started_without_edits(ctx, delimited));
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.localReplayMaxOffset(), 0u);
   EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
 
   EXPECT_TRUE(detail::attempt_parse_without_side_effects(ctx, literal));
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.localReplayMaxOffset(), 0u);
+  EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
+}
+
+TEST(ProbeRestoreScopeTest, RestoresCheckpointAndFurthestOnDestruction) {
+  auto builderHarness = pegium::test::makeCstBuilderHarness("hello");
+  auto &builder = builderHarness.builder;
+  const auto input = builder.getText();
+  const auto skipper = NoOpSkipper();
+  const auto literal = "h"_kw;
+  detail::FailureHistoryRecorder recorder(input.begin());
+  RecoveryContext ctx{builder, skipper, recorder};
+
+  EXPECT_EQ(ctx.cursorOffset(), 0u);
+  EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
+
+  {
+    detail::ProbeRestoreScope guard{ctx};
+    ctx.leaf(input.begin() + 3, std::addressof(literal));
+    EXPECT_EQ(ctx.cursorOffset(), 3u);
+    EXPECT_EQ(ctx.furthestExploredOffset(), 3u);
+  }
+
+  EXPECT_EQ(ctx.cursorOffset(), 0u);
+  EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
+}
+
+TEST(ProbeRestoreScopeTest, CommitSuppressesRestore) {
+  auto builderHarness = pegium::test::makeCstBuilderHarness("hello");
+  auto &builder = builderHarness.builder;
+  const auto input = builder.getText();
+  const auto skipper = NoOpSkipper();
+  const auto literal = "h"_kw;
+  detail::FailureHistoryRecorder recorder(input.begin());
+  RecoveryContext ctx{builder, skipper, recorder};
+
+  {
+    detail::ProbeRestoreScope guard{ctx};
+    ctx.leaf(input.begin() + 3, std::addressof(literal));
+    guard.commit();
+  }
+
+  EXPECT_EQ(ctx.cursorOffset(), 3u);
+}
+
+TEST(ProbeRestoreScopeTest, RestoresOnEarlyReturnPath) {
+  auto builderHarness = pegium::test::makeCstBuilderHarness("hello");
+  auto &builder = builderHarness.builder;
+  const auto input = builder.getText();
+  const auto skipper = NoOpSkipper();
+  const auto literal = "h"_kw;
+  detail::FailureHistoryRecorder recorder(input.begin());
+  RecoveryContext ctx{builder, skipper, recorder};
+
+  const auto withGuardThatBailsEarly = [&]() {
+    detail::ProbeRestoreScope guard{ctx};
+    ctx.leaf(input.begin() + 3, std::addressof(literal));
+    if (ctx.cursorOffset() > 0u) {
+      return;  // early-return path; guard restores on dtor
+    }
+    guard.commit();
+  };
+  withGuardThatBailsEarly();
+
+  EXPECT_EQ(ctx.cursorOffset(), 0u);
   EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
 }

@@ -6,6 +6,7 @@ out/
 .vscode-test/
 .cache/
 /Testing
-/tools/
+/tools/*
+!/tools/lints/
 /dist
 .fuzz/

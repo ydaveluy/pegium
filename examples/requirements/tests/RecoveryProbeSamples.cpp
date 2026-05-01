@@ -31,12 +31,12 @@ TEST(RequirementsRecoveryProbeBatchTest, ReportsRequirementsBatchBehavior) {
       parser, samples, "requirements-lang", "requirements");
   pegium::test::expect_recovery_probe_summary(
       "requirements", summary,
-      {.total = 4u,
+      {.total = 3u,
        .withValue = 2u,
-       .fullMatch = 1u,
+       .fullMatch = 2u,
        .recovered = 2u,
-       .incomplete = 3u,
-       .completeRecovery = 1u});
+       .incomplete = 1u,
+       .completeRecovery = 2u});
 }
 
 TEST(RequirementsRecoveryProbeBatchTest, ReportsTestsBatchBehavior) {
@@ -49,16 +49,16 @@ TEST(RequirementsRecoveryProbeBatchTest, ReportsTestsBatchBehavior) {
                                              "tests");
   pegium::test::expect_recovery_probe_summary(
       "tests", summary,
-      {.total = 4u,
-       .withValue = 1u,
-       .fullMatch = 1u,
-       .recovered = 1u,
-       .incomplete = 3u,
-       .completeRecovery = 1u});
+      {.total = 3u,
+       .withValue = 3u,
+       .fullMatch = 3u,
+       .recovered = 3u,
+       .incomplete = 0u,
+       .completeRecovery = 3u});
 }
 
 TEST(RequirementsRecoveryProbeBatchTest,
-     Diff3ConflictingApplicableRetainsRecoveredRequirementModel) {
+     Diff3ConflictingApplicableKeepsRecoveredAlternatives) {
   const auto samples = requirements_probe_samples();
   const auto sample = std::find_if(
       samples.begin(), samples.end(), [](const auto &candidate) {
@@ -75,8 +75,8 @@ TEST(RequirementsRecoveryProbeBatchTest,
       pegium::test::observe_recovery_probe(sample->label, *document);
   EXPECT_TRUE(observation.hasValue);
   EXPECT_TRUE(observation.recovered);
-  EXPECT_FALSE(observation.fullMatch);
-  EXPECT_TRUE(observation.incomplete);
+  EXPECT_TRUE(observation.fullMatch);
+  EXPECT_FALSE(observation.incomplete);
 
   auto *model =
       dynamic_cast<ast::RequirementModel *>(document->parseResult.value.get());
@@ -84,13 +84,22 @@ TEST(RequirementsRecoveryProbeBatchTest,
   ASSERT_EQ(model->environments.size(), 2u);
   EXPECT_EQ(model->environments[0]->name, "prod");
   EXPECT_EQ(model->environments[1]->name, "staging");
-  ASSERT_EQ(model->requirements.size(), 1u);
-  auto *requirement = model->requirements.front().get();
-  ASSERT_NE(requirement, nullptr);
-  EXPECT_EQ(requirement->name, "login");
-  ASSERT_EQ(requirement->environments.size(), 2u);
-  EXPECT_EQ(requirement->environments[0].getRefText(), "prod");
-  EXPECT_EQ(requirement->environments[1].getRefText(), "staging");
+  ASSERT_EQ(model->requirements.size(), 3u);
+  auto *headRequirement = model->requirements[0].get();
+  auto *baseRequirement = model->requirements[1].get();
+  auto *featureRequirement = model->requirements[2].get();
+  ASSERT_NE(headRequirement, nullptr);
+  ASSERT_NE(baseRequirement, nullptr);
+  ASSERT_NE(featureRequirement, nullptr);
+  EXPECT_EQ(headRequirement->name, "login");
+  EXPECT_EQ(baseRequirement->name, "login");
+  EXPECT_EQ(featureRequirement->name, "login");
+  ASSERT_EQ(headRequirement->environments.size(), 2u);
+  EXPECT_EQ(headRequirement->environments[0].getRefText(), "prod");
+  EXPECT_EQ(headRequirement->environments[1].getRefText(), "staging");
+  EXPECT_TRUE(baseRequirement->environments.empty());
+  ASSERT_EQ(featureRequirement->environments.size(), 1u);
+  EXPECT_EQ(featureRequirement->environments[0].getRefText(), "prod");
 }
 
 } // namespace

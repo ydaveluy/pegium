@@ -78,6 +78,25 @@ TEST(LiteralFuzzyMatcherTest, SupportsSingleSubstitution) {
   EXPECT_EQ(match.cost.secondaryRankCost, 2u);
 }
 
+TEST(LiteralFuzzyMatcherTest,
+     RejectsWordLikeWindowsWithoutLocalPrefixAnchor) {
+  const auto candidates =
+      find_literal_fuzzy_candidates("extends", "tring", false);
+
+  EXPECT_TRUE(candidates.empty());
+}
+
+TEST(LiteralFuzzyMatcherTest,
+     KeepsWordLikeFirstCodepointSubstitutionWithLocalAnchor) {
+  const auto candidate =
+      find_best_literal_fuzzy_candidate("entity", "xntity", true);
+  const auto &match = requireCandidate(candidate);
+
+  EXPECT_EQ(match.consumed, 6u);
+  EXPECT_EQ(match.distance, 1u);
+  EXPECT_EQ(match.substitutionCount, 1u);
+}
+
 TEST(LiteralFuzzyMatcherTest, ExactCaseInsensitiveMatchDoesNotRequireFuzzyEdit) {
   const auto candidate =
       find_best_literal_fuzzy_candidate("module", "ModUle", false);

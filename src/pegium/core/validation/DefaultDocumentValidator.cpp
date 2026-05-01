@@ -441,11 +441,16 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
   switch (parseDiagnostic.kind) {
   case Inserted:
     diagnostic.code = pegium::DiagnosticCode(std::string("parse.inserted"));
-    diagnostic.message =
-        !parseDiagnostic.message.empty()
-            ? parseDiagnostic.message
-            : (expected.empty() ? "Unexpected input."
-                                : "Expecting " + expected);
+    if (!parseDiagnostic.message.empty()) {
+      diagnostic.message = parseDiagnostic.message;
+    } else if (expected.empty()) {
+      diagnostic.message = "Unexpected input.";
+    } else if (!foundToken.image.empty()) {
+      diagnostic.message = "Expecting " + expected + " but found `" +
+                           std::string(foundToken.image) + "`.";
+    } else {
+      diagnostic.message = "Expecting " + expected;
+    }
     if (parseDiagnostic.element == nullptr && !parseDiagnostic.message.empty()) {
       diagnostic.end = gap_insert_diagnostic_end(document, diagnostic.begin,
                                                  foundToken);
@@ -533,10 +538,16 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
           make_base_diagnostic(safeBegin, safeEnd, "parse.incomplete");
     }
     diagnostic.code = pegium::DiagnosticCode(std::string("parse.incomplete"));
-    diagnostic.message =
-        !parseDiagnostic.message.empty()
-            ? parseDiagnostic.message
-            : (expected.empty() ? unexpectedMessage : "Expecting " + expected);
+    if (!parseDiagnostic.message.empty()) {
+      diagnostic.message = parseDiagnostic.message;
+    } else if (expected.empty()) {
+      diagnostic.message = unexpectedMessage;
+    } else if (!foundToken.image.empty()) {
+      diagnostic.message = "Expecting " + expected + " but found `" +
+                           std::string(foundToken.image) + "`.";
+    } else {
+      diagnostic.message = "Expecting " + expected;
+    }
     break;
   case Recovered:
     diagnostic.code = pegium::DiagnosticCode(std::string("parse.recovered"));

@@ -1,13 +1,12 @@
 add_library(pegium_example_arithmetics_core
-    src/core/Language.cpp
-    src/core/validation/ArithmeticsValidator.cpp
+    src/arithmetics/core/Language.cpp
+    src/arithmetics/core/Module.cpp
+    src/arithmetics/core/validation/ArithmeticsValidator.cpp
 )
 
 target_include_directories(pegium_example_arithmetics_core
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_arithmetics_core PUBLIC cxx_std_20)
@@ -19,15 +18,14 @@ target_link_libraries(pegium_example_arithmetics_core
 )
 
 add_library(pegium_example_arithmetics_lsp
-    src/lsp/ArithmeticsCodeActionProvider.cpp
-    src/lsp/ArithmeticsFormatter.cpp
+    src/arithmetics/lsp/ArithmeticsCodeActionProvider.cpp
+    src/arithmetics/lsp/ArithmeticsFormatter.cpp
+    src/arithmetics/lsp/Module.cpp
 )
 
 target_include_directories(pegium_example_arithmetics_lsp
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_arithmetics_lsp PUBLIC cxx_std_20)
@@ -40,14 +38,12 @@ target_link_libraries(pegium_example_arithmetics_lsp
 )
 
 add_library(pegium_example_arithmetics_cli
-    src/cli/Evaluator.cpp
+    src/arithmetics/cli/Evaluator.cpp
 )
 
 target_include_directories(pegium_example_arithmetics_cli
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_arithmetics_cli PUBLIC cxx_std_20)
@@ -60,10 +56,7 @@ target_link_libraries(pegium_example_arithmetics_cli
 )
 
 add_executable(pegium-example-arithmetics-cli
-    src/cli_main.cpp
-)
-target_include_directories(pegium-example-arithmetics-cli PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    src/arithmetics/cli_main.cpp
 )
 target_compile_features(pegium-example-arithmetics-cli PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-arithmetics-cli PRIVATE
@@ -73,7 +66,7 @@ target_link_libraries(pegium-example-arithmetics-cli PRIVATE
 )
 
 add_executable(pegium-example-arithmetics-lsp
-    src/lsp_main.cpp
+    src/arithmetics/lsp_main.cpp
 )
 target_compile_features(pegium-example-arithmetics-lsp PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-arithmetics-lsp PRIVATE
@@ -120,4 +113,17 @@ if(BUILD_TESTING)
     set_tests_properties(PegiumRecoveryCorpusArithmetics PROPERTIES
         LABELS "recovery-corpus"
     )
+
+    if(PEGIUM_ENABLE_FUZZ_CORPUS)
+        add_test(
+            NAME PegiumArithmeticsSemicolonColonFuzz
+            COMMAND $<TARGET_FILE:pegium-example-arithmetics-test>
+                --gtest_filter=ArithmeticsSemicolonColonFuzzTest.*
+        )
+        set_tests_properties(PegiumArithmeticsSemicolonColonFuzz PROPERTIES
+            LABELS "fuzz-corpus"
+            ENVIRONMENT "PEGIUM_ARITHMETICS_FUZZ_EXHAUSTIVE=1"
+            TIMEOUT 300
+        )
+    endif()
 endif()

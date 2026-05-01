@@ -315,7 +315,8 @@ TEST(DefaultDocumentBuilderTest,
 
   ASSERT_NE(document, nullptr);
   ASSERT_FALSE(document->diagnostics.empty());
-  EXPECT_EQ(document->diagnostics.front().message, "Expecting 'module'");
+  EXPECT_EQ(document->diagnostics.front().message,
+            "Expecting 'module' but found `foo`.");
   const auto &actions = default_code_actions(document->diagnostics.front());
   ASSERT_EQ(actions.size(), 1u);
   const auto &action = actions.front().object();
@@ -588,7 +589,8 @@ TEST(DefaultDocumentBuilderTest,
 
   ASSERT_NE(document, nullptr);
   ASSERT_FALSE(document->diagnostics.empty());
-  EXPECT_EQ(document->diagnostics.front().message, "Expecting Expression");
+  EXPECT_EQ(document->diagnostics.front().message,
+            "Expecting Expression but found `2   *`.");
   EXPECT_EQ(document->diagnostics.front().begin, 12u);
   EXPECT_EQ(document->diagnostics.front().end, 12u);
 }
@@ -691,7 +693,8 @@ TEST(DefaultDocumentBuilderTest,
 
   ASSERT_NE(document, nullptr);
   ASSERT_FALSE(document->diagnostics.empty());
-  EXPECT_EQ(document->diagnostics.front().message, "Expecting MODULE_ID");
+  EXPECT_EQ(document->diagnostics.front().message,
+            "Expecting MODULE_ID but found `def a`.");
   EXPECT_EQ(document->diagnostics.front().begin, 10u);
   EXPECT_EQ(document->diagnostics.front().end, 10u);
   ASSERT_EQ(document->parseResult.value, nullptr);

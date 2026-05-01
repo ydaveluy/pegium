@@ -157,7 +157,7 @@ TEST(GroupTest, ScopedLeadingTerminalInsertDoesNotLeakOutsideGuard) {
 
   const auto checkpoint = ctx.mark();
   {
-    auto leadingInsertScope = ctx.withLeadingTerminalInsertScope();
+    pegium::parser::detail::ScopedBoolOverride leadingInsertScope{ctx.allowLeadingTerminalInsertScope, true};
     EXPECT_TRUE(parse(group, ctx));
   }
 
@@ -181,14 +181,14 @@ TEST(GroupTest,
   {
     auto noDeleteGuard = ctx.withEditPermissions(true, false);
     (void)noDeleteGuard;
-    auto leadingInsertScope = ctx.withLeadingTerminalInsertScope();
+    pegium::parser::detail::ScopedBoolOverride leadingInsertScope{ctx.allowLeadingTerminalInsertScope, true};
     (void)leadingInsertScope;
     EXPECT_TRUE(parse(group, ctx));
   }
 
   ctx.rewind(checkpoint);
   {
-    auto leadingInsertScope = ctx.withLeadingTerminalInsertScope();
+    pegium::parser::detail::ScopedBoolOverride leadingInsertScope{ctx.allowLeadingTerminalInsertScope, true};
     (void)leadingInsertScope;
     EXPECT_FALSE(parse(group, ctx));
   }
@@ -203,7 +203,7 @@ TEST(GroupTest,
 
 TEST(GroupTest,
      ScopedLeadingTerminalInsertCanContinueLocallyAfterHiddenTrivia) {
-  auto skipper = SkipperBuilder().build();
+  auto skipper = SkipperBuilder().ignore(some(s)).build();
   auto group = ","_kw + "name"_kw;
 
   auto builderHarness = pegium::test::makeCstBuilderHarness(" name");
@@ -217,14 +217,14 @@ TEST(GroupTest,
   {
     auto noDeleteGuard = ctx.withEditPermissions(true, false);
     (void)noDeleteGuard;
-    auto leadingInsertScope = ctx.withLeadingTerminalInsertScope();
+    pegium::parser::detail::ScopedBoolOverride leadingInsertScope{ctx.allowLeadingTerminalInsertScope, true};
     (void)leadingInsertScope;
     EXPECT_TRUE(parse(group, ctx));
   }
 
   ctx.rewind(checkpoint);
   {
-    auto leadingInsertScope = ctx.withLeadingTerminalInsertScope();
+    pegium::parser::detail::ScopedBoolOverride leadingInsertScope{ctx.allowLeadingTerminalInsertScope, true};
     (void)leadingInsertScope;
     EXPECT_FALSE(parse(group, ctx));
   }

@@ -7,14 +7,35 @@
 #include <pegium/core/parser/ParseDiagnostics.hpp>
 #include <pegium/core/parser/AstReflectionBootstrap.hpp>
 #include <pegium/core/parser/RecoverySearch.hpp>
+#include <pegium/core/parser/StepTrace.hpp>
 #include <pegium/core/parser/ValueBuildContext.hpp>
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
 #include <pegium/core/utils/Cancellation.hpp>
 
+#if defined(PEGIUM_ENABLE_STEP_TRACE)
+#include <iostream>
+#endif
+
 namespace pegium::parser {
 
 namespace {
+
+#if defined(PEGIUM_ENABLE_STEP_TRACE)
+/// Dumps the step counters to stderr at process exit so each test
+/// binary contributes to the corpus-wide view of `Wins/Runs` ratios
+/// for the global compensations. Compiled in only when
+/// `PEGIUM_ENABLE_STEP_TRACE` is defined; the production parser pays
+/// nothing for this hook in release builds.
+struct StepTraceAtExitDumper {
+  ~StepTraceAtExitDumper() noexcept {
+    std::cerr << "[step-trace-atexit] step counters at process exit:\n";
+    detail::stepTraceDumpSummary(std::cerr);
+  }
+};
+[[maybe_unused]] const StepTraceAtExitDumper stepTraceAtExitDumper;
+#endif
+
 
 struct StandaloneCoreServices {
   pegium::SharedCoreServices shared;
@@ -46,9 +67,10 @@ ParseResult PegiumParser::parse(text::TextSnapshot text,
   ParseResult result;
   const TextOffset inputSize = static_cast<TextOffset>(text.size());
   auto recoverySearch =
-      detail::run_recovery_search(entryRule, skipper, options, text, cancelToken);
+      detail::orchestrate_recovery_search(entryRule, skipper, options, text,
+                                          cancelToken);
   auto &selectedAttempt = recoverySearch.selectedAttempt;
-  auto &selectedWindows = recoverySearch.selectedWindows;
+  const auto &selectedWindows = recoverySearch.selectedWindows;
   const auto failureVisibleCursorOffset =
       recoverySearch.failureVisibleCursorOffset;
   utils::throw_if_cancelled(cancelToken);
@@ -81,6 +103,8 @@ ParseResult PegiumParser::parse(text::TextSnapshot text,
       .strictParseRuns = recoverySearch.strictParseRuns,
       .recoveryAttemptRuns = recoverySearch.recoveryAttemptRuns,
       .recoveryEdits = selectedAttempt.editCount,
+      .choiceRecoverCacheHits = recoverySearch.choiceRecoverCacheHits,
+      .choiceRecoverCacheMisses = recoverySearch.choiceRecoverCacheMisses,
       .lastRecoveryWindow = std::move(lastRecoveryWindow),
   };
   if (!syntaxDiagnostics.empty() || !result.fullMatch ||

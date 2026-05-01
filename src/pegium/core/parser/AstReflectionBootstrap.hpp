@@ -12,6 +12,7 @@
 #include <pegium/core/grammar/ParserRule.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
 #include <pegium/core/syntax-tree/AstReflection.hpp>
+#include <pegium/core/utils/TypeIndexHash.hpp>
 
 namespace pegium::parser {
 
@@ -91,9 +92,10 @@ struct VisitedKey {
 struct VisitedKeyHash {
   [[nodiscard]] std::size_t operator()(const VisitedKey &key) const noexcept {
     const auto elementHash = std::hash<const void *>{}(key.element);
-    const auto typeHash = std::hash<std::type_index>{}(key.expectedType);
-    return elementHash ^ (typeHash + 0x9e3779b9u + (elementHash << 6u) +
-                          (elementHash >> 2u));
+    const auto typeHash =
+        utils::FastTypeIndexHash{}(key.expectedType);
+    return elementHash ^ (typeHash + 0x9e3779b9U + (elementHash << 6U) +
+                          (elementHash >> 2U));
   }
 };
 
@@ -108,10 +110,10 @@ struct DirectSubtypeEdge {
 struct DirectSubtypeEdgeHash {
   [[nodiscard]] std::size_t
   operator()(const DirectSubtypeEdge &edge) const noexcept {
-    const auto subtypeHash = std::hash<std::type_index>{}(edge.subtype);
-    const auto supertypeHash = std::hash<std::type_index>{}(edge.supertype);
-    return subtypeHash ^ (supertypeHash + 0x9e3779b9u + (subtypeHash << 6u) +
-                          (subtypeHash >> 2u));
+    const auto subtypeHash = utils::FastTypeIndexHash{}(edge.subtype);
+    const auto supertypeHash = utils::FastTypeIndexHash{}(edge.supertype);
+    return subtypeHash ^ (supertypeHash + 0x9e3779b9U + (subtypeHash << 6U) +
+                          (subtypeHash >> 2U));
   }
 };
 

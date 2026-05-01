@@ -78,10 +78,10 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
     if (_literalRecoveryMetadata.has_value() &&
         (!ctx.hasHadEdits() ||
          detail::allows_fuzzy_replace_after_prior_edits(
-             _lexicalRecoveryProfile))) {
+             _terminalShape))) {
       const auto replaceCandidates = detail::collect_literal_replace_candidates(
           ctx, ctx.cursor(), _literalRecoveryMetadata->value,
-          _literalRecoveryMetadata->caseSensitive, _lexicalRecoveryProfile);
+          _literalRecoveryMetadata->caseSensitive, _terminalShape);
       if (!replaceCandidates.empty()) {
         return true;
       }
@@ -91,7 +91,7 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
         [this](const char *scanCursor) noexcept {
           return terminal(scanCursor);
         },
-        localRecoveryFacts, _lexicalRecoveryProfile);
+        localRecoveryFacts, _terminalShape);
   }
 
   bool probeRecoverableAtEntry(RecoveryContext &ctx) const noexcept {
@@ -101,10 +101,10 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
     if (_literalRecoveryMetadata.has_value() &&
         (!ctx.hasHadEdits() ||
          detail::allows_fuzzy_replace_after_prior_edits(
-             _lexicalRecoveryProfile))) {
+             _terminalShape))) {
       const auto replaceCandidates = detail::collect_literal_replace_candidates(
           ctx, ctx.cursor(), _literalRecoveryMetadata->value,
-          _literalRecoveryMetadata->caseSensitive, _lexicalRecoveryProfile);
+          _literalRecoveryMetadata->caseSensitive, _terminalShape);
       if (std::ranges::any_of(
               replaceCandidates,
               [](const detail::LiteralFuzzyCandidate &candidate) noexcept {
@@ -113,7 +113,7 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
         return true;
       }
     }
-    if (detail::allows_terminal_entry_probe(ctx, _lexicalRecoveryProfile)) {
+    if (detail::allows_terminal_entry_probe(ctx, _terminalShape)) {
       return true;
     }
     return detail::probe_nearby_delete_scan_match(
@@ -121,7 +121,41 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
         [this](const char *scanCursor) noexcept {
           return terminal(scanCursor);
         },
-        localRecoveryFacts, _lexicalRecoveryProfile);
+        localRecoveryFacts, _terminalShape);
+  }
+
+  bool
+  probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const noexcept {
+    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
+        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
+    };
+    const char *const cursorStart = ctx.cursor();
+    if (const char *const matchedEnd = terminal(cursorStart);
+        matchedEnd != nullptr && matchedEnd > cursorStart) {
+      return true;
+    }
+    if (_literalRecoveryMetadata.has_value() &&
+        (!ctx.hasHadEdits() ||
+         detail::allows_fuzzy_replace_after_prior_edits(
+             _terminalShape))) {
+      const auto replaceCandidates = detail::collect_literal_replace_candidates(
+          ctx, cursorStart, _literalRecoveryMetadata->value,
+          _literalRecoveryMetadata->caseSensitive, _terminalShape);
+      if (std::ranges::any_of(
+              replaceCandidates,
+              [](const detail::LiteralFuzzyCandidate &candidate) noexcept {
+                return candidate.consumed > 0u &&
+                       detail::allows_entry_probe_fuzzy_candidate(candidate);
+              })) {
+        return true;
+      }
+    }
+    return detail::probe_nearby_delete_scan_match(
+        ctx,
+        [this](const char *scanCursor) noexcept {
+          return terminal(scanCursor);
+        },
+        localRecoveryFacts, _terminalShape);
   }
 
   TerminalRule super() const { return *this; }
@@ -157,15 +191,15 @@ private:
 
   template <NonNullableTerminalCapableExpression Element>
   constexpr TerminalRule(std::string_view name,
-                         detail::LexicalRecoveryProfile lexicalRecoveryProfile,
+                         detail::TerminalShape terminalShape,
                          std::optional<detail::DirectLiteralRecoveryMetadata>
                              literalRecoveryMetadata,
                          Element &&element)
       : BaseRule(name, std::forward<Element>(element)),
-        _lexicalRecoveryProfile(lexicalRecoveryProfile),
+        _terminalShape(terminalShape),
         _literalRecoveryMetadata(std::move(literalRecoveryMetadata)) {}
 
-  detail::LexicalRecoveryProfile _lexicalRecoveryProfile{};
+  detail::TerminalShape _terminalShape{};
   std::optional<detail::DirectLiteralRecoveryMetadata>
       _literalRecoveryMetadata{};
 
@@ -179,6 +213,9 @@ private:
           !facts.triviaGap.visibleSourceAfterLocalSkip) {
         facts.triviaGap = detail::current_local_skip_trivia_gap_profile(ctx);
       }
+      facts.allowProvisionalLowConfidenceReplace =
+          facts.allowProvisionalLowConfidenceReplace ||
+          detail::allows_provisional_fuzzy_replace_here(ctx);
       return facts;
     }();
     const char *const cursorStart = ctx.cursor();
@@ -216,12 +253,12 @@ private:
       if (_literalRecoveryMetadata.has_value()) {
         if (!hasHadEdits ||
             detail::allows_fuzzy_replace_after_prior_edits(
-                _lexicalRecoveryProfile)) {
+                _terminalShape)) {
           const auto replaceCandidates =
               detail::collect_literal_replace_candidates(
                   ctx, cursorStart, _literalRecoveryMetadata->value,
                   _literalRecoveryMetadata->caseSensitive,
-                  _lexicalRecoveryProfile, facts);
+                  _terminalShape, facts);
           for (const auto &replaceCandidate : replaceCandidates) {
             const char *const replaceEnd =
                 cursorStart + replaceCandidate.consumed;
@@ -233,25 +270,22 @@ private:
                     ctx, cursorStart, replaceEnd, this, replaceCandidate.cost,
                     replaceCandidate.distance,
                     replaceCandidate.substitutionCount,
-                    replaceCandidate.operationCount,
-                    detail::terminal_anchor_quality(
-                        facts.triviaGap));
-            if (detail::is_better_normalized_recovery_order_key(
-                    detail::terminal_recovery_order_key(candidate),
-                    detail::terminal_recovery_order_key(bestChoice),
-                    detail::RecoveryOrderProfile::Terminal)) {
+                    replaceCandidate.operationCount);
+            if (detail::is_better_recovery_key(
+                    detail::terminal_recovery_key(candidate),
+                    detail::terminal_recovery_key(bestChoice))) {
               bestChoice = candidate;
             }
           }
         }
       }
       const bool allowInsert =
-          detail::allows_terminal_rule_insert(ctx, _lexicalRecoveryProfile) &&
+          detail::allows_terminal_rule_insert(ctx, _terminalShape) &&
           (!_literalRecoveryMetadata.has_value() ||
-           _lexicalRecoveryProfile.allowsInsert());
+           _terminalShape.allowsInsert());
       const auto choice = detail::complete_terminal_recovery_choice(
           ctx, cursorStart, this, facts,
-          _lexicalRecoveryProfile, allowInsert, bestChoice,
+          _terminalShape, allowInsert, bestChoice,
           matchRecoverableTerminal,
           [this, &ctx](const char *matched) {
             ctx.leaf(matched, this, false, true);
@@ -285,12 +319,13 @@ private:
             const auto &facts = effectiveRecoveryFacts;
             return detail::apply_delete_scan_terminal_candidate(
                 ctx, matchRecoverableTerminal, applyRecoveredLeaf,
-                facts, _lexicalRecoveryProfile);
+                facts, _terminalShape);
           });
     };
 
     if constexpr (RecoveryParseModeContext<Context>) {
-      if (!ctx.isInRecoveryPhase()) {
+      if (!ctx.isInRecoveryPhase() &&
+          !ctx.hasPendingCommittedRecoveryEdits()) {
         PEGIUM_RECOVERY_TRACE("[terminal rule] enter ", getName(),
                               " offset=", ctx.cursorOffset());
         if (matchedEnd != nullptr) {
@@ -308,6 +343,9 @@ private:
                               " offset=", ctx.cursorOffset());
         ctx.leaf(matchedEnd, this);
         return true;
+      }
+      if (effectiveRecoveryFacts.localRecoveryBlocked) {
+        return false;
       }
       if (!ctx.canEdit()) {
         PEGIUM_RECOVERY_TRACE("[terminal rule] no-edit-window fail ", getName(),
@@ -383,7 +421,7 @@ private:
 public:
   template <NonNullableTerminalCapableExpression Element>
   TerminalRule &operator=(Element &&element) {
-    _lexicalRecoveryProfile =
+    _terminalShape =
         detail::infer_terminal_rule_recovery_profile(element);
     _literalRecoveryMetadata =
         detail::infer_direct_literal_recovery_metadata(element);

@@ -25,19 +25,15 @@ run_strict_parse(const auto &entryRule, const Skipper &skipper,
 detail::StrictFailureEngineResult
 inspect_failure(const auto &entryRule, const Skipper &skipper,
                 const pegium::text::TextSnapshot &text,
-                const detail::StrictParseSummary &summary,
                 const pegium::utils::CancellationToken &cancelToken = {}) {
-  const detail::StrictFailureEngine strictFailureEngine;
-  return strictFailureEngine.inspectFailure(entryRule, skipper, text, summary,
-                                            cancelToken);
+  return detail::run_strict_parse_with_failure_snapshot(entryRule, skipper,
+                                                        text, cancelToken);
 }
 
 detail::RecoveryAttemptSpec
-build_attempt_spec(std::span<const detail::RecoveryWindow> selectedWindows,
+build_attempt_spec(std::span<const detail::RecoveryWindow> /*selectedWindows*/,
                    const detail::RecoveryWindow &window) {
-  detail::WindowPlanner planner{ParseOptions{}};
-  planner.seedAcceptedWindows(selectedWindows);
-  return planner.buildAttemptSpec(window);
+  return detail::RecoveryAttemptSpec{.window = window};
 }
 
 void set_recovery_edits(
@@ -53,6 +49,11 @@ void set_recovery_edits(
                                      .element = diagnostic.element,
                                      .message = diagnostic.message});
   }
+  // Keep the cached facts in sync with the edits so tests that read
+  // facts-derived predicates without calling `classify_recovery_attempt`
+  // still see consistent values. Tests that classify will recompute
+  // facts again — that's fine, derive is pure.
+  attempt.facts = detail::derive_attempt_facts(attempt);
 }
 
 detail::RecoveryAttempt make_ranked_attempt(
@@ -80,6 +81,7 @@ detail::RecoveryAttempt make_ranked_attempt(
             .element = nullptr,
             .message = {},
         });
+    attempt.facts = detail::derive_attempt_facts(attempt);
     return attempt;
   }
   for (std::uint32_t index = 0; index < entryCount; ++index) {
@@ -95,6 +97,7 @@ detail::RecoveryAttempt make_ranked_attempt(
             .message = {},
         });
   }
+  attempt.facts = detail::derive_attempt_facts(attempt);
   return attempt;
 }
 
@@ -233,13 +236,12 @@ bestRecoveryAttempt(const RuleType &entryRule, std::string_view text,
   RecoveryAttemptHarness harness;
   const auto snapshot = pegium::text::TextSnapshot::copy(text);
 
-  const auto strictResult = run_strict_parse(entryRule, skipper, snapshot);
-  const auto failureAnalysis =
-      inspect_failure(entryRule, skipper, snapshot, strictResult.summary);
+  const auto failureAnalysis = inspect_failure(entryRule, skipper, snapshot);
+  const auto &strictSummary = failureAnalysis.strictResult.summary;
   const auto editFloorOffset =
-      strictResult.summary.parsedLength != 0 ||
+      strictSummary.parsedLength != 0 ||
               !failureAnalysis.snapshot.hasFailureToken
-          ? strictResult.summary.parsedLength
+          ? strictSummary.parsedLength
           : failureAnalysis.snapshot
                 .failureLeafHistory[failureAnalysis.snapshot.failureTokenIndex]
                 .beginOffset;
@@ -250,7 +252,7 @@ bestRecoveryAttempt(const RuleType &entryRule, std::string_view text,
       editFloorOffset);
   const auto spec = build_attempt_spec({}, window);
   auto attempt =
-      detail::run_recovery_attempt(entryRule, skipper, options, snapshot, spec);
+      detail::execute_recovery_parse(entryRule, skipper, options, snapshot, spec);
   detail::classify_recovery_attempt(attempt);
   if (!harness.attempt.cst ||
       detail::is_better_recovery_attempt(attempt, harness.attempt)) {
@@ -282,7 +284,6 @@ TEST(RecoverySearchTest, MissingDelimiterUsesInsertionAttempt) {
 
   ParseOptions options;
   options.recoveryWindowTokenCount = 4;
-  options.maxRecoveryWindowTokenCount = 8;
   const auto result = pegium::test::Parse(entry, "hello", options);
 
   pegium::test::ExpectCst(result,
@@ -468,61 +469,13 @@ TEST(RecoverySearchTest, RecoveryAttemptSpecsStayGenericWithoutAnchorVariants) {
                    assign<&RecoveryPairNode::second>(id)};
   const auto text = pegium::text::TextSnapshot::copy("one two");
 
-  const auto strictResult = run_strict_parse(entry, NoOpSkipper(), text);
-  const auto failureAnalysis =
-      inspect_failure(entry, NoOpSkipper(), text, strictResult.summary);
+  const auto failureAnalysis = inspect_failure(entry, NoOpSkipper(), text);
   const auto window =
       detail::compute_recovery_window(failureAnalysis.snapshot, 2u);
   const auto spec = build_attempt_spec({}, window);
 
-  ASSERT_EQ(spec.windows.size(), 1u);
-  EXPECT_EQ(spec.windows.front().beginOffset, window.beginOffset);
-  EXPECT_EQ(spec.windows.front().maxCursorOffset, window.maxCursorOffset);
-}
-
-TEST(RecoverySearchTest,
-     WindowPlannerAcceptKeepsValidatedFollowUpReplayContract) {
-  detail::WindowPlanner planner{ParseOptions{}};
-  const detail::RecoveryWindow first{
-      .beginOffset = 10u,
-      .editFloorOffset = 14u,
-      .maxCursorOffset = 20u,
-      .forwardTokenCount = 8u,
-      .visibleLeafBeginIndex = 3u,
-      .stablePrefixOffset = 14u,
-      .hasStablePrefix = true,
-  };
-  const detail::RecoveryWindow second{
-      .beginOffset = 18u,
-      .editFloorOffset = 24u,
-      .maxCursorOffset = 30u,
-      .forwardTokenCount = 8u,
-      .visibleLeafBeginIndex = 7u,
-      .stablePrefixOffset = 24u,
-      .hasStablePrefix = true,
-  };
-  const detail::RecoveryWindow third{
-      .beginOffset = 28u,
-      .editFloorOffset = 36u,
-      .maxCursorOffset = 44u,
-      .forwardTokenCount = 16u,
-      .visibleLeafBeginIndex = 11u,
-      .stablePrefixOffset = 36u,
-      .hasStablePrefix = true,
-  };
-  planner.seedAcceptedWindows(std::array{first});
-
-  detail::RecoveryAttempt acceptedAttempt;
-  acceptedAttempt.replayWindows = {first, second, third};
-
-  planner.accept(acceptedAttempt, second);
-
-  ASSERT_EQ(planner.acceptedWindows().size(), 3u);
-  EXPECT_EQ(planner.acceptedWindows()[0].beginOffset, first.beginOffset);
-  EXPECT_EQ(planner.acceptedWindows()[1].beginOffset, second.beginOffset);
-  EXPECT_EQ(planner.acceptedWindows()[2].beginOffset, third.beginOffset);
-  EXPECT_EQ(planner.acceptedWindows()[2].editFloorOffset,
-            third.editFloorOffset);
+  EXPECT_EQ(spec.window.beginOffset, window.beginOffset);
+  EXPECT_EQ(spec.window.maxCursorOffset, window.maxCursorOffset);
 }
 
 TEST(
@@ -546,7 +499,6 @@ TEST(
                                        "end\n");
   ParseOptions options;
   options.recoveryWindowTokenCount = 8;
-  options.maxRecoveryWindowTokenCount = 8;
   const detail::RecoveryWindow window{
       .beginOffset = 0,
       .editFloorOffset = 0,
@@ -556,7 +508,7 @@ TEST(
   };
   const auto spec = build_attempt_spec({}, window);
   auto attempt =
-      detail::run_recovery_attempt(entry, skipper, options, text, spec);
+      detail::execute_recovery_parse(entry, skipper, options, text, spec);
   detail::classify_recovery_attempt(attempt);
   const auto diagnostics =
       detail::materialize_syntax_diagnostics(attempt.recoveryEdits);
@@ -591,7 +543,6 @@ TEST(RecoverySearchTest,
                                        "}\n");
   ParseOptions options;
   options.recoveryWindowTokenCount = 8;
-  options.maxRecoveryWindowTokenCount = 8;
   const detail::RecoveryWindow window{
       .beginOffset = 13,
       .editFloorOffset = 13,
@@ -603,7 +554,7 @@ TEST(RecoverySearchTest,
   };
   const auto spec = build_attempt_spec({}, window);
   auto attempt =
-      detail::run_recovery_attempt(entry, skipper, options, text, spec);
+      detail::execute_recovery_parse(entry, skipper, options, text, spec);
   detail::classify_recovery_attempt(attempt);
   const auto diagnostics =
       detail::materialize_syntax_diagnostics(attempt.recoveryEdits);
@@ -619,99 +570,9 @@ TEST(RecoverySearchTest,
 }
 
 TEST(RecoverySearchTest,
-     RecoveryAttemptSpecPreservesSelectedWindowReplayContract) {
-  const detail::RecoveryWindow selectedWindow{
-      .beginOffset = 4,
-      .editFloorOffset = 9,
-      .maxCursorOffset = 18,
-      .tokenCount = 3,
-      .forwardTokenCount = 6,
-      .visibleLeafBeginIndex = 2,
-      .stablePrefixOffset = 9,
-      .hasStablePrefix = true,
-  };
-  const detail::RecoveryWindow laterWindow{
-      .beginOffset = 24,
-      .editFloorOffset = 27,
-      .maxCursorOffset = 31,
-      .tokenCount = 2,
-      .forwardTokenCount = 4,
-      .visibleLeafBeginIndex = 7,
-      .stablePrefixOffset = 0,
-      .hasStablePrefix = false,
-  };
-  const std::array selectedWindows{selectedWindow};
-
-  const auto spec = build_attempt_spec(selectedWindows, laterWindow);
-
-  ASSERT_EQ(spec.windows.size(), 2u);
-  EXPECT_EQ(spec.windows.front().beginOffset, selectedWindow.beginOffset);
-  EXPECT_EQ(spec.windows.front().editFloorOffset,
-            selectedWindow.editFloorOffset);
-  EXPECT_EQ(spec.windows.front().maxCursorOffset,
-            selectedWindow.maxCursorOffset);
-  EXPECT_EQ(spec.windows.front().tokenCount, selectedWindow.tokenCount);
-  EXPECT_EQ(spec.windows.front().forwardTokenCount,
-            selectedWindow.forwardTokenCount);
-  EXPECT_EQ(spec.windows.front().visibleLeafBeginIndex,
-            selectedWindow.visibleLeafBeginIndex);
-  EXPECT_EQ(spec.windows.front().stablePrefixOffset,
-            selectedWindow.stablePrefixOffset);
-  EXPECT_EQ(spec.windows.front().hasStablePrefix,
-            selectedWindow.hasStablePrefix);
-  EXPECT_EQ(spec.windows.back().editFloorOffset, laterWindow.editFloorOffset);
-  EXPECT_EQ(spec.windows.back().forwardTokenCount,
-            laterWindow.forwardTokenCount);
-  EXPECT_EQ(spec.windows.back().stablePrefixOffset,
-            laterWindow.stablePrefixOffset);
-  EXPECT_EQ(spec.windows.back().hasStablePrefix, laterWindow.hasStablePrefix);
-}
-
-TEST(RecoverySearchTest,
-     FallbackReplayCarriesParsedPrefixIntoNextWindowFloor) {
-  detail::WindowPlanner planner{ParseOptions{}};
-  const detail::RecoveryWindow acceptedWindow{
-      .beginOffset = 0,
-      .editFloorOffset = 4,
-      .maxCursorOffset = 4,
-      .tokenCount = 2,
-      .forwardTokenCount = 0,
-      .visibleLeafBeginIndex = 0,
-      .stablePrefixOffset = 4,
-      .hasStablePrefix = true,
-  };
-  planner.seedAcceptedWindows(std::span<const detail::RecoveryWindow>{
-      &acceptedWindow, 1u});
-
-  detail::FailureSnapshot snapshot{
-      .maxCursorOffset = 14,
-      .failureLeafHistory =
-          {
-              {.beginOffset = 0, .endOffset = 3, .element = nullptr},
-              {.beginOffset = 4, .endOffset = 7, .element = nullptr},
-              {.beginOffset = 8, .endOffset = 12, .element = nullptr},
-              {.beginOffset = 13, .endOffset = 15, .element = nullptr},
-          },
-      .failureTokenIndex = 3,
-      .hasFailureToken = true,
-  };
-  detail::RecoveryAttempt selectedAttempt;
-  selectedAttempt.entryRuleMatched = true;
-  selectedAttempt.parsedLength = 12;
-
-  planner.begin(snapshot, selectedAttempt);
-  const auto planned = planner.plan();
-
-  EXPECT_EQ(planned.window.editFloorOffset, 12);
-  EXPECT_EQ(planned.window.stablePrefixOffset, 12);
-  EXPECT_TRUE(planned.window.hasStablePrefix);
-}
-
-TEST(RecoverySearchTest,
      InitialWindowFloorStopsBeforeFailureLeafThatEndsAtFurthestCursor) {
   ParseOptions options;
   options.recoveryWindowTokenCount = 8;
-  options.maxRecoveryWindowTokenCount = 8;
   detail::WindowPlanner planner{options};
 
   detail::FailureSnapshot snapshot{
@@ -737,120 +598,8 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(planned.window.hasStablePrefix);
 }
 
-TEST(RecoverySearchTest, FallbackAcceptancePreservesReplayForwardTokenCount) {
-  detail::WindowPlanner planner{ParseOptions{}};
-  detail::RecoveryAttempt attempt;
-  attempt.replayWindows.push_back({
-      .beginOffset = 0,
-      .editFloorOffset = 4,
-      .maxCursorOffset = 9,
-      .tokenCount = 2,
-      .forwardTokenCount = 6,
-      .visibleLeafBeginIndex = 0,
-      .stablePrefixOffset = 4,
-      .hasStablePrefix = true,
-  });
-
-  const detail::RecoveryWindow plannedWindow{
-      .beginOffset = 0,
-      .editFloorOffset = 4,
-      .maxCursorOffset = 9,
-      .tokenCount = 2,
-      .forwardTokenCount = 2,
-      .visibleLeafBeginIndex = 0,
-      .stablePrefixOffset = 4,
-      .hasStablePrefix = true,
-  };
-
-  planner.accept(attempt, plannedWindow);
-  ASSERT_EQ(planner.acceptedWindows().size(), 1u);
-  EXPECT_EQ(planner.acceptedWindows().front().forwardTokenCount, 6u);
-}
-
 TEST(RecoverySearchTest,
-     StablePrefixWindowsDoNotFallbackToFullHistoryReplay) {
-  ParseOptions options;
-  options.recoveryWindowTokenCount = 2;
-  options.maxRecoveryWindowTokenCount = 64;
-  detail::WindowPlanner planner{options};
-
-  detail::FailureSnapshot snapshot{
-      .maxCursorOffset = 23,
-      .failureLeafHistory =
-          {
-              {.beginOffset = 0, .endOffset = 3, .element = nullptr},
-              {.beginOffset = 4, .endOffset = 7, .element = nullptr},
-              {.beginOffset = 8, .endOffset = 11, .element = nullptr},
-              {.beginOffset = 12, .endOffset = 15, .element = nullptr},
-              {.beginOffset = 16, .endOffset = 19, .element = nullptr},
-              {.beginOffset = 20, .endOffset = 23, .element = nullptr},
-          },
-      .failureTokenIndex = 5,
-      .hasFailureToken = true,
-  };
-  detail::RecoveryAttempt selectedAttempt;
-  selectedAttempt.entryRuleMatched = true;
-  selectedAttempt.parsedLength = 19;
-
-  planner.begin(snapshot, selectedAttempt);
-  const auto planned = planner.plan();
-
-  EXPECT_GT(planned.window.beginOffset, 0);
-  EXPECT_TRUE(planned.window.hasStablePrefix);
-  EXPECT_TRUE(planner.advance(planned.window));
-
-  const auto widened = planner.plan();
-  EXPECT_EQ(widened.window.beginOffset, planned.window.beginOffset);
-  EXPECT_EQ(widened.window.editFloorOffset, planned.window.editFloorOffset);
-  EXPECT_EQ(widened.window.tokenCount, planned.window.tokenCount);
-  EXPECT_EQ(widened.window.forwardTokenCount, 4u);
-}
-
-TEST(RecoverySearchTest,
-     StablePrefixWindowsCanWidenBackwardWithoutReopeningEditFloor) {
-  ParseOptions options;
-  options.recoveryWindowTokenCount = 2;
-  options.maxRecoveryWindowTokenCount = 4;
-  detail::WindowPlanner planner{options};
-
-  detail::FailureSnapshot snapshot{
-      .maxCursorOffset = 23,
-      .failureLeafHistory =
-          {
-              {.beginOffset = 0, .endOffset = 3, .element = nullptr},
-              {.beginOffset = 4, .endOffset = 7, .element = nullptr},
-              {.beginOffset = 8, .endOffset = 11, .element = nullptr},
-              {.beginOffset = 12, .endOffset = 15, .element = nullptr},
-              {.beginOffset = 16, .endOffset = 19, .element = nullptr},
-              {.beginOffset = 20, .endOffset = 23, .element = nullptr},
-          },
-      .failureTokenIndex = 5,
-      .hasFailureToken = true,
-  };
-  detail::RecoveryAttempt selectedAttempt;
-  selectedAttempt.entryRuleMatched = true;
-  selectedAttempt.parsedLength = 19;
-
-  planner.begin(snapshot, selectedAttempt);
-  const auto planned = planner.plan();
-  ASSERT_TRUE(planner.advance(planned.window));
-
-  const auto forwardWidened = planner.plan();
-  ASSERT_EQ(forwardWidened.window.beginOffset, planned.window.beginOffset);
-  ASSERT_EQ(forwardWidened.window.editFloorOffset, planned.window.editFloorOffset);
-  ASSERT_EQ(forwardWidened.window.forwardTokenCount, 4u);
-
-  ASSERT_TRUE(planner.advance(forwardWidened.window, true));
-  const auto backwardWidened = planner.plan();
-  EXPECT_LT(backwardWidened.window.beginOffset, forwardWidened.window.beginOffset);
-  EXPECT_EQ(backwardWidened.window.editFloorOffset,
-            forwardWidened.window.editFloorOffset);
-  EXPECT_EQ(backwardWidened.window.forwardTokenCount,
-            forwardWidened.window.forwardTokenCount);
-}
-
-TEST(RecoverySearchTest,
-     BudgetOverflowFullMatchAtStablePrefixBoundaryRemainsSelectable) {
+     BudgetOverflowFullMatchAtStablePrefixBoundaryDeleteOnlyIsFallback) {
   detail::RecoveryAttempt attempt;
   attempt.entryRuleMatched = true;
   attempt.stablePrefixOffset = 10;
@@ -867,12 +616,16 @@ TEST(RecoverySearchTest,
 
   detail::classify_recovery_attempt(attempt);
 
-  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Stable);
-  EXPECT_TRUE(detail::is_selectable_recovery_attempt(attempt));
+  EXPECT_EQ(attempt.status,
+            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
+  EXPECT_FALSE(detail::is_selectable_recovery_attempt(attempt));
 }
 
 TEST(RecoverySearchTest,
-     BudgetOverflowAcrossLaterReplayWindowIsNotSelectable) {
+     BudgetOverflowAcrossLaterReplayWindowStaysSelectableOnFullMatch) {
+  // Over-budget attempts that nevertheless reach a full match with genuine
+  // continuation past the first edit are trusted under the 4-axis ranking:
+  // the budget is a cap on exploration, not a veto on completed parses.
   detail::RecoveryAttempt attempt;
   attempt.entryRuleMatched = true;
   attempt.stablePrefixOffset = 22;
@@ -884,24 +637,15 @@ TEST(RecoverySearchTest,
   attempt.fullMatch = true;
   attempt.stableAfterRecovery = true;
   attempt.reachedRecoveryTarget = true;
-  attempt.replayWindows = {
-      {.beginOffset = 3,
-       .editFloorOffset = 22,
-       .maxCursorOffset = 32,
-       .tokenCount = 8,
-       .forwardTokenCount = 8,
-       .visibleLeafBeginIndex = 0,
-       .stablePrefixOffset = 22,
-       .hasStablePrefix = true},
-      {.beginOffset = 10,
-       .editFloorOffset = 39,
-       .maxCursorOffset = 75,
-       .tokenCount = 8,
-       .forwardTokenCount = 8,
-       .visibleLeafBeginIndex = 1,
-       .stablePrefixOffset = 39,
-       .hasStablePrefix = true},
-  };
+  attempt.replayWindow =
+      detail::RecoveryWindow{.beginOffset = 3,
+                             .editFloorOffset = 22,
+                             .maxCursorOffset = 32,
+                             .tokenCount = 8,
+                             .forwardTokenCount = 8,
+                             .visibleLeafBeginIndex = 0,
+                             .stablePrefixOffset = 22,
+                             .hasStablePrefix = true};
   set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
                                 .offset = 32,
                                 .beginOffset = 32,
@@ -917,9 +661,8 @@ TEST(RecoverySearchTest,
 
   detail::classify_recovery_attempt(attempt);
 
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(detail::is_selectable_recovery_attempt(attempt));
+  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Stable);
+  EXPECT_TRUE(detail::is_selectable_recovery_attempt(attempt));
 }
 
 TEST(RecoverySearchTest,
@@ -957,14 +700,15 @@ TEST(RecoverySearchTest,
   attempt.hasStablePrefix = false;
   attempt.configuredMaxEditCost = 64;
   attempt.editCost = 112;
-  attempt.replayWindows = {{.beginOffset = 0,
-                            .editFloorOffset = 0,
-                            .maxCursorOffset = 0,
-                            .tokenCount = 1,
-                            .forwardTokenCount = 1,
-                            .visibleLeafBeginIndex = 0,
-                            .stablePrefixOffset = 0,
-                            .hasStablePrefix = false}};
+  attempt.replayWindow =
+      detail::RecoveryWindow{.beginOffset = 0,
+                             .editFloorOffset = 0,
+                             .maxCursorOffset = 0,
+                             .tokenCount = 1,
+                             .forwardTokenCount = 1,
+                             .visibleLeafBeginIndex = 0,
+                             .stablePrefixOffset = 0,
+                             .hasStablePrefix = false};
   attempt.cst = make_attempt_cst("req login", {{24u, 27u}, {28u, 33u}});
   set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
                                 .offset = 0,
@@ -992,7 +736,6 @@ TEST(RecoverySearchTest,
 
   ParseOptions options;
   options.recoveryWindowTokenCount = 4;
-  options.maxRecoveryWindowTokenCount = 16;
 
   const std::string baselineInput = "def a\n"
                                     "def b\n"
@@ -1025,7 +768,7 @@ TEST(RecoverySearchTest,
   ASSERT_TRUE(laterError.fullMatch) << laterErrorDump;
   EXPECT_TRUE(baseline.recoveryReport.hasRecovered);
   EXPECT_TRUE(laterError.recoveryReport.hasRecovered);
-  EXPECT_GE(laterError.recoveryReport.recoveryCount, 2u);
+  EXPECT_GE(laterError.recoveryReport.recoveryEdits, 2u);
 
   auto *baselineRoot =
       pegium::ast_ptr_cast<RecoveryStatementListNode>(baseline.value);
@@ -1081,11 +824,10 @@ TEST(RecoverySearchTest, ParserResultMatchesGlobalRecoverySearchRunResult) {
 
   ParseOptions options;
   options.recoveryWindowTokenCount = 4;
-  options.maxRecoveryWindowTokenCount = 8;
   const auto text = pegium::text::TextSnapshot::copy("hello");
 
   const auto search =
-      detail::run_recovery_search(entry, NoOpSkipper(), options, text);
+      detail::orchestrate_recovery_search(entry, NoOpSkipper(), options, text);
   const auto parsed =
       pegium::test::Parse(entry, "hello", NoOpSkipper(), options);
 
@@ -1103,7 +845,7 @@ TEST(RecoverySearchTest, ParserResultMatchesGlobalRecoverySearchRunResult) {
             !search.selectedWindows.empty() &&
                 search.selectedAttempt.fullMatch);
   EXPECT_EQ(parsed.recoveryReport.recoveryCount,
-            static_cast<std::uint32_t>(search.selectedWindows.size()));
+            search.selectedWindows.size());
   EXPECT_EQ(parsed.recoveryReport.recoveryWindowsTried,
             search.recoveryWindowsTried);
   EXPECT_EQ(parsed.recoveryReport.strictParseRuns, search.strictParseRuns);
@@ -1124,15 +866,20 @@ TEST(RecoverySearchTest, ParserResultMatchesGlobalRecoverySearchRunResult) {
   }
 }
 
+// Phase C rebaseline: global recovery-attempt ranking is the 4-axis RecoveryKey
+// (matched > firstEditOffset higher > editCost lower > progressAfterEdits
+// higher). Old heuristics that preferred farther progress over later edits or
+// penalized cost-vs-span asymmetries are intentionally gone.
+
 TEST(RecoverySearchTest,
-     GlobalRecoveryRankingPrefersFartherParseBeforeEditPosition) {
+     GlobalRecoveryRankingPrefersLaterEditOverFartherParse) {
   const auto farther = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
                                            false, 24u, 24u, 1u, 10u, 0u, 1u);
-  const auto nearer = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
-                                          false, 20u, 20u, 1u, 18u, 0u, 1u);
+  const auto laterEdit = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::Stable, false, 20u, 20u, 1u, 18u, 0u, 1u);
 
-  EXPECT_TRUE(detail::is_better_recovery_attempt(farther, nearer));
-  EXPECT_FALSE(detail::is_better_recovery_attempt(nearer, farther));
+  EXPECT_TRUE(detail::is_better_recovery_attempt(laterEdit, farther));
+  EXPECT_FALSE(detail::is_better_recovery_attempt(farther, laterEdit));
 }
 
 TEST(RecoverySearchTest,
@@ -1144,21 +891,6 @@ TEST(RecoverySearchTest,
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(later, earlier));
   EXPECT_FALSE(detail::is_better_recovery_attempt(earlier, later));
-}
-
-TEST(RecoverySearchTest,
-     GlobalRecoveryRankingLetsNonCredibleFallbacksAdvanceByProgress) {
-  const auto earlierLocalFallback = make_ranked_attempt(
-      detail::RecoveryAttemptStatus::RecoveredButNotCredible, false, 24u, 24u,
-      1u, 18u, 0u, 1u);
-  const auto fartherFallback = make_ranked_attempt(
-      detail::RecoveryAttemptStatus::RecoveredButNotCredible, false, 31u, 31u,
-      2u, 12u, 4u, 2u);
-
-  EXPECT_TRUE(
-      detail::is_better_recovery_attempt(fartherFallback, earlierLocalFallback));
-  EXPECT_FALSE(
-      detail::is_better_recovery_attempt(earlierLocalFallback, fartherFallback));
 }
 
 TEST(RecoverySearchTest,
@@ -1174,19 +906,6 @@ TEST(RecoverySearchTest,
 }
 
 TEST(RecoverySearchTest,
-     GlobalRecoveryRankingDoesNotPreferLaterEditWhenItCostsMoreAndSpansMore) {
-  const auto earlyLocalRepair = make_ranked_attempt(
-      detail::RecoveryAttemptStatus::Stable, true, 31u, 31u, 3u, 17u, 0u, 1u);
-  const auto laterRewrite = make_ranked_attempt(
-      detail::RecoveryAttemptStatus::Stable, true, 31u, 31u, 9u, 18u, 6u, 3u);
-
-  EXPECT_TRUE(
-      detail::is_better_recovery_attempt(earlyLocalRepair, laterRewrite));
-  EXPECT_FALSE(
-      detail::is_better_recovery_attempt(laterRewrite, earlyLocalRepair));
-}
-
-TEST(RecoverySearchTest,
      GlobalRecoveryRankingPrefersFullerRecoveryBeforeCheaperPartialAttempt) {
   const auto full = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
                                         true, 24u, 24u, 12u, 8u, 0u, 2u);
@@ -1197,33 +916,94 @@ TEST(RecoverySearchTest,
   EXPECT_FALSE(detail::is_better_recovery_attempt(partial, full));
 }
 
-TEST(RecoverySearchTest,
-     EditableCandidateRankingUsesPostSkipProgressBeforeRawCursor) {
-  detail::EditableRecoveryCandidate trailingTriviaHeavy{
+TEST(RecoverySearchTest, RecoveryKeyPrefersMatchedOverUnmatched) {
+  const detail::RecoveryKey matched{.matched = true,
+                                    .firstEditOffset = 0,
+                                    .editCost = 100,
+                                    .progressAfterEdits = 0};
+  const detail::RecoveryKey unmatched{.matched = false,
+                                      .firstEditOffset = 100,
+                                      .editCost = 0,
+                                      .progressAfterEdits = 100};
+
+  EXPECT_TRUE(detail::is_better_recovery_key(matched, unmatched));
+  EXPECT_FALSE(detail::is_better_recovery_key(unmatched, matched));
+}
+
+TEST(RecoverySearchTest, RecoveryKeyPrefersLaterFirstEditOffset) {
+  const detail::RecoveryKey later{.matched = true,
+                                  .firstEditOffset = 20,
+                                  .editCost = 5,
+                                  .progressAfterEdits = 40};
+  const detail::RecoveryKey earlier{.matched = true,
+                                    .firstEditOffset = 10,
+                                    .editCost = 5,
+                                    .progressAfterEdits = 40};
+
+  EXPECT_TRUE(detail::is_better_recovery_key(later, earlier));
+  EXPECT_FALSE(detail::is_better_recovery_key(earlier, later));
+}
+
+TEST(RecoverySearchTest, RecoveryKeyPrefersLowerEditCostAtSameOffset) {
+  const detail::RecoveryKey cheap{.matched = true,
+                                  .firstEditOffset = 10,
+                                  .editCost = 1,
+                                  .progressAfterEdits = 20};
+  const detail::RecoveryKey expensive{.matched = true,
+                                      .firstEditOffset = 10,
+                                      .editCost = 5,
+                                      .progressAfterEdits = 40};
+
+  EXPECT_TRUE(detail::is_better_recovery_key(cheap, expensive));
+  EXPECT_FALSE(detail::is_better_recovery_key(expensive, cheap));
+}
+
+TEST(RecoverySearchTest, RecoveryKeyBreaksTiesWithProgressAfterEdits) {
+  const detail::RecoveryKey farther{.matched = true,
+                                    .firstEditOffset = 10,
+                                    .editCost = 2,
+                                    .progressAfterEdits = 40};
+  const detail::RecoveryKey nearer{.matched = true,
+                                   .firstEditOffset = 10,
+                                   .editCost = 2,
+                                   .progressAfterEdits = 30};
+
+  EXPECT_TRUE(detail::is_better_recovery_key(farther, nearer));
+  EXPECT_FALSE(detail::is_better_recovery_key(nearer, farther));
+}
+
+TEST(RecoverySearchTest, EditableRecoveryKeyProjectsAxesFromCandidate) {
+  const detail::EditableRecoveryCandidate candidate{
       .matched = true,
       .cursorOffset = 18,
-      .postSkipCursorOffset = 12,
-      .editCost = 1,
-      .editCount = 1,
-      .firstEditOffset = 8,
-  };
-  detail::EditableRecoveryCandidate realProgress{
-      .matched = true,
-      .cursorOffset = 14,
-      .postSkipCursorOffset = 14,
-      .editCost = 1,
-      .editCount = 1,
-      .firstEditOffset = 8,
+      .postSkipCursorOffset = 20,
+      .editCost = 3u,
+      .editCount = 2u,
+      .firstEditOffset = 9u,
   };
 
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(realProgress),
-      detail::editable_recovery_order_key(trailingTriviaHeavy),
-      detail::RecoveryOrderProfile::Structural));
-  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(trailingTriviaHeavy),
-      detail::editable_recovery_order_key(realProgress),
-      detail::RecoveryOrderProfile::Structural));
+  const auto key = detail::editable_recovery_key(candidate);
+  EXPECT_TRUE(key.matched);
+  EXPECT_EQ(key.firstEditOffset, 9u);
+  EXPECT_EQ(key.editCost, 3u);
+  EXPECT_EQ(key.progressAfterEdits, 20u);
+}
+
+TEST(RecoverySearchTest, TerminalRecoveryKeyProjectsFromCandidate) {
+  // Terminal candidates project cost axis from primaryRankCost (logical edit
+  // distance + strategy penalty), not budgetCost (raw deleted/inserted span).
+  // This keeps a cheap-looking synthetic-gap split from beating a fuzzy
+  // keyword repair that describes a single logical substitution.
+  const detail::TerminalRecoveryCandidate candidate{
+      .kind = detail::TerminalRecoveryChoiceKind::DeleteScan,
+      .cost = {.budgetCost = 4u, .primaryRankCost = 2u},
+      .consumed = 7u,
+  };
+
+  const auto key = detail::terminal_recovery_key(candidate);
+  EXPECT_TRUE(key.matched);
+  EXPECT_EQ(key.editCost, 2u);
+  EXPECT_EQ(key.progressAfterEdits, 7u);
 }
 
 TEST(RecoverySearchTest,
@@ -1241,368 +1021,11 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::continues_after_first_edit(candidate));
 }
 
-TEST(RecoverySearchTest, TerminalRecoveryOrderKeyProjectsSharedAxes) {
-  const detail::TerminalRecoveryCandidate candidate{
-      .kind = detail::TerminalRecoveryChoiceKind::DeleteScan,
-      .anchorQuality = detail::TerminalAnchorQuality::DirectVisible,
-      .cost = {.budgetCost = 4u,
-               .primaryRankCost = 2u,
-               .secondaryRankCost = 5u},
-      .distance = 2u,
-      .consumed = 7u,
-      .substitutionCount = 0u,
-      .operationCount = 1u,
-  };
-
-  const auto key = detail::terminal_recovery_order_key(candidate);
-  EXPECT_TRUE(key.safety.matched);
-  EXPECT_EQ(key.safety.strategyPriority, 2u);
-  EXPECT_EQ(key.continuation.anchorQuality,
-            detail::TerminalAnchorQuality::DirectVisible);
-  EXPECT_EQ(key.continuation.consumedVisible, 7u);
-  EXPECT_EQ(key.edits.primaryRankCost, 2u);
-  EXPECT_EQ(key.edits.secondaryRankCost, 5u);
-  EXPECT_EQ(key.edits.editCost, 4u);
-  EXPECT_EQ(key.edits.distance, 2u);
-}
-
-TEST(RecoverySearchTest, EditableRecoveryOrderKeyProjectsSharedAxes) {
-  const detail::EditableRecoveryCandidate candidate{
-      .matched = true,
-      .cursorOffset = 18,
-      .postSkipCursorOffset = 18,
-      .editCost = 3u,
-      .editCount = 2u,
-      .editSpan = 6u,
-      .firstEditOffset = 9u,
-  };
-
-  const auto key = detail::editable_recovery_order_key(candidate);
-  EXPECT_TRUE(key.safety.matched);
-  EXPECT_TRUE(key.continuation.continuesAfterFirstEdit);
-  EXPECT_EQ(key.continuation.postSkipCursorOffset, 18u);
-  EXPECT_EQ(key.progress.cursorOffset, 18u);
-  EXPECT_EQ(key.edits.editCost, 3u);
-  EXPECT_EQ(key.edits.editCount, 2u);
-  EXPECT_EQ(key.edits.editSpan, 6u);
-  EXPECT_EQ(key.prefix.firstEditOffset, 9u);
-}
-
-TEST(RecoverySearchTest, TerminalOrderKeyComparatorMatchesCandidateComparator) {
-  const detail::TerminalRecoveryCandidate lhs{
-      .kind = detail::TerminalRecoveryChoiceKind::Replace,
-      .anchorQuality = detail::TerminalAnchorQuality::DirectVisible,
-      .cost = {.budgetCost = 2u,
-               .primaryRankCost = 1u,
-               .secondaryRankCost = 2u},
-      .distance = 1u,
-      .consumed = 5u,
-      .substitutionCount = 1u,
-      .operationCount = 1u,
-  };
-  const detail::TerminalRecoveryCandidate rhs{
-      .kind = detail::TerminalRecoveryChoiceKind::DeleteScan,
-      .anchorQuality = detail::TerminalAnchorQuality::AfterHiddenTrivia,
-      .cost = {.budgetCost = 2u,
-               .primaryRankCost = 1u,
-               .secondaryRankCost = 2u},
-      .distance = 1u,
-      .consumed = 5u,
-      .substitutionCount = 1u,
-      .operationCount = 1u,
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::terminal_recovery_order_key(lhs),
-      detail::terminal_recovery_order_key(rhs),
-      detail::RecoveryOrderProfile::Terminal));
-}
-
-TEST(RecoverySearchTest,
-     ChoiceNormalizedComparatorMatchesCandidateComparatorWithoutOverride) {
-  const detail::EditableRecoveryCandidate lhs{
-      .matched = true,
-      .cursorOffset = 18,
-      .postSkipCursorOffset = 15,
-      .editCost = 2u,
-      .editCount = 1u,
-      .editSpan = 1u,
-      .firstEditOffset = 10u,
-  };
-  const detail::EditableRecoveryCandidate rhs{
-      .matched = true,
-      .cursorOffset = 19,
-      .postSkipCursorOffset = 14,
-      .editCost = 2u,
-      .editCount = 1u,
-      .editSpan = 2u,
-      .firstEditOffset = 10u,
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(lhs),
-      detail::editable_recovery_order_key(rhs),
-      detail::RecoveryOrderProfile::Structural));
-}
-
-TEST(RecoverySearchTest,
-     ChoiceNormalizedComparatorMatchesCandidateComparatorForLaterCheaperContinuingEdit) {
-  const detail::EditableRecoveryCandidate laterCheaperContinuingEdit{
-      .matched = true,
-      .cursorOffset = 30u,
-      .postSkipCursorOffset = 30u,
-      .editCost = 1u,
-      .editCount = 1u,
-      .editSpan = 1u,
-      .firstEditOffset = 21u,
-  };
-  const detail::EditableRecoveryCandidate earlierCostlierEdit{
-      .matched = true,
-      .cursorOffset = 28u,
-      .postSkipCursorOffset = 28u,
-      .editCost = 2u,
-      .editCount = 2u,
-      .editSpan = 2u,
-      .firstEditOffset = 18u,
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(laterCheaperContinuingEdit),
-      detail::editable_recovery_order_key(earlierCostlierEdit),
-      detail::RecoveryOrderProfile::Structural));
-  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(earlierCostlierEdit),
-      detail::editable_recovery_order_key(laterCheaperContinuingEdit),
-      detail::RecoveryOrderProfile::Structural));
-  EXPECT_EQ(
-      detail::is_better_normalized_recovery_order_key(
-          detail::editable_recovery_order_key(laterCheaperContinuingEdit),
-          detail::editable_recovery_order_key(earlierCostlierEdit),
-          detail::RecoveryOrderProfile::Structural),
-      detail::is_better_normalized_recovery_order_key(
-          detail::editable_recovery_order_key(laterCheaperContinuingEdit),
-          detail::editable_recovery_order_key(earlierCostlierEdit),
-          detail::RecoveryOrderProfile::Structural));
-}
-
-TEST(RecoverySearchTest,
-     StructuralComparatorPrefersFartherContinuationBeforeCheaperEarlierRewrite) {
-  const detail::EditableRecoveryCandidate cheaperEarlierRewrite{
-      .matched = true,
-      .cursorOffset = 5u,
-      .postSkipCursorOffset = 5u,
-      .editCost = 1u,
-      .editCount = 1u,
-      .editSpan = 0u,
-      .firstEditOffset = 0u,
-  };
-  const detail::EditableRecoveryCandidate fullerLaterRepair{
-      .matched = true,
-      .cursorOffset = 13u,
-      .postSkipCursorOffset = 13u,
-      .editCost = 2u,
-      .editCount = 1u,
-      .editSpan = 0u,
-      .firstEditOffset = 5u,
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(fullerLaterRepair),
-      detail::editable_recovery_order_key(cheaperEarlierRewrite),
-      detail::RecoveryOrderProfile::Structural));
-  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(cheaperEarlierRewrite),
-      detail::editable_recovery_order_key(fullerLaterRepair),
-      detail::RecoveryOrderProfile::Structural));
-}
-
-TEST(RecoverySearchTest,
-     StructuralComparatorPrefersSameStartStrongerContinuationOverCheaperShorterRewrite) {
-  const detail::EditableRecoveryCandidate cheaperShorterRewrite{
-      .matched = true,
-      .cursorOffset = 6u,
-      .postSkipCursorOffset = 6u,
-      .editCost = 1u,
-      .editCount = 1u,
-      .editSpan = 0u,
-      .firstEditOffset = 0u,
-  };
-  const detail::EditableRecoveryCandidate strongerSameStartContinuation{
-      .matched = true,
-      .cursorOffset = 13u,
-      .postSkipCursorOffset = 13u,
-      .editCost = 2u,
-      .editCount = 1u,
-      .editSpan = 5u,
-      .firstEditOffset = 0u,
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(strongerSameStartContinuation),
-      detail::editable_recovery_order_key(cheaperShorterRewrite),
-      detail::RecoveryOrderProfile::Structural));
-  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(cheaperShorterRewrite),
-      detail::editable_recovery_order_key(strongerSameStartContinuation),
-      detail::RecoveryOrderProfile::Structural));
-}
-
-TEST(RecoverySearchTest,
-     ChoiceComparatorPrefersSmallerEditSpanAtSameBoundaryBeforeFartherOffset) {
-  const detail::EditableRecoveryCandidate localInsert{
-      .matched = true,
-      .cursorOffset = 18u,
-      .postSkipCursorOffset = 18u,
-      .editCost = 1u,
-      .editCount = 1u,
-      .editSpan = 0u,
-      .firstEditOffset = 18u,
-  };
-  const detail::EditableRecoveryCandidate deleteThenInsert{
-      .matched = true,
-      .cursorOffset = 24u,
-      .postSkipCursorOffset = 24u,
-      .editCost = 7u,
-      .editCount = 2u,
-      .editSpan = 6u,
-      .firstEditOffset = 18u,
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(localInsert),
-      detail::editable_recovery_order_key(deleteThenInsert),
-      detail::RecoveryOrderProfile::Structural));
-  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(deleteThenInsert),
-      detail::editable_recovery_order_key(localInsert),
-      detail::RecoveryOrderProfile::Structural));
-}
-
-TEST(RecoverySearchTest,
-     ChoiceComparatorDoesNotPreferLaterEditWhenItCostsMoreAndAddsMoreEdits) {
-  const detail::EditableRecoveryCandidate earlyReplace{
-      .matched = true,
-      .cursorOffset = 26u,
-      .postSkipCursorOffset = 26u,
-      .editCost = 2u,
-      .editCount = 1u,
-      .editSpan = 2u,
-      .firstEditOffset = 18u,
-  };
-  const detail::EditableRecoveryCandidate laterRewrite{
-      .matched = true,
-      .cursorOffset = 26u,
-      .postSkipCursorOffset = 26u,
-      .editCost = 9u,
-      .editCount = 2u,
-      .editSpan = 2u,
-      .firstEditOffset = 21u,
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(earlyReplace),
-      detail::editable_recovery_order_key(laterRewrite),
-      detail::RecoveryOrderProfile::Structural));
-  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
-      detail::editable_recovery_order_key(laterRewrite),
-      detail::editable_recovery_order_key(earlyReplace),
-      detail::RecoveryOrderProfile::Structural));
-}
-
-TEST(RecoverySearchTest,
-     ChoiceComparatorBoundaryPreferenceStillPrefersCheaperSameStartEdit) {
-  static const auto closeBrace = "}"_kw;
-  const detail::EditableRecoveryCandidate continuingCurrent{
-      .matched = true,
-      .cursorOffset = 56u,
-      .postSkipCursorOffset = 58u,
-      .editCost = 96u,
-      .editCount = 4u,
-      .editSpan = 40u,
-      .firstEditOffset = 16u,
-  };
-  const detail::EditableRecoveryCandidate preferredTailSkip{
-      .matched = true,
-      .cursorOffset = 59u,
-      .postSkipCursorOffset = 59u,
-      .editCost = 149u,
-      .editCount = 5u,
-      .editSpan = 42u,
-      .firstEditOffset = 16u,
-      .firstEditElement = std::addressof(closeBrace),
-  };
-
-  EXPECT_TRUE(
-      detail::is_better_choice_recovery_candidate(
-          continuingCurrent, preferredTailSkip,
-          {.preferredBoundaryElement = std::addressof(closeBrace)}));
-  EXPECT_FALSE(
-      detail::is_better_choice_recovery_candidate(
-          preferredTailSkip, continuingCurrent,
-          {.preferredBoundaryElement = std::addressof(closeBrace)}));
-}
-
-TEST(RecoverySearchTest,
-     ChoiceComparatorBoundaryPreferenceBreaksOnlySameStartTies) {
-  static const auto closeBrace = "}"_kw;
-  const detail::EditableRecoveryCandidate preferredBoundary{
-      .matched = true,
-      .cursorOffset = 32u,
-      .postSkipCursorOffset = 32u,
-      .editCost = 2u,
-      .editCount = 1u,
-      .editSpan = 0u,
-      .firstEditOffset = 18u,
-      .firstEditElement = std::addressof(closeBrace),
-  };
-  const detail::EditableRecoveryCandidate genericSameStart{
-      .matched = true,
-      .cursorOffset = 32u,
-      .postSkipCursorOffset = 32u,
-      .editCost = 2u,
-      .editCount = 1u,
-      .editSpan = 0u,
-      .firstEditOffset = 18u,
-      .firstEditElement = nullptr,
-  };
-
-  EXPECT_TRUE(
-      detail::is_better_choice_recovery_candidate(
-          preferredBoundary, genericSameStart,
-          {.preferredBoundaryElement = std::addressof(closeBrace)}));
-  EXPECT_FALSE(
-      detail::is_better_choice_recovery_candidate(
-          genericSameStart, preferredBoundary,
-          {.preferredBoundaryElement = std::addressof(closeBrace)}));
-}
-
-TEST(RecoverySearchTest,
-     ChoiceReplayComparatorPrefersLaterPrefixEditOverParseStartRewriteWhenCostDoesNotIncrease) {
-  constexpr pegium::TextOffset parseStartOffset = 8u;
-  const detail::EditableRecoveryCandidate parseStartRewrite{
-      .matched = true,
-      .cursorOffset = 20u,
-      .postSkipCursorOffset = 20u,
-      .editCost = 2u,
-      .editCount = 2u,
-      .firstEditOffset = 8u,
-  };
-  const detail::EditableRecoveryCandidate laterPrefixPreservingEdit{
-      .matched = true,
-      .cursorOffset = 20u,
-      .postSkipCursorOffset = 20u,
-      .editCost = 2u,
-      .editCount = 1u,
-      .firstEditOffset = 14u,
-  };
-
-  EXPECT_TRUE(detail::is_better_choice_recovery_candidate(
-      laterPrefixPreservingEdit, parseStartRewrite,
-      {.parseStartOffset = parseStartOffset}));
-  EXPECT_FALSE(detail::is_better_choice_recovery_candidate(
-      parseStartRewrite, laterPrefixPreservingEdit,
-      {.parseStartOffset = parseStartOffset}));
-}
+// Obsolete axis-projection and per-profile comparator tests were removed in
+// Phase C of the recovery rewrite (single 4-axis RecoveryKey replaces the
+// former 24-axis / 3-profile normalized key). The surviving behavior is
+// exercised by the RecoveryKey* tests above and by the end-to-end recovery
+// sample tests elsewhere.
 
 TEST(RecoverySearchTest,
      ChoiceEntrySignalRequirementAcceptsLaterEditWithoutStrictStartSignal) {
@@ -1676,83 +1099,6 @@ TEST(RecoverySearchTest,
             detail::ChoiceRecoveryEntrySignalRequirement::Accept);
 }
 
-TEST(RecoverySearchTest,
-     ChoiceComparatorPrefersContinuingStartedBranchOverSameStartDeleteRewrite) {
-  const detail::EditableRecoveryCandidate continuingStartedBranch{
-      .matched = true,
-      .hasDeleteEdit = true,
-      .cursorOffset = 24u,
-      .postSkipCursorOffset = 24u,
-      .editCost = 36u,
-      .editCount = 9u,
-      .editSpan = 9u,
-      .firstEditOffset = 14u,
-  };
-  const detail::EditableRecoveryCandidate sameStartDeleteRewrite{
-      .matched = true,
-      .hasDeleteEdit = true,
-      .cursorOffset = 35u,
-      .postSkipCursorOffset = 35u,
-      .editCost = 72u,
-      .editCount = 16u,
-      .editSpan = 24u,
-      .firstEditOffset = 11u,
-  };
-
-  EXPECT_TRUE(detail::is_better_choice_recovery_candidate(
-      continuingStartedBranch, sameStartDeleteRewrite,
-      {.parseStartOffset = 11u}));
-  EXPECT_FALSE(detail::is_better_choice_recovery_candidate(
-      sameStartDeleteRewrite, continuingStartedBranch,
-      {.parseStartOffset = 11u}));
-}
-
-TEST(RecoverySearchTest,
-     StructuralComparatorKeepsCursorProgressTieBreakForNoEditCandidates) {
-  const detail::StructuralProgressRecoveryCandidate lhs{
-      .matched = true,
-      .cursorOffset = 12u,
-      .editCost = 1u,
-      .strategyPriority = 0u,
-      .hadEdits = false,
-      .continuesAfterFirstEdit = true,
-      .rewritesParseStartBoundary = false,
-  };
-  const detail::StructuralProgressRecoveryCandidate rhs{
-      .matched = true,
-      .cursorOffset = 11u,
-      .editCost = 1u,
-      .strategyPriority = 0u,
-      .hadEdits = false,
-      .continuesAfterFirstEdit = true,
-      .rewritesParseStartBoundary = false,
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::structural_progress_recovery_order_key(lhs),
-      detail::structural_progress_recovery_order_key(rhs),
-      detail::RecoveryOrderProfile::Structural));
-}
-
-TEST(RecoverySearchTest, GlobalRecoveryOrderKeyProjectsSharedAxes) {
-  const auto attempt = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
-                                           false, 24u, 28u, 2u, 12u, 6u, 1u);
-
-  const auto key = detail::recovery_attempt_order_key(attempt);
-  EXPECT_TRUE(key.safety.matched);
-  EXPECT_TRUE(key.prefix.entryRuleMatched);
-  EXPECT_TRUE(key.prefix.stable);
-  EXPECT_TRUE(key.prefix.credible);
-  EXPECT_FALSE(key.prefix.fullMatch);
-  EXPECT_EQ(key.prefix.firstEditOffset, 12u);
-  EXPECT_TRUE(key.continuation.continuesAfterFirstEdit);
-  EXPECT_EQ(key.edits.editCost, 2u);
-  EXPECT_EQ(key.edits.editSpan, 6u);
-  EXPECT_EQ(key.edits.entryCount, 1u);
-  EXPECT_EQ(key.progress.parsedLength, 24u);
-  EXPECT_EQ(key.progress.maxCursorOffset, 28u);
-}
-
 TEST(RecoverySearchTest, RecoveryAttemptDebugJsonTracksEditedSourceSpan) {
   detail::RecoveryAttempt attempt;
   attempt.entryRuleMatched = true;
@@ -1786,204 +1132,6 @@ TEST(RecoverySearchTest, RecoveryAttemptDebugJsonTracksEditedSourceSpan) {
   EXPECT_EQ(score.at("editSpan").integer(), 22);
 }
 
-TEST(RecoverySearchTest, GlobalOrderKeyComparatorMatchesAttemptComparator) {
-  const auto lhs = make_ranked_attempt(
-      detail::RecoveryAttemptStatus::RecoveredButNotCredible, false, 18u, 18u,
-      2u, 10u, 4u, 1u);
-  const auto rhs = make_ranked_attempt(
-      detail::RecoveryAttemptStatus::RecoveredButNotCredible, false, 18u, 18u,
-      3u, 10u, 4u, 1u);
-
-  EXPECT_EQ(detail::is_better_recovery_attempt(lhs, rhs),
-            detail::is_better_normalized_recovery_order_key(
-                detail::recovery_attempt_order_key(lhs),
-                detail::recovery_attempt_order_key(rhs),
-                detail::RecoveryOrderProfile::Attempt));
-}
-
-TEST(RecoverySearchTest,
-     StructuralComparatorPrefersContinuingEditOverWeakEarlierInsert) {
-  const detail::StructuralProgressRecoveryCandidate continuingDelete{
-      .matched = true,
-      .cursorOffset = 22u,
-      .editCost = 4u,
-      .strategyPriority = 2u,
-      .hadEdits = true,
-      .continuesAfterFirstEdit = true,
-      .rewritesParseStartBoundary = false,
-      .firstEditKind = ParseDiagnosticKind::Deleted,
-      .firstEditOffset = 16u,
-      .firstEditElement = nullptr,
-  };
-  const detail::StructuralProgressRecoveryCandidate weakInsert{
-      .matched = true,
-      .cursorOffset = 16u,
-      .editCost = 1u,
-      .strategyPriority = 1u,
-      .hadEdits = true,
-      .continuesAfterFirstEdit = false,
-      .rewritesParseStartBoundary = false,
-      .firstEditKind = ParseDiagnosticKind::Inserted,
-      .firstEditOffset = 16u,
-      .firstEditElement = nullptr,
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::structural_progress_recovery_order_key(continuingDelete),
-      detail::structural_progress_recovery_order_key(weakInsert),
-      detail::RecoveryOrderProfile::Structural));
-  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
-      detail::structural_progress_recovery_order_key(weakInsert),
-      detail::structural_progress_recovery_order_key(continuingDelete),
-      detail::RecoveryOrderProfile::Structural));
-}
-
-TEST(RecoverySearchTest,
-     StructuralComparatorKeepsWeakBoundaryLiteralInsertAvailable) {
-  static const auto semicolon = ";"_kw;
-  const detail::StructuralProgressRecoveryCandidate continuingDelete{
-      .matched = true,
-      .cursorOffset = 17u,
-      .editCost = 4u,
-      .strategyPriority = 2u,
-      .hadEdits = true,
-      .continuesAfterFirstEdit = true,
-      .rewritesParseStartBoundary = true,
-      .firstEditKind = ParseDiagnosticKind::Deleted,
-      .firstEditOffset = 9u,
-      .firstEditElement = nullptr,
-  };
-  const detail::StructuralProgressRecoveryCandidate weakLiteralInsert{
-      .matched = true,
-      .cursorOffset = 9u,
-      .editCost = 1u,
-      .strategyPriority = 1u,
-      .hadEdits = true,
-      .continuesAfterFirstEdit = false,
-      .rewritesParseStartBoundary = false,
-      .firstEditKind = ParseDiagnosticKind::Inserted,
-      .firstEditOffset = 9u,
-      .firstEditElement = std::addressof(semicolon),
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::structural_progress_recovery_order_key(weakLiteralInsert),
-      detail::structural_progress_recovery_order_key(continuingDelete),
-      detail::RecoveryOrderProfile::Structural));
-  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
-      detail::structural_progress_recovery_order_key(continuingDelete),
-      detail::structural_progress_recovery_order_key(weakLiteralInsert),
-      detail::RecoveryOrderProfile::Structural));
-}
-
-TEST(RecoverySearchTest,
-     StructuralComparatorPrefersContinuingEditOverWeakBoundaryLiteralInsert) {
-  static const auto comma = ","_kw;
-  static const auto closeParen = ")"_kw;
-  const detail::StructuralProgressRecoveryCandidate continuingCommaInsert{
-      .matched = true,
-      .cursorOffset = 282u,
-      .editCost = 2u,
-      .strategyPriority = 1u,
-      .hadEdits = true,
-      .continuesAfterFirstEdit = true,
-      .rewritesParseStartBoundary = false,
-      .firstEditKind = ParseDiagnosticKind::Inserted,
-      .firstEditOffset = 277u,
-      .firstEditElement = std::addressof(comma),
-  };
-  const detail::StructuralProgressRecoveryCandidate weakBoundaryClose{
-      .matched = true,
-      .cursorOffset = 276u,
-      .editCost = 2u,
-      .strategyPriority = 1u,
-      .hadEdits = true,
-      .continuesAfterFirstEdit = false,
-      .rewritesParseStartBoundary = false,
-      .firstEditKind = ParseDiagnosticKind::Inserted,
-      .firstEditOffset = 276u,
-      .firstEditElement = std::addressof(closeParen),
-  };
-
-  EXPECT_TRUE(detail::is_better_normalized_recovery_order_key(
-      detail::structural_progress_recovery_order_key(continuingCommaInsert),
-      detail::structural_progress_recovery_order_key(weakBoundaryClose),
-      detail::RecoveryOrderProfile::Structural));
-  EXPECT_FALSE(detail::is_better_normalized_recovery_order_key(
-      detail::structural_progress_recovery_order_key(weakBoundaryClose),
-      detail::structural_progress_recovery_order_key(continuingCommaInsert),
-      detail::RecoveryOrderProfile::Structural));
-}
-
-TEST(RecoverySearchTest,
-     SameStartStructuralBoundaryInsertInvariantBeatsSameStartWeakCompetingEdit) {
-  static const auto closeParen = ")"_kw;
-  const detail::StructuralProgressRecoveryCandidate boundaryInsert{
-      .matched = true,
-      .cursorOffset = 276u,
-      .editCost = 2u,
-      .strategyPriority = 1u,
-      .hadEdits = true,
-      .continuesAfterFirstEdit = false,
-      .rewritesParseStartBoundary = false,
-      .firstEditKind = ParseDiagnosticKind::Inserted,
-      .firstEditOffset = 276u,
-      .firstEditElement = std::addressof(closeParen),
-  };
-  const detail::StructuralProgressRecoveryCandidate competingWeakEdit{
-      .matched = true,
-      .cursorOffset = 276u,
-      .editCost = 2u,
-      .strategyPriority = 1u,
-      .hadEdits = true,
-      .continuesAfterFirstEdit = true,
-      .rewritesParseStartBoundary = false,
-      .firstEditKind = ParseDiagnosticKind::Inserted,
-      .firstEditOffset = 276u,
-      .firstEditElement = nullptr,
-  };
-
-  EXPECT_TRUE(detail::is_better_structural_progress_recovery_candidate(
-      boundaryInsert, competingWeakEdit, {.parseStartOffset = 276u}));
-  EXPECT_FALSE(detail::is_better_structural_progress_recovery_candidate(
-      competingWeakEdit, boundaryInsert, {.parseStartOffset = 276u}));
-}
-
-TEST(RecoverySearchTest,
-     StructuralOrderKeyComparatorMatchesCandidateComparator) {
-  const detail::StructuralProgressRecoveryCandidate lhs{
-      .matched = true,
-      .cursorOffset = 22u,
-      .editCost = 4u,
-      .strategyPriority = 2u,
-      .hadEdits = true,
-      .continuesAfterFirstEdit = true,
-      .rewritesParseStartBoundary = false,
-      .firstEditKind = ParseDiagnosticKind::Deleted,
-      .firstEditOffset = 16u,
-      .firstEditElement = nullptr,
-  };
-  const detail::StructuralProgressRecoveryCandidate rhs{
-      .matched = true,
-      .cursorOffset = 16u,
-      .editCost = 1u,
-      .strategyPriority = 1u,
-      .hadEdits = true,
-      .continuesAfterFirstEdit = false,
-      .rewritesParseStartBoundary = false,
-      .firstEditKind = ParseDiagnosticKind::Inserted,
-      .firstEditOffset = 16u,
-      .firstEditElement = nullptr,
-  };
-
-  EXPECT_EQ(
-      detail::is_better_structural_progress_recovery_candidate(lhs, rhs),
-      detail::is_better_normalized_recovery_order_key(
-          detail::structural_progress_recovery_order_key(lhs),
-          detail::structural_progress_recovery_order_key(rhs),
-          detail::RecoveryOrderProfile::Structural));
-}
-
 TEST(RecoverySearchTest, WordLiteralSingleSubstitutionCanRecoverGenerically) {
   ParserRule<RecoverySearchNode> entry{
       "Entry", assign<&RecoverySearchNode::name>("service"_kw)};
@@ -2014,7 +1162,7 @@ TEST(RecoverySearchTest,
 
   const auto text = pegium::text::TextSnapshot::copy("modle basicMath");
   const auto run =
-      detail::run_recovery_search(entry, skipper, ParseOptions{}, text);
+      detail::orchestrate_recovery_search(entry, skipper, ParseOptions{}, text);
   const auto json = detail::recovery_search_run_to_json(run);
 
   EXPECT_TRUE(run.selectedAttempt.entryRuleMatched) << json;
@@ -2039,20 +1187,17 @@ TEST(RecoverySearchTest,
   const auto skipper = SkipperBuilder().ignore(ws).build();
   ParseOptions options;
   options.recoveryWindowTokenCount = 2;
-  options.maxRecoveryWindowTokenCount = 2;
-  options.maxRecoveryWindows = 1;
   options.maxRecoveryEditsPerAttempt = 1;
 
   const auto result =
       pegium::test::Parse(entry, "one two three", skipper, options);
   const auto text = pegium::text::TextSnapshot::copy("one two three");
-  const auto strictResult = run_strict_parse(entry, skipper, text);
-  const auto failureAnalysis =
-      inspect_failure(entry, skipper, text, strictResult.summary);
+  const auto failureAnalysis = inspect_failure(entry, skipper, text);
+  const auto &strictSummary = failureAnalysis.strictResult.summary;
   const auto editFloorOffset =
-      strictResult.summary.parsedLength != 0 ||
+      strictSummary.parsedLength != 0 ||
               !failureAnalysis.snapshot.hasFailureToken
-          ? strictResult.summary.parsedLength
+          ? strictSummary.parsedLength
           : failureAnalysis.snapshot
                 .failureLeafHistory[failureAnalysis.snapshot.failureTokenIndex]
                 .beginOffset;
@@ -2062,7 +1207,7 @@ TEST(RecoverySearchTest,
   const auto spec = build_attempt_spec({}, window);
   bool foundSelectableAttempt = false;
   auto attempt =
-      detail::run_recovery_attempt(entry, skipper, options, text, spec);
+      detail::execute_recovery_parse(entry, skipper, options, text, spec);
   detail::classify_recovery_attempt(attempt);
   foundSelectableAttempt |= detail::is_selectable_recovery_attempt(attempt);
 
@@ -2127,7 +1272,11 @@ TEST(RecoverySearchTest,
 }
 
 TEST(RecoverySearchTest,
-     FullMatchLocalGapInsertionWithoutStablePrefixDoesNotBypassBudgetDowngrade) {
+     FullMatchLocalGapInsertionWithContinuationBypassesBudget) {
+  // A local gap insert that still produces a full match with visible
+  // continuation past the edit is accepted even when the edit cost exceeds
+  // the configured budget. The budget caps exploratory work, not completed
+  // parses.
   detail::RecoveryAttempt attempt;
   attempt.entryRuleMatched = true;
   attempt.fullMatch = true;
@@ -2146,9 +1295,8 @@ TEST(RecoverySearchTest,
 
   detail::classify_recovery_attempt(attempt);
 
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(detail::is_selectable_recovery_attempt(attempt));
+  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Stable);
+  EXPECT_TRUE(detail::is_selectable_recovery_attempt(attempt));
 }
 
 TEST(RecoverySearchTest,
@@ -2215,14 +1363,15 @@ TEST(RecoverySearchTest,
   attempt.maxCursorOffset = 53;
   attempt.configuredMaxEditCost = 64;
   attempt.editCost = 96;
-  attempt.replayWindows = {{.beginOffset = 0,
-                            .editFloorOffset = 0,
-                            .maxCursorOffset = 0,
-                            .tokenCount = 1,
-                            .forwardTokenCount = 1,
-                            .visibleLeafBeginIndex = 0,
-                            .stablePrefixOffset = 0,
-                            .hasStablePrefix = false}};
+  attempt.replayWindow =
+      detail::RecoveryWindow{.beginOffset = 0,
+                             .editFloorOffset = 0,
+                             .maxCursorOffset = 0,
+                             .tokenCount = 1,
+                             .forwardTokenCount = 1,
+                             .visibleLeafBeginIndex = 0,
+                             .stablePrefixOffset = 0,
+                             .hasStablePrefix = false};
   attempt.cst = make_attempt_cst("req login", {{24u, 27u}, {28u, 33u}});
   set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
                                 .offset = 0,
@@ -2237,31 +1386,6 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::is_selectable_recovery_attempt(attempt));
   EXPECT_FALSE(
       detail::satisfies_non_credible_fallback_contract(attempt, {}));
-}
-
-TEST(RecoverySearchTest,
-     TrimmedTailFullMatchUsesFallbackSelectionInsteadOfSelectableRecovery) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.fullMatch = true;
-  attempt.parsedLength = 20;
-  attempt.lastVisibleCursorOffset = 20;
-  attempt.maxCursorOffset = 20;
-  attempt.trimmedVisibleTailToEof = true;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 4;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                .offset = 20,
-                                .beginOffset = 20,
-                                .endOffset = 24,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Stable);
-  EXPECT_FALSE(detail::is_selectable_recovery_attempt(attempt));
-  EXPECT_TRUE(detail::satisfies_non_credible_fallback_contract(attempt, {}));
 }
 
 TEST(RecoverySearchTest,
@@ -2488,110 +1612,6 @@ TEST(RecoverySearchTest,
 }
 
 TEST(RecoverySearchTest,
-     TrimmedFallbackCannotExtendProvisionalCredibleLeadingDelete) {
-  detail::RecoveryAttempt selectedAttempt;
-  selectedAttempt.entryRuleMatched = true;
-  selectedAttempt.hasStablePrefix = true;
-  selectedAttempt.stablePrefixOffset = 10;
-  selectedAttempt.parsedLength = 27;
-  selectedAttempt.lastVisibleCursorOffset = 27;
-  selectedAttempt.maxCursorOffset = 40;
-  selectedAttempt.reachedRecoveryTarget = true;
-  selectedAttempt.configuredMaxEditCost = 64;
-  selectedAttempt.editCost = 1;
-  set_recovery_edits(selectedAttempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                        .offset = 10,
-                                        .beginOffset = 10,
-                                        .endOffset = 12,
-                                        .element = nullptr,
-                                        .message = {}}});
-  detail::classify_recovery_attempt(selectedAttempt);
-  ASSERT_EQ(selectedAttempt.status, detail::RecoveryAttemptStatus::Credible);
-
-  detail::RecoveryAttempt candidate;
-  candidate.entryRuleMatched = true;
-  candidate.hasStablePrefix = true;
-  candidate.stablePrefixOffset = 10;
-  candidate.parsedLength = 48;
-  candidate.lastVisibleCursorOffset = 48;
-  candidate.maxCursorOffset = 48;
-  candidate.fullMatch = true;
-  candidate.stableAfterRecovery = true;
-  candidate.trimmedVisibleTailToEof = true;
-  candidate.configuredMaxEditCost = 64;
-  candidate.editCost = 6;
-  set_recovery_edits(candidate, {{.kind = ParseDiagnosticKind::Deleted,
-                                  .offset = 10,
-                                  .beginOffset = 10,
-                                  .endOffset = 24,
-                                  .element = nullptr,
-                                  .message = {}},
-                                 {.kind = ParseDiagnosticKind::Deleted,
-                                  .offset = 34,
-                                  .beginOffset = 34,
-                                  .endOffset = 48,
-                                  .element = nullptr,
-                                  .message = {}}});
-  detail::classify_recovery_attempt(candidate);
-
-  EXPECT_EQ(candidate.status, detail::RecoveryAttemptStatus::Stable);
-  EXPECT_FALSE(detail::satisfies_non_credible_fallback_contract(
-      candidate, selectedAttempt));
-}
-
-TEST(RecoverySearchTest,
-     TrimmedFallbackCannotExtendLeadingDeleteAfterStableReplay) {
-  detail::RecoveryAttempt selectedAttempt;
-  selectedAttempt.entryRuleMatched = true;
-  selectedAttempt.hasStablePrefix = true;
-  selectedAttempt.stablePrefixOffset = 10;
-  selectedAttempt.parsedLength = 27;
-  selectedAttempt.lastVisibleCursorOffset = 27;
-  selectedAttempt.maxCursorOffset = 40;
-  selectedAttempt.stableAfterRecovery = true;
-  selectedAttempt.configuredMaxEditCost = 64;
-  selectedAttempt.editCost = 1;
-  set_recovery_edits(selectedAttempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                        .offset = 10,
-                                        .beginOffset = 10,
-                                        .endOffset = 12,
-                                        .element = nullptr,
-                                        .message = {}}});
-  detail::classify_recovery_attempt(selectedAttempt);
-  ASSERT_EQ(selectedAttempt.status, detail::RecoveryAttemptStatus::Stable);
-
-  detail::RecoveryAttempt candidate;
-  candidate.entryRuleMatched = true;
-  candidate.hasStablePrefix = true;
-  candidate.stablePrefixOffset = 10;
-  candidate.parsedLength = 48;
-  candidate.lastVisibleCursorOffset = 48;
-  candidate.maxCursorOffset = 48;
-  candidate.fullMatch = true;
-  candidate.stableAfterRecovery = true;
-  candidate.trimmedVisibleTailToEof = true;
-  candidate.configuredMaxEditCost = 64;
-  candidate.editCost = 6;
-  set_recovery_edits(candidate, {{.kind = ParseDiagnosticKind::Deleted,
-                                  .offset = 10,
-                                  .beginOffset = 10,
-                                  .endOffset = 24,
-                                  .element = nullptr,
-                                  .message = {}},
-                                 {.kind = ParseDiagnosticKind::Deleted,
-                                  .offset = 34,
-                                  .beginOffset = 34,
-                                  .endOffset = 48,
-                                  .element = nullptr,
-                                  .message = {}}});
-  detail::classify_recovery_attempt(candidate);
-
-  EXPECT_EQ(candidate.status, detail::RecoveryAttemptStatus::Stable);
-  EXPECT_FALSE(detail::satisfies_non_credible_fallback_contract(
-      candidate, selectedAttempt));
-}
-
-TEST(RecoverySearchTest,
      StableReplayContractFallbackExtensionMustPreserveEarlierEdits) {
   detail::RecoveryAttempt selectedAttempt;
   selectedAttempt.entryRuleMatched = true;
@@ -2773,7 +1793,11 @@ TEST(RecoverySearchTest,
 }
 
 TEST(RecoverySearchTest,
-     NonPrefixDeleteOnlyFullMatchCannotUseFallbackSelection) {
+     NonPrefixDeleteOnlyFullMatchIsSelectableOnGenuineContinuation) {
+  // A non-prefix delete that still reaches a full match with visible
+  // continuation past the deleted span is accepted under the 4-axis ranking:
+  // the fallback-contract path is bypassed because the primary path already
+  // classifies the attempt as Stable.
   detail::RecoveryAttempt attempt;
   attempt.entryRuleMatched = true;
   attempt.fullMatch = true;
@@ -2790,10 +1814,8 @@ TEST(RecoverySearchTest,
 
   detail::classify_recovery_attempt(attempt);
 
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(
-      detail::satisfies_non_credible_fallback_contract(attempt, {}));
+  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Stable);
+  EXPECT_TRUE(detail::is_selectable_recovery_attempt(attempt));
 }
 
 TEST(RecoverySearchTest,
@@ -2846,8 +1868,6 @@ TEST(RecoverySearchTest, SingleWindowResumesStrictParsingAfterRecovery) {
   const auto skipper = SkipperBuilder().ignore(ws).build();
   ParseOptions options;
   options.recoveryWindowTokenCount = 1;
-  options.maxRecoveryWindowTokenCount = 1;
-  options.maxRecoveryWindows = 1;
   const auto result = pegium::test::Parse(entry, "one two", skipper, options);
 
   pegium::test::ExpectCst(result,
@@ -2908,8 +1928,6 @@ TEST(RecoverySearchTest,
   const auto skipper = SkipperBuilder().ignore(ws).build();
   ParseOptions options;
   options.recoveryWindowTokenCount = 1;
-  options.maxRecoveryWindowTokenCount = 1;
-  options.maxRecoveryWindows = 2;
   const auto result =
       pegium::test::Parse(entry, "one;two three four", skipper, options);
 
@@ -2976,6 +1994,7 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(result.recoveryReport.fullRecovered);
   EXPECT_EQ(result.recoveryReport.recoveryCount, 1u);
   EXPECT_EQ(result.recoveryReport.recoveryEdits, 2u);
+  EXPECT_LT(result.recoveryReport.recoveryAttemptRuns, 256u);
   ASSERT_TRUE(result.recoveryReport.lastRecoveryWindow.has_value());
   EXPECT_EQ(result.recoveryReport.lastRecoveryWindow->backwardTokenCount, 1u);
   EXPECT_GE(result.recoveryReport.lastRecoveryWindow->forwardTokenCount, 2u);
@@ -2996,8 +2015,6 @@ TEST(RecoverySearchTest,
   const auto skipper = SkipperBuilder().ignore(ws).build();
   ParseOptions options;
   options.recoveryWindowTokenCount = 1;
-  options.maxRecoveryWindowTokenCount = 1;
-  options.maxRecoveryWindows = 2;
   options.maxRecoveryAttempts = 1;
 
   const auto result =
@@ -3025,8 +2042,6 @@ TEST(RecoverySearchTest,
   const auto skipper = SkipperBuilder().ignore(ws).build();
   ParseOptions options;
   options.recoveryWindowTokenCount = 1;
-  options.maxRecoveryWindowTokenCount = 1;
-  options.maxRecoveryWindows = 2;
 
   const auto result =
       pegium::test::Parse(entry, "one;\n\ntwo three\n\nfour", skipper, options);
@@ -3108,8 +2123,6 @@ TEST(RecoverySearchTest,
   const auto skipper = SkipperBuilder().ignore(ws).build();
   ParseOptions options;
   options.recoveryWindowTokenCount = 1;
-  options.maxRecoveryWindowTokenCount = 1;
-  options.maxRecoveryWindows = 2;
   options.maxRecoveryEditsPerAttempt = 1;
 
   const auto result =
@@ -3132,8 +2145,6 @@ TEST(RecoverySearchTest,
   const auto skipper = SkipperBuilder().ignore(ws).build();
   ParseOptions options;
   options.recoveryWindowTokenCount = 1;
-  options.maxRecoveryWindowTokenCount = 1;
-  options.maxRecoveryWindows = 2;
 
   const auto result =
       pegium::test::Parse(entry, "catalogxoe demo next", skipper, options);
@@ -3192,8 +2203,6 @@ TEST(RecoverySearchTest,
   const auto skipper = SkipperBuilder().ignore(ws).build();
   ParseOptions options;
   options.recoveryWindowTokenCount = 1;
-  options.maxRecoveryWindowTokenCount = 1;
-  options.maxRecoveryWindows = 2;
 
   const auto result =
       pegium::test::Parse(entry, "cxtxlgxxe demo next", skipper, options);
@@ -3220,8 +2229,6 @@ TEST(RecoverySearchTest,
   const auto skipper = SkipperBuilder().ignore(ws).build();
   ParseOptions options;
   options.recoveryWindowTokenCount = 1;
-  options.maxRecoveryWindowTokenCount = 1;
-  options.maxRecoveryWindows = 1;
   const auto result =
       pegium::test::Parse(entry, "one;two three;four five", skipper, options);
 
@@ -3273,26 +2280,40 @@ TEST(RecoverySearchTest,
           "end": 18,
           "grammarSource": "fourth=ID",
           "text": "four"
+        },
+        {
+          "begin": 19,
+          "end": 19,
+          "grammarSource": "Literal",
+          "recovered": true,
+          "text": ""
+        },
+        {
+          "begin": 19,
+          "end": 23,
+          "grammarSource": "fifth=ID",
+          "text": "five"
         }
       ],
-      "end": 18,
+      "end": 23,
       "grammarSource": "Rule(Entry)"
     }
   ]
 })json",
                           kRecoveryCstJsonOptions);
-  EXPECT_FALSE(result.fullMatch);
+  EXPECT_TRUE(result.fullMatch);
   ASSERT_EQ(result.parseDiagnostics.size(), 2u);
   EXPECT_EQ(result.parseDiagnostics.front().kind, ParseDiagnosticKind::Inserted);
-  EXPECT_EQ(result.parseDiagnostics.back().kind, ParseDiagnosticKind::Incomplete);
+  EXPECT_EQ(result.parseDiagnostics.back().kind, ParseDiagnosticKind::Inserted);
   EXPECT_EQ(result.parseDiagnostics.back().offset, 19u);
-  EXPECT_EQ(result.parseDiagnostics.back().beginOffset, 18u);
-  EXPECT_EQ(result.parseDiagnostics.back().endOffset, 23u);
-  EXPECT_EQ(result.parseDiagnostics.back().message, "Unexpected input.");
+  EXPECT_EQ(result.parseDiagnostics.back().beginOffset, 19u);
+  EXPECT_EQ(result.parseDiagnostics.back().endOffset, 19u);
+  EXPECT_EQ(result.parseDiagnostics.back().message, "");
   EXPECT_TRUE(result.recoveryReport.hasRecovered);
-  EXPECT_FALSE(result.recoveryReport.fullRecovered);
-  EXPECT_EQ(result.recoveryReport.recoveryCount, 1u);
-  EXPECT_EQ(result.recoveryReport.recoveryEdits, 1u);
+  EXPECT_TRUE(result.recoveryReport.fullRecovered);
+  EXPECT_EQ(result.recoveryReport.recoveryCount, 2u);
+  EXPECT_EQ(result.recoveryReport.recoveryEdits, 2u);
+  EXPECT_LT(result.recoveryReport.recoveryAttemptRuns, 256u);
   ASSERT_TRUE(result.recoveryReport.lastRecoveryWindow.has_value());
 }
 

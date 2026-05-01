@@ -1,8 +1,13 @@
 #include <pegium/core/parser/LiteralFuzzyMatcher.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <vector>
+
+#include <pegium/core/parser/ContextShared.hpp>
+#include <pegium/core/utils/TextUtils.hpp>
 
 namespace pegium::parser::detail {
 
@@ -240,11 +245,9 @@ prune_dominated_candidates(const LiteralFuzzyCandidates &candidates) {
 
 [[nodiscard]] constexpr unsigned char
 normalize_char(unsigned char value, bool caseSensitive) noexcept {
-  if (!caseSensitive && value >= static_cast<unsigned char>('A') &&
-      value <= static_cast<unsigned char>('Z')) {
-    return static_cast<unsigned char>(value + ('a' - 'A'));
-  }
-  return value;
+  return caseSensitive ? value
+                       : static_cast<unsigned char>(
+                             pegium::parser::tolower(static_cast<char>(value)));
 }
 
 [[nodiscard]] constexpr bool
@@ -254,21 +257,41 @@ equal_codepoint(unsigned char lhs, unsigned char rhs,
          normalize_char(rhs, caseSensitive);
 }
 
-[[nodiscard]] constexpr bool is_word_char(unsigned char value) noexcept {
-  return (value >= static_cast<unsigned char>('a') &&
-          value <= static_cast<unsigned char>('z')) ||
-         (value >= static_cast<unsigned char>('A') &&
-          value <= static_cast<unsigned char>('Z')) ||
-         (value >= static_cast<unsigned char>('0') &&
-          value <= static_cast<unsigned char>('9')) ||
-         value == static_cast<unsigned char>('_');
+[[nodiscard]] bool is_word_like(std::string_view value) noexcept {
+  return is_word_like_terminal(value);
 }
 
-[[nodiscard]] bool is_word_like(std::string_view value) noexcept {
-  return !value.empty() &&
-         std::ranges::all_of(value, [](char c) {
-           return is_word_char(static_cast<unsigned char>(c));
-         });
+[[nodiscard]] bool
+has_word_like_local_anchor(std::string_view literal, std::string_view input,
+                           bool caseSensitive) noexcept {
+  if (!is_word_like(literal) || !is_word_like(input)) {
+    return true;
+  }
+
+  constexpr std::size_t kAnchorWindow = 3u;
+  const auto literalWindow = std::min(literal.size(), kAnchorWindow);
+  const auto inputWindow = std::min(input.size(), kAnchorWindow);
+  if (literalWindow <= 1u || inputWindow <= 1u) {
+    return true;
+  }
+
+  for (std::size_t literalIndex = 0u; literalIndex < literalWindow;
+       ++literalIndex) {
+    for (std::size_t inputIndex = 0u; inputIndex < inputWindow; ++inputIndex) {
+      const auto indexDistance =
+          literalIndex > inputIndex ? literalIndex - inputIndex
+                                    : inputIndex - literalIndex;
+      if (indexDistance > 1u) {
+        continue;
+      }
+      if (equal_codepoint(static_cast<unsigned char>(literal[literalIndex]),
+                          static_cast<unsigned char>(input[inputIndex]),
+                          caseSensitive)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 [[nodiscard]] bool equals_text(std::string_view lhs, std::string_view rhs,
@@ -288,18 +311,51 @@ equal_codepoint(unsigned char lhs, unsigned char rhs,
 
 } // namespace
 
-LiteralFuzzyCandidates find_literal_fuzzy_candidates(std::string_view literal,
-                                                     std::string_view input,
-                                                     bool caseSensitive) noexcept {
+LiteralFuzzyCandidates
+find_literal_fuzzy_candidates(std::string_view literal,
+                              std::string_view input, bool caseSensitive,
+                              LiteralFuzzyCandidatesCache *cache) noexcept {
   LiteralFuzzyCandidates candidates;
-  candidates.reserve(input.size() * 2u);
   if (literal.empty() || input.empty()) {
     return candidates;
   }
   if (equals_text(literal, input, caseSensitive)) {
     return candidates;
   }
+  if (!has_word_like_local_anchor(literal, input, caseSensitive)) {
+    return candidates;
+  }
 
+  // Direct-mapped lookup. The function is called hundreds of thousands of
+  // times during pathological recoveries (git-conflict markers, large fuzz
+  // sweeps) with substantial input-window repetition: backtracking re-
+  // evaluates the same (literal, source-window) tuple as the parser explores
+  // alternative branches. We compare by pointer identity — both literal
+  // storage (grammar) and input span (text snapshot) are stable for the
+  // duration of one parse, so the cache must live in the parse-scoped owner
+  // (`RecoveryContext`). When the caller does not provide a cache, we fall
+  // through and recompute.
+  LiteralFuzzyCandidatesCache::Entry *slot = nullptr;
+  if (cache != nullptr) {
+    const auto literalHash =
+        reinterpret_cast<std::uintptr_t>(literal.data()) ^
+        (literal.size() * 0x9E3779B97F4A7C15ULL);
+    const auto inputHash =
+        reinterpret_cast<std::uintptr_t>(input.data()) ^
+        (input.size() * 0xBF58476D1CE4E5B9ULL);
+    const auto slotIdx =
+        (literalHash ^ inputHash ^ (caseSensitive ? 0xDEADBEEFULL : 0u)) %
+        LiteralFuzzyCandidatesCache::kSlotCount;
+    slot = &cache->slots[slotIdx];
+    if (slot->literalData == literal.data() &&
+        slot->literalSize == literal.size() &&
+        slot->inputData == input.data() && slot->inputSize == input.size() &&
+        slot->caseSensitive == caseSensitive) {
+      return slot->result;
+    }
+  }
+
+  candidates.reserve(input.size() * 2u);
   const auto rows = literal.size() + 1u;
   const auto cols = input.size() + 1u;
   std::vector<DpState> cells(rows * cols);
@@ -447,7 +503,16 @@ LiteralFuzzyCandidates find_literal_fuzzy_candidates(std::string_view literal,
     collect_candidate(state.noSubstitution, DpLane::NoSubstitution);
   }
 
-  return prune_dominated_candidates(candidates);
+  auto pruned = prune_dominated_candidates(candidates);
+  if (slot != nullptr) {
+    slot->literalData = literal.data();
+    slot->literalSize = literal.size();
+    slot->inputData = input.data();
+    slot->inputSize = input.size();
+    slot->caseSensitive = caseSensitive;
+    slot->result = pruned;
+  }
+  return pruned;
 }
 
 std::optional<LiteralFuzzyCandidate>

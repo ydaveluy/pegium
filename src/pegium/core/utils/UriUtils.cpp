@@ -7,6 +7,8 @@
 #include <span>
 #include <string>
 
+#include <pegium/core/utils/TextUtils.hpp>
+
 namespace pegium::utils {
 
 namespace {
@@ -16,9 +18,7 @@ bool has_file_scheme(std::string_view uri) {
     return false;
   }
   for (std::size_t index = 0; index < 7; ++index) {
-    const auto actual = static_cast<unsigned char>(uri[index]);
-    const auto expected = static_cast<unsigned char>("file://"[index]);
-    if (std::tolower(actual) != expected) {
+    if (tolower(uri[index]) != "file://"[index]) {
       return false;
     }
   }
@@ -53,8 +53,7 @@ std::string percent_encode(std::string_view text) {
 }
 
 int from_hex(char c) {
-  const auto lower =
-      static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(c)));
+  const auto lower = static_cast<unsigned char>(tolower(c));
   if (lower >= '0' && lower <= '9') {
     return lower - '0';
   }
@@ -133,9 +132,8 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
                                    : remainder.substr(0, slashIndex);
         !authority.empty()) {
       std::string lowered(authority);
-      std::ranges::transform(lowered, lowered.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-      });
+      std::ranges::transform(lowered, lowered.begin(),
+                             [](char c) { return tolower(c); });
       if (lowered != "localhost") {
         return std::nullopt;
       }

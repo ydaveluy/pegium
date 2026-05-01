@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/utils/TextUtils.hpp>
 
 namespace pegium::parser::detail {
 
@@ -53,11 +54,6 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
     ctx.maxConsecutiveCodepointDeletes = std::numeric_limits<std::uint32_t>::max();
     ctx.maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
     ctx.maxEditCost = std::numeric_limits<std::uint32_t>::max();
-    if constexpr (requires(Context &context) {
-                    context.noteRecoveryPolicyMutation();
-                  }) {
-      ctx.noteRecoveryPolicyMutation();
-    }
     enabled = true;
     return true;
   }
@@ -69,11 +65,6 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
     ctx.maxConsecutiveCodepointDeletes = savedMaxConsecutiveDeletes;
     ctx.maxEditsPerAttempt = savedMaxEditsPerAttempt;
     ctx.maxEditCost = savedMaxEditCost;
-    if constexpr (requires(Context &context) {
-                    context.noteRecoveryPolicyMutation();
-                  }) {
-      ctx.noteRecoveryPolicyMutation();
-    }
     enabled = false;
   }
 
@@ -102,11 +93,6 @@ template <typename Context> struct DeleteRetryReplayScope {
       ctx.allowDeleteRetry = false;
     }
     ctx.skipAfterDelete = false;
-    if constexpr (requires(Context &context) {
-                    context.noteRecoveryPolicyMutation();
-                  }) {
-      ctx.noteRecoveryPolicyMutation();
-    }
   }
 
   DeleteRetryReplayScope(const DeleteRetryReplayScope &) = delete;
@@ -117,11 +103,6 @@ template <typename Context> struct DeleteRetryReplayScope {
     ctx.skipAfterDelete = savedSkipAfterDelete;
     if (disableDeleteRetry) {
       ctx.allowDeleteRetry = savedAllowDeleteRetry;
-    }
-    if constexpr (requires(Context &context) {
-                    context.noteRecoveryPolicyMutation();
-                  }) {
-      ctx.noteRecoveryPolicyMutation();
     }
   }
 
@@ -171,6 +152,8 @@ struct DeleteRetryOptions {
   bool extendThroughHiddenTrivia = true;
   bool stopAtHiddenTriviaBoundary = false;
   bool visitAfterHiddenTriviaExtension = true;
+  bool stopAtStructuredVisibleSource = false;
+  bool stopOverflowAtStructuredVisibleSource = false;
 };
 
 struct DeleteRetryVisitState {
@@ -230,6 +213,21 @@ inline void invoke_delete_scan_on_match(OnMatchFn &onMatchFn,
   } else {
     onMatchFn(matchedEnd);
   }
+}
+
+template <typename Context>
+[[nodiscard]] constexpr bool
+delete_retry_position_starts_structured_visible_source(
+    const Context &ctx, const char *position) noexcept {
+  if (position == nullptr || position >= ctx.end) {
+    return false;
+  }
+  if constexpr (requires { ctx.skip_without_builder(position); }) {
+    if (ctx.skip_without_builder(position) != position) {
+      return false;
+    }
+  }
+  return is_identifier_like_codepoint(decode_utf8_codepoint(position));
 }
 
 template <typename VisitFn>
@@ -393,9 +391,20 @@ visit_guarded_delete_retry_positions(
           retryScope.commitOverflowEdits();
         }
         return result;
-      };
+  };
   const auto try_retry_pass = [&](bool overflowBudget) {
-    while (deleteCount < options.scan.maxDeletes && ctx.deleteOneCodepoint()) {
+    while (deleteCount < options.scan.maxDeletes) {
+      const bool structuredVisibleSource =
+          delete_retry_position_starts_structured_visible_source(ctx,
+                                                                ctx.cursor());
+      if (((overflowBudget && options.stopOverflowAtStructuredVisibleSource) ||
+           options.stopAtStructuredVisibleSource) &&
+          structuredVisibleSource && deleteCount != 0u) {
+        return DeleteRetryVisitResult::Continue;
+      }
+      if (!ctx.deleteOneCodepoint()) {
+        break;
+      }
       ++deleteCount;
       bool hiddenTriviaBoundary = false;
       if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
@@ -411,6 +420,12 @@ visit_guarded_delete_retry_positions(
       if (const auto result = try_retry_at_current_position(visitState);
           result != DeleteRetryVisitResult::Continue) {
         return result;
+      }
+      if (options.stopAtStructuredVisibleSource &&
+          delete_retry_position_starts_structured_visible_source(ctx,
+                                                                ctx.cursor()) &&
+          deleteCount != 0u) {
+        return DeleteRetryVisitResult::Stop;
       }
       if (!hiddenTriviaBoundary) {
         continue;
@@ -431,6 +446,12 @@ visit_guarded_delete_retry_positions(
                     try_retry_at_current_position(extendedVisitState);
                 result != DeleteRetryVisitResult::Continue) {
               return result;
+            }
+            if (options.stopAtStructuredVisibleSource &&
+                delete_retry_position_starts_structured_visible_source(
+                    ctx, ctx.cursor()) &&
+                deleteCount != 0u) {
+              return DeleteRetryVisitResult::Stop;
             }
             continue;
           }

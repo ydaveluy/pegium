@@ -1,14 +1,13 @@
 add_library(pegium_example_domainmodel_core
-    src/core/references/DomainModelScopeComputation.cpp
-    src/core/references/QualifiedNameProvider.cpp
-    src/core/validation/DomainModelValidator.cpp
+    src/domainmodel/core/Module.cpp
+    src/domainmodel/core/references/DomainModelScopeComputation.cpp
+    src/domainmodel/core/references/QualifiedNameProvider.cpp
+    src/domainmodel/core/validation/DomainModelValidator.cpp
 )
 
 target_include_directories(pegium_example_domainmodel_core
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_domainmodel_core PUBLIC cxx_std_20)
@@ -20,15 +19,14 @@ target_link_libraries(pegium_example_domainmodel_core
 )
 
 add_library(pegium_example_domainmodel_lsp
-    src/lsp/DomainModelFormatter.cpp
-    src/lsp/DomainModelRenameProvider.cpp
+    src/domainmodel/lsp/DomainModelFormatter.cpp
+    src/domainmodel/lsp/DomainModelRenameProvider.cpp
+    src/domainmodel/lsp/Module.cpp
 )
 
 target_include_directories(pegium_example_domainmodel_lsp
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_domainmodel_lsp PUBLIC cxx_std_20)
@@ -41,15 +39,13 @@ target_link_libraries(pegium_example_domainmodel_lsp
 )
 
 add_library(pegium_example_domainmodel_cli
-    src/cli/CliUtils.cpp
-    src/cli/Generator.cpp
+    src/domainmodel/cli/CliUtils.cpp
+    src/domainmodel/cli/Generator.cpp
 )
 
 target_include_directories(pegium_example_domainmodel_cli
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_compile_features(pegium_example_domainmodel_cli PUBLIC cxx_std_20)
@@ -62,7 +58,7 @@ target_link_libraries(pegium_example_domainmodel_cli
 )
 
 add_executable(pegium-example-domainmodel-cli
-    src/cli_main.cpp
+    src/domainmodel/cli_main.cpp
 )
 target_compile_features(pegium-example-domainmodel-cli PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-domainmodel-cli PRIVATE
@@ -72,7 +68,7 @@ target_link_libraries(pegium-example-domainmodel-cli PRIVATE
 )
 
 add_executable(pegium-example-domainmodel-lsp
-    src/lsp_main.cpp
+    src/domainmodel/lsp_main.cpp
 )
 target_compile_features(pegium-example-domainmodel-lsp PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-domainmodel-lsp PRIVATE
@@ -120,4 +116,17 @@ if(BUILD_TESTING)
     set_tests_properties(PegiumRecoveryCorpusDomainModel PROPERTIES
         LABELS "recovery-corpus"
     )
+
+    if(PEGIUM_ENABLE_FUZZ_CORPUS)
+        add_test(
+            NAME PegiumDomainModelKeywordFuzz
+            COMMAND $<TARGET_FILE:pegium-example-domainmodel-test>
+                --gtest_filter=DomainModelKeywordFuzzTest.*
+        )
+        set_tests_properties(PegiumDomainModelKeywordFuzz PROPERTIES
+            LABELS "fuzz-corpus"
+            ENVIRONMENT "PEGIUM_DOMAINMODEL_FUZZ_EXHAUSTIVE=1"
+            TIMEOUT 600
+        )
+    endif()
 endif()

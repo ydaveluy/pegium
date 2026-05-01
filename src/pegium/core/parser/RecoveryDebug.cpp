@@ -368,64 +368,28 @@ attempt_score_projection_to_json(const RecoveryAttempt &attempt,
   };
 }
 
-[[nodiscard]] pegium::JsonValue
-order_key_to_json(const NormalizedRecoveryOrderKey &key) {
+[[nodiscard]] pegium::JsonValue order_key_to_json(const RecoveryKey &key) {
   return pegium::JsonValue::Object{
-      {"prefix",
-       pegium::JsonValue::Object{
-           {"credible", key.prefix.credible},
-           {"entryRuleMatched", key.prefix.entryRuleMatched},
-           {"firstEditOffset", json_int(key.prefix.firstEditOffset)},
-           {"fullMatch", key.prefix.fullMatch},
-           {"stable", key.prefix.stable},
-       }},
-      {"continuation",
-       pegium::JsonValue::Object{
-           {"anchorQuality", json_int(static_cast<std::uint32_t>(
-                                 key.continuation.anchorQuality))},
-           {"consumedVisible", json_int(key.continuation.consumedVisible)},
-           {"continuesAfterFirstEdit",
-            key.continuation.continuesAfterFirstEdit},
-           {"cursorOffset", json_int(key.continuation.cursorOffset)},
-           {"postSkipCursorOffset",
-            json_int(key.continuation.postSkipCursorOffset)},
-           {"strength",
-            json_int(static_cast<TextOffset>(key.continuation.strength))},
-       }},
-      {"safety",
-       pegium::JsonValue::Object{
-           {"matched", key.safety.matched},
-           {"overflowed", key.safety.overflowed},
-           {"replaySafe", key.safety.replaySafe},
-           {"strategyPriority",
-            json_int(static_cast<TextOffset>(key.safety.strategyPriority))},
-       }},
-      {"edits",
-       pegium::JsonValue::Object{
-           {"entryCount", json_int(key.edits.entryCount)},
-           {"distance", json_int(key.edits.distance)},
-           {"editCost", json_int(key.edits.editCost)},
-           {"editCount", json_int(key.edits.editCount)},
-           {"editSpan", json_int(key.edits.editSpan)},
-           {"operationCount", json_int(key.edits.operationCount)},
-           {"primaryRankCost", json_int(key.edits.primaryRankCost)},
-           {"secondaryRankCost", json_int(key.edits.secondaryRankCost)},
-           {"substitutionCount", json_int(key.edits.substitutionCount)},
-       }},
-      {"progress",
-       pegium::JsonValue::Object{
-           {"cursorOffset", json_int(key.progress.cursorOffset)},
-           {"maxCursorOffset", json_int(key.progress.maxCursorOffset)},
-           {"parsedLength", json_int(key.progress.parsedLength)},
-       }},
+      {"matched", key.matched},
+      {"firstEditOffset", json_int(key.firstEditOffset)},
+      {"editCost", json_int(key.editCost)},
+      {"progressAfterEdits", json_int(key.progressAfterEdits)},
   };
 }
 
 [[nodiscard]] pegium::JsonValue
 attempt_spec_to_json(const RecoveryAttemptSpec &spec) {
+  pegium::JsonValue::Array windows;
+  windows.emplace_back(recovery_window_to_json(spec.window));
   pegium::JsonValue::Object object{
-      {"windows", recovery_windows_to_json(spec.windows)},
+      {"windows", std::move(windows)},
   };
+  if (!spec.committedRecoveryEdits.empty()) {
+    object.try_emplace("committedRecoveryResumeFloor",
+                       json_int(spec.committedRecoveryResumeFloor));
+    object.try_emplace("committedRecoveryEditCount",
+                       json_int(spec.committedRecoveryEdits.size()));
+  }
   return object;
 }
 
@@ -535,7 +499,8 @@ recovery_attempt_to_json(const RecoveryAttempt &attempt,
            : pegium::JsonValue(nullptr)},
       {"fullMatch", attempt.fullMatch},
       {"maxCursorOffset", json_int(attempt.maxCursorOffset)},
-      {"orderKey", order_key_to_json(recovery_attempt_order_key(attempt))},
+      {"lastVisibleCursorOffset", json_int(attempt.lastVisibleCursorOffset)},
+      {"orderKey", order_key_to_json(recovery_attempt_key(attempt))},
       {"parseDiagnostics", std::move(diagnostics)},
       {"recoveryEdits", std::move(recoveryEdits)},
       {"parsedLength", json_int(attempt.parsedLength)},
@@ -546,9 +511,10 @@ recovery_attempt_to_json(const RecoveryAttempt &attempt,
       {"stablePrefixOffset", json_int(attempt.stablePrefixOffset)},
       {"status", std::string(recovery_attempt_status_name(attempt.status))},
   };
-  if (!attempt.replayWindows.empty()) {
-    object.try_emplace("replayWindows",
-                      recovery_windows_to_json(attempt.replayWindows));
+  if (attempt.replayWindow.has_value()) {
+    pegium::JsonValue::Array replayWindows;
+    replayWindows.emplace_back(recovery_window_to_json(*attempt.replayWindow));
+    object.try_emplace("replayWindows", std::move(replayWindows));
   }
   if (spec != nullptr) {
     object.try_emplace("spec", attempt_spec_to_json(*spec));

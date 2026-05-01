@@ -23,12 +23,4 @@ make_recovery_cost(std::uint32_t budgetCost, std::uint32_t primaryRankCost,
   };
 }
 
-[[nodiscard]] constexpr std::uint32_t
-saturating_add(std::uint32_t lhs, std::uint32_t rhs) noexcept {
-  if (lhs > std::numeric_limits<std::uint32_t>::max() - rhs) {
-    return std::numeric_limits<std::uint32_t>::max();
-  }
-  return lhs + rhs;
-}
-
 } // namespace pegium::parser::detail

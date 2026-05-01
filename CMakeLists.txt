@@ -12,6 +12,7 @@ option(PEGIUM_PROFILE_BUILD "Enable profiling-friendly flags (no LTO, visible sy
 option(PEGIUM_ENABLE_ASAN "Enable AddressSanitizer for supported toolchains" OFF)
 option(PEGIUM_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer for supported toolchains" OFF)
 option(PEGIUM_BUILD_FUZZ_TARGETS "Build FuzzTest-based Pegium fuzz targets" OFF)
+option(PEGIUM_ENABLE_FUZZ_CORPUS "Register exhaustive language-specific fuzz corpus tests" OFF)
 option(PEGIUM_BUILD_EXAMPLES "Build pegium examples" ${PEGIUM_MASTER_PROJECT})
 
 if(NOT PEGIUM_MASTER_PROJECT AND NOT DEFINED BUILD_TESTING)
@@ -123,10 +124,17 @@ endif()
 
 option(PEGIUM_ENABLE_CODECOVERAGE   "Enable code coverage testing support"            OFF)
 option(PEGIUM_ENABLE_RECOVERY_TRACE "Enable verbose recovery traces"                   OFF)
+option(PEGIUM_ENABLE_STEP_TRACE     "Enable step counters for Phase 8 instrumentation" OFF)
 
 if(PEGIUM_ENABLE_RECOVERY_TRACE)
     target_compile_definitions(pegium_internal_build_options INTERFACE
         PEGIUM_ENABLE_RECOVERY_TRACE
+    )
+endif()
+
+if(PEGIUM_ENABLE_STEP_TRACE)
+    target_compile_definitions(pegium_internal_build_options INTERFACE
+        PEGIUM_ENABLE_STEP_TRACE
     )
 endif()
 
@@ -197,10 +205,39 @@ if(PEGIUM_BUILD_FUZZ_TARGETS)
     endif()
 endif()
 
-add_subdirectory(src)
+add_subdirectory(src/pegium)
 if(PEGIUM_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 if(BUILD_TESTING)
     add_subdirectory(tests)
+endif()
+
+# Recovery refactor lints (Phase 0 charge B). The lint scripts live in
+# tools/lints/ and are scaffolds for several upcoming concepts; the
+# `pegium_recovery_lints` target lets CI invoke them with a single
+# command. As phases activate semantically (Phase 1: strict path,
+# Phase 2: evidence + axis orthogonality, etc.), the scripts grow but
+# the CMake wiring remains stable.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_custom_target(pegium_recovery_lints
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/lints/run_all.py
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Running recovery refactor lints"
+        VERBATIM
+    )
+    if(BUILD_TESTING)
+        add_test(
+            NAME PegiumRecoveryLints
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/lints/run_all.py
+                ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        set_tests_properties(PegiumRecoveryLints PROPERTIES
+            LABELS "lints;core"
+        )
+    endif()
 endif()

@@ -74,7 +74,8 @@ private:
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     if constexpr (RecoveryParseModeContext<Context>) {
-      if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows()) {
+      if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows() &&
+          !ctx.allowsCompletedWindowContinuationRecovery()) {
         return parse_impl(static_cast<TrackedParseContext &>(ctx));
       }
     }
