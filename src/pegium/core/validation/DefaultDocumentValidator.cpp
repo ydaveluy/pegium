@@ -630,7 +630,7 @@ void DefaultDocumentValidator::processLinkingErrors(
 
     diagnostics.push_back(pegium::Diagnostic{
         .severity = pegium::DiagnosticSeverity::Error,
-        .message = "Unresolved reference: " + std::string(refText),
+        .message = reference.getErrorMessage(),
         .source = source,
         .code = pegium::DiagnosticCode(
             std::string("linking.unresolved-reference")),

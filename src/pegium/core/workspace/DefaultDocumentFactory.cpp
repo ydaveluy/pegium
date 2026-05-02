@@ -161,7 +161,8 @@ void DefaultDocumentFactory::parse(
     document.parseResult.cst->attachDocument(document);
   }
   if (document.parseResult.astArena != nullptr) {
-    document.parseResult.astArena->attachDocument(document);
+    document.parseResult.astArena->attachDocument(
+        document, services.shared.astReflection.get());
   }
 }
 

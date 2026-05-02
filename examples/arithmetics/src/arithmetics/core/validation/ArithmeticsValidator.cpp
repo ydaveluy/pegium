@@ -23,7 +23,7 @@ namespace {
 using namespace arithmetics::ast;
 
 const Definition *as_definition(const pegium::AstNode *node) {
-  return dynamic_cast<const Definition *>(node);
+  return pegium::ast_ptr_cast<const Definition>(node);
 }
 
 const Definition *resolved_function_definition(const FunctionCall &call) {
@@ -31,18 +31,18 @@ const Definition *resolved_function_definition(const FunctionCall &call) {
 }
 
 std::optional<double> evaluate_constant_expression(const Expression &expression) {
-  if (const auto *number = dynamic_cast<const NumberLiteral *>(&expression)) {
+  if (const auto *number = pegium::ast_ptr_cast<const NumberLiteral>(&expression)) {
     return number->value;
   }
 
-  if (const auto *grouped = dynamic_cast<const GroupedExpression *>(&expression)) {
+  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(&expression)) {
     if (!grouped->expression) {
       return std::nullopt;
     }
     return evaluate_constant_expression(*grouped->expression);
   }
 
-  const auto *binary = dynamic_cast<const BinaryExpression *>(&expression);
+  const auto *binary = pegium::ast_ptr_cast<const BinaryExpression>(&expression);
   if (binary == nullptr || !binary->left || !binary->right) {
     return std::nullopt;
   }
@@ -63,11 +63,11 @@ std::optional<double> evaluate_constant_expression(const Expression &expression)
 std::optional<double> resolve_normalizable_value(
     const Expression &expression,
     const std::unordered_map<const Expression *, double> &context) {
-  if (const auto *number = dynamic_cast<const NumberLiteral *>(&expression)) {
+  if (const auto *number = pegium::ast_ptr_cast<const NumberLiteral>(&expression)) {
     return number->value;
   }
 
-  if (const auto *grouped = dynamic_cast<const GroupedExpression *>(&expression)) {
+  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(&expression)) {
     if (!grouped->expression) {
       return std::nullopt;
     }
@@ -88,7 +88,7 @@ void erase_normalizable_value(
     return;
   }
 
-  if (const auto *grouped = dynamic_cast<const GroupedExpression *>(expression)) {
+  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(expression)) {
     erase_normalizable_value(grouped->expression, context);
   }
 
@@ -99,14 +99,14 @@ void evaluate_normalizable_expressions(
     const Expression &expression,
     std::unordered_map<const Expression *, double> &context,
     std::vector<const Expression *> &order) {
-  if (const auto *grouped = dynamic_cast<const GroupedExpression *>(&expression)) {
+  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(&expression)) {
     if (grouped->expression) {
       evaluate_normalizable_expressions(*grouped->expression, context, order);
     }
     return;
   }
 
-  const auto *binary = dynamic_cast<const BinaryExpression *>(&expression);
+  const auto *binary = pegium::ast_ptr_cast<const BinaryExpression>(&expression);
   if (binary == nullptr || !binary->left || !binary->right) {
     return;
   }
@@ -174,19 +174,19 @@ void collect_nested_function_calls(const Definition &host,
     return;
   }
 
-  if (const auto *grouped = dynamic_cast<const GroupedExpression *>(expression)) {
+  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(expression)) {
     collect_nested_function_calls(host, grouped->expression, calls);
     return;
   }
 
-  if (const auto *call = dynamic_cast<const FunctionCall *>(expression)) {
+  if (const auto *call = pegium::ast_ptr_cast<const FunctionCall>(expression)) {
     if (resolved_function_definition(*call) != nullptr) {
       calls.push_back({.call = call, .host = &host});
     }
     return;
   }
 
-  if (const auto *binary = dynamic_cast<const BinaryExpression *>(expression)) {
+  if (const auto *binary = pegium::ast_ptr_cast<const BinaryExpression>(expression)) {
     collect_nested_function_calls(host, binary->left, calls);
     collect_nested_function_calls(host, binary->right, calls);
   }
@@ -321,7 +321,7 @@ void ArithmeticsValidator::checkNormalizable(
     const Definition &definition,
     const pegium::validation::ValidationAcceptor &accept) const {
   if (!definition.expr ||
-      dynamic_cast<const NumberLiteral *>(definition.expr) != nullptr) {
+      pegium::ast_ptr_cast<const NumberLiteral>(definition.expr) != nullptr) {
     return;
   }
 
@@ -353,7 +353,7 @@ void ArithmeticsValidator::checkUniqueDefinitions(
   names.reserve(module.statements.size());
 
   for (const auto &statement : module.statements) {
-    const auto *definition = dynamic_cast<const Definition *>(statement);
+    const auto *definition = pegium::ast_ptr_cast<const Definition>(statement);
     if (definition == nullptr || definition->name.empty()) {
       continue;
     }
@@ -380,7 +380,7 @@ void ArithmeticsValidator::checkFunctionRecursion(
   std::vector<FunctionCallCycle> callCycles;
 
   for (const auto &statement : module.statements) {
-    const auto *definition = dynamic_cast<const Definition *>(statement);
+    const auto *definition = pegium::ast_ptr_cast<const Definition>(statement);
     if (definition == nullptr) {
       continue;
     }

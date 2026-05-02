@@ -1,11 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
-#include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
-#include <type_traits>
+#include <thread>
 #include <typeindex>
 #include <utility>
 
@@ -142,25 +141,38 @@ struct ReferenceHandle {
   }
 };
 
+/// Error subtypes are kept contiguous and last so `hasError()` collapses to a
+/// single `state >= kFirstErrorState` comparison.
 enum class ReferenceState : std::uint8_t {
   Unresolved,
   Resolving,
   Resolved,
-  Error,
+  ErrorNoLinker,
+  ErrorNotFound,
+  ErrorIncompatibleType,
+  ErrorCycle,
+  ErrorException,
 };
+
+inline constexpr ReferenceState kFirstErrorState =
+    ReferenceState::ErrorNoLinker;
 
 class AbstractReference {
 public:
-  AbstractReference() = default;
   virtual ~AbstractReference() noexcept = default;
 
   AbstractReference(const AbstractReference &) = delete;
   AbstractReference &operator=(const AbstractReference &) = delete;
 
+  /// Move construction copies the current state snapshot. Only safe when no
+  /// other thread holds the resolver role on `other` (true during AST build).
   AbstractReference(AbstractReference &&other) noexcept
       : _container(other._container), _assignment(other._assignment),
         _refText(std::move(other._refText)), _refNode(other._refNode),
-        _linker(other._linker), _state(other._state) {}
+        _linker(other._linker),
+        _state(other._state.load(std::memory_order_acquire)),
+        _resolvingOwner(other._resolvingOwner.load(std::memory_order_acquire)),
+        _isMulti(other._isMulti) {}
 
   AbstractReference &operator=(AbstractReference &&other) noexcept {
     if (this != &other) {
@@ -169,7 +181,13 @@ public:
       _refText = std::move(other._refText);
       _refNode = other._refNode;
       _linker = other._linker;
-      _state = other._state;
+      _state.store(other._state.load(std::memory_order_acquire),
+                   std::memory_order_release);
+      _resolvingOwner.store(
+          other._resolvingOwner.load(std::memory_order_acquire),
+          std::memory_order_release);
+      _waiterCount.store(0, std::memory_order_release);
+      _isMulti = other._isMulti;
     }
     return *this;
   }
@@ -189,7 +207,7 @@ public:
 
   void setRefNode(const CstNodeView &node) noexcept {
     _refNode = node;
-    clearLinkStateUnlocked();
+    clearLinkState();
   }
 
   [[nodiscard]] const std::string &getRefText() const noexcept {
@@ -198,28 +216,27 @@ public:
 
   void setRefText(std::string refText) {
     _refText = std::move(refText);
-    clearLinkStateUnlocked();
+    clearLinkState();
   }
 
   [[nodiscard]] bool isResolved() const noexcept {
-    return _state == ReferenceState::Resolved;
+    return _state.load(std::memory_order_acquire) == ReferenceState::Resolved;
   }
 
   [[nodiscard]] bool hasError() const noexcept {
-    return _state == ReferenceState::Error;
+    return _state.load(std::memory_order_acquire) >= kFirstErrorState;
   }
 
   [[nodiscard]] ReferenceState state() const noexcept {
-    return _state;
+    return _state.load(std::memory_order_acquire);
   }
 
-  [[nodiscard]] virtual std::string_view getErrorMessage() const noexcept = 0;
+  /// Returns an empty string when the reference is not in an error state.
+  [[nodiscard]] std::string getErrorMessage() const;
 
-  void clearLinkState() const noexcept {
-    clearLinkStateUnlocked();
-  }
+  virtual void clearLinkState() const noexcept = 0;
 
-  [[nodiscard]] virtual bool isMultiReference() const noexcept = 0;
+  [[nodiscard]] bool isMultiReference() const noexcept { return _isMulti; }
 
   void initialize(AstNode &container, std::string refText,
                   CstNodeView refNode,
@@ -230,28 +247,112 @@ public:
     _refText = std::move(refText);
     _refNode = refNode;
     _linker = std::addressof(linker);
-    clearLinkStateUnlocked();
+    clearLinkState();
   }
 
 protected:
-  void resetBaseLinkStateUnlocked() const noexcept {
-    _state = ReferenceState::Unresolved;
+  explicit AbstractReference(bool isMulti) noexcept : _isMulti(isMulti) {}
+
+  /// Resets the cached resolution. Caller must guarantee no concurrent reader
+  /// (typically invoked by the linker during a workspace write).
+  void resetBaseLinkState() const noexcept {
+    _resolvingOwner.store(std::thread::id{}, std::memory_order_release);
+    _state.store(ReferenceState::Unresolved, std::memory_order_release);
   }
 
-  virtual void clearLinkStateUnlocked() const noexcept = 0;
+  /// Publishes a terminal state and wakes up any thread waiting on the
+  /// resolver. Must only be called by the thread that holds the resolver role
+  /// (i.e. the one that won `acquireResolverRole`). Skips `notify_all` when no
+  /// thread is currently parked on the state, which is the common case during
+  /// single-threaded builds.
+  void publishState(ReferenceState newState) const noexcept {
+    _resolvingOwner.store(std::thread::id{}, std::memory_order_release);
+    _state.store(newState, std::memory_order_release);
+    if (_waiterCount.load(std::memory_order_acquire) > 0) {
+      _state.notify_all();
+    }
+  }
+
+  /// Maps a `LinkingErrorKind` returned by the linker into the matching
+  /// reference state and publishes it. `Retryable` becomes `Unresolved` so the
+  /// next access re-attempts resolution.
+  void applyLinkingError(workspace::LinkingErrorKind kind) const noexcept {
+    using enum workspace::LinkingErrorKind;
+    ReferenceState newState = ReferenceState::ErrorException;
+    switch (kind) {
+    case Retryable:
+      newState = ReferenceState::Unresolved;
+      break;
+    case Cycle:
+      newState = ReferenceState::ErrorCycle;
+      break;
+    case Exception:
+      newState = ReferenceState::ErrorException;
+      break;
+    case NotFound:
+      newState = ReferenceState::ErrorNotFound;
+      break;
+    }
+    publishState(newState);
+  }
+
+  /// Tries to acquire the resolver role for this reference.
+  ///
+  /// Returns `true` when the calling thread successfully transitioned the
+  /// state from `Unresolved` to `Resolving` and must now perform the
+  /// resolution work. Returns `false` when the state is already terminal
+  /// (`Resolved` or one of the `Error*` states), in which case the caller
+  /// must read the published value without further work.
+  ///
+  /// If another thread is already resolving, this call blocks via
+  /// `std::atomic::wait` until that thread publishes a terminal state.
+  ///
+  /// Throws `CyclicReferenceResolution` when the same thread re-enters this
+  /// method while still owning the resolver role for the same reference,
+  /// indicating that resolving the target recursively requires the target
+  /// itself.
+  bool acquireResolverRole() const {
+    using enum ReferenceState;
+    auto state = _state.load(std::memory_order_acquire);
+    while (true) {
+      if (state == Resolved || state >= kFirstErrorState) {
+        return false;
+      }
+      if (state == Resolving) {
+        if (_resolvingOwner.load(std::memory_order_acquire) ==
+            std::this_thread::get_id()) {
+          throw CyclicReferenceResolution(*this);
+        }
+        _waiterCount.fetch_add(1, std::memory_order_acq_rel);
+        _state.wait(state, std::memory_order_acquire);
+        _waiterCount.fetch_sub(1, std::memory_order_acq_rel);
+        state = _state.load(std::memory_order_acquire);
+        continue;
+      }
+      if (_state.compare_exchange_weak(state, Resolving,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire)) {
+        _resolvingOwner.store(std::this_thread::get_id(),
+                              std::memory_order_release);
+        return true;
+      }
+    }
+  }
 
   AstNode *_container = nullptr;
   const grammar::Assignment *_assignment = nullptr;
   std::string _refText;
   CstNodeView _refNode;
   const references::Linker *_linker = nullptr;
-  mutable ReferenceState _state = ReferenceState::Unresolved;
+  mutable std::atomic<ReferenceState> _state{ReferenceState::Unresolved};
+  mutable std::atomic<std::thread::id> _resolvingOwner{};
+  mutable std::atomic<unsigned> _waiterCount{0};
+  bool _isMulti;
 };
 
 class AbstractSingleReference : public AbstractReference {
 public:
-  using AbstractReference::AbstractReference;
-  [[nodiscard]] bool isMultiReference() const noexcept final { return false; }
+  AbstractSingleReference() noexcept : AbstractReference(false) {}
   [[nodiscard]] virtual const AstNode *resolve() const = 0;
   /// Returns the resolved target description.
   ///
@@ -262,8 +363,7 @@ public:
 
 class AbstractMultiReference : public AbstractReference {
 public:
-  using AbstractReference::AbstractReference;
-  [[nodiscard]] bool isMultiReference() const noexcept final { return true; }
+  AbstractMultiReference() noexcept : AbstractReference(true) {}
 
   [[nodiscard]] virtual std::size_t resolvedDescriptionCount() const = 0;
   [[nodiscard]] virtual const workspace::AstNodeDescription &

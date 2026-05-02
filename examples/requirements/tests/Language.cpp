@@ -85,7 +85,7 @@ TEST(RequirementsLanguageTest, LinksEnvironmentMultiReferencesAndReportsUnresolv
   EXPECT_NE(requirement->environments[2].getErrorMessage().find("missing"),
             std::string::npos);
   EXPECT_TRUE(pegium::test::has_diagnostic_message(*document,
-                                                   "Unresolved reference: missing"));
+                                                   "named 'missing'"));
 }
 
 } // namespace

@@ -1,9 +1,9 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
 #include <optional>
 #include <span>
-#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -13,24 +13,16 @@ namespace pegium {
 
 /// Typed single-valued AST reference.
 template <typename T> struct Reference : AbstractSingleReference {
-private:
-  static constexpr std::string_view kIncompatibleTargetMessage =
-      "Incompatible reference target type: resolved node cannot be cast "
-      "to the expected reference type.";
-
 public:
   Reference() noexcept = default;
 
-  void clearLinkStateUnlocked() const noexcept override {
-    resetBaseLinkStateUnlocked();
+  void clearLinkState() const noexcept override {
     _target = nullptr;
-    _description.reset();
-    _errorMessage.clear();
+    _description = nullptr;
+    resetBaseLinkState();
   }
 
-  [[nodiscard]] const AstNode *resolve() const override {
-    return get();
-  }
+  [[nodiscard]] const AstNode *resolve() const override { return get(); }
 
   [[nodiscard]] const T *get() const {
     ensureResolved();
@@ -45,229 +37,172 @@ public:
 
   explicit operator bool() const { return get() != nullptr; }
 
-  [[nodiscard]] std::string_view getErrorMessage() const noexcept override {
-    return _errorMessage;
-  }
-
 protected:
   [[nodiscard]] const workspace::AstNodeDescription &
   resolvedDescription() const override {
     ensureResolved();
-    assert(_description.has_value());
+    assert(_description != nullptr);
     return *_description;
   }
 
 private:
   void ensureResolved() const {
-    using enum ReferenceState;
-    auto state = _state;
-    if (state == Resolving) {
-      throw CyclicReferenceResolution(*this);
-    }
-    if (state == Resolved || state == Error) {
+    if (!acquireResolverRole()) {
       return;
     }
 
     if (_linker == nullptr) {
-      _target = nullptr;
-      _description.reset();
-      _errorMessage = "No linker is available for this reference.";
-      _state = Error;
+      publishState(ReferenceState::ErrorNoLinker);
       return;
     }
-
-    _target = nullptr;
-    _description.reset();
-    _errorMessage.clear();
-    _state = Resolving;
 
     const auto resolution = _linker->resolve(*this);
 
-    _target = nullptr;
-    _description.reset();
     if (const auto *error = std::get_if<workspace::LinkingError>(&resolution);
         error != nullptr) {
-      if (error->retryable) {
-        _state = Unresolved;
-        return;
-      }
-      _errorMessage = error->message;
-      _state = Error;
+      applyLinkingError(error->kind);
       return;
     }
 
-    auto resolved = std::get<workspace::ResolvedAstNodeDescription>(resolution);
-    const auto *typedNode = dynamic_cast<const T *>(resolved.node);
-    if (typedNode == nullptr) {
-      _errorMessage = kIncompatibleTargetMessage;
-      _state = Error;
-      return;
-    }
-
-    _target = typedNode;
-    _description = std::move(resolved.description);
-    _state = ReferenceState::Resolved;
+    const auto &resolved =
+        std::get<workspace::ResolvedAstNodeDescription>(resolution);
+    // The scope provider already type-checked candidates against the
+    // reference's expected type via `AstReflection::isSubtype` (see
+    // `DefaultScopeProvider::find_scope_entry`). A correct linker therefore
+    // hands us a node that IS-A `T`, making the cast a static downcast.
+    assert(dynamic_cast<const T *>(resolved.node) != nullptr);
+    _target = static_cast<const T *>(resolved.node);
+    _description = resolved.description;
+    publishState(ReferenceState::Resolved);
   }
 
   mutable const T *_target = nullptr;
-  mutable std::optional<workspace::AstNodeDescription> _description;
-  mutable std::string _errorMessage;
+  mutable const workspace::AstNodeDescription *_description = nullptr;
+};
+
+/// Resolved entry of a multi-valued reference: pairs the (non-owning) node
+/// description pointer with the typed pointer to the resolved AST node.
+///
+/// Pointer lifetimes mirror those of `Reference<T>`: descriptions live in the
+/// owning document's index, AST nodes live in the parsed document.
+template <typename T> struct MultiReferenceItem {
+  const workspace::AstNodeDescription *description = nullptr;
+  const T *ref = nullptr;
 };
 
 /// Typed multi-valued AST reference.
 template <typename T> struct MultiReference : AbstractMultiReference {
-private:
-  static constexpr std::string_view kIncompatibleTargetMessage =
-      "Incompatible reference target type: resolved node cannot be cast "
-      "to the expected reference type.";
-
 public:
+  using Item = MultiReferenceItem<T>;
+
   MultiReference() noexcept = default;
 
-  void clearLinkStateUnlocked() const noexcept override {
-    resetBaseLinkStateUnlocked();
-    _descriptions.clear();
-    _targets.clear();
-    _errorMessage.clear();
+  void clearLinkState() const noexcept override {
+    _items.clear();
+    resetBaseLinkState();
   }
 
-  [[nodiscard]] std::span<const T *const> resolveAll() const {
+  [[nodiscard]] std::span<const Item> items() const {
     ensureResolved();
-    return std::span<const T *const>(_targets.data(), _targets.size());
+    return std::span<const Item>(_items.data(), _items.size());
   }
+
+  [[nodiscard]] std::span<const Item> resolveAll() const { return items(); }
 
   [[nodiscard]] const T *operator[](std::size_t index) const {
     ensureResolved();
-    return _targets[index];
+    return _items[index].ref;
   }
 
   [[nodiscard]] const T *front() const {
     ensureResolved();
-    assert(!_targets.empty());
-    return _targets.front();
+    assert(!_items.empty());
+    return _items.front().ref;
   }
 
   [[nodiscard]] const T *back() const {
     ensureResolved();
-    assert(!_targets.empty());
-    return _targets.back();
-  }
-
-  [[nodiscard]] const T *const *data() const {
-    ensureResolved();
-    return _targets.data();
+    assert(!_items.empty());
+    return _items.back().ref;
   }
 
   [[nodiscard]] auto begin() const {
     ensureResolved();
-    return _targets.begin();
+    return _items.begin();
   }
 
   [[nodiscard]] auto end() const {
     ensureResolved();
-    return _targets.end();
+    return _items.end();
   }
 
   [[nodiscard]] auto cbegin() const {
     ensureResolved();
-    return _targets.cbegin();
+    return _items.cbegin();
   }
 
   [[nodiscard]] auto cend() const {
     ensureResolved();
-    return _targets.cend();
+    return _items.cend();
   }
 
   [[nodiscard]] std::size_t size() const {
     ensureResolved();
-    return _targets.size();
+    return _items.size();
   }
 
   [[nodiscard]] bool empty() const {
     ensureResolved();
-    return _targets.empty();
+    return _items.empty();
   }
 
   explicit operator bool() const { return !empty(); }
 
-  [[nodiscard]] std::string_view getErrorMessage() const noexcept override {
-    return _errorMessage;
-  }
-
 protected:
   [[nodiscard]] std::size_t resolvedDescriptionCount() const override {
     ensureResolved();
-    return _descriptions.size();
+    return _items.size();
   }
 
   [[nodiscard]] const workspace::AstNodeDescription &
   resolvedDescriptionAt(std::size_t index) const override {
     ensureResolved();
-    assert(index < _descriptions.size());
-    return _descriptions[index];
+    assert(index < _items.size());
+    assert(_items[index].description != nullptr);
+    return *_items[index].description;
   }
 
 private:
   void ensureResolved() const {
-    using enum ReferenceState;
-    auto state = _state;
-    if (state == Resolving) {
-      throw CyclicReferenceResolution(*this);
-    }
-    if (state == Resolved || state == Error) {
+    if (!acquireResolverRole()) {
       return;
     }
 
     if (_linker == nullptr) {
-      _descriptions.clear();
-      _targets.clear();
-      _errorMessage = "No linker is available for this reference.";
-      _state = Error;
+      publishState(ReferenceState::ErrorNoLinker);
       return;
     }
-
-    _descriptions.clear();
-    _targets.clear();
-    _errorMessage.clear();
-    _state = Resolving;
 
     const auto resolution = _linker->resolveAll(*this);
 
-    _descriptions.clear();
-    _targets.clear();
     if (const auto *error = std::get_if<workspace::LinkingError>(&resolution);
         error != nullptr) {
-      if (error->retryable) {
-        _state = Unresolved;
-        return;
-      }
-      _errorMessage = error->message;
-      _state = Error;
+      applyLinkingError(error->kind);
       return;
     }
 
-    auto descriptions =
+    const auto &descriptions =
         std::get<std::vector<workspace::ResolvedAstNodeDescription>>(resolution);
-    _descriptions.reserve(descriptions.size());
-    _targets.reserve(descriptions.size());
-    for (auto &resolved : descriptions) {
-      const auto *typedNode = dynamic_cast<const T *>(resolved.node);
-      if (typedNode == nullptr) {
-        _descriptions.clear();
-        _targets.clear();
-        _errorMessage = kIncompatibleTargetMessage;
-        _state = Error;
-        return;
-      }
-      _descriptions.push_back(std::move(resolved.description));
-      _targets.push_back(typedNode);
+    _items.reserve(descriptions.size());
+    for (const auto &resolved : descriptions) {
+      assert(dynamic_cast<const T *>(resolved.node) != nullptr);
+      _items.push_back(Item{.description = resolved.description,
+                            .ref = static_cast<const T *>(resolved.node)});
     }
-    _state = ReferenceState::Resolved;
+    publishState(ReferenceState::Resolved);
   }
 
-  mutable std::vector<workspace::AstNodeDescription> _descriptions;
-  mutable std::vector<const T *> _targets;
-  mutable std::string _errorMessage;
+  mutable std::vector<Item> _items;
 };
 
 template <typename T> struct is_reference : std::false_type {};

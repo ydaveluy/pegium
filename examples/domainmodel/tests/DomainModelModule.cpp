@@ -103,7 +103,7 @@ collect_local_symbol_names(const pegium::workspace::LocalSymbols &symbols,
                            const pegium::AstNode *container) {
   std::vector<std::string> names;
   if (const auto *entries = symbols.forContainer(container)) {
-    for (const auto &bucket : entries->buckets) {
+    for (const auto &bucket : *entries) {
       for (const auto &description : bucket.ownedEntries) {
         names.push_back(description.name);
       }

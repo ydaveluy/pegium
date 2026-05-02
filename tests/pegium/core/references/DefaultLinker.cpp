@@ -421,7 +421,7 @@ TEST(DefaultLinkerTest, DetectsCyclicReferenceResolution) {
             std::string::npos);
   EXPECT_NE(reference.getErrorMessage().find("(symbol 'a')"),
             std::string::npos);
-  EXPECT_TRUE(has_diagnostic_message(*document, "Unresolved reference: a"));
+  EXPECT_TRUE(has_diagnostic_message(*document, "(symbol 'a')"));
 }
 
 TEST(DefaultLinkerTest,
@@ -485,8 +485,8 @@ TEST(DefaultLinkerTest, UnresolvedCandidateMessageIncludesReferenceType) {
 
   const auto candidate = linker->getCandidate(info);
   ASSERT_TRUE(std::holds_alternative<workspace::LinkingError>(candidate));
-  EXPECT_EQ(std::get<workspace::LinkingError>(candidate).message,
-            "Could not resolve reference to LinkerNode named 'missing'.");
+  EXPECT_EQ(std::get<workspace::LinkingError>(candidate).kind,
+            workspace::LinkingErrorKind::NotFound);
 }
 
 TEST(DefaultLinkerTest, GetCandidatesDeduplicatesDescriptionsByNodeKey) {
@@ -553,7 +553,7 @@ TEST(DefaultLinkerTest,
   fixture.document->state = workspace::DocumentState::ComputedScopes;
 
   EXPECT_EQ(fixture.referrer->node.get(), nullptr);
-  EXPECT_EQ(fixture.referrer->node.state(), ReferenceState::Error);
+  EXPECT_EQ(fixture.referrer->node.state(), ReferenceState::ErrorNotFound);
   EXPECT_TRUE(fixture.referrer->node.hasError());
   EXPECT_EQ(fixture.referrer->node.getErrorMessage(),
             "Could not resolve reference to LinkerNode named 'missing'.");
@@ -585,8 +585,11 @@ TEST(DefaultLinkerTest, LinkCatchesScopeProviderExceptionsWithoutThrowing) {
 
   EXPECT_NO_THROW(linker->link(*fixture.document, {}));
   EXPECT_TRUE(fixture.referrer->nodes.hasError());
+  // The exception detail (`: boom`) is intentionally dropped from the
+  // reference-side message — the full text is logged via the observability
+  // sink (asserted below).
   EXPECT_EQ(fixture.referrer->nodes.getErrorMessage(),
-            "An error occurred while resolving reference to 'missing': boom");
+            "An error occurred while resolving reference to 'missing'.");
   ASSERT_TRUE(recordingSink->waitForCount(1));
   const auto observation = recordingSink->lastObservation();
   ASSERT_TRUE(observation.has_value());

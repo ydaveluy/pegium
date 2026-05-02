@@ -31,7 +31,7 @@ using CompiledValidationCheckList =
     std::vector<const CompiledValidationCheckEntry *>;
 using CompiledValidationCheckIndex =
     std::unordered_map<std::type_index, CompiledValidationCheckList,
-                       utils::FastTypeIndexHash>;
+                       utils::FastTypeIndexHash, utils::FastTypeIndexEqual>;
 
 struct CompiledValidationRegistry {
   std::vector<std::string> knownCategories;

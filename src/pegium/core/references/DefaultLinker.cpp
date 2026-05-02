@@ -5,12 +5,10 @@
 #include <exception>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <unordered_set>
 #include <utility>
 
 #include <pegium/core/observability/ObservabilitySink.hpp>
-#include <pegium/core/parser/Introspection.hpp>
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
 #include <pegium/core/syntax-tree/AstUtils.hpp>
@@ -97,9 +95,7 @@ DefaultLinker::getCandidate(const ReferenceInfo &reference) const {
 }
 
 workspace::LinkingError
-DefaultLinker::createLinkingError(
-    const ReferenceInfo &reference,
-    std::optional<workspace::AstNodeDescription> targetDescription) const {
+DefaultLinker::createLinkingError(const ReferenceInfo &reference) const {
   const auto *document = reference.container == nullptr
                              ? nullptr
                              : std::addressof(getDocument(*reference.container));
@@ -114,21 +110,10 @@ DefaultLinker::createLinkingError(
             document->uri + ").",
         document->state);
   }
-
-  auto message = std::string("Could not resolve reference");
-  if (const auto type = reference.getReferenceType();
-      type != std::type_index(typeid(void))) {
-    const auto typeName = parser::detail::runtime_type_name(type);
-    assert(!typeName.empty());
-    message += " to " + typeName;
-  }
-  message += " named '" + std::string(reference.referenceText) + "'.";
-
   return workspace::LinkingError{
       .info = reference,
-      .message = std::move(message),
-      .targetDescription = std::move(targetDescription),
-      .retryable = retryable};
+      .kind = retryable ? workspace::LinkingErrorKind::Retryable
+                        : workspace::LinkingErrorKind::NotFound};
 }
 
 workspace::AstNodeDescriptionsOrError
@@ -154,37 +139,17 @@ DefaultLinker::getCandidates(const ReferenceInfo &reference) const {
   return descriptions;
 }
 
-workspace::LinkingError
-DefaultLinker::createCycleLinkingError(const ReferenceInfo &reference) const {
-  std::string feature(reference.getFeature());
-  if (feature.empty()) {
-    feature = "<unknown>";
-  }
-
-  return workspace::LinkingError{
-      .info = reference,
-      .message = "Cyclic reference resolution detected for feature '" +
-                 feature + "' (symbol '" +
-                 std::string(reference.referenceText) + "').",
-      .targetDescription = std::nullopt,
-      .retryable = false};
-}
-
 workspace::LinkingError DefaultLinker::createExceptionLinkingError(
     const ReferenceInfo &reference, const std::string &message) const {
-  auto fullMessage = "An error occurred while resolving reference to '" +
-                     std::string(reference.referenceText) + "': " + message;
   log_reference_resolution_problem(
       services.shared,
       reference.container == nullptr
           ? nullptr
           : std::addressof(getDocument(*reference.container)),
-      fullMessage);
-  return workspace::LinkingError{
-      .info = reference,
-      .message = std::move(fullMessage),
-      .targetDescription = std::nullopt,
-      .retryable = false};
+      "An error occurred while resolving reference to '" +
+          std::string(reference.referenceText) + "': " + message);
+  return workspace::LinkingError{.info = reference,
+                                 .kind = workspace::LinkingErrorKind::Exception};
 }
 
 workspace::ResolvedAstNodeDescriptionOrError
@@ -197,7 +162,7 @@ DefaultLinker::getLinkedNode(const ReferenceInfo &reference,
         .node = std::addressof(workspace::resolve_ast_node(
             *services.shared.workspace.documents, *candidate,
             currentDocument)),
-        .description = *candidate};
+        .description = candidate};
   }
   return createLinkingError(reference);
 }
@@ -206,23 +171,19 @@ workspace::ResolvedAstNodeDescriptionsOrError
 DefaultLinker::getLinkedNodes(const ReferenceInfo &reference,
                               const workspace::Document &currentDocument) const {
   std::vector<workspace::ResolvedAstNodeDescription> resolved;
-  std::optional<workspace::AstNodeDescription> firstCandidate;
   std::unordered_set<workspace::NodeKey, workspace::NodeKeyHash> seen;
   const auto *scopeProvider = services.references.scopeProvider.get();
   const auto resolveCandidate =
-      [this, &currentDocument, &resolved, &firstCandidate,
+      [this, &currentDocument, &resolved,
        &seen](const workspace::AstNodeDescription &candidate) {
         if (!seen.insert(make_node_key(candidate)).second) {
           return true;
-        }
-        if (!firstCandidate.has_value()) {
-          firstCandidate = candidate;
         }
         resolved.push_back(
             {.node = std::addressof(workspace::resolve_ast_node(
                  *services.shared.workspace.documents, candidate,
                  currentDocument)),
-             .description = candidate});
+             .description = std::addressof(candidate)});
         return true;
       };
   (void)scopeProvider->visitScopeEntries(
@@ -232,7 +193,7 @@ DefaultLinker::getLinkedNodes(const ReferenceInfo &reference,
   if (!resolved.empty()) {
     return resolved;
   }
-  return createLinkingError(reference, std::move(firstCandidate));
+  return createLinkingError(reference);
 }
 
 workspace::ResolvedAstNodeDescriptionOrError
@@ -243,7 +204,9 @@ DefaultLinker::resolve(const AbstractSingleReference &reference) const {
     const auto &currentDocument = getDocument(*reference.getContainer());
     return getLinkedNode(info, currentDocument);
   } catch (const CyclicReferenceResolution &cycle) {
-    return createCycleLinkingError(makeReferenceInfo(cycle.reference()));
+    return workspace::LinkingError{
+        .info = makeReferenceInfo(cycle.reference()),
+        .kind = workspace::LinkingErrorKind::Cycle};
   } catch (const std::exception &error) {
     return createExceptionLinkingError(info, error.what());
   }
@@ -257,7 +220,9 @@ DefaultLinker::resolveAll(const AbstractMultiReference &reference) const {
     const auto &currentDocument = getDocument(*reference.getContainer());
     return getLinkedNodes(info, currentDocument);
   } catch (const CyclicReferenceResolution &cycle) {
-    return createCycleLinkingError(makeReferenceInfo(cycle.reference()));
+    return workspace::LinkingError{
+        .info = makeReferenceInfo(cycle.reference()),
+        .kind = workspace::LinkingErrorKind::Cycle};
   } catch (const std::exception &error) {
     return createExceptionLinkingError(info, error.what());
   }

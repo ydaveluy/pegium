@@ -1,7 +1,5 @@
 #pragma once
 
-#include <optional>
-
 #include <pegium/core/services/DefaultCoreService.hpp>
 #include <pegium/core/references/Linker.hpp>
 #include <pegium/core/references/NameProvider.hpp>
@@ -47,11 +45,7 @@ public:
 
 private:
   [[nodiscard]] workspace::LinkingError
-  createLinkingError(const ReferenceInfo &reference,
-                     std::optional<workspace::AstNodeDescription>
-                         targetDescription = std::nullopt) const;
-  [[nodiscard]] workspace::LinkingError
-  createCycleLinkingError(const ReferenceInfo &reference) const;
+  createLinkingError(const ReferenceInfo &reference) const;
   [[nodiscard]] workspace::LinkingError
   createExceptionLinkingError(const ReferenceInfo &reference,
                               const std::string &message) const;

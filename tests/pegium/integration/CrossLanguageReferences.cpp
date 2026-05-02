@@ -146,7 +146,7 @@ TEST_P(CrossLanguageReferencesIntegrationTest,
   ASSERT_TRUE(consumerDocument->parseSucceeded());
   EXPECT_EQ(consumerDocument->state, workspace::DocumentState::Validated);
   EXPECT_FALSE(
-      has_diagnostic_message(*consumerDocument, "Unresolved reference"));
+      has_diagnostic_message(*consumerDocument, "Could not resolve reference"));
 
   auto *consumer = dynamic_cast<CrossLanguageConsumerRoot *>(
       consumerDocument->parseResult.value);
