@@ -32,13 +32,13 @@ find_reference_at_offset(const workspace::Document &document, TextOffset offset)
   for (const auto &handle : document.references) {
     const auto &reference = *handle.getConst();
     const auto refNode = reference.getRefNode();
-    if (!refNode.has_value()) {
+    if (!refNode.valid()) {
       continue;
     }
-    if (offset < refNode->getBegin() || offset > refNode->getEnd()) {
+    if (offset < refNode.getBegin() || offset > refNode.getEnd()) {
       continue;
     }
-    const auto span = refNode->getEnd() - refNode->getBegin();
+    const auto span = refNode.getEnd() - refNode.getBegin();
     if (best == nullptr || span < bestSpan) {
       best = &reference;
       bestSpan = span;

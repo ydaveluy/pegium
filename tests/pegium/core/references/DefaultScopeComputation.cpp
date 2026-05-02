@@ -122,13 +122,11 @@ std::shared_ptr<workspace::Document> make_scope_document() {
   root->branch->directLeaf = std::make_unique<ScopeLeaf>("nested");
   root->branch->leaves.push_back(std::make_unique<ScopeLeaf>("nested2"));
 
-  root->branch->setContainer<ScopeRoot, &ScopeRoot::branch>(*root);
-  root->leaves[0]->setContainer<ScopeRoot, &ScopeRoot::leaves>(*root, 0);
-  root->leaves[1]->setContainer<ScopeRoot, &ScopeRoot::leaves>(*root, 1);
-  root->branch->directLeaf->setContainer<ScopeBranch, &ScopeBranch::directLeaf>(
-      *root->branch);
-  root->branch->leaves[0]->setContainer<ScopeBranch, &ScopeBranch::leaves>(
-      *root->branch, 0);
+  root->branch->setContainer(*root);
+  root->leaves[0]->setContainer(*root);
+  root->leaves[1]->setContainer(*root);
+  root->branch->directLeaf->setContainer(*root->branch);
+  root->branch->leaves[0]->setContainer(*root->branch);
 
   document->parseResult.value = std::move(root);
   return document;

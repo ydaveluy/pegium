@@ -234,7 +234,7 @@ TargetDocumentFixture make_target_document(pegium::SharedCoreServices &shared,
   auto *targetPtr = target.get();
   targetPtr->setCstNode(cst->get(0));
   root->nodes.push_back(std::move(target));
-  targetPtr->setContainer<LinkerRoot, &LinkerRoot::nodes>(*root, 0);
+  targetPtr->setContainer(*root);
 
   document->parseResult.value = std::move(root);
   document->parseResult.cst = std::move(cst);
@@ -265,7 +265,7 @@ make_reference_document(pegium::SharedCoreServices &shared,
   referrerPtr->node.initialize(*referrerPtr, refText, cst->get(0), assignment,
                                linker);
   root->referrers.push_back(std::move(referrer));
-  referrerPtr->setContainer<LinkerRoot, &LinkerRoot::referrers>(*root, 0);
+  referrerPtr->setContainer(*root);
 
   document->parseResult.value = std::move(root);
   document->parseResult.cst = std::move(cst);
@@ -297,7 +297,7 @@ make_multi_reference_document(pegium::SharedCoreServices &shared,
   referrerPtr->nodes.initialize(*referrerPtr, refText, cst->get(0), assignment,
                                 linker);
   root->multiReferrers.push_back(std::move(referrer));
-  referrerPtr->setContainer<LinkerRoot, &LinkerRoot::multiReferrers>(*root, 0);
+  referrerPtr->setContainer(*root);
 
   document->parseResult.value = std::move(root);
   document->parseResult.cst = std::move(cst);
@@ -364,7 +364,7 @@ make_linker_parser(const Linker *&linkerRef) {
     auto *nodePtr = node.get();
     nodePtr->setCstNode(cst->get(0));
     root->nodes.push_back(std::move(node));
-    nodePtr->setContainer<LinkerRoot, &LinkerRoot::nodes>(*root, 0);
+    nodePtr->setContainer(*root);
 
     auto referrer = std::make_unique<LinkerReferrer>();
     auto *referrerPtr = referrer.get();
@@ -372,7 +372,7 @@ make_linker_parser(const Linker *&linkerRef) {
     referrerPtr->node.initialize(*referrerPtr, "a", cst->get(0), assignment,
                                  *linkerRef);
     root->referrers.push_back(std::move(referrer));
-    referrerPtr->setContainer<LinkerRoot, &LinkerRoot::referrers>(*root, 0);
+    referrerPtr->setContainer(*root);
 
     result.value = std::move(root);
     result.cst = std::move(cst);
@@ -404,10 +404,10 @@ TEST(DefaultLinkerTest, DetectsCyclicReferenceResolution) {
   const auto &reference = root->referrers.front()->node;
   EXPECT_TRUE(reference.hasError());
   EXPECT_EQ(reference.get(), nullptr);
-  EXPECT_NE(
-      reference.getErrorMessage().find("Cyclic reference resolution detected:"),
-      std::string::npos);
-  EXPECT_NE(reference.getErrorMessage().find("/referrers@0/node (symbol 'a')"),
+  EXPECT_NE(reference.getErrorMessage().find(
+                "Cyclic reference resolution detected for feature 'node'"),
+            std::string::npos);
+  EXPECT_NE(reference.getErrorMessage().find("(symbol 'a')"),
             std::string::npos);
   EXPECT_TRUE(has_diagnostic_message(*document, "Unresolved reference: a"));
 }
@@ -638,7 +638,7 @@ TEST(DefaultLinkerTest, ReinitializingReferenceResetsCachedResolution) {
   auto *root =
       static_cast<LinkerRoot *>(fixture.document->parseResult.value.get());
   root->nodes.push_back(std::move(second));
-  secondPtr->setContainer<LinkerRoot, &LinkerRoot::nodes>(*root, 1);
+  secondPtr->setContainer(*root);
 
   services->references.scopeProvider = std::make_unique<StaticScopeProvider>(
       std::vector<workspace::AstNodeDescription>{

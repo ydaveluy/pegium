@@ -3,7 +3,6 @@
 /// Inputs and callbacks used while materializing AST and rule values.
 
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include <pegium/core/parser/Parser.hpp>
@@ -15,22 +14,12 @@ namespace pegium::parser {
 struct ValueBuildContext {
   std::vector<ReferenceHandle> *references = nullptr;
   const references::Linker *linker = nullptr;
-  std::string_view property = {};
   const grammar::Assignment *assignment = nullptr;
   std::vector<ParseDiagnostic> *diagnostics = nullptr;
 
   [[nodiscard]] ValueBuildContext
-  withProperty(std::string_view nextProperty) const noexcept {
-    auto copy = *this;
-    copy.property = nextProperty;
-    copy.assignment = nullptr;
-    return copy;
-  }
-
-  [[nodiscard]] ValueBuildContext
   withAssignment(const grammar::Assignment &nextAssignment) const noexcept {
     auto copy = *this;
-    copy.property = nextAssignment.getFeature();
     copy.assignment = std::addressof(nextAssignment);
     return copy;
   }

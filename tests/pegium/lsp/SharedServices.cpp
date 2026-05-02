@@ -122,7 +122,6 @@ TEST(SharedServicesTest, CoreServicesCanBeExtendedWithCustomSections) {
   ASSERT_NE(languageServices.observability.telemetry, nullptr);
   EXPECT_EQ(*languageServices.observability.telemetry, 7);
   EXPECT_NE(languageServices.references.references, nullptr);
-  EXPECT_NE(languageServices.workspace.astNodeLocator, nullptr);
 }
 
 TEST(SharedServicesTest, LanguageServicesCanBeExtendedWithCustomSections) {
@@ -173,7 +172,6 @@ TEST(SharedServicesTest, MakeDefaultServicesSupportsDerivedLanguageServices) {
   ASSERT_NE(services, nullptr);
   EXPECT_EQ(services->languageMetaData.languageId, "extended-language");
   EXPECT_NE(services->references.references, nullptr);
-  EXPECT_NE(services->workspace.astNodeLocator, nullptr);
   EXPECT_NE(services->lsp.documentSymbolProvider, nullptr);
   EXPECT_NE(services->lsp.referencesProvider, nullptr);
 }

@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -15,7 +14,6 @@
 #include <variant>
 #include <vector>
 
-#include <pegium/core/parser/Introspection.hpp>
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
 #include <pegium/core/syntax-tree/Reference.hpp>
 
@@ -23,14 +21,10 @@ namespace pegium {
 
 struct AstNode;
 
-template <typename Node, auto Feature>
-concept AstFeatureMember =
-    std::derived_from<Node, AstNode> && requires(Node &node) { node.*Feature; };
-
 /// Base type for every AST node produced by pegium parsers.
 ///
 /// `AstNode` stores the structural links of the tree:
-/// - direct children
+/// - direct children (via an intrusive sibling-linked list)
 /// - parent/container metadata
 /// - the originating CST node when available
 ///
@@ -87,44 +81,12 @@ struct AstNode {
 
   /// Returns the direct children of this node.
   ///
-  /// Child pointers are never null.
-  auto getContent() noexcept { return std::views::all(_content); }
+  /// Iteration follows attach-order (which mirrors source order for parser-built
+  /// trees). Child pointers are never null.
+  auto getContent() noexcept { return ChildRange<AstNode *>(_firstChild); }
   /// Returns the direct children of this node.
-  ///
-  /// The returned range preserves the stored child order and never yields null
-  /// child pointers.
   auto getContent() const noexcept {
-    return std::views::transform(_content,
-                                 [](const AstNode *ptr) { return ptr; });
-  }
-
-  /// Returns the direct child at `index`, or `nullptr` when out of bounds.
-  [[nodiscard]] const AstNode *getContentAt(std::size_t index) const noexcept {
-    return index < _content.size() ? _content[index] : nullptr;
-  }
-
-  /// Returns the direct child at `index`, or `nullptr` when out of bounds.
-  [[nodiscard]] AstNode *getContentAt(std::size_t index) noexcept {
-    return index < _content.size() ? _content[index] : nullptr;
-  }
-
-  /// Returns the name of the container property that owns this node.
-  ///
-  /// The value is empty when the property name was not provided during
-  /// container setup.
-  [[nodiscard]] std::string_view getContainerPropertyName() const noexcept {
-    return _containerPropertyName;
-  }
-
-  /// Returns the index within the owning container property when it is a vector.
-  ///
-  /// Single-valued containment properties return `std::nullopt`.
-  [[nodiscard]] std::optional<std::size_t>
-  getContainerPropertyIndex() const noexcept {
-    if (_containerIndex == std::numeric_limits<std::size_t>::max()) {
-      return std::nullopt;
-    }
-    return _containerIndex;
+    return ChildRange<const AstNode *>(_firstChild);
   }
 
   /// Returns the direct children of type T.
@@ -142,14 +104,12 @@ struct AstNode {
 
   /// Returns all descendants of this node.
   ///
-  /// Descendant pointers are never null.
-  auto getAllContent() noexcept { return Range<AstNode *>(this); }
-
-  /// Returns all descendants of this node.
-  ///
   /// The current node itself is not included. Traversal order is depth-first
-  /// and preserves child order. Descendant pointers are never null.
-  auto getAllContent() const noexcept { return Range<const AstNode *>(this); }
+  /// pre-order and preserves child order. Descendant pointers are never null.
+  auto getAllContent() noexcept { return DescendantRange<AstNode *>(this); }
+  auto getAllContent() const noexcept {
+    return DescendantRange<const AstNode *>(this);
+  }
 
   /// Returns all descendants of type T.
   template <typename T>
@@ -224,47 +184,30 @@ struct AstNode {
     return nullptr;
   }
 
-  /// Sets the container relationship for this node using a compile-time AST feature.
-  template <typename Node, auto Feature>
-    requires AstFeatureMember<Node, Feature>
-  void setContainer(
-      Node &container,
-      std::size_t index = std::numeric_limits<std::size_t>::max()) {
-    this->setContainer(container, parser::detail::member_name_v<Feature>, index);
-  }
-
-  /// Attaches this node to a container using a compile-time AST feature.
-  template <typename Node, auto Feature>
-    requires AstFeatureMember<Node, Feature>
-  void attachToContainer(
-      Node &container,
-      std::size_t index = std::numeric_limits<std::size_t>::max()) noexcept {
-    this->attachToContainer(container, parser::detail::member_name_v<Feature>,
-                            index);
-  }
-
-  /// Attaches this node to a container without handling reparenting.
-  void attachToContainer(
-      AstNode &container, std::string_view propertyName,
-      std::size_t index = std::numeric_limits<std::size_t>::max()) noexcept {
+  /// Attaches this node to `container` as the last child.
+  ///
+  /// Container assignment is write-once: re-attaching a node that already has a
+  /// parent trips an assertion.
+  void setContainer(AstNode &container) noexcept {
     assert(_container == nullptr);
     _container = &container;
-    _containerPropertyName = propertyName;
-    _containerIndex = index;
-    _container->_content.push_back(this);
+    if (container._lastChild == nullptr) {
+      container._firstChild = this;
+    } else {
+      container._lastChild->_nextSibling = this;
+    }
+    container._lastChild = this;
   }
 
 private:
-  void setContainer(AstNode &container, std::string_view propertyName,
-                    std::size_t index);
-  std::vector<AstNode *> _content;
-  /// The container node in the AST; every node except the root node has a
-  /// container.
+  /// Parent in the AST. Null for the root.
   AstNode *_container = nullptr;
-  std::string_view _containerPropertyName;
-  /// In case the container property is a vector, the element index is stored
-  /// here.
-  std::size_t _containerIndex = std::numeric_limits<std::size_t>::max();
+  /// First child in attach order, or null when this node has no children.
+  AstNode *_firstChild = nullptr;
+  /// Last child in attach order. Used to keep `setContainer` O(1).
+  AstNode *_lastChild = nullptr;
+  /// Next sibling under the same parent, or null when this is the last child.
+  AstNode *_nextSibling = nullptr;
   /// The Concrete Syntax Tree (CST) node of the text range from which this node
   /// was parsed.
   CstNodeView _cstNode;
@@ -282,56 +225,100 @@ private:
            std::views::transform(
                [](Ptr ptr) noexcept { return static_cast<CastedPtr>(ptr); });
   }
-  template <typename NodePtr> class Iterator {
+
+  /// Forward iterator walking the sibling chain `_firstChild` → `_nextSibling`.
+  template <typename NodePtr> class ChildIterator {
+  public:
+    using value_type = NodePtr;
+    using difference_type = std::ptrdiff_t;
+    using iterator_category = std::forward_iterator_tag;
+    using reference = NodePtr;
+    using pointer = void;
+    ChildIterator() = default;
+    explicit ChildIterator(NodePtr current) noexcept : _current(current) {}
+    reference operator*() const noexcept { return _current; }
+    ChildIterator &operator++() noexcept {
+      _current = _current->_nextSibling;
+      return *this;
+    }
+    ChildIterator operator++(int) noexcept {
+      auto temp = *this;
+      ++(*this);
+      return temp;
+    }
+    bool operator==(const ChildIterator &other) const noexcept = default;
+
+  private:
+    NodePtr _current = nullptr;
+  };
+
+  template <typename NodePtr>
+  class ChildRange : public std::ranges::view_interface<ChildRange<NodePtr>> {
+  public:
+    using iterator = ChildIterator<NodePtr>;
+    ChildRange() = default;
+    explicit ChildRange(NodePtr first) noexcept : _first(first) {}
+    iterator begin() const noexcept { return iterator{_first}; }
+    iterator end() const noexcept { return iterator{}; }
+
+  private:
+    NodePtr _first = nullptr;
+  };
+
+  /// Depth-first pre-order iterator over descendants (root excluded).
+  template <typename NodePtr> class DescendantIterator {
   public:
     using value_type = NodePtr;
     using difference_type = std::ptrdiff_t;
     using iterator_category = std::input_iterator_tag;
     using reference = NodePtr;
     using pointer = void;
-    Iterator() = default;
-    explicit Iterator(NodePtr root) {
-      if (root) {
-        for (auto it = root->_content.rbegin(); it != root->_content.rend();
-             ++it) {
-          stack.push_back(*it);
-        }
+    DescendantIterator() = default;
+    explicit DescendantIterator(NodePtr root) {
+      if (root != nullptr && root->_firstChild != nullptr) {
+        _stack.push_back(root->_firstChild);
       }
     }
-    reference operator*() const { return stack.back(); }
-    Iterator &operator++() {
-      NodePtr current = stack.back();
-      stack.pop_back();
-      for (auto it = current->_content.rbegin(); it != current->_content.rend();
-           ++it) {
-        assert((*it)->getContainer() == current);
-        stack.push_back(*it);
+    reference operator*() const { return _stack.back(); }
+    DescendantIterator &operator++() {
+      NodePtr current = _stack.back();
+      _stack.pop_back();
+      // Push next sibling first (visited after the current subtree).
+      if (current->_nextSibling != nullptr) {
+        _stack.push_back(current->_nextSibling);
+      }
+      // Then descend into the first child (visited next).
+      if (current->_firstChild != nullptr) {
+        _stack.push_back(current->_firstChild);
       }
       return *this;
     }
-    Iterator operator++(int) {
-      Iterator temp = *this;
+    DescendantIterator operator++(int) {
+      auto temp = *this;
       ++(*this);
       return temp;
     }
-    bool operator==(const Iterator &other) const = default;
+    bool operator==(const DescendantIterator &other) const = default;
 
   private:
-    std::vector<NodePtr> stack;
+    std::vector<NodePtr> _stack;
   };
+
   template <typename NodePtr>
-  class Range : public std::ranges::view_interface<Range<NodePtr>> {
+  class DescendantRange
+      : public std::ranges::view_interface<DescendantRange<NodePtr>> {
   public:
-    using iterator = Iterator<NodePtr>;
-    explicit Range(NodePtr root) : root_(root) {}
-    iterator begin() const { return iterator(root_); }
-    iterator end() const { return iterator(); }
+    using iterator = DescendantIterator<NodePtr>;
+    explicit DescendantRange(NodePtr root) noexcept : _root(root) {}
+    iterator begin() const { return iterator{_root}; }
+    iterator end() const { return iterator{}; }
 
   private:
-    NodePtr root_;
+    NodePtr _root = nullptr;
   };
 };
-
+static_assert(sizeof(AstNode) <= 56,
+              "AstNode size is less or equal than 56");
 /// AST base class for declarations that expose a semantic `name`.
 ///
 /// Languages can inherit from `NamedAstNode` to let the default naming

@@ -156,25 +156,16 @@ DefaultLinker::getCandidates(const ReferenceInfo &reference) const {
 
 workspace::LinkingError
 DefaultLinker::createCycleLinkingError(const ReferenceInfo &reference) const {
-  std::string target = std::string(reference.getFeature());
-  if (reference.container != nullptr) {
-    const auto *locator = services.workspace.astNodeLocator.get();
-    try {
-      target = locator->getAstNodePath(*reference.container) + "/" +
-               std::string(reference.getFeature());
-    } catch (const std::exception &) {
-      if (target.empty()) {
-        target = "<unknown>";
-      }
-    }
-  } else if (target.empty()) {
-    target = "<unknown>";
+  std::string feature(reference.getFeature());
+  if (feature.empty()) {
+    feature = "<unknown>";
   }
 
   return workspace::LinkingError{
       .info = reference,
-      .message = "Cyclic reference resolution detected: " + target +
-                 " (symbol '" + std::string(reference.referenceText) + "')",
+      .message = "Cyclic reference resolution detected for feature '" +
+                 feature + "' (symbol '" +
+                 std::string(reference.referenceText) + "').",
       .targetDescription = std::nullopt,
       .retryable = false};
 }

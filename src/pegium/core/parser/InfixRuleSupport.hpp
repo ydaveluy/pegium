@@ -287,7 +287,7 @@ private:
 
     auto &leftMember = node.get()->*Left;
     leftMember = std::move(left);
-    leftMember->attachToContainer(*node, detail::member_name_v<Left>);
+    leftMember->setContainer(*node);
 
     const bool assignedOperator =
         assign_operator_from_node(model, node.get(), operatorNode, context);
@@ -296,7 +296,7 @@ private:
 
     auto &rightMember = node.get()->*Right;
     rightMember = std::move(right);
-    rightMember->attachToContainer(*node, detail::member_name_v<Right>);
+    rightMember->setContainer(*node);
 
     return node;
   }

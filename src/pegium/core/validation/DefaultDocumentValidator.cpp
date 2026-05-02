@@ -634,9 +634,9 @@ void DefaultDocumentValidator::processLinkingErrors(
 
     TextOffset begin = 0;
     TextOffset end = static_cast<TextOffset>(refText.size());
-    if (const auto refNode = reference.getRefNode(); refNode.has_value()) {
-      begin = refNode->getBegin();
-      end = refNode->getEnd();
+    if (const auto refNode = reference.getRefNode(); refNode.valid()) {
+      begin = refNode.getBegin();
+      end = refNode.getEnd();
     }
 
     diagnostics.push_back(pegium::Diagnostic{

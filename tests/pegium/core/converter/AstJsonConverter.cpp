@@ -20,7 +20,7 @@ TEST(AstJsonConverterTest, ConvertsBuiltAstToReferenceJson) {
     {
       "$type": "Greeting",
       "person": {
-        "$ref": "#/persons@0",
+        "$ref": "#1",
         "$refText": "John"
       }
     }

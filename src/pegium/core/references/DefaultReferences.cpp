@@ -22,14 +22,14 @@ find_reference_at_cst_node(const workspace::Document &document,
   for (const auto &handle : document.references) {
     const auto &reference = *handle.getConst();
     const auto refNode = reference.getRefNode();
-    if (!refNode.has_value()) {
+    if (!refNode.valid()) {
       continue;
     }
-    if (selectedNode.getBegin() < refNode->getBegin() ||
-        refNode->getEnd() < selectedNode.getEnd()) {
+    if (selectedNode.getBegin() < refNode.getBegin() ||
+        refNode.getEnd() < selectedNode.getEnd()) {
       continue;
     }
-    const auto span = refNode->getEnd() - refNode->getBegin();
+    const auto span = refNode.getEnd() - refNode.getBegin();
     if (best == nullptr || span < bestSpan) {
       best = &reference;
       bestSpan = span;

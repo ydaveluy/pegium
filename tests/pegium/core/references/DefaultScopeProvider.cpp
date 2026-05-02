@@ -266,17 +266,17 @@ ScopedDocumentFixture make_scoped_document(pegium::SharedCoreServices &shared,
   auto holder = std::make_unique<RefHolder>();
   auto *holderPtr = holder.get();
   holderPtr->setCstNode(cst->get(0));
-  holderPtr->ref.initialize(*holderPtr, std::move(refText), std::nullopt,
+  holderPtr->ref.initialize(*holderPtr, std::move(refText), CstNodeView{},
                             assignment, linker);
 
   inner->refs.push_back(std::move(holder));
-  holderPtr->setContainer<ScopeBlock, &ScopeBlock::refs>(*innerPtr, 0);
+  holderPtr->setContainer(*innerPtr);
 
   outer->blocks.push_back(std::move(inner));
-  innerPtr->setContainer<ScopeBlock, &ScopeBlock::blocks>(*outerPtr, 0);
+  innerPtr->setContainer(*outerPtr);
 
   root->blocks.push_back(std::move(outer));
-  outerPtr->setContainer<ScopeRoot, &ScopeRoot::blocks>(*rootPtr, 0);
+  outerPtr->setContainer(*rootPtr);
 
   document->parseResult.value = std::move(root);
   document->parseResult.cst = std::move(cst);
