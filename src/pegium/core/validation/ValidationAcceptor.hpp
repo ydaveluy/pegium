@@ -17,6 +17,7 @@
 #include <pegium/core/services/JsonValue.hpp>
 #include <pegium/core/services/Diagnostic.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
+#include <pegium/core/utils/FunctionRef.hpp>
 #include <pegium/core/validation/DiagnosticRanges.hpp>
 
 namespace pegium::validation {
@@ -195,18 +196,18 @@ public:
 };
 
 /// Callback adapter used by validation checks to emit diagnostics.
+///
+/// Holds a non-owning `function_ref` to the diagnostic sink. The callback
+/// must outlive the acceptor — typically a stack-allocated lambda in
+/// `validateDocument` does the trick.
 class ValidationAcceptor {
 public:
-  using Callback = std::function<void(pegium::Diagnostic)>;
+  using Callback = utils::function_ref<void(pegium::Diagnostic)>;
 
   ValidationAcceptor() = default;
 
-  template <typename CallbackType>
-    requires (!std::same_as<std::remove_cvref_t<CallbackType>,
-                            ValidationAcceptor> &&
-              std::constructible_from<Callback, CallbackType>)
-  explicit ValidationAcceptor(CallbackType &&callback)
-      : _callback(std::forward<CallbackType>(callback)) {}
+  explicit ValidationAcceptor(Callback callback) noexcept
+      : _callback(callback) {}
 
   void operator()(pegium::Diagnostic diagnostic) const {
     if (_callback) {

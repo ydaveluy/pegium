@@ -40,15 +40,15 @@ TEST(RecoveryTest,
   ASSERT_TRUE(result.value) << parseDump;
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 3u) << parseDump;
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   ASSERT_NE(firstDefinition, nullptr) << parseDump;
   auto *firstNumber =
-      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr.get());
+      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr);
   ASSERT_NE(firstNumber, nullptr) << parseDump;
   EXPECT_EQ(firstNumber->value, 5) << parseDump;
 }
@@ -90,15 +90,15 @@ TEST(RecoveryTest,
   ASSERT_TRUE(result.value) << parseDump;
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 3u) << parseDump;
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   ASSERT_NE(firstDefinition, nullptr) << parseDump;
   auto *firstNumber =
-      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr.get());
+      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr);
   ASSERT_NE(firstNumber, nullptr) << parseDump;
   EXPECT_EQ(firstDefinition->name, "a") << parseDump;
   EXPECT_EQ(firstNumber->value, 5) << parseDump;
@@ -138,15 +138,15 @@ TEST(RecoveryTest,
   ASSERT_TRUE(result.value) << parseDump;
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 3u) << parseDump;
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   ASSERT_NE(firstDefinition, nullptr) << parseDump;
   auto *firstNumber =
-      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr.get());
+      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr);
   ASSERT_NE(firstNumber, nullptr) << parseDump;
   EXPECT_EQ(firstDefinition->name, "a") << parseDump;
   EXPECT_EQ(firstNumber->value, 5) << parseDump;
@@ -207,23 +207,23 @@ TEST(RecoveryTest,
       }))
       << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 2u) << parseDump;
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   auto *secondDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[1].get());
+      parsedModule->statements[1]);
   ASSERT_NE(firstDefinition, nullptr) << parseDump;
   ASSERT_NE(secondDefinition, nullptr) << parseDump;
   EXPECT_EQ(firstDefinition->name, "a") << parseDump;
   EXPECT_EQ(secondDefinition->name, "b") << parseDump;
 
   auto *firstNumber =
-      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr.get());
+      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr);
   auto *secondNumber =
-      dynamic_cast<RecoveryNumberExpression *>(secondDefinition->expr.get());
+      dynamic_cast<RecoveryNumberExpression *>(secondDefinition->expr);
   ASSERT_NE(firstNumber, nullptr) << parseDump;
   ASSERT_NE(secondNumber, nullptr) << parseDump;
   EXPECT_EQ(firstNumber->value, 5) << parseDump;
@@ -267,14 +267,14 @@ TEST(RecoveryTest,
   ASSERT_TRUE(result.value) << parseDump;
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 2u) << parseDump;
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   auto *secondDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[1].get());
+      parsedModule->statements[1]);
   ASSERT_NE(firstDefinition, nullptr) << parseDump;
   ASSERT_NE(secondDefinition, nullptr) << parseDump;
   EXPECT_EQ(firstDefinition->name, "a") << parseDump;
@@ -315,14 +315,14 @@ TEST(RecoveryTest,
   ASSERT_TRUE(result.value) << parseDump;
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 2u) << parseDump;
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   auto *secondDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[1].get());
+      parsedModule->statements[1]);
   ASSERT_NE(firstDefinition, nullptr) << parseDump;
   ASSERT_NE(secondDefinition, nullptr) << parseDump;
   EXPECT_EQ(firstDefinition->name, "a") << parseDump;
@@ -364,16 +364,16 @@ TEST(RecoveryTest, StartedOptionalBranchKeepsRecoveredArgumentPrefix) {
       << parseDump;
 
   auto *parsedEvaluation =
-      dynamic_cast<RecoveryExpressionEvaluation *>(result.value.get());
+      dynamic_cast<RecoveryExpressionEvaluation *>(result.value);
   ASSERT_NE(parsedEvaluation, nullptr) << parseDump;
   auto *parsedCall =
-      dynamic_cast<RecoveryFunctionCall *>(parsedEvaluation->expression.get());
+      dynamic_cast<RecoveryFunctionCall *>(parsedEvaluation->expression);
   ASSERT_NE(parsedCall, nullptr) << parseDump;
   EXPECT_EQ(parsedCall->name, "sqrt") << parseDump;
   ASSERT_EQ(parsedCall->args.size(), 1u) << parseDump;
 
   auto *parsedArgument =
-      dynamic_cast<RecoveryNumberExpression *>(parsedCall->args.front().get());
+      dynamic_cast<RecoveryNumberExpression *>(parsedCall->args.front());
   ASSERT_NE(parsedArgument, nullptr) << parseDump;
   EXPECT_EQ(parsedArgument->value, 81) << parseDump;
 }
@@ -407,10 +407,10 @@ TEST(RecoveryTest, StartedOptionalBranchWithEmptyCallKeepsCallPrefix) {
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
   auto *parsedEvaluation =
-      dynamic_cast<RecoveryExpressionEvaluation *>(result.value.get());
+      dynamic_cast<RecoveryExpressionEvaluation *>(result.value);
   ASSERT_NE(parsedEvaluation, nullptr) << parseDump;
   auto *parsedCall =
-      dynamic_cast<RecoveryFunctionCall *>(parsedEvaluation->expression.get());
+      dynamic_cast<RecoveryFunctionCall *>(parsedEvaluation->expression);
   ASSERT_NE(parsedCall, nullptr) << parseDump;
   EXPECT_EQ(parsedCall->name, "sqrt") << parseDump;
   EXPECT_TRUE(parsedCall->args.empty()) << parseDump;
@@ -445,18 +445,18 @@ TEST(RecoveryTest, StartedOptionalBranchWithMissingCommaKeepsCallPrefix) {
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
   auto *parsedEvaluation =
-      dynamic_cast<RecoveryExpressionEvaluation *>(result.value.get());
+      dynamic_cast<RecoveryExpressionEvaluation *>(result.value);
   ASSERT_NE(parsedEvaluation, nullptr) << parseDump;
   auto *parsedCall =
-      dynamic_cast<RecoveryFunctionCall *>(parsedEvaluation->expression.get());
+      dynamic_cast<RecoveryFunctionCall *>(parsedEvaluation->expression);
   ASSERT_NE(parsedCall, nullptr) << parseDump;
   EXPECT_EQ(parsedCall->name, "root") << parseDump;
   ASSERT_EQ(parsedCall->args.size(), 2u) << parseDump;
 
   auto *firstArgument =
-      dynamic_cast<RecoveryNumberExpression *>(parsedCall->args[0].get());
+      dynamic_cast<RecoveryNumberExpression *>(parsedCall->args[0]);
   auto *secondArgument =
-      dynamic_cast<RecoveryNumberExpression *>(parsedCall->args[1].get());
+      dynamic_cast<RecoveryNumberExpression *>(parsedCall->args[1]);
   ASSERT_NE(firstArgument, nullptr) << parseDump;
   ASSERT_NE(secondArgument, nullptr) << parseDump;
   EXPECT_EQ(firstArgument->value, 64) << parseDump;
@@ -501,10 +501,10 @@ TEST(RecoveryTest, InfixArgumentCallKeepsFunctionNameWhenCommaIsMissing) {
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
   auto *parsedEvaluation =
-      dynamic_cast<RecoveryExpressionEvaluation *>(result.value.get());
+      dynamic_cast<RecoveryExpressionEvaluation *>(result.value);
   ASSERT_NE(parsedEvaluation, nullptr) << parseDump;
   auto *parsedCall =
-      dynamic_cast<RecoveryFunctionCall *>(parsedEvaluation->expression.get());
+      dynamic_cast<RecoveryFunctionCall *>(parsedEvaluation->expression);
   ASSERT_NE(parsedCall, nullptr) << parseDump;
   EXPECT_EQ(parsedCall->name, "root") << parseDump;
   ASSERT_EQ(parsedCall->args.size(), 2u) << parseDump;
@@ -577,14 +577,14 @@ TEST(RecoveryTest, ArithmeticShapedModuleKeepsBrokenCallLocal) {
   ASSERT_TRUE(result.value) << parseDump;
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 1u) << parseDump;
   auto *evaluationNode = dynamic_cast<RecoveryExpressionEvaluation *>(
-      parsedModule->statements.front().get());
+      parsedModule->statements.front());
   ASSERT_NE(evaluationNode, nullptr) << parseDump;
   auto *call =
-      dynamic_cast<RecoveryFunctionCall *>(evaluationNode->expression.get());
+      dynamic_cast<RecoveryFunctionCall *>(evaluationNode->expression);
   ASSERT_NE(call, nullptr) << parseDump;
   EXPECT_EQ(call->name, "Root") << parseDump;
   ASSERT_EQ(call->args.size(), 2u) << parseDump;
@@ -662,14 +662,14 @@ TEST(RecoveryTest,
   EXPECT_TRUE(result.fullMatch) << parseDump;
   EXPECT_LT(result.result.recoveryReport.recoveryAttemptRuns, 512u) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_FALSE(parsedModule->statements.empty()) << parseDump;
   auto *lastEvaluation = dynamic_cast<RecoveryExpressionEvaluation *>(
-      parsedModule->statements.back().get());
+      parsedModule->statements.back());
   ASSERT_NE(lastEvaluation, nullptr) << parseDump;
   auto *call =
-      dynamic_cast<RecoveryFunctionCall *>(lastEvaluation->expression.get());
+      dynamic_cast<RecoveryFunctionCall *>(lastEvaluation->expression);
   ASSERT_NE(call, nullptr) << parseDump;
   EXPECT_EQ(call->name, "Root") << parseDump;
   EXPECT_FALSE(call->args.empty()) << parseDump;
@@ -821,14 +821,14 @@ TEST(RecoveryTest,
   EXPECT_TRUE(result.fullMatch) << parseDump;
   EXPECT_LT(result.result.recoveryReport.recoveryAttemptRuns, 1024u) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 6u) << parseDump;
 
   auto *rootDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[4].get());
+      parsedModule->statements[4]);
   auto *sqrtDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[5].get());
+      parsedModule->statements[5]);
   ASSERT_NE(rootDefinition, nullptr) << parseDump;
   ASSERT_NE(sqrtDefinition, nullptr) << parseDump;
   EXPECT_EQ(rootDefinition->name, "root") << parseDump;
@@ -918,18 +918,18 @@ TEST(RecoveryTest,
   EXPECT_TRUE(result.fullMatch) << parseDump;
   EXPECT_LT(result.result.recoveryReport.recoveryAttemptRuns, 1024u) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 10u) << parseDump;
 
   auto *b1Definition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[2].get());
+      parsedModule->statements[2]);
   auto *b2Definition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[3].get());
+      parsedModule->statements[3]);
   auto *firstEvaluation = dynamic_cast<RecoveryExpressionEvaluation *>(
-      parsedModule->statements[8].get());
+      parsedModule->statements[8]);
   auto *secondEvaluation = dynamic_cast<RecoveryExpressionEvaluation *>(
-      parsedModule->statements[9].get());
+      parsedModule->statements[9]);
   ASSERT_NE(b1Definition, nullptr) << parseDump;
   ASSERT_NE(b2Definition, nullptr) << parseDump;
   ASSERT_NE(firstEvaluation, nullptr) << parseDump;

@@ -398,9 +398,8 @@ template <typename T, auto Left, auto Op, auto Right>
   requires DefaultConstructibleAstNode<T>
 struct InfixRule final : grammar::InfixRule {
   struct Ops {
-    std::unique_ptr<AstNode> (*getValue)(const void *, const CstNodeView &,
-                                         std::unique_ptr<AstNode>,
-                                         const ValueBuildContext &);
+    AstNode *(*getValue)(const void *, const CstNodeView &, AstNode *,
+                         const ValueBuildContext &);
     bool (*rule)(const void *, ParseContext &);
     bool (*ruleTracked)(const void *, TrackedParseContext &);
     bool (*fastProbeTracked)(const void *, TrackedParseContext &);
@@ -508,12 +507,10 @@ struct InfixRule final : grammar::InfixRule {
     return *this;
   }
 
-  std::unique_ptr<AstNode>
-  getValue(const CstNodeView &node,
-           std::unique_ptr<AstNode> lhsNode,
-           const ValueBuildContext &context) const override {
+  AstNode *getValue(const CstNodeView &node, AstNode *lhsNode,
+                    const ValueBuildContext &context) const override {
     assert(_obj && _ops.getValue && "Missing element wrapper!");
-    return _ops.getValue(_obj, node, std::move(lhsNode), context);
+    return _ops.getValue(_obj, node, lhsNode, context);
   }
 
   bool probeRecoverable(RecoveryContext &ctx) const {
@@ -596,12 +593,11 @@ private:
         : _owner(owner), primary(detail::move_if_owned<Element>(elem)),
           ops(OperatorCatalog::make_ops(detail::move_if_owned<Operators>(opsIn)...)) {}
 
-    static std::unique_ptr<AstNode>
-    getValue(const void *self, const CstNodeView &node,
-             std::unique_ptr<AstNode> lhsNode,
-             const ValueBuildContext &context) {
+    static AstNode *getValue(const void *self, const CstNodeView &node,
+                             AstNode *lhsNode,
+                             const ValueBuildContext &context) {
       return ValueBuilder::getValue(static_cast<const Model *>(self), node,
-                                    std::move(lhsNode), context);
+                                    lhsNode, context);
     }
 
     static bool rule(const void *self, ParseContext &ctx) {

@@ -47,7 +47,7 @@ TEST(AstJsonConverterTest,
 
   const auto document = test_support::open_reference_document(*shared);
   ASSERT_NE(document, nullptr);
-  for (const auto &handle : document->references) {
+  for (const auto &handle : document->parseResult.references) {
     handle.get()->clearLinkState();
   }
   document->state = workspace::DocumentState::Parsed;

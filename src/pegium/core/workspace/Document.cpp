@@ -3,6 +3,8 @@
 #include <cassert>
 #include <utility>
 
+#include <pegium/core/syntax-tree/AstArena.hpp>
+
 namespace pegium::workspace {
 namespace {
 
@@ -25,11 +27,7 @@ void Document::resetAnalysisState() noexcept {
   state = DocumentState::Changed;
   parseResult = {};
   localSymbols.clear();
-  references.clear();
   diagnostics.clear();
-  std::scoped_lock lock(_astNodeIndexMutex);
-  _astNodesBySymbolId.clear();
-  _astNodeIndexBuilt = false;
 }
 
 const TextDocument &Document::textDocument() const noexcept {
@@ -44,62 +42,22 @@ void Document::attachTextDocument(std::shared_ptr<TextDocument> textDocument) {
 }
 
 SymbolId Document::makeSymbolId(const AstNode &node) const noexcept {
-  assert(node.hasCstNode() && "AST nodes should always carry a CST node");
-  return node.getCstNode().id();
+  return static_cast<SymbolId>(node.symbolId());
 }
 
 const AstNode &Document::getAstNode(SymbolId symbolId) const noexcept {
   assert(symbolId != InvalidSymbolId);
-  assert(hasAst());
-
-  std::scoped_lock lock(_astNodeIndexMutex);
-  if (!_astNodeIndexBuilt) {
-    buildAstNodeIndexLocked();
-  }
-
-  const auto index = static_cast<std::size_t>(symbolId);
-  assert(index < _astNodesBySymbolId.size());
-  const auto *node = _astNodesBySymbolId[index];
+  assert(parseResult.astArena != nullptr);
+  const auto *node = parseResult.astArena->getNode(symbolId);
   assert(node != nullptr);
   return *node;
 }
 
 const AstNode *Document::findAstNode(SymbolId symbolId) const noexcept {
-  assert(symbolId != InvalidSymbolId);
-  assert(hasAst());
-
-  std::scoped_lock lock(_astNodeIndexMutex);
-  if (!_astNodeIndexBuilt) {
-    buildAstNodeIndexLocked();
+  if (symbolId == InvalidSymbolId || parseResult.astArena == nullptr) {
+    return nullptr;
   }
-
-  const auto index = static_cast<std::size_t>(symbolId);
-  return index < _astNodesBySymbolId.size() ? _astNodesBySymbolId[index]
-                                            : nullptr;
-}
-
-void Document::buildAstNodeIndexLocked() const {
-  assert(hasAst());
-  _astNodesBySymbolId.clear();
-
-  auto registerNode = [this](const AstNode &node) {
-    if (!node.hasCstNode()) {
-      return;
-    }
-    const auto symbolId = static_cast<std::size_t>(node.getCstNode().id());
-    if (symbolId >= _astNodesBySymbolId.size()) {
-      _astNodesBySymbolId.resize(symbolId + 1, nullptr);
-    }
-    _astNodesBySymbolId[symbolId] = &node;
-  };
-
-  const auto &root = *parseResult.value;
-  registerNode(root);
-  for (const auto *node : root.getAllContent()) {
-    registerNode(*node);
-  }
-
-  _astNodeIndexBuilt = true;
+  return parseResult.astArena->getNode(symbolId);
 }
 
 } // namespace pegium::workspace

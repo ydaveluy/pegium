@@ -154,7 +154,7 @@ template <typename T> struct ValueNode : pegium::AstNode {
 struct ParsedResult {
   pegium::parser::ParseResult result;
   std::unique_ptr<pegium::RootCstNode> &cst;
-  std::unique_ptr<pegium::AstNode> &value;
+  pegium::AstNode *&value;
   std::vector<pegium::parser::ParseDiagnostic> &parseDiagnostics;
   pegium::TextOffset &parsedLength;
   bool &fullMatch;

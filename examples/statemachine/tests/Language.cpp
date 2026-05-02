@@ -20,7 +20,7 @@ TEST(StatemachineLanguageTest, ParsesSimpleStateMachine) {
 
   ASSERT_TRUE(document->parseSucceeded());
   auto *model =
-      dynamic_cast<ast::Statemachine *>(document->parseResult.value.get());
+      dynamic_cast<ast::Statemachine *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
   EXPECT_EQ(model->states.size(), 1u);
 }
@@ -46,13 +46,13 @@ TEST(StatemachineLanguageTest, LinksInitialStateTransitionAndActionReferences) {
 
   ASSERT_NE(document, nullptr);
   auto *model =
-      dynamic_cast<ast::Statemachine *>(document->parseResult.value.get());
+      dynamic_cast<ast::Statemachine *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
   ASSERT_TRUE(model->init);
   EXPECT_EQ(model->init->name, "Idle");
   ASSERT_EQ(model->states.size(), 2u);
 
-  auto *idle = model->states.front().get();
+  auto *idle = model->states.front();
   ASSERT_NE(idle, nullptr);
   ASSERT_EQ(idle->actions.size(), 2u);
   ASSERT_TRUE(idle->actions[0]);
@@ -61,7 +61,7 @@ TEST(StatemachineLanguageTest, LinksInitialStateTransitionAndActionReferences) {
   EXPECT_EQ(idle->actions[1]->name, "Close");
 
   ASSERT_EQ(idle->transitions.size(), 1u);
-  auto *transition = idle->transitions.front().get();
+  auto *transition = idle->transitions.front();
   ASSERT_NE(transition, nullptr);
   ASSERT_TRUE(transition->event);
   ASSERT_TRUE(transition->state);

@@ -680,10 +680,8 @@ TEST(AssignmentTest, OrderedChoiceSupportsVariantBoolAndAstNodeValues) {
 })json");
     auto resultValue = ast_as<StrictChoiceNode>(result);
     ASSERT_TRUE(resultValue != nullptr);
-    ASSERT_TRUE(std::holds_alternative<std::unique_ptr<StrictChildNode>>(
-        resultValue->value));
-    const auto &child =
-        std::get<std::unique_ptr<StrictChildNode>>(resultValue->value);
+    ASSERT_TRUE(std::holds_alternative<StrictChildNode *>(resultValue->value));
+    auto *child = std::get<StrictChildNode *>(resultValue->value);
     ASSERT_TRUE(child != nullptr);
     EXPECT_EQ(child->getContainer(), resultValue);
   }
@@ -775,20 +773,11 @@ TEST(AssignmentTest, AssignOnBoolWithNonBoolElementSetsTrue) {
 })json");
 }
 
-TEST(AssignmentTest, DirectObjectValuesAssignAndAppendSharedPointers) {
-  DirectValueParser parser;
-
-  auto result = parse_rule(parser.Root, "leaf:leaf");
-  ASSERT_TRUE(result.value);
-  auto resultValue = ast_as<DirectValueNode>(result);
-  ASSERT_TRUE(resultValue != nullptr);
-
-  ASSERT_TRUE(resultValue->one != nullptr);
-  EXPECT_EQ(resultValue->one->name, "leaf");
-
-  ASSERT_EQ(resultValue->many.size(), 1u);
-  ASSERT_TRUE(resultValue->many[0] != nullptr);
-  EXPECT_EQ(resultValue->many[0]->name, "leaf");
+// Disabled: pointer<NonAstNode> is no longer supported after the arena
+// migration. AST containment (pointer<T>) is reserved for AstNode subtypes
+// owned by the document's AstArena. Non-AST values can use direct value
+// storage or std::unique_ptr<T> in user code outside the parser-managed path.
+TEST(AssignmentTest, DISABLED_DirectObjectValuesAssignAndAppendSharedPointers) {
 }
 
 TEST(AssignmentTest, NullptrValueAssignmentIsAccepted) {

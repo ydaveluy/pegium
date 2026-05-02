@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <pegium/core/CoreTestSupport.hpp>
+#include <pegium/core/syntax-tree/AstArena.hpp>
 #include <string>
 #include <vector>
 
@@ -73,9 +74,9 @@ TEST(DefaultDocumentValidatorTest, SupportsBuiltInAndCustomCategories) {
   pegium::test::apply_parse_result(
       document, parser.parse(document.textDocument().getText()));
   ASSERT_TRUE(document.parseResult.value != nullptr);
-  ASSERT_FALSE(document.references.empty());
+  ASSERT_FALSE(document.parseResult.references.empty());
   auto *reference = dynamic_cast<AbstractSingleReference *>(
-      document.references.front().get());
+      document.parseResult.references.front().get());
   ASSERT_NE(reference, nullptr);
   document.state = workspace::DocumentState::Parsed;
   EXPECT_EQ(reference->resolve(), nullptr);
@@ -164,7 +165,13 @@ TEST(DefaultDocumentValidatorTest, RunsBeforeAndAfterDocumentHooks) {
   workspace::Document document(
       test::make_text_document("file:///validation-hooks.pg", "mini", {}));
   document.id = 2u;
-  document.parseResult.value = std::make_unique<ValidationNodeA>();
+  document.parseResult.cst = std::make_unique<RootCstNode>(
+      pegium::text::TextSnapshot::copy(""));
+  document.parseResult.astArena =
+      std::make_unique<pegium::AstArena>(*document.parseResult.cst);
+  document.parseResult.astArena->attachDocument(document);
+  document.parseResult.value =
+      document.parseResult.astArena->create<ValidationNodeA>();
 
   ValidationOptions options;
   options.categories = {"fast"};
@@ -198,9 +205,9 @@ TEST(DefaultDocumentValidatorTest, UsesReferenceNodeRangeWhenAvailable) {
   pegium::test::apply_parse_result(
       document, parser.parse(document.textDocument().getText()));
   ASSERT_TRUE(document.parseResult.value != nullptr);
-  ASSERT_FALSE(document.references.empty());
+  ASSERT_FALSE(document.parseResult.references.empty());
   auto *reference = dynamic_cast<AbstractSingleReference *>(
-      document.references.front().get());
+      document.parseResult.references.front().get());
   ASSERT_NE(reference, nullptr);
   document.state = workspace::DocumentState::Parsed;
   EXPECT_EQ(reference->resolve(), nullptr);
@@ -255,7 +262,13 @@ TEST(DefaultDocumentValidatorTest,
   workspace::Document document(test::make_text_document(
       "file:///validation-parse-source.pg", "mini", {}));
   document.id = 4u;
-  document.parseResult.value = std::make_unique<ValidationNodeA>();
+  document.parseResult.cst = std::make_unique<RootCstNode>(
+      pegium::text::TextSnapshot::copy(""));
+  document.parseResult.astArena =
+      std::make_unique<pegium::AstArena>(*document.parseResult.cst);
+  document.parseResult.astArena->attachDocument(document);
+  document.parseResult.value =
+      document.parseResult.astArena->create<ValidationNodeA>();
   document.parseResult.parseDiagnostics.push_back(insertedDiagnostic);
 
   ValidationOptions options;
@@ -307,7 +320,7 @@ TEST(DefaultDocumentValidatorTest,
   pegium::test::parse_rule(rootRule, document, SkipperBuilder().build());
   ASSERT_TRUE(document.parseResult.value != nullptr);
   const auto *rootNode = dynamic_cast<const ValidationRootNode *>(
-      document.parseResult.value.get());
+      document.parseResult.value);
   ASSERT_NE(rootNode, nullptr);
   std::vector<std::string> expectedMessages;
   for (const auto *node : rootNode->getAllContent<ValidationNodeA>()) {

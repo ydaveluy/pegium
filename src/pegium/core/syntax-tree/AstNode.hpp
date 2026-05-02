@@ -19,6 +19,8 @@
 
 namespace pegium {
 
+class AstArena;
+
 struct AstNode;
 
 /// Base type for every AST node produced by pegium parsers.
@@ -55,9 +57,10 @@ struct AstNode {
 
   /// A pointer on an object of type T.
   ///
-  /// This is the default ownership model for containment relations in generated
-  /// AST types.
-  template <typename T> using pointer = std::unique_ptr<T>;
+  /// AstNode children are owned by the document's `AstArena`. The field stores
+  /// a non-owning raw pointer; the arena handles destruction at parse-result
+  /// teardown.
+  template <typename T> using pointer = T *;
 
   /// Optional value convenience alias used in AST structs.
   template <typename T> using optional = std::optional<T>;
@@ -126,25 +129,24 @@ struct AstNode {
   }
 
   /// Returns `true` when this AST node is associated with a CST node.
-  [[nodiscard]] bool hasCstNode() const noexcept { return _cstNode.valid(); }
-
-  /// Returns the CST node from which this AST node was parsed.
-  ///
-  /// Callers should check `hasCstNode()` before assuming the result is valid.
-  [[nodiscard]] const CstNodeView &getCstNode() const noexcept {
-    return _cstNode;
+  [[nodiscard]] bool hasCstNode() const noexcept {
+    return _cstNodeId != kNoNode;
   }
 
   /// Returns the CST node from which this AST node was parsed.
   ///
   /// Callers should check `hasCstNode()` before assuming the result is valid.
-  [[nodiscard]] CstNodeView &getCstNode() noexcept { return _cstNode; }
+  /// Returns by value: the view is materialized from the owning arena's CST
+  /// root and the stored node id, so it costs a single memory load.
+  [[nodiscard]] CstNodeView getCstNode() const noexcept;
 
   /// Associates this AST node with its originating CST node.
+  ///
+  /// The view's root must match the CST root attached to this node's arena.
   [[gnu::always_inline]] void setCstNode(const CstNodeView &node) noexcept {
     assert(node.valid());
-    assert(!_cstNode.valid());
-    _cstNode = node;
+    assert(_cstNodeId == kNoNode);
+    _cstNodeId = node.id();
   }
 
   /// Returns the parent node, or nullptr if this is the root.
@@ -199,7 +201,19 @@ struct AstNode {
     container._lastChild = this;
   }
 
+  /// Returns the symbol id of this node within its owning `AstArena`.
+  ///
+  /// The id is dense within the arena (0..N-1 in allocation order) and is the
+  /// canonical key used by `Document::getAstNode(SymbolId)`.
+  [[nodiscard]] std::uint32_t symbolId() const noexcept { return _symbolId; }
+
+  /// Returns the arena that owns this AST node, or nullptr for a default-
+  /// constructed node not yet placed in an arena.
+  [[nodiscard]] AstArena *arena() const noexcept { return _arena; }
+
 private:
+  friend class AstArena;
+
   /// Parent in the AST. Null for the root.
   AstNode *_container = nullptr;
   /// First child in attach order, or null when this node has no children.
@@ -208,9 +222,14 @@ private:
   AstNode *_lastChild = nullptr;
   /// Next sibling under the same parent, or null when this is the last child.
   AstNode *_nextSibling = nullptr;
-  /// The Concrete Syntax Tree (CST) node of the text range from which this node
-  /// was parsed.
-  CstNodeView _cstNode;
+  /// Owning arena. Set by `AstArena::create`. The arena reaches the workspace
+  /// document and the originating CST root without per-node duplication.
+  AstArena *_arena = nullptr;
+  /// Index of this node within the owning arena. Set by `AstArena::create`.
+  NodeId _symbolId = kNoNode;
+  /// CST node id within the arena's CST root, or `kNoNode` when unattached.
+  /// `getCstNode()` materializes a `CstNodeView` from this id and the arena.
+  NodeId _cstNodeId = kNoNode;
 
   template <typename T, typename Range>
   static auto of_type(Range &&range) noexcept {
@@ -318,7 +337,7 @@ private:
   };
 };
 static_assert(sizeof(AstNode) <= 56,
-              "AstNode size is less or equal than 56");
+              "AstNode should stay compact");
 /// AST base class for declarations that expose a semantic `name`.
 ///
 /// Languages can inherit from `NamedAstNode` to let the default naming
@@ -338,16 +357,17 @@ concept DefaultConstructibleAstNode =
 // parser design, not a recommendation to encode semantic invariants in
 // constructors.
 
-/// Casts a contained unique pointer to a concrete AST type without transferring ownership.
+/// Casts an AST node pointer to a concrete derived type, returning nullptr on
+/// type mismatch.
 template <typename T, typename U>
-T *ast_ptr_cast(std::unique_ptr<U> &ptr) noexcept {
-  return dynamic_cast<T *>(ptr.get());
+T *ast_ptr_cast(U *ptr) noexcept {
+  return dynamic_cast<T *>(ptr);
 }
 
-/// Casts a contained unique pointer to a concrete AST type without transferring ownership.
+/// Const overload.
 template <typename T, typename U>
-const T *ast_ptr_cast(const std::unique_ptr<U> &ptr) noexcept {
-  return dynamic_cast<const T *>(ptr.get());
+const T *ast_ptr_cast(const U *ptr) noexcept {
+  return dynamic_cast<const T *>(ptr);
 }
 
 } // namespace pegium

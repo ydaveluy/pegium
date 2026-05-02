@@ -2,11 +2,14 @@
 
 /// Grammar contract for AST node creation elements.
 
-#include <memory>
 #include <string_view>
 
 #include <pegium/core/grammar/AbstractElement.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
+
+namespace pegium {
+class AstArena;
+} // namespace pegium
 
 namespace pegium::grammar {
 
@@ -16,7 +19,7 @@ struct Create : AbstractElement {
   }
   constexpr ~Create() noexcept override = default;
 
-  virtual std::unique_ptr<AstNode> getValue() const = 0;
+  virtual AstNode *getValue(AstArena &arena) const = 0;
   virtual std::string_view getTypeName() const noexcept = 0;
 
   void print(std::ostream &os) const override;

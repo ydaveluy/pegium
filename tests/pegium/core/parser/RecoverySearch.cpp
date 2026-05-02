@@ -265,7 +265,7 @@ std::string summarize_statement_names(const RecoveryStatementListNode &root) {
   std::string summary;
   for (const auto &statement : root.statements) {
     const auto *node =
-        dynamic_cast<const RecoveryStatementNode *>(statement.get());
+        dynamic_cast<const RecoveryStatementNode *>(statement);
     if (node == nullptr) {
       continue;
     }
@@ -347,9 +347,9 @@ TEST(RecoverySearchTest,
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(root->statements.size(), 2u);
   auto *first =
-      dynamic_cast<RecoveryStatementNode *>(root->statements[0].get());
+      dynamic_cast<RecoveryStatementNode *>(root->statements[0]);
   auto *second =
-      dynamic_cast<RecoveryStatementNode *>(root->statements[1].get());
+      dynamic_cast<RecoveryStatementNode *>(root->statements[1]);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(second, nullptr);
   EXPECT_EQ(first->name, "a");
@@ -399,9 +399,9 @@ TEST(
   ASSERT_NE(root, nullptr);
   ASSERT_GE(root->statements.size(), 2u);
   auto *first =
-      dynamic_cast<RecoveryStatementNode *>(root->statements[0].get());
+      dynamic_cast<RecoveryStatementNode *>(root->statements[0]);
   auto *last =
-      dynamic_cast<RecoveryStatementNode *>(root->statements.back().get());
+      dynamic_cast<RecoveryStatementNode *>(root->statements.back());
   ASSERT_NE(first, nullptr);
   ASSERT_NE(last, nullptr);
   EXPECT_EQ(first->name, "a");
@@ -449,8 +449,8 @@ TEST(
   auto *root = pegium::ast_ptr_cast<RecoveryTypeListNode>(parsed.value);
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(root->elements.size(), 2u);
-  auto *post = dynamic_cast<RecoveryEntityNode *>(root->elements[0].get());
-  auto *comment = dynamic_cast<RecoveryEntityNode *>(root->elements[1].get());
+  auto *post = dynamic_cast<RecoveryEntityNode *>(root->elements[0]);
+  auto *comment = dynamic_cast<RecoveryEntityNode *>(root->elements[1]);
   ASSERT_NE(post, nullptr);
   ASSERT_NE(comment, nullptr);
   EXPECT_EQ(post->name, "Post");

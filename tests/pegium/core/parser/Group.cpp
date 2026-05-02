@@ -261,8 +261,8 @@ TEST(GroupTest,
                diag.endOffset == delimiterOffset;
       }));
 
-  auto *parsedEntry = dynamic_cast<GroupEntryNode *>(result.value.get());
+  auto *parsedEntry = dynamic_cast<GroupEntryNode *>(result.value);
   ASSERT_NE(parsedEntry, nullptr);
   EXPECT_EQ(parsedEntry->name, "sample");
-  EXPECT_EQ(parsedEntry->item.get(), nullptr);
+  EXPECT_EQ(parsedEntry->item, nullptr);
 }

@@ -8,6 +8,7 @@
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/Introspection.hpp>
 #include <pegium/core/parser/NodeParseHelpers.hpp>
+#include <pegium/core/parser/ParseAttempt.hpp>
 #include <pegium/core/parser/Parser.hpp>
 #include <pegium/core/parser/ParserRuleSupport.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
@@ -45,34 +46,14 @@ struct ParserRule final : AbstractRule<grammar::ParserRule>,
     return typeName;
   }
 
-  std::unique_ptr<AstNode>
-  getValue(const CstNodeView &node,
-           const ValueBuildContext &context) const override {
+  AstNode *getValue(const CstNodeView &node,
+                    const ValueBuildContext &context) const override {
     return getRawValue(node, context);
   }
 
-  std::unique_ptr<AstNode> getValue(const CstNodeView &node) const {
-    return getRawValue(node, ValueBuildContext{});
-  }
-
-  std::unique_ptr<AstNode>
-  getValue(const CstNodeView &node,
-           std::vector<ReferenceHandle> &references) const {
-    return getRawValue(node, ValueBuildContext{.references = &references});
-  }
-
-  std::unique_ptr<T> getRawValue(const CstNodeView &node,
-                                 std::vector<ReferenceHandle> &references) const {
-    return getRawValue(node, ValueBuildContext{.references = &references});
-  }
-
-  std::unique_ptr<T> getRawValue(const CstNodeView &node,
-                                 const ValueBuildContext &context) const {
+  T *getRawValue(const CstNodeView &node,
+                 const ValueBuildContext &context) const {
     return detail::ParserRuleBuildSupport<T>::get_raw_value(node, context);
-  }
-
-  std::unique_ptr<T> getRawValue(const CstNodeView &node) const {
-    return getRawValue(node, ValueBuildContext{});
   }
 
   bool rule(ParseContext &ctx) const override { return parse_impl(ctx); }

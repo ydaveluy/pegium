@@ -64,7 +64,7 @@ void DefaultLinker::link(workspace::Document &document,
   }
 
   std::uint32_t cancelPollCounter = 0;
-  for (const auto &handle : document.references) {
+  for (const auto &handle : document.parseResult.references) {
     if ((++cancelPollCounter & 0x3fU) == 0U) {
       utils::throw_if_cancelled(cancelToken);
     }
@@ -81,7 +81,7 @@ void DefaultLinker::link(workspace::Document &document,
 }
 
 void DefaultLinker::unlink(workspace::Document &document) const {
-  for (const auto &handle : document.references) {
+  for (const auto &handle : document.parseResult.references) {
     handle.get()->clearLinkState();
   }
 }

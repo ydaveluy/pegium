@@ -19,7 +19,7 @@ find_reference_at_cst_node(const workspace::Document &document,
                            const CstNodeView &selectedNode) {
   const AbstractReference *best = nullptr;
   TextOffset bestSpan = std::numeric_limits<TextOffset>::max();
-  for (const auto &handle : document.references) {
+  for (const auto &handle : document.parseResult.references) {
     const auto &reference = *handle.getConst();
     const auto refNode = reference.getRefNode();
     if (!refNode.valid()) {

@@ -304,7 +304,7 @@ TEST(RecoveryTest,
 
   ASSERT_TRUE(result.value);
   EXPECT_FALSE(result.parseDiagnostics.empty());
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   EXPECT_TRUE(std::ranges::any_of(
       result.parseDiagnostics,
@@ -344,7 +344,7 @@ TEST(RecoveryTest,
   const auto recovered = detail::first_recovered_node(*result.cst);
   EXPECT_FALSE(recovered.valid());
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   EXPECT_EQ(parsedModule->name, "basicMath");
 }
@@ -374,7 +374,7 @@ TEST(RecoveryTest, MissingKeywordCodepointCanRecoverLiteralAndContinue) {
   EXPECT_EQ(replaced->offset, 0u);
   EXPECT_NE(replaced->element, nullptr);
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   EXPECT_EQ(parsedModule->name, "basicMath");
 }
@@ -396,7 +396,7 @@ TEST(RecoveryTest, MissingKeywordSuffixCanRecoverLiteralAndContinue) {
         return diagnostic.kind == ParseDiagnosticKind::Replaced;
       }));
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   EXPECT_EQ(parsedModule->name, "basicMath");
 }
@@ -418,7 +418,7 @@ TEST(RecoveryTest, HiddenGapWordLikeLiteralCanUseIdentifierLikeFuzzyRepair) {
         return diagnostic.kind == ParseDiagnosticKind::Replaced;
       }));
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   EXPECT_EQ(parsedModule->name, "basicMath");
 }
@@ -602,7 +602,7 @@ TEST(RecoveryTest, ExtraKeywordCodepointCanRecoverLiteralAndContinue) {
         return diagnostic.kind == ParseDiagnosticKind::Replaced;
       }));
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   EXPECT_EQ(parsedModule->name, "basicMath");
 }
@@ -643,7 +643,7 @@ TEST(RecoveryTest, TransposedKeywordCodepointsCanRecoverLiteralAndContinue) {
         return diagnostic.kind == ParseDiagnosticKind::Replaced;
       }));
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   EXPECT_EQ(parsedModule->name, "basicMath");
 }
@@ -695,10 +695,10 @@ TEST(RecoveryTest, MissingRequiredExpressionBeforeDelimiterLeavesHole) {
   ASSERT_TRUE(result.value);
   EXPECT_TRUE(result.fullMatch);
   auto *parsedDefinition =
-      dynamic_cast<RecoveryDefinitionWithExpr *>(result.value.get());
+      dynamic_cast<RecoveryDefinitionWithExpr *>(result.value);
   ASSERT_NE(parsedDefinition, nullptr);
   EXPECT_EQ(parsedDefinition->name, "a");
-  EXPECT_EQ(parsedDefinition->expr.get(), nullptr);
+  EXPECT_EQ(parsedDefinition->expr, nullptr);
   EXPECT_TRUE(std::ranges::any_of(
       result.parseDiagnostics, [](const ParseDiagnostic &diagnostic) {
         return diagnostic.kind == ParseDiagnosticKind::Inserted;
@@ -737,21 +737,21 @@ TEST(RecoveryTest, RepetitionAllowsInsertRetryAfterRewoundProgressAtEof) {
         return diagnostic.kind == ParseDiagnosticKind::Inserted;
       }));
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   ASSERT_EQ(parsedModule->statements.size(), 1u);
 
   auto *parsedDefinition = dynamic_cast<RecoveryDefinitionWithExpr *>(
-      parsedModule->statements.front().get());
+      parsedModule->statements.front());
   ASSERT_NE(parsedDefinition, nullptr);
   EXPECT_EQ(parsedDefinition->name, "a");
 
   auto *binary =
-      dynamic_cast<RecoveryBinaryExpression *>(parsedDefinition->expr.get());
+      dynamic_cast<RecoveryBinaryExpression *>(parsedDefinition->expr);
   ASSERT_NE(binary, nullptr);
   EXPECT_EQ(binary->op, "+");
-  auto *left = dynamic_cast<RecoveryNumberExpression *>(binary->left.get());
-  auto *right = dynamic_cast<RecoveryNumberExpression *>(binary->right.get());
+  auto *left = dynamic_cast<RecoveryNumberExpression *>(binary->left);
+  auto *right = dynamic_cast<RecoveryNumberExpression *>(binary->right);
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr);
   EXPECT_EQ(left->value, 3);
@@ -844,14 +844,14 @@ TEST(RecoveryTest,
         return diagnostic.kind == ParseDiagnosticKind::Deleted;
       }));
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   ASSERT_EQ(parsedModule->statements.size(), 2u);
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   auto *secondDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[1].get());
+      parsedModule->statements[1]);
   ASSERT_NE(firstDefinition, nullptr);
   ASSERT_NE(secondDefinition, nullptr);
   EXPECT_EQ(firstDefinition->name, "a");
@@ -895,17 +895,17 @@ TEST(RecoveryTest,
         return diagnostic.kind == ParseDiagnosticKind::Inserted;
       })) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 3u) << parseDump;
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   ASSERT_NE(firstDefinition, nullptr) << parseDump;
   EXPECT_EQ(firstDefinition->name, "a") << parseDump;
   ASSERT_NE(firstDefinition->expr, nullptr) << parseDump;
   auto *firstNumber =
-      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr.get());
+      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr);
   ASSERT_NE(firstNumber, nullptr) << parseDump;
   EXPECT_EQ(firstNumber->value, 5) << parseDump;
 }
@@ -951,23 +951,23 @@ TEST(RecoveryTest,
         return diagnostic.kind == ParseDiagnosticKind::Inserted;
       })) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 3u) << parseDump;
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   auto *secondDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[1].get());
+      parsedModule->statements[1]);
   auto *thirdEvaluation = dynamic_cast<RecoveryExpressionEvaluation *>(
-      parsedModule->statements[2].get());
+      parsedModule->statements[2]);
   ASSERT_NE(firstDefinition, nullptr) << parseDump;
   ASSERT_NE(secondDefinition, nullptr) << parseDump;
   ASSERT_NE(thirdEvaluation, nullptr) << parseDump;
   EXPECT_EQ(firstDefinition->name, "a") << parseDump;
   EXPECT_EQ(secondDefinition->name, "b") << parseDump;
   auto *firstNumber =
-      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr.get());
+      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr);
   ASSERT_NE(firstNumber, nullptr) << parseDump;
   EXPECT_EQ(firstNumber->value, 5) << parseDump;
 }
@@ -1010,15 +1010,15 @@ TEST(RecoveryTest,
   ASSERT_TRUE(result.value) << parseDump;
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 3u) << parseDump;
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   ASSERT_NE(firstDefinition, nullptr) << parseDump;
   auto *firstNumber =
-      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr.get());
+      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr);
   ASSERT_NE(firstNumber, nullptr) << parseDump;
   EXPECT_EQ(firstNumber->value, 5) << parseDump;
 }
@@ -1057,15 +1057,15 @@ TEST(RecoveryTest,
   ASSERT_TRUE(result.value) << parseDump;
   EXPECT_TRUE(result.fullMatch) << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 3u) << parseDump;
 
   auto *firstDefinition = dynamic_cast<RecoveryDefinitionWithOptionalArgs *>(
-      parsedModule->statements[0].get());
+      parsedModule->statements[0]);
   ASSERT_NE(firstDefinition, nullptr) << parseDump;
   auto *firstNumber =
-      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr.get());
+      dynamic_cast<RecoveryNumberExpression *>(firstDefinition->expr);
   ASSERT_NE(firstNumber, nullptr) << parseDump;
   EXPECT_EQ(firstNumber->value, 5) << parseDump;
 }

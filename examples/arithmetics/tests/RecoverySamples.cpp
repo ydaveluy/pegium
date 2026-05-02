@@ -25,13 +25,13 @@ std::string summarize_expression(const ast::Expression *expression) {
   if (const auto *grouped =
           dynamic_cast<const ast::GroupedExpression *>(expression);
       grouped != nullptr) {
-    return "group(" + summarize_expression(grouped->expression.get()) + ")";
+    return "group(" + summarize_expression(grouped->expression) + ")";
   }
   if (const auto *binary =
           dynamic_cast<const ast::BinaryExpression *>(expression);
       binary != nullptr) {
-    return "binary(" + summarize_expression(binary->left.get()) + " " +
-           binary->op + " " + summarize_expression(binary->right.get()) + ")";
+    return "binary(" + summarize_expression(binary->left) + " " +
+           binary->op + " " + summarize_expression(binary->right) + ")";
   }
   return "other-expr";
 }
@@ -43,17 +43,17 @@ std::string summarize_module_statement_shapes(const ast::Module &module) {
       summary += " | ";
     }
     if (const auto *definition =
-            dynamic_cast<const ast::Definition *>(statement.get());
+            dynamic_cast<const ast::Definition *>(statement);
         definition != nullptr) {
       summary += "def:";
       summary += definition->name;
       continue;
     }
     if (const auto *evaluation =
-            dynamic_cast<const ast::Evaluation *>(statement.get());
+            dynamic_cast<const ast::Evaluation *>(statement);
         evaluation != nullptr) {
       summary += "eval:";
-      summary += summarize_expression(evaluation->expression.get());
+      summary += summarize_expression(evaluation->expression);
       continue;
     }
     summary += "other";
@@ -103,7 +103,7 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
   const auto &parsed = document.parseResult;
   const auto parseDump =
       pegium::test::dump_parse_diagnostics(parsed.parseDiagnostics);
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << sample.label << " :: " << parseDump;
 
   if (sample.label == "missing_semicolon_before_next_definition.calc") {
@@ -116,9 +116,9 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(module->statements.size(), 2u)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     auto *firstDefinition =
-        dynamic_cast<ast::Definition *>(module->statements[0].get());
+        dynamic_cast<ast::Definition *>(module->statements[0]);
     auto *secondDefinition =
-        dynamic_cast<ast::Definition *>(module->statements[1].get());
+        dynamic_cast<ast::Definition *>(module->statements[1]);
     ASSERT_NE(firstDefinition, nullptr);
     ASSERT_NE(secondDefinition, nullptr);
     EXPECT_EQ(firstDefinition->name, "a");
@@ -133,15 +133,15 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(module->statements.size(), 2u)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     auto *brokenDefinition =
-        dynamic_cast<ast::Definition *>(module->statements[0].get());
+        dynamic_cast<ast::Definition *>(module->statements[0]);
     auto *keptDefinition =
-        dynamic_cast<ast::Definition *>(module->statements[1].get());
+        dynamic_cast<ast::Definition *>(module->statements[1]);
     ASSERT_NE(brokenDefinition, nullptr);
     ASSERT_NE(keptDefinition, nullptr);
     EXPECT_EQ(brokenDefinition->name, "broken");
     EXPECT_EQ(keptDefinition->name, "kept");
     ASSERT_NE(brokenDefinition->expr, nullptr);
-    EXPECT_EQ(summarize_expression(brokenDefinition->expr.get()),
+    EXPECT_EQ(summarize_expression(brokenDefinition->expr),
               "binary(number:1.000000 + number:2.000000)");
     return;
   }
@@ -150,15 +150,15 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(module->statements.size(), 2u)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     auto *definition =
-        dynamic_cast<ast::Definition *>(module->statements[0].get());
+        dynamic_cast<ast::Definition *>(module->statements[0]);
     auto *evaluation =
-        dynamic_cast<ast::Evaluation *>(module->statements[1].get());
+        dynamic_cast<ast::Evaluation *>(module->statements[1]);
     ASSERT_NE(definition, nullptr);
     ASSERT_NE(evaluation, nullptr);
     EXPECT_EQ(definition->name, "root");
     EXPECT_EQ(definition->args.size(), 2u);
     auto *call =
-        dynamic_cast<ast::FunctionCall *>(evaluation->expression.get());
+        dynamic_cast<ast::FunctionCall *>(evaluation->expression);
     ASSERT_NE(call, nullptr)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     EXPECT_EQ(call->func.getRefText(), "root");
@@ -170,10 +170,10 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(module->statements.size(), 2u)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     auto *evaluation =
-        dynamic_cast<ast::Evaluation *>(module->statements[1].get());
+        dynamic_cast<ast::Evaluation *>(module->statements[1]);
     ASSERT_NE(evaluation, nullptr);
     auto *call =
-        dynamic_cast<ast::FunctionCall *>(evaluation->expression.get());
+        dynamic_cast<ast::FunctionCall *>(evaluation->expression);
     ASSERT_NE(call, nullptr)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     EXPECT_EQ(call->func.getRefText(), "root");
@@ -236,13 +236,13 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(module->statements.size(), 3u)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     auto *evaluation =
-        dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+        dynamic_cast<ast::Evaluation *>(module->statements.back());
     ASSERT_NE(evaluation, nullptr);
     auto *call =
-        dynamic_cast<ast::FunctionCall *>(evaluation->expression.get());
+        dynamic_cast<ast::FunctionCall *>(evaluation->expression);
     ASSERT_NE(call, nullptr);
     ASSERT_EQ(call->args.size(), 1u);
-    auto *argument = dynamic_cast<ast::NumberLiteral *>(call->args.front().get());
+    auto *argument = dynamic_cast<ast::NumberLiteral *>(call->args.front());
     ASSERT_NE(argument, nullptr);
     EXPECT_DOUBLE_EQ(argument->value, 81.0);
     return;
@@ -255,14 +255,14 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(module->statements.size(), 2u)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     auto *evaluation =
-        dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+        dynamic_cast<ast::Evaluation *>(module->statements.back());
     ASSERT_NE(evaluation, nullptr);
     auto *call =
-        dynamic_cast<ast::FunctionCall *>(evaluation->expression.get());
+        dynamic_cast<ast::FunctionCall *>(evaluation->expression);
     ASSERT_NE(call, nullptr);
     EXPECT_EQ(call->func.getRefText(), "sqrt");
     ASSERT_EQ(call->args.size(), 1u);
-    auto *argument = dynamic_cast<ast::NumberLiteral *>(call->args.front().get());
+    auto *argument = dynamic_cast<ast::NumberLiteral *>(call->args.front());
     ASSERT_NE(argument, nullptr);
     EXPECT_DOUBLE_EQ(argument->value, 81.0);
     return;
@@ -277,10 +277,10 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(module->statements.size(), 3u)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     auto *evaluation =
-        dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+        dynamic_cast<ast::Evaluation *>(module->statements.back());
     ASSERT_NE(evaluation, nullptr);
     auto *call =
-        dynamic_cast<ast::FunctionCall *>(evaluation->expression.get());
+        dynamic_cast<ast::FunctionCall *>(evaluation->expression);
     ASSERT_NE(call, nullptr);
     EXPECT_EQ(call->func.getRefText(), "sqrt");
     return;
@@ -296,20 +296,20 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(module->statements.size(), 3u)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     auto *evaluation =
-        dynamic_cast<ast::Evaluation *>(module->statements[1].get());
+        dynamic_cast<ast::Evaluation *>(module->statements[1]);
     ASSERT_NE(evaluation, nullptr);
     auto *binary =
-        dynamic_cast<ast::BinaryExpression *>(evaluation->expression.get());
+        dynamic_cast<ast::BinaryExpression *>(evaluation->expression);
     ASSERT_NE(binary, nullptr);
-    auto *left = dynamic_cast<ast::NumberLiteral *>(binary->left.get());
-    auto *right = dynamic_cast<ast::NumberLiteral *>(binary->right.get());
+    auto *left = dynamic_cast<ast::NumberLiteral *>(binary->left);
+    auto *right = dynamic_cast<ast::NumberLiteral *>(binary->right);
     ASSERT_NE(left, nullptr);
     ASSERT_NE(right, nullptr);
     EXPECT_EQ(binary->op, "*");
     EXPECT_EQ(left->value, 2.0);
     EXPECT_EQ(right->value, 7.0);
     auto *definition =
-        dynamic_cast<ast::Definition *>(module->statements[2].get());
+        dynamic_cast<ast::Definition *>(module->statements[2]);
     ASSERT_NE(definition, nullptr);
     EXPECT_EQ(definition->name, "b");
     return;
@@ -326,20 +326,20 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(module->statements.size(), 3u)
         << sample.label << " :: " << summarize_module_statement_shapes(*module);
     auto *evaluation =
-        dynamic_cast<ast::Evaluation *>(module->statements[1].get());
+        dynamic_cast<ast::Evaluation *>(module->statements[1]);
     ASSERT_NE(evaluation, nullptr);
     auto *binary =
-        dynamic_cast<ast::BinaryExpression *>(evaluation->expression.get());
+        dynamic_cast<ast::BinaryExpression *>(evaluation->expression);
     ASSERT_NE(binary, nullptr);
-    auto *left = dynamic_cast<ast::NumberLiteral *>(binary->left.get());
-    auto *right = dynamic_cast<ast::NumberLiteral *>(binary->right.get());
+    auto *left = dynamic_cast<ast::NumberLiteral *>(binary->left);
+    auto *right = dynamic_cast<ast::NumberLiteral *>(binary->right);
     ASSERT_NE(left, nullptr);
     ASSERT_NE(right, nullptr);
     EXPECT_EQ(binary->op, "*");
     EXPECT_EQ(left->value, 2.0);
     EXPECT_EQ(right->value, 7.0);
     auto *definition =
-        dynamic_cast<ast::Definition *>(module->statements[2].get());
+        dynamic_cast<ast::Definition *>(module->statements[2]);
     ASSERT_NE(definition, nullptr);
     EXPECT_EQ(definition->name, "b");
     return;

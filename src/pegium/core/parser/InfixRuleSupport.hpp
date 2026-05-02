@@ -54,8 +54,12 @@ struct InfixRuleModelTraits {
   using RightType =
       std::remove_reference_t<decltype(std::declval<T &>().*Right)>;
   using OpType = std::remove_reference_t<decltype(std::declval<T &>().*Op)>;
-  using LeftPointeeType = typename LeftType::element_type;
-  using RightPointeeType = typename RightType::element_type;
+  static_assert(std::is_pointer_v<LeftType>,
+                "InfixRule Left member must be a raw pointer (T *).");
+  static_assert(std::is_pointer_v<RightType>,
+                "InfixRule Right member must be a raw pointer (T *).");
+  using LeftPointeeType = std::remove_pointer_t<LeftType>;
+  using RightPointeeType = std::remove_pointer_t<RightType>;
 
   static_assert(sizeof...(Operators) > 0,
                 "InfixRule requires at least one operator.");
@@ -159,23 +163,23 @@ template <typename Model, typename NodeType, auto Left, auto Op, auto Right,
           typename OpType, typename LeftPointeeType, typename RightPointeeType,
           typename... Operators>
 struct InfixRuleValueBuilder {
-  static std::unique_ptr<AstNode>
-  getValue(const Model *model, const CstNodeView &node,
-           std::unique_ptr<AstNode> lhsNode, const ValueBuildContext &context) {
+  static AstNode *getValue(const Model *model, const CstNodeView &node,
+                           AstNode *lhsNode,
+                           const ValueBuildContext &context) {
     return cast_operand<AstNode>(buildTypedFromCst(
-        model, node, cast_operand<LeftPointeeType>(std::move(lhsNode)), context));
+        model, node, cast_operand<LeftPointeeType>(lhsNode), context));
   }
 
 private:
   template <typename Target, typename Source>
-  static std::unique_ptr<Target> cast_operand(std::unique_ptr<Source> value) {
+  static Target *cast_operand(Source *value) {
     static_assert(std::derived_from<Source, AstNode>,
                   "InfixRule operands must derive from AstNode.");
     static_assert(std::derived_from<Target, AstNode>,
                   "InfixRule target operands must derive from AstNode.");
     assert(value != nullptr);
-    auto *astNode = static_cast<AstNode *>(value.release());
-    return std::unique_ptr<Target>(static_cast<Target *>(astNode));
+    auto *astNode = static_cast<AstNode *>(value);
+    return static_cast<Target *>(astNode);
   }
 
   template <typename RawValue>
@@ -242,11 +246,11 @@ private:
     }
   }
 
-  static std::unique_ptr<NodeType>
-  buildTypedFromCst(const Model *model, const CstNodeView &node,
-                    std::unique_ptr<LeftPointeeType> lhsNode,
-                    const ValueBuildContext &context) {
-    std::unique_ptr<RightPointeeType> rhs;
+  static NodeType *buildTypedFromCst(const Model *model,
+                                     const CstNodeView &node,
+                                     LeftPointeeType *lhsNode,
+                                     const ValueBuildContext &context) {
+    RightPointeeType *rhs = nullptr;
     CstNodeView operatorNode;
     for (const auto child : node) {
       if (child.node().isHidden) {
@@ -264,38 +268,36 @@ private:
       }
       assert(child.getGrammarElement() == model->_owner);
       rhs = cast_operand<RightPointeeType>(
-          buildTypedFromCst(model, child,
-                            cast_operand<LeftPointeeType>(std::move(rhs)),
+          buildTypedFromCst(model, child, cast_operand<LeftPointeeType>(rhs),
                             context));
     }
 
     assert(lhsNode != nullptr);
     assert(rhs != nullptr);
     assert(operatorNode.valid());
-    return createNode(model, node, std::move(lhsNode), operatorNode,
-                      std::move(rhs), context);
+    return createNode(model, node, lhsNode, operatorNode, rhs, context);
   }
 
-  static std::unique_ptr<NodeType>
-  createNode(const Model *model, const CstNodeView &cstNode,
-             std::unique_ptr<LeftPointeeType> left,
-             const CstNodeView &operatorNode,
-             std::unique_ptr<RightPointeeType> right,
-             const ValueBuildContext &context) {
-    auto node = std::make_unique<NodeType>();
+  static NodeType *createNode(const Model *model, const CstNodeView &cstNode,
+                              LeftPointeeType *left,
+                              const CstNodeView &operatorNode,
+                              RightPointeeType *right,
+                              const ValueBuildContext &context) {
+    assert(context.arena != nullptr);
+    auto *node = context.arena->template create<NodeType>();
     node->setCstNode(cstNode);
 
-    auto &leftMember = node.get()->*Left;
-    leftMember = std::move(left);
+    auto &leftMember = node->*Left;
+    leftMember = left;
     leftMember->setContainer(*node);
 
     const bool assignedOperator =
-        assign_operator_from_node(model, node.get(), operatorNode, context);
+        assign_operator_from_node(model, node, operatorNode, context);
     assert(assignedOperator && "Infix operator node must match one operator.");
     (void)assignedOperator;
 
-    auto &rightMember = node.get()->*Right;
-    rightMember = std::move(right);
+    auto &rightMember = node->*Right;
+    rightMember = right;
     rightMember->setContainer(*node);
 
     return node;

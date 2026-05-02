@@ -121,38 +121,39 @@ TEST(DefaultReferenceDescriptionProviderTest,
       "alpha alpha"));
   auto document = std::make_shared<Document>(textDocument);
   document->state = DocumentState::Linked;
-  shared->workspace.documents->addDocument(document);
-
-  auto root = std::make_unique<RootNode>();
-  auto cst = std::make_unique<RootCstNode>(text::TextSnapshot::copy(document->textDocument().getText()));
+  shared->workspace.documents->addDocument(document);  auto cst = std::make_unique<RootCstNode>(text::TextSnapshot::copy(document->textDocument().getText()));
   cst->attachDocument(*document);
+
+
+  document->parseResult.astArena = std::make_unique<pegium::AstArena>(*cst);
+
+
+  auto &arena = *document->parseResult.astArena;
+  arena.attachDocument(*document);
+  auto *root = arena.create<RootNode>();
   static const DummyLiteral literal;
   CstBuilder builder(*cst);
   builder.leaf(0, 5, &literal);
   builder.leaf(6, 11, &literal);
 
-  auto target = std::make_unique<TargetNode>();
+  auto *target = arena.create<TargetNode>();
   target->name = "alpha";
-  auto *targetPtr = target.get();
-  targetPtr->setCstNode(cst->get(0));
-  root->targets.push_back(std::move(target));
-  targetPtr->setContainer(*root);
+  target->setCstNode(cst->get(0));
+  root->targets.push_back(target);
+  target->setContainer(*root);
 
-  auto ref = std::make_unique<RefNode>();
-  auto *refPtr = ref.get();
-  refPtr->setCstNode(cst->get(1));
-  refPtr->target.initialize(
-      *refPtr, "alpha", CstNodeView{}, assignment, *linker);
-  root->refs.push_back(std::move(ref));
-  refPtr->setContainer(*root);
+  auto *ref = arena.create<RefNode>();
+  ref->setCstNode(cst->get(1));
+  ref->target.initialize(*ref, "alpha", CstNodeView{}, assignment, *linker);
+  root->refs.push_back(ref);
+  ref->setContainer(*root);
 
   root->setCstNode(cst->get(1));
-  document->parseResult.value = std::move(root);
+  document->parseResult.value = root;
   document->parseResult.cst = std::move(cst);
   document->parseResult.references.push_back(
-      ReferenceHandle::direct(&refPtr->target));
-  document->references = document->parseResult.references;
-  const auto targetSymbolId = document->makeSymbolId(*targetPtr);
+      ReferenceHandle::direct(&ref->target));
+  const auto targetSymbolId = document->makeSymbolId(*target);
 
   AstNodeDescription targetDescription{
       .name = "alpha",
@@ -164,8 +165,8 @@ TEST(DefaultReferenceDescriptionProviderTest,
       std::make_unique<StaticScopeProvider>(std::vector<AstNodeDescription>{
           targetDescription});
 
-  const auto *resolved = refPtr->target.get();
-  ASSERT_EQ(resolved, targetPtr);
+  const auto *resolved = ref->target.get();
+  ASSERT_EQ(resolved, target);
 
   const auto descriptions = provider->createDescriptions(*document);
   ASSERT_EQ(descriptions.size(), 1u);

@@ -429,15 +429,15 @@ TEST_F(DocumentPipelineIntegrationTest,
   ASSERT_TRUE(document->parseRecovered());
 
   auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
   ASSERT_EQ(module->statements.size(), 1u);
 
   auto *definition =
-      dynamic_cast<arithmetics::ast::Definition *>(module->statements.front().get());
+      dynamic_cast<arithmetics::ast::Definition *>(module->statements.front());
   ASSERT_NE(definition, nullptr);
   EXPECT_EQ(definition->name, "a");
-  EXPECT_EQ(definition->expr.get(), nullptr);
+  EXPECT_EQ(definition->expr, nullptr);
   EXPECT_TRUE(test::has_diagnostic_message(*document, "Expression"));
   EXPECT_FALSE(test::has_diagnostic_message(*document, "Expecting `(`"));
   EXPECT_FALSE(
@@ -646,13 +646,13 @@ TEST_F(DocumentPipelineIntegrationTest,
       << parseDump;
 
   auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr) << parseDump;
   auto *lastEvaluation =
-      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr) << parseDump;
   auto *lastCall = dynamic_cast<arithmetics::ast::FunctionCall *>(
-      lastEvaluation->expression.get());
+      lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr) << parseDump;
   EXPECT_EQ(lastCall->func.getRefText(), "root");
   EXPECT_FALSE(lastCall->args.empty());
@@ -727,15 +727,15 @@ TEST_F(DocumentPipelineIntegrationTest,
   ASSERT_TRUE(document->parseRecovered());
 
   auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
   EXPECT_EQ(module->statements.size(), 3u)
       << dumpDiagnostics(parseDiagnostics(*document));
   auto *lastEvaluation =
-      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr) << dumpDiagnostics(parseDiagnostics(*document));
   auto *lastBinary = dynamic_cast<arithmetics::ast::BinaryExpression *>(
-      lastEvaluation->expression.get());
+      lastEvaluation->expression);
   ASSERT_NE(lastBinary, nullptr) << dumpDiagnostics(parseDiagnostics(*document));
   EXPECT_EQ(lastBinary->op, "%") << dumpDiagnostics(parseDiagnostics(*document));
 }
@@ -760,7 +760,7 @@ TEST_F(DocumentPipelineIntegrationTest,
   ASSERT_TRUE(document->parseRecovered());
 
   auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
   const auto parseDump = dumpDiagnostics(parseDiagnostics(*document));
   EXPECT_EQ(module->statements.size(), 3u) << parseDump;
@@ -781,10 +781,10 @@ TEST_F(DocumentPipelineIntegrationTest,
   for (std::size_t index = module->statements.size() - 2u;
        index < module->statements.size(); ++index) {
     auto *evaluation =
-        dynamic_cast<arithmetics::ast::Evaluation *>(module->statements[index].get());
+        dynamic_cast<arithmetics::ast::Evaluation *>(module->statements[index]);
     ASSERT_NE(evaluation, nullptr) << parseDump;
     auto *binary =
-        dynamic_cast<arithmetics::ast::BinaryExpression *>(evaluation->expression.get());
+        dynamic_cast<arithmetics::ast::BinaryExpression *>(evaluation->expression);
     ASSERT_NE(binary, nullptr) << parseDump;
     EXPECT_EQ(binary->op, "%") << parseDump;
   }
@@ -822,7 +822,7 @@ TEST_F(DocumentPipelineIntegrationTest,
   ASSERT_TRUE(document->parseRecovered());
 
   auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
   const auto parseDump = dumpDiagnostics(parseDiagnostics(*document));
   EXPECT_EQ(module->statements.size(), 10u) << parseDump;
@@ -841,10 +841,10 @@ TEST_F(DocumentPipelineIntegrationTest,
   for (std::size_t index = module->statements.size() - 2u;
        index < module->statements.size(); ++index) {
     auto *evaluation =
-        dynamic_cast<arithmetics::ast::Evaluation *>(module->statements[index].get());
+        dynamic_cast<arithmetics::ast::Evaluation *>(module->statements[index]);
     ASSERT_NE(evaluation, nullptr) << parseDump;
     auto *binary =
-        dynamic_cast<arithmetics::ast::BinaryExpression *>(evaluation->expression.get());
+        dynamic_cast<arithmetics::ast::BinaryExpression *>(evaluation->expression);
     ASSERT_NE(binary, nullptr) << parseDump;
     EXPECT_EQ(binary->op, "%") << parseDump;
   }
@@ -913,17 +913,17 @@ TEST_F(DocumentPipelineIntegrationTest,
   ASSERT_TRUE(document->parseRecovered());
 
   auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
   EXPECT_GE(module->statements.size(), 11u)
       << dumpDiagnostics(parseDiagnostics(*document));
 
   auto *lastEvaluation =
-      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr)
       << dumpDiagnostics(parseDiagnostics(*document));
   auto *lastCall = dynamic_cast<arithmetics::ast::FunctionCall *>(
-      lastEvaluation->expression.get());
+      lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr) << dumpDiagnostics(parseDiagnostics(*document));
   EXPECT_EQ(lastCall->func.getRefText(), "sqrt");
   EXPECT_EQ(lastCall->args.size(), 1u);
@@ -974,17 +974,17 @@ TEST_F(DocumentPipelineIntegrationTest,
   ASSERT_TRUE(document->parseRecovered());
 
   auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
   EXPECT_GE(module->statements.size(), 11u)
       << dumpDiagnostics(parseDiagnostics(*document));
 
   auto *lastEvaluation =
-      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr)
       << dumpDiagnostics(parseDiagnostics(*document));
   auto *lastCall = dynamic_cast<arithmetics::ast::FunctionCall *>(
-      lastEvaluation->expression.get());
+      lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr) << dumpDiagnostics(parseDiagnostics(*document));
   EXPECT_EQ(lastCall->func.getRefText(), "sqrt");
   EXPECT_EQ(lastCall->args.size(), 1u);
@@ -1040,7 +1040,7 @@ TEST_F(DocumentPipelineIntegrationTest,
       << dumpDiagnostics(parseDiagnostics(*document));
 
   auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
   const auto parseDump = dumpDiagnostics(parseDiagnostics(*document));
   const auto lateGarbageOffset =
@@ -1108,7 +1108,7 @@ TEST_F(DocumentPipelineIntegrationTest,
       << dumpDiagnostics(parseDiagnostics(*document));
 
   auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
   const auto parseDump = dumpDiagnostics(parseDiagnostics(*document));
   const auto lateGarbageOffset =
@@ -1116,10 +1116,10 @@ TEST_F(DocumentPipelineIntegrationTest,
   EXPECT_GE(module->statements.size(), 14u) << parseDump;
 
   auto *lastEvaluation =
-      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr) << parseDump;
   auto *lastCall = dynamic_cast<arithmetics::ast::FunctionCall *>(
-      lastEvaluation->expression.get());
+      lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr) << parseDump;
   EXPECT_EQ(lastCall->func.getRefText(), "sqrt") << parseDump;
   ASSERT_EQ(lastCall->args.size(), 1u) << parseDump;
@@ -1183,16 +1183,16 @@ TEST_F(DocumentPipelineIntegrationTest,
       << dumpDiagnostics(parseDiagnostics(*document));
 
   auto *module =
-      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value.get());
+      dynamic_cast<arithmetics::ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
 
   auto *lastEvaluation =
-      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<arithmetics::ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr)
       << dumpDiagnostics(parseDiagnostics(*document));
   auto *lastCall =
       dynamic_cast<arithmetics::ast::FunctionCall *>(
-          lastEvaluation->expression.get());
+          lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr)
       << dumpDiagnostics(parseDiagnostics(*document));
   EXPECT_EQ(lastCall->func.getRefText(), "sqrt");

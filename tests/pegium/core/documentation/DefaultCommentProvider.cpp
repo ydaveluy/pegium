@@ -68,7 +68,7 @@ TEST(DefaultCommentProviderTest, ReturnsLeadingHiddenMultilineComment) {
   ASSERT_NE(document, nullptr);
 
   auto *model =
-      dynamic_cast<DocumentationModel *>(document->parseResult.value.get());
+      dynamic_cast<DocumentationModel *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
   ASSERT_EQ(model->entries.size(), 2u);
 
@@ -102,7 +102,7 @@ TEST(DefaultCommentProviderTest, ReturnsLeadingHiddenMultilineCommentForRootNode
   ASSERT_NE(document, nullptr);
 
   auto *model =
-      dynamic_cast<DocumentationModel *>(document->parseResult.value.get());
+      dynamic_cast<DocumentationModel *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
 
   const auto &services = shared->serviceRegistry->getServices(document->uri);

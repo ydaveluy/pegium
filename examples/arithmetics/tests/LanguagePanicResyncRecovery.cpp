@@ -40,7 +40,7 @@ void expect_fullmatch_with_statement_count(const std::string &text,
   EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 512u)
       << "recoveryAttemptRuns regressed\n" << parseDump;
   const auto *module =
-      dynamic_cast<const ast::Module *>(parsed.value.get());
+      dynamic_cast<const ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_GE(module->statements.size(), expectedMinStatements)
       << "panic-mode resync lost statements\n" << parseDump;
@@ -138,11 +138,11 @@ TEST(ArithmeticsPanicResyncRecoveryTest,
   const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
   ASSERT_TRUE(parsed.fullMatch) << parseDump;
   const auto *module =
-      dynamic_cast<const ast::Module *>(parsed.value.get());
+      dynamic_cast<const ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   bool foundDefC = false;
   for (const auto &s : module->statements) {
-    if (const auto *def = dynamic_cast<const ast::Definition *>(s.get())) {
+    if (const auto *def = dynamic_cast<const ast::Definition *>(s)) {
       if (def->name == "c") {
         foundDefC = true;
         break;
@@ -184,15 +184,15 @@ TEST(ArithmeticsPanicResyncRecoveryTest,
   EXPECT_EQ(parsed.recoveryReport.recoveryEdits, 5u) << parseDump;
 
   const auto *module =
-      dynamic_cast<const ast::Module *>(parsed.value.get());
+      dynamic_cast<const ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(module->name, "basicmath");
   ASSERT_EQ(module->statements.size(), 2u) << parseDump;
   // Both definitions are recovered with their names intact.
   const auto *defA =
-      dynamic_cast<const ast::Definition *>(module->statements[0].get());
+      dynamic_cast<const ast::Definition *>(module->statements[0]);
   const auto *defB =
-      dynamic_cast<const ast::Definition *>(module->statements[1].get());
+      dynamic_cast<const ast::Definition *>(module->statements[1]);
   ASSERT_NE(defA, nullptr) << parseDump;
   ASSERT_NE(defB, nullptr) << parseDump;
   EXPECT_EQ(defA->name, "a");

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <optional>
-#include <string>
 
+#include <pegium/core/references/NameProvider.hpp>
 #include <pegium/core/workspace/AstDescriptions.hpp>
 
 namespace pegium {
@@ -18,7 +18,9 @@ class AstNodeDescriptionProvider {
 public:
   virtual ~AstNodeDescriptionProvider() noexcept = default;
 
-  /// Creates a resolvable symbol description for `node`.
+  /// Creates a resolvable symbol description for `node` from a precomputed
+  /// `(name, cstNode)` pair. The caller typically obtains `nameInfo` via
+  /// `NameProvider::nameOf(node)`, avoiding a redundant CST lookup here.
   ///
   /// Implementations must either return `std::nullopt` or a complete
   /// description with a non-empty name, a valid `documentId`, and a valid
@@ -27,7 +29,7 @@ public:
   /// name in source text.
   [[nodiscard]] virtual std::optional<AstNodeDescription>
   createDescription(const AstNode &node, const Document &document,
-                    std::string name) const = 0;
+                    references::AstNodeName nameInfo) const = 0;
 };
 
 } // namespace pegium::workspace

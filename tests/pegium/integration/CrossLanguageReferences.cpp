@@ -149,7 +149,7 @@ TEST_P(CrossLanguageReferencesIntegrationTest,
       has_diagnostic_message(*consumerDocument, "Unresolved reference"));
 
   auto *consumer = dynamic_cast<CrossLanguageConsumerRoot *>(
-      consumerDocument->parseResult.value.get());
+      consumerDocument->parseResult.value);
   ASSERT_NE(consumer, nullptr);
 
   const auto *target = consumer->target.get();

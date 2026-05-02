@@ -42,7 +42,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
       pegium::test::dump_parse_diagnostics(parsed.parseDiagnostics);
 
   if (sample.language == SampleLanguage::Requirements) {
-    auto *model = dynamic_cast<const ast::RequirementModel *>(parsed.value.get());
+    auto *model = dynamic_cast<const ast::RequirementModel *>(parsed.value);
     ASSERT_NE(model, nullptr) << sample.file.label << " :: " << parseDump;
 
     if (sample.file.label == "requirements/extra_contact_colon.req") {
@@ -62,7 +62,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
     if (sample.file.label == "requirements/extra_environment_colon.req") {
       ASSERT_EQ(model->environments.size(), 1u);
       ASSERT_EQ(model->requirements.size(), 1u);
-      auto *environment = model->environments.front().get();
+      auto *environment = model->environments.front();
       ASSERT_NE(environment, nullptr);
       EXPECT_EQ(environment->name, "prod");
       EXPECT_EQ(environment->description, "Production");
@@ -79,7 +79,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
     if (sample.file.label == "requirements/extra_applicable_comma.req" ||
         sample.file.label == "requirements/missing_applicable_comma.req") {
       ASSERT_EQ(model->requirements.size(), 1u);
-      auto *requirement = model->requirements.front().get();
+      auto *requirement = model->requirements.front();
       ASSERT_NE(requirement, nullptr);
       EXPECT_EQ(requirement->name, "login");
       ASSERT_EQ(requirement->environments.size(), 2u)
@@ -92,7 +92,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
 
     if (sample.file.label == "requirements/long_garbage_prefix.req") {
       ASSERT_EQ(model->requirements.size(), 1u);
-      auto *requirement = model->requirements.front().get();
+      auto *requirement = model->requirements.front();
       ASSERT_NE(requirement, nullptr);
       EXPECT_EQ(requirement->name, "login");
       return;
@@ -101,7 +101,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
     if (sample.file.label ==
         "requirements/git-merge/conflicting_environments.req") {
       ASSERT_EQ(model->requirements.size(), 1u);
-      auto *requirement = model->requirements.front().get();
+      auto *requirement = model->requirements.front();
       ASSERT_NE(requirement, nullptr);
       EXPECT_EQ(requirement->name, "login");
       return;
@@ -110,7 +110,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
     return;
   }
 
-  auto *model = dynamic_cast<const ast::TestModel *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::TestModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << sample.file.label << " :: " << parseDump;
 
   if (sample.file.label == "tests/extra_contact_colon.tst") {
@@ -122,7 +122,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
 
   if (sample.file.label == "tests/missing_testfile_equals.tst") {
     ASSERT_EQ(model->tests.size(), 1u);
-    auto *test = model->tests.front().get();
+    auto *test = model->tests.front();
     ASSERT_NE(test, nullptr);
     ASSERT_TRUE(test->testFile.has_value());
     EXPECT_EQ(*test->testFile, "qa.spec");
@@ -132,7 +132,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
 
   if (sample.file.label == "tests/extra_testfile_equals.tst") {
     ASSERT_EQ(model->tests.size(), 1u);
-    auto *test = model->tests.front().get();
+    auto *test = model->tests.front();
     ASSERT_NE(test, nullptr);
     ASSERT_TRUE(test->testFile.has_value());
     EXPECT_EQ(*test->testFile, "qa.spec");
@@ -155,7 +155,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
 
   if (sample.file.label == "tests/missing_test_name.tst") {
     ASSERT_EQ(model->tests.size(), 1u);
-    auto *test = model->tests.front().get();
+    auto *test = model->tests.front();
     ASSERT_NE(test, nullptr);
     EXPECT_EQ(test->requirements.size(), 1u);
     EXPECT_EQ(test->requirements[0].getRefText(), "Req1");
@@ -165,7 +165,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
   if (sample.file.label == "tests/extra_requirements_comma.tst" ||
       sample.file.label == "tests/missing_requirements_comma.tst") {
     ASSERT_EQ(model->tests.size(), 1u);
-    auto *test = model->tests.front().get();
+    auto *test = model->tests.front();
     ASSERT_NE(test, nullptr);
     ASSERT_EQ(test->requirements.size(), 2u)
         << sample.file.label << " :: " << parseDump << " :: "
@@ -177,7 +177,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
 
   if (sample.file.label == "tests/missing_applicable_comma.tst") {
     ASSERT_EQ(model->tests.size(), 1u);
-    auto *test = model->tests.front().get();
+    auto *test = model->tests.front();
     ASSERT_NE(test, nullptr);
     EXPECT_EQ(test->requirements.size(), 1u);
     ASSERT_EQ(test->environments.size(), 2u);
@@ -193,7 +193,7 @@ void validate_requirements_sample(const RecoverySampleCase &sample,
 
   if (sample.file.label == "tests/multiple_broken_header_and_test.tst") {
     ASSERT_EQ(model->tests.size(), 1u);
-    auto *test = model->tests.front().get();
+    auto *test = model->tests.front();
     ASSERT_NE(test, nullptr);
     EXPECT_EQ(test->name, "T1");
     ASSERT_TRUE(test->testFile.has_value());

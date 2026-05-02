@@ -8,23 +8,26 @@
 #include <pegium/core/grammar/Nest.hpp>
 #include <pegium/core/grammar/ParserRule.hpp>
 #include <pegium/core/parser/ValueBuildContext.hpp>
+#include <pegium/core/syntax-tree/AstArena.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
 #include <array>
 #include <cassert>
-#include <memory>
 #include <vector>
 
 namespace pegium::parser::detail {
 
 template <typename T> struct ParserRuleBuildSupport {
-  [[nodiscard]] static std::unique_ptr<T>
-  get_raw_value(const CstNodeView &node, const ValueBuildContext &context) {
+  [[nodiscard]] static T *get_raw_value(const CstNodeView &node,
+                                        const ValueBuildContext &context) {
     auto buildContext = context;
     std::vector<ReferenceHandle> localReferences;
     if (buildContext.references == nullptr) {
       buildContext.references = &localReferences;
     }
-    std::unique_ptr<AstNode> currentNode;
+    assert(buildContext.arena != nullptr &&
+           "ParserRule materialization requires a valid AstArena pointer.");
+    AstArena &arena = *buildContext.arena;
+    AstNode *currentNode = nullptr;
     struct PendingAssignmentEntry {
       const grammar::Assignment *assignment;
       NodeId nodeId;
@@ -88,9 +91,9 @@ template <typename T> struct ParserRuleBuildSupport {
         };
 
     if (node.isLeaf()) {
-      auto leafNode = std::make_unique<T>();
+      auto *leafNode = arena.template create<T>();
       leafNode->setCstNode(node);
-      applyPendingAssignments(leafNode.get());
+      applyPendingAssignments(leafNode);
       return leafNode;
     }
 
@@ -110,20 +113,20 @@ template <typename T> struct ParserRuleBuildSupport {
       case Create: {
         currentNode =
             static_cast<const grammar::Create *>(cstNode.grammarElement)
-                ->getValue();
+                ->getValue(arena);
         assert(currentNode != nullptr);
         currentNode->setCstNode(node);
         break;
       }
       case Nest: {
-        if (!currentNode) {
-          currentNode = std::make_unique<T>();
+        if (currentNode == nullptr) {
+          currentNode = arena.template create<T>();
           currentNode->setCstNode(node);
         }
-        applyAndClearPendingAssignments(currentNode.get());
+        applyAndClearPendingAssignments(currentNode);
         currentNode =
             static_cast<const grammar::Nest *>(cstNode.grammarElement)
-                ->getValue(std::move(currentNode));
+                ->getValue(currentNode, arena);
         assert(currentNode != nullptr);
         currentNode->setCstNode(node);
         break;
@@ -138,9 +141,8 @@ template <typename T> struct ParserRuleBuildSupport {
       case InfixRule: {
         const auto *infixRule =
             static_cast<const grammar::InfixRule *>(cstNode.grammarElement);
-        applyAndClearPendingAssignments(currentNode.get());
-        currentNode =
-            infixRule->getValue(view, std::move(currentNode), buildContext);
+        applyAndClearPendingAssignments(currentNode);
+        currentNode = infixRule->getValue(view, currentNode, buildContext);
         assert(currentNode != nullptr && currentNode->hasCstNode());
         break;
       }
@@ -149,15 +151,13 @@ template <typename T> struct ParserRuleBuildSupport {
       }
     }
 
-    if (!currentNode) {
-      currentNode = std::make_unique<T>();
+    if (currentNode == nullptr) {
+      currentNode = arena.template create<T>();
       currentNode->setCstNode(node);
     }
-    applyPendingAssignments(currentNode.get());
+    applyPendingAssignments(currentNode);
     assert(currentNode != nullptr);
-    auto *typedNode = static_cast<T *>(currentNode.get());
-    currentNode.release();
-    return std::unique_ptr<T>(typedNode);
+    return static_cast<T *>(currentNode);
   }
 };
 

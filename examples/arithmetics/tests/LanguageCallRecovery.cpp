@@ -55,17 +55,17 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 512u)
       << "recoveryAttemptRuns regressed\n" << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_FALSE(module->statements.empty())
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 
   auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   auto *lastCall =
-      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression.get());
+      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   EXPECT_EQ(lastCall->func.getRefText(), "sqrt")

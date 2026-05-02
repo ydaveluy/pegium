@@ -103,8 +103,7 @@ void run_checks(const ValidationRegistry &registry, const AstNode &node,
                 std::span<const std::string> categories,
                 const ValidationAcceptor &acceptor,
                 const utils::CancellationToken &cancelToken = {}) {
-  auto preparedChecks = registry.prepareChecks(categories);
-  preparedChecks->run(node, acceptor, cancelToken);
+  registry.runChecks(node, acceptor, categories, cancelToken);
 }
 
 TEST(DefaultValidationRegistryTest, FiltersChecksByTypeAndCategory) {
@@ -134,19 +133,20 @@ TEST(DefaultValidationRegistryTest, FiltersChecksByTypeAndCategory) {
       },
       "slow");
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA nodeA;
 
   const std::vector<std::string> fastCategories{"fast"};
-  const auto fastChecks = registry.prepareChecks(fastCategories);
-  fastChecks->run(nodeA, noopAcceptor, {});
+  registry.runChecks(nodeA, noopAcceptor, fastCategories, {});
 
   EXPECT_EQ(nodeAFastCalls, 1u);
   EXPECT_EQ(nodeBFastCalls, 0u);
   EXPECT_EQ(astSlowCalls, 0u);
 
-  const auto allChecks = registry.prepareChecks();
-  allChecks->run(nodeA, noopAcceptor, {});
+  registry.runChecks(nodeA, noopAcceptor, {}, {});
 
   EXPECT_EQ(nodeAFastCalls, 2u);
   EXPECT_EQ(nodeBFastCalls, 0u);
@@ -164,8 +164,7 @@ TEST(DefaultValidationRegistryTest, RejectsBuiltInCustomCategory) {
       std::invalid_argument);
 }
 
-TEST(DefaultValidationRegistryTest,
-     LateRegistrationsInvalidateFuturePreparedChecksOnly) {
+TEST(DefaultValidationRegistryTest, LateRegistrationsArePickedUpOnNextRun) {
   RegistryTestServices context;
   DefaultValidationRegistry registry(context.core);
 
@@ -177,7 +176,14 @@ TEST(DefaultValidationRegistryTest,
       },
       "fast");
 
-  auto initialChecks = registry.prepareChecks();
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{
+      ValidationAcceptor::Callback(noopAcceptorCb)};
+  ValidationNodeA nodeA;
+
+  registry.runChecks(nodeA, noopAcceptor, {}, {});
+  EXPECT_EQ(existingCalls, 1u);
+  EXPECT_EQ(lateCalls, 0u);
 
   registry.registerCheck<ValidationNodeA>(
       [&lateCalls](const ValidationNodeA &, const ValidationAcceptor &) {
@@ -185,16 +191,7 @@ TEST(DefaultValidationRegistryTest,
       },
       "fast");
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
-  ValidationNodeA nodeA;
-  initialChecks->run(nodeA, noopAcceptor, {});
-
-  EXPECT_EQ(existingCalls, 1u);
-  EXPECT_EQ(lateCalls, 0u);
-
-  auto refreshedChecks = registry.prepareChecks();
-  refreshedChecks->run(nodeA, noopAcceptor, {});
-
+  registry.runChecks(nodeA, noopAcceptor, {}, {});
   EXPECT_EQ(existingCalls, 2u);
   EXPECT_EQ(lateCalls, 1u);
 }
@@ -237,7 +234,10 @@ TEST(DefaultValidationRegistryTest, StoresBeforeAndAfterDocumentHooks) {
   ASSERT_EQ(registry.checksBefore().size(), 1u);
   ASSERT_EQ(registry.checksAfter().size(), 1u);
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA root;
   const std::vector<std::string> categories{"fast"};
 
@@ -277,7 +277,10 @@ TEST(DefaultValidationRegistryTest, LateRegistrationsUpdateHookReads) {
   ASSERT_EQ(registry.checksBefore().size(), 2u);
   ASSERT_EQ(registry.checksAfter().size(), 2u);
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA root;
   const std::vector<std::string> categories{"fast"};
 
@@ -313,7 +316,10 @@ TEST(DefaultValidationRegistryTest, RegisterChecksAddsGroupedTypedChecks) {
            })},
       "fast");
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA nodeA;
   ValidationNodeB nodeB;
 
@@ -336,7 +342,10 @@ TEST(DefaultValidationRegistryTest, RegisterChecksBindsValidatorMethods) {
            validator)},
       "fast");
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA nodeA;
   ValidationNodeB nodeB;
 
@@ -359,7 +368,10 @@ TEST(DefaultValidationRegistryTest,
           MoveOnlyValidator(std::move(calls)))},
       "fast");
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA nodeA;
   run_checks(registry, nodeA, {}, noopAcceptor);
 
@@ -376,11 +388,12 @@ TEST(DefaultValidationRegistryTest, ValidationCheckExceptionsBecomeDiagnostics) 
       });
 
   std::vector<std::string> messages;
-  const ValidationAcceptor acceptor{
+  auto acceptorCb = 
       [&messages](pegium::Diagnostic diagnostic) {
         EXPECT_EQ(diagnostic.severity, pegium::DiagnosticSeverity::Error);
-        messages.push_back(std::move(diagnostic.message));
-      }};
+        messages.push_back(std::move(diagnostic.message));      };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
 
   ValidationNodeA node;
   run_checks(registry, node, {}, acceptor);
@@ -417,14 +430,15 @@ TEST(DefaultValidationRegistryTest,
   auto *root = pegium::ast_ptr_cast<ValidationRoot>(document.parseResult.value);
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(root->nodes.size(), 1u);
-  auto *node = root->nodes.front().get();
+  auto *node = root->nodes.front();
   ASSERT_NE(node, nullptr);
 
   std::optional<pegium::Diagnostic> captured;
-  const ValidationAcceptor acceptor{
+  auto acceptorCb = 
       [&captured](pegium::Diagnostic diagnostic) {
-        captured = std::move(diagnostic);
-      }};
+        captured = std::move(diagnostic);      };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
 
   run_checks(registry, *node, {}, acceptor);
 
@@ -454,7 +468,10 @@ TEST(DefaultValidationRegistryTest,
       },
       "fast");
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA nodeA;
   ValidationNodeB nodeB;
 
@@ -486,13 +503,14 @@ TEST(DefaultValidationRegistryTest,
 
   const std::vector<std::string> fastCategories{"fast"};
   const std::vector<std::string> slowCategories{"slow"};
-  const auto fastChecks = registry.prepareChecks(fastCategories);
-  const auto slowChecks = registry.prepareChecks(slowCategories);
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA nodeA;
-  fastChecks->run(nodeA, noopAcceptor, {});
-  slowChecks->run(nodeA, noopAcceptor, {});
+  registry.runChecks(nodeA, noopAcceptor, fastCategories, {});
+  registry.runChecks(nodeA, noopAcceptor, slowCategories, {});
 
   EXPECT_EQ(fastCalls, 1u);
   EXPECT_EQ(slowCalls, 1u);
@@ -510,11 +528,13 @@ TEST(DefaultValidationRegistryTest, UnknownCategoriesExecuteNothing) {
       "fast");
 
   const std::vector<std::string> unknownCategories{"unknown"};
-  auto preparedChecks = registry.prepareChecks(unknownCategories);
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA nodeA;
-  preparedChecks->run(nodeA, noopAcceptor, {});
+  registry.runChecks(nodeA, noopAcceptor, unknownCategories, {});
 
   EXPECT_EQ(calls, 0u);
 }
@@ -543,7 +563,10 @@ TEST(DefaultValidationRegistryTest, ChecksExecuteInRegistrationOrder) {
       },
       "fast");
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA nodeA;
   run_checks(registry, nodeA, {}, noopAcceptor);
 
@@ -554,28 +577,6 @@ TEST(DefaultValidationRegistryTest, ChecksExecuteInRegistrationOrder) {
                    }));
 }
 
-TEST(DefaultValidationRegistryTest,
-     PreparedChecksRemainUsableAfterRegistryDestruction) {
-  std::size_t calls = 0;
-  std::unique_ptr<const ValidationRegistry::PreparedChecks> preparedChecks;
-
-  {
-    RegistryTestServices context;
-    DefaultValidationRegistry registry(context.core);
-    registry.registerCheck<ValidationNodeA>(
-        [&calls](const ValidationNodeA &, const ValidationAcceptor &) {
-          ++calls;
-        },
-        "fast");
-    preparedChecks = registry.prepareChecks();
-  }
-
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
-  ValidationNodeA nodeA;
-  preparedChecks->run(nodeA, noopAcceptor, {});
-
-  EXPECT_EQ(calls, 1u);
-}
 
 TEST(DefaultValidationRegistryTest,
      PreparationExceptionsBecomeDiagnostics) {
@@ -588,11 +589,12 @@ TEST(DefaultValidationRegistryTest,
       });
 
   std::vector<std::string> messages;
-  const ValidationAcceptor acceptor{
+  auto acceptorCb = 
       [&messages](pegium::Diagnostic diagnostic) {
         EXPECT_EQ(diagnostic.severity, pegium::DiagnosticSeverity::Error);
-        messages.push_back(std::move(diagnostic.message));
-      }};
+        messages.push_back(std::move(diagnostic.message));      };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
 
   ValidationNodeA root;
   registry.checksBefore().front()(root, acceptor, {}, {});
@@ -621,10 +623,11 @@ TEST(DefaultValidationRegistryTest,
       });
 
   std::vector<std::string> messages;
-  const ValidationAcceptor acceptor{
+  auto acceptorCb = 
       [&messages](pegium::Diagnostic diagnostic) {
-        messages.push_back(std::move(diagnostic.message));
-      }};
+        messages.push_back(std::move(diagnostic.message));      };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
 
   ValidationNodeA root;
   registry.checksAfter().front()(root, acceptor, {}, {});
@@ -656,7 +659,10 @@ TEST(DefaultValidationRegistryTest, BaseTypeChecksApplyToDerivedNodes) {
         ++baseCalls;
       });
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationDerivedNode derivedNode;
 
   run_checks(registry, derivedNode, {}, noopAcceptor);
@@ -682,11 +688,13 @@ TEST(DefaultValidationRegistryTest,
   utils::CancellationTokenSource source;
   source.request_stop();
 
-  const ValidationAcceptor noopAcceptor{[](pegium::Diagnostic) {}};
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+
+
+  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
   ValidationNodeA node;
 
-  auto preparedChecks = registry.prepareChecks();
-  EXPECT_THROW(preparedChecks->run(node, noopAcceptor, source.get_token()),
+  EXPECT_THROW(registry.runChecks(node, noopAcceptor, {}, source.get_token()),
                utils::OperationCancelled);
 }
 

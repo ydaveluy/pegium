@@ -43,9 +43,8 @@ struct InfixRule : AbstractRule {
   constexpr ElementKind getKind() const noexcept override {
     return ElementKind::InfixRule;
   }
-  virtual std::unique_ptr<AstNode>
-  getValue(const CstNodeView &node,
-           std::unique_ptr<AstNode> lhsNode,
+  virtual AstNode *
+  getValue(const CstNodeView &node, AstNode *lhsNode,
            const parser::ValueBuildContext &context) const = 0;
 
   virtual const InfixOperator *

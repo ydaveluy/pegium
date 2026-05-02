@@ -133,7 +133,7 @@ struct FeatureData {
 }
 
 void generate_abstract_elements(const std::filesystem::path &destination,
-                                const std::vector<std::unique_ptr<AbstractElement>> &elements,
+                                const std::vector<AbstractElement*> &elements,
                                 std::string filePath,
                                 std::string &lastGeneratedPath) {
   const auto fullPath = destination / filePath;
@@ -142,7 +142,7 @@ void generate_abstract_elements(const std::filesystem::path &destination,
 
   const auto packagePath = package_path_from_file_path(filePath);
   for (const auto &element : elements) {
-    if (const auto *package = dynamic_cast<const PackageDeclaration *>(element.get())) {
+    if (const auto *package = dynamic_cast<const PackageDeclaration *>(element)) {
       auto packagePath = package->name;
       std::ranges::replace(packagePath, '.', '/');
       generate_abstract_elements(destination, package->elements,
@@ -150,7 +150,7 @@ void generate_abstract_elements(const std::filesystem::path &destination,
                                   std::filesystem::path(packagePath))
                                      .string(),
                                  lastGeneratedPath);
-    } else if (const auto *entity = dynamic_cast<const Entity *>(element.get())) {
+    } else if (const auto *entity = dynamic_cast<const Entity *>(element)) {
       const auto filePathValue = fullPath / (entity->name + ".java");
       std::ofstream out(filePathValue, std::ios::binary);
       if (!out.is_open()) {

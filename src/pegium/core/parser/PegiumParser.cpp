@@ -125,10 +125,12 @@ ParseResult PegiumParser::parse(text::TextSnapshot text,
       matchedNode = detail::findFirstMatchingNode(*result.cst, &entryRule);
     }
     if (matchedNode.has_value()) {
+      result.astArena = std::make_unique<AstArena>(*result.cst);
       const ValueBuildContext context{
           .references = &result.references,
           .linker = services.references.linker.get(),
           .diagnostics = &result.parseDiagnostics,
+          .arena = result.astArena.get(),
       };
       result.value = entryRule.getValue(*matchedNode, context);
     }

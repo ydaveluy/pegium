@@ -52,19 +52,19 @@ TEST(ArithmeticsRecoveryProbeBatchTest,
   EXPECT_TRUE(observation.fullMatch);
   EXPECT_FALSE(observation.incomplete);
 
-  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
+  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
   const auto evaluation = std::find_if(
       module->statements.begin(), module->statements.end(),
       [](const auto &statement) {
         const auto *parsedEvaluation =
-            dynamic_cast<const ast::Evaluation *>(statement.get());
+            dynamic_cast<const ast::Evaluation *>(statement);
         if (parsedEvaluation == nullptr) {
           return false;
         }
         const auto *call =
             dynamic_cast<const ast::FunctionCall *>(
-                parsedEvaluation->expression.get());
+                parsedEvaluation->expression);
         return call != nullptr && call->func.getRefText() == "root" &&
                call->args.size() == 2u;
       });

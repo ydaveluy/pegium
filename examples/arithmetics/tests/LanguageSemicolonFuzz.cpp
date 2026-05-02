@@ -83,7 +83,7 @@ void expect_recovered(parser::ArithmeticParser &parser,
   auto parsed = parser.parse(text);
   const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
   const auto label = describe_deletions(deletions);
-  EXPECT_TRUE(parsed.value.get() != nullptr)
+  EXPECT_TRUE(parsed.value != nullptr)
       << label << "\n----\n" << text << "\n----\n" << parseDump;
   EXPECT_TRUE(parsed.fullMatch)
       << label << "\n----\n" << text << "\n----\n" << parseDump;

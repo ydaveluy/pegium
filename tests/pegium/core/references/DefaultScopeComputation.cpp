@@ -10,6 +10,8 @@
 
 #include <pegium/core/CoreTestSupport.hpp>
 #include <pegium/core/references/DefaultScopeComputation.hpp>
+#include <pegium/core/syntax-tree/RootCstNode.hpp>
+#include <pegium/core/text/TextSnapshot.hpp>
 #include <pegium/core/references/NameProvider.hpp>
 #include <pegium/core/workspace/AstNodeDescriptionProvider.hpp>
 
@@ -27,31 +29,24 @@ struct ScopeLeaf final : NamedScopeNode {
 
 struct ScopeBranch final : NamedScopeNode {
   using NamedScopeNode::NamedScopeNode;
-  std::unique_ptr<ScopeLeaf> directLeaf;
-  std::vector<std::unique_ptr<ScopeLeaf>> leaves;
+  ScopeLeaf *directLeaf = nullptr;
+  std::vector<ScopeLeaf *> leaves;
 };
 
 struct ScopeRoot final : NamedScopeNode {
   using NamedScopeNode::NamedScopeNode;
-  std::unique_ptr<ScopeBranch> branch;
-  std::vector<std::unique_ptr<ScopeLeaf>> leaves;
+  ScopeBranch *branch = nullptr;
+  std::vector<ScopeLeaf *> leaves;
 };
 
 class TestNameProvider final : public NameProvider {
 public:
-  [[nodiscard]] std::optional<std::string>
-  getName(const AstNode &node) const noexcept override {
-    if (const auto *named = dynamic_cast<const NamedScopeNode *>(&node)) {
-      if (!named->name.empty()) {
-        return named->name;
-      }
+  [[nodiscard]] AstNodeName nameOf(const AstNode &node) const override {
+    if (const auto *named = dynamic_cast<const NamedScopeNode *>(&node);
+        named != nullptr && !named->name.empty()) {
+      return {named->name, {}};
     }
-    return std::nullopt;
-  }
-
-  [[nodiscard]] std::optional<CstNodeView>
-  getNameNode(const AstNode &) const noexcept override {
-    return std::nullopt;
+    return {};
   }
 };
 
@@ -59,18 +54,12 @@ class PrefixNameProvider final : public NameProvider {
 public:
   explicit PrefixNameProvider(std::string prefix) : _prefix(std::move(prefix)) {}
 
-  [[nodiscard]] std::optional<std::string>
-  getName(const AstNode &node) const noexcept override {
+  [[nodiscard]] AstNodeName nameOf(const AstNode &node) const override {
     if (const auto *named = dynamic_cast<const NamedScopeNode *>(&node);
         named != nullptr && !named->name.empty()) {
-      return _prefix + named->name;
+      return {_prefix + named->name, {}};
     }
-    return std::nullopt;
-  }
-
-  [[nodiscard]] std::optional<CstNodeView>
-  getNameNode(const AstNode &) const noexcept override {
-    return std::nullopt;
+    return {};
   }
 
 private:
@@ -84,11 +73,11 @@ public:
 
   [[nodiscard]] std::optional<workspace::AstNodeDescription>
   createDescription(const AstNode &node, const workspace::Document &document,
-                    std::string name) const override {
-    if (name.empty()) {
+                    AstNodeName nameInfo) const override {
+    if (nameInfo.empty()) {
       return std::nullopt;
     }
-    auto fullName = _prefix + name;
+    auto fullName = _prefix + nameInfo.name;
 
     auto symbolId =
         static_cast<workspace::SymbolId>(reinterpret_cast<std::uintptr_t>(&node));
@@ -101,7 +90,7 @@ public:
         .type = std::type_index(typeid(node)),
         .documentId = document.id,
         .symbolId = symbolId,
-        .nameLength = static_cast<TextOffset>(_prefix.size() + name.size()),
+        .nameLength = static_cast<TextOffset>(_prefix.size() + nameInfo.name.size()),
     };
   }
 
@@ -115,12 +104,18 @@ std::shared_ptr<workspace::Document> make_scope_document() {
                                "test", ""));
   document->id = 7;
 
-  auto root = std::make_unique<ScopeRoot>("root");
-  root->branch = std::make_unique<ScopeBranch>("branch");
-  root->leaves.push_back(std::make_unique<ScopeLeaf>("leaf"));
-  root->leaves.push_back(std::make_unique<ScopeLeaf>());
-  root->branch->directLeaf = std::make_unique<ScopeLeaf>("nested");
-  root->branch->leaves.push_back(std::make_unique<ScopeLeaf>("nested2"));
+  document->parseResult.cst = std::make_unique<RootCstNode>(
+      pegium::text::TextSnapshot::copy(""));
+  document->parseResult.astArena =
+      std::make_unique<pegium::AstArena>(*document->parseResult.cst);
+  auto &arena = *document->parseResult.astArena;
+  arena.attachDocument(*document);
+  auto *root = arena.create<ScopeRoot>("root");
+  root->branch = arena.create<ScopeBranch>("branch");
+  root->leaves.push_back(arena.create<ScopeLeaf>("leaf"));
+  root->leaves.push_back(arena.create<ScopeLeaf>());
+  root->branch->directLeaf = arena.create<ScopeLeaf>("nested");
+  root->branch->leaves.push_back(arena.create<ScopeLeaf>("nested2"));
 
   root->branch->setContainer(*root);
   root->leaves[0]->setContainer(*root);
@@ -128,7 +123,7 @@ std::shared_ptr<workspace::Document> make_scope_document() {
   root->branch->directLeaf->setContainer(*root->branch);
   root->branch->leaves[0]->setContainer(*root->branch);
 
-  document->parseResult.value = std::move(root);
+  document->parseResult.value = root;
   return document;
 }
 

@@ -93,16 +93,17 @@ struct AssignmentElementValueType<
 template <typename E>
 using AssignmentElementValueType_t = typename AssignmentElementValueType<E>::type;
 
-template <typename T> struct AssignmentIsUniquePtr : std::false_type {};
+template <typename T> struct AssignmentIsAstPtr : std::false_type {};
 template <typename T>
-struct AssignmentIsUniquePtr<std::unique_ptr<T>> : std::true_type {
+  requires std::derived_from<T, AstNode>
+struct AssignmentIsAstPtr<T *> : std::true_type {
   using type = T;
 };
 
-template <typename T> struct AssignmentIsVectorUniquePtr : std::false_type {};
+template <typename T> struct AssignmentIsVectorAstPtr : std::false_type {};
 template <typename T>
-struct AssignmentIsVectorUniquePtr<std::vector<std::unique_ptr<T>>>
-    : std::true_type {
+  requires std::derived_from<T, AstNode>
+struct AssignmentIsVectorAstPtr<std::vector<T *>> : std::true_type {
   using type = T;
 };
 
@@ -238,39 +239,33 @@ public:
                                     AttrType ClassType::*member, Value &&value,
                                     const ValueBuildContext &context) {
     using RawValueType = std::remove_cvref_t<Value>;
-    if constexpr (AssignmentIsUniquePtr<AttrType>::value ||
-                  AssignmentIsVectorUniquePtr<AttrType>::value) {
+    if constexpr (AssignmentIsAstPtr<AttrType>::value ||
+                  AssignmentIsVectorAstPtr<AttrType>::value) {
       using PointeeType =
-          typename std::conditional_t<AssignmentIsUniquePtr<AttrType>::value,
-                                      AssignmentIsUniquePtr<AttrType>,
-                                      AssignmentIsVectorUniquePtr<AttrType>>::type;
+          typename std::conditional_t<AssignmentIsAstPtr<AttrType>::value,
+                                      AssignmentIsAstPtr<AttrType>,
+                                      AssignmentIsVectorAstPtr<AttrType>>::type;
 
-      if constexpr (AssignmentIsUniquePtr<RawValueType>::value) {
+      if constexpr (AssignmentIsAstPtr<RawValueType>::value) {
         using ValuePointeeType =
-            typename AssignmentIsUniquePtr<RawValueType>::type;
+            typename AssignmentIsAstPtr<RawValueType>::type;
         if constexpr (std::derived_from<ValuePointeeType, PointeeType>) {
-          auto ptr = std::remove_cvref_t<Value>{std::forward<Value>(value)};
-          helpers::AssignmentHelper<AttrType>{}(astNode, member, std::move(ptr),
-                                                context);
+          helpers::AssignmentHelper<AttrType>{}(astNode, member, value, context);
           return true;
         } else if constexpr (std::derived_from<ValuePointeeType, AstNode> &&
                              std::derived_from<PointeeType, AstNode>) {
           auto *castedPtr =
-              value ? dynamic_cast<PointeeType *>(value.get()) : nullptr;
-          if (!castedPtr) {
+              value != nullptr ? dynamic_cast<PointeeType *>(value) : nullptr;
+          if (castedPtr == nullptr) {
             return false;
           }
-          value.release();
-          std::unique_ptr<PointeeType> casted(castedPtr);
-          helpers::AssignmentHelper<AttrType>{}(astNode, member,
-                                                std::move(casted), context);
+          helpers::AssignmentHelper<AttrType>{}(astNode, member, castedPtr,
+                                                context);
           return true;
         }
       } else if constexpr (std::derived_from<RawValueType, PointeeType>) {
-        using NormalizedValue = std::remove_cvref_t<Value>;
         helpers::AssignmentHelper<AttrType>{}(astNode, member,
-                                              NormalizedValue{
-                                                  std::forward<Value>(value)},
+                                              std::forward<Value>(value),
                                               context);
         return true;
       }
@@ -330,8 +325,8 @@ public:
     } else if constexpr (AssignmentIsOptional<AttrType>::value) {
       return assign_optional_target(astNode, member, std::forward<Value>(value),
                                     context);
-    } else if constexpr (AssignmentIsUniquePtr<AttrType>::value ||
-                         AssignmentIsVectorUniquePtr<AttrType>::value) {
+    } else if constexpr (AssignmentIsAstPtr<AttrType>::value ||
+                         AssignmentIsVectorAstPtr<AttrType>::value) {
       return assign_pointer_target(astNode, member, std::forward<Value>(value),
                                    context);
     } else {
@@ -368,14 +363,14 @@ public:
       return false;
     } else {
       using Alternative = std::variant_alternative_t<I, VariantType>;
-      if constexpr (AssignmentIsUniquePtr<Alternative>::value) {
+      if constexpr (AssignmentIsAstPtr<Alternative>::value) {
         using AlternativePointee =
-            typename AssignmentIsUniquePtr<Alternative>::type;
+            typename AssignmentIsAstPtr<Alternative>::type;
         if constexpr (std::derived_from<AlternativePointee, AstNode>) {
           auto *castedPtr =
-              value ? dynamic_cast<AlternativePointee *>(value.get()) : nullptr;
-          if (castedPtr) {
-            value.release();
+              value != nullptr ? dynamic_cast<AlternativePointee *>(value)
+                               : nullptr;
+          if (castedPtr != nullptr) {
             castedPtr->setContainer(*astNode);
             target = Alternative(castedPtr);
             return true;
@@ -387,37 +382,35 @@ public:
     }
   }
 
-  template <typename ClassType, typename AttrType, typename RawUniquePtr>
+  template <typename ClassType, typename AttrType, typename RawAstPtr>
   static bool assign_ast_ptr_to_target(ClassType *astNode,
                                        AttrType ClassType::*member,
-                                       RawUniquePtr &&rawValue,
+                                       RawAstPtr rawValue,
                                        const ValueBuildContext &context) {
-    using RawUniqueType = std::remove_cvref_t<RawUniquePtr>;
-    using RawPointeeType = typename AssignmentIsUniquePtr<RawUniqueType>::type;
+    using RawPtrType = std::remove_cvref_t<RawAstPtr>;
+    using RawPointeeType = typename AssignmentIsAstPtr<RawPtrType>::type;
 
-    if constexpr (AssignmentIsUniquePtr<AttrType>::value ||
-                  AssignmentIsVectorUniquePtr<AttrType>::value) {
+    if constexpr (AssignmentIsAstPtr<AttrType>::value ||
+                  AssignmentIsVectorAstPtr<AttrType>::value) {
       using TargetPointeeType =
-          typename std::conditional_t<AssignmentIsUniquePtr<AttrType>::value,
-                                      AssignmentIsUniquePtr<AttrType>,
-                                      AssignmentIsVectorUniquePtr<AttrType>>::type;
+          typename std::conditional_t<AssignmentIsAstPtr<AttrType>::value,
+                                      AssignmentIsAstPtr<AttrType>,
+                                      AssignmentIsVectorAstPtr<AttrType>>::type;
 
       if constexpr (std::derived_from<RawPointeeType, TargetPointeeType>) {
-        auto ptr = RawUniqueType{std::forward<RawUniquePtr>(rawValue)};
-        helpers::AssignmentHelper<AttrType>{}(astNode, member, std::move(ptr),
+        helpers::AssignmentHelper<AttrType>{}(astNode, member, rawValue,
                                               context);
         return true;
       } else if constexpr (std::same_as<RawPointeeType, AstNode> &&
                            std::derived_from<TargetPointeeType, AstNode>) {
         auto *castedPtr =
-            rawValue ? dynamic_cast<TargetPointeeType *>(rawValue.get()) : nullptr;
-        if (!castedPtr) {
+            rawValue != nullptr ? dynamic_cast<TargetPointeeType *>(rawValue)
+                                : nullptr;
+        if (castedPtr == nullptr) {
           return false;
         }
-        rawValue.release();
-        std::unique_ptr<TargetPointeeType> casted(castedPtr);
-        helpers::AssignmentHelper<AttrType>{}(astNode, member,
-                                              std::move(casted), context);
+        helpers::AssignmentHelper<AttrType>{}(astNode, member, castedPtr,
+                                              context);
         return true;
       }
     }
@@ -433,8 +426,8 @@ public:
     using RawType = std::remove_cvref_t<RawValue>;
     using TargetValueType = helpers::AttrType<feature>;
 
-    if constexpr (AssignmentIsUniquePtr<RawType>::value &&
-                  std::derived_from<typename AssignmentIsUniquePtr<RawType>::type,
+    if constexpr (AssignmentIsAstPtr<RawType>::value &&
+                  std::derived_from<typename AssignmentIsAstPtr<RawType>::type,
                                     AstNode>) {
       if constexpr (AssignmentIsVariant<TargetValueType>::value) {
         TargetValueType converted{};

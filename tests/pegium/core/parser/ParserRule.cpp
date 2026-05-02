@@ -3,6 +3,9 @@
 #include <pegium/core/TestCstBuilderHarness.hpp>
 #include <pegium/core/TestRuleParser.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/syntax-tree/AstArena.hpp>
+#include <pegium/core/syntax-tree/RootCstNode.hpp>
+#include <pegium/core/text/TextSnapshot.hpp>
 
 #include <memory>
 #include <type_traits>
@@ -96,7 +99,10 @@ TEST(ParserRuleTest, ParseAndGetValueExposeTypedAstValue) {
   auto node = detail::findFirstMatchingNode(*result.cst, std::addressof(rule));
   ASSERT_TRUE(node.has_value());
 
-  auto value = rule.getValue(*node);
+  pegium::RootCstNode dummyCst{pegium::text::TextSnapshot::copy("")}; pegium::AstArena arena{dummyCst};
+  pegium::parser::ValueBuildContext ctx{};
+  ctx.arena = &arena;
+  auto *value = rule.getValue(*node, ctx);
   auto *typed = pegium::ast_ptr_cast<LeafNode>(value);
   ASSERT_TRUE(typed != nullptr);
   EXPECT_EQ(typed->name, "leaf");

@@ -255,11 +255,25 @@ std::optional<CstNodeView> find_node_for_feature(const CstNodeView &node,
 std::optional<CstNodeView> find_node_for_feature(const CstNodeView &node,
                                                  std::string_view feature,
                                                  std::size_t index) {
-  const auto matches = find_nodes_for_feature(node, feature);
-  if (index >= matches.size()) {
+  if (!node.valid()) {
     return std::nullopt;
   }
-  return matches[index];
+  std::size_t seen = 0;
+  for (const auto &child : node) {
+    if (child.isHidden() ||
+        child.getGrammarElement()->getKind() != grammar::ElementKind::Assignment) {
+      continue;
+    }
+    const auto *assignment =
+        static_cast<const grammar::Assignment *>(child.getGrammarElement());
+    if (assignment->getFeature() != feature) {
+      continue;
+    }
+    if (seen++ == index) {
+      return child;
+    }
+  }
+  return std::nullopt;
 }
 
 std::vector<CstNodeView> find_nodes_for_feature(const CstNodeView &node,
@@ -272,7 +286,8 @@ std::vector<CstNodeView> find_nodes_for_feature(const CstNodeView &node,
 std::optional<CstNodeView> find_node_for_keyword(const CstNodeView &node,
                                                  std::string_view keyword,
                                                  std::size_t index) {
-  const auto matches = find_nodes_for_keyword(node, keyword);
+  std::vector<CstNodeView> matches;
+  collect_keyword_nodes(node, keyword, matches);
   if (index >= matches.size()) {
     return std::nullopt;
   }

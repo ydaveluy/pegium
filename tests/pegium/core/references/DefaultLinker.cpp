@@ -221,24 +221,26 @@ TargetDocumentFixture make_target_document(pegium::SharedCoreServices &shared,
       test::make_text_document(std::move(uri), "linker", "a"));
   shared.workspace.documents->addDocument(document);
 
-  auto root = std::make_unique<LinkerRoot>();
   auto cst = std::make_unique<RootCstNode>(
       text::TextSnapshot::copy(document->textDocument().getText()));
   cst->attachDocument(*document);
+  document->parseResult.astArena = std::make_unique<pegium::AstArena>(*cst);
+  auto &arena = *document->parseResult.astArena;
+  arena.attachDocument(*document);
+  auto *root = arena.create<LinkerRoot>();
   static const DummyLiteral literal;
   CstBuilder builder(*cst);
   builder.leaf(0, 1, &literal);
 
-  auto target = std::make_unique<LinkerNode>();
+  auto *target = arena.create<LinkerNode>();
   target->name = "a";
-  auto *targetPtr = target.get();
-  targetPtr->setCstNode(cst->get(0));
-  root->nodes.push_back(std::move(target));
-  targetPtr->setContainer(*root);
+  target->setCstNode(cst->get(0));
+  root->nodes.push_back(target);
+  target->setContainer(*root);
 
-  document->parseResult.value = std::move(root);
+  document->parseResult.value = root;
   document->parseResult.cst = std::move(cst);
-  return {.document = std::move(document), .target = targetPtr};
+  return {.document = std::move(document), .target = target};
 }
 
 ReferenceDocumentFixture
@@ -247,30 +249,34 @@ make_reference_document(pegium::SharedCoreServices &shared,
                         std::string refText = "a") {
   auto document = std::make_shared<workspace::Document>(
       test::make_text_document(std::move(uri), "linker", refText));
-  shared.workspace.documents->addDocument(document);
-
-  auto root = std::make_unique<LinkerRoot>();
-  auto cst = std::make_unique<RootCstNode>(
+  shared.workspace.documents->addDocument(document);  auto cst = std::make_unique<RootCstNode>(
       text::TextSnapshot::copy(document->textDocument().getText()));
   cst->attachDocument(*document);
+
+
+  document->parseResult.astArena = std::make_unique<pegium::AstArena>(*cst);
+
+
+  auto &arena = *document->parseResult.astArena;
+  arena.attachDocument(*document);
+  auto *root = arena.create<LinkerRoot>();
   static const DummyLiteral literal;
   CstBuilder builder(*cst);
   builder.leaf(0, static_cast<TextOffset>(refText.size()), &literal);
 
   static const TestReferenceAssignment<LinkerReferrer, LinkerNode> assignment(
       "node");
-  auto referrer = std::make_unique<LinkerReferrer>();
-  auto *referrerPtr = referrer.get();
-  referrerPtr->setCstNode(cst->get(0));
-  referrerPtr->node.initialize(*referrerPtr, refText, cst->get(0), assignment,
-                               linker);
-  root->referrers.push_back(std::move(referrer));
-  referrerPtr->setContainer(*root);
+  auto *referrer = arena.create<LinkerReferrer>();
+  referrer->setCstNode(cst->get(0));
+  referrer->node.initialize(*referrer, refText, cst->get(0), assignment,
+                            linker);
+  root->referrers.push_back(referrer);
+  referrer->setContainer(*root);
 
-  document->parseResult.value = std::move(root);
+  document->parseResult.value = root;
   document->parseResult.cst = std::move(cst);
-  document->references.push_back(ReferenceHandle::direct(&referrerPtr->node));
-  return {.document = std::move(document), .referrer = referrerPtr};
+  document->parseResult.references.push_back(ReferenceHandle::direct(&referrer->node));
+  return {.document = std::move(document), .referrer = referrer};
 }
 
 MultiReferenceDocumentFixture
@@ -279,30 +285,34 @@ make_multi_reference_document(pegium::SharedCoreServices &shared,
                               std::string refText = "a") {
   auto document = std::make_shared<workspace::Document>(
       test::make_text_document(std::move(uri), "linker", refText));
-  shared.workspace.documents->addDocument(document);
-
-  auto root = std::make_unique<LinkerRoot>();
-  auto cst = std::make_unique<RootCstNode>(
+  shared.workspace.documents->addDocument(document);  auto cst = std::make_unique<RootCstNode>(
       text::TextSnapshot::copy(document->textDocument().getText()));
   cst->attachDocument(*document);
+
+
+  document->parseResult.astArena = std::make_unique<pegium::AstArena>(*cst);
+
+
+  auto &arena = *document->parseResult.astArena;
+  arena.attachDocument(*document);
+  auto *root = arena.create<LinkerRoot>();
   static const DummyLiteral literal;
   CstBuilder builder(*cst);
   builder.leaf(0, static_cast<TextOffset>(refText.size()), &literal);
 
   static const TestReferenceAssignment<LinkerMultiReferrer, LinkerNode, true>
       assignment("nodes");
-  auto referrer = std::make_unique<LinkerMultiReferrer>();
-  auto *referrerPtr = referrer.get();
-  referrerPtr->setCstNode(cst->get(0));
-  referrerPtr->nodes.initialize(*referrerPtr, refText, cst->get(0), assignment,
-                                linker);
-  root->multiReferrers.push_back(std::move(referrer));
-  referrerPtr->setContainer(*root);
+  auto *referrer = arena.create<LinkerMultiReferrer>();
+  referrer->setCstNode(cst->get(0));
+  referrer->nodes.initialize(*referrer, refText, cst->get(0), assignment,
+                             linker);
+  root->multiReferrers.push_back(referrer);
+  referrer->setContainer(*root);
 
-  document->parseResult.value = std::move(root);
+  document->parseResult.value = root;
   document->parseResult.cst = std::move(cst);
-  document->references.push_back(ReferenceHandle::direct(&referrerPtr->nodes));
-  return {.document = std::move(document), .referrer = referrerPtr};
+  document->parseResult.references.push_back(ReferenceHandle::direct(&referrer->nodes));
+  return {.document = std::move(document), .referrer = referrer};
 }
 
 AttachedLinkerReferrerFixture
@@ -322,16 +332,18 @@ make_attached_referrer(pegium::SharedCoreServices &shared,
 
   static const TestReferenceAssignment<LinkerReferrer, LinkerNode> assignment(
       "node");
-  auto referrer = std::make_unique<LinkerReferrer>();
-  auto *referrerPtr = referrer.get();
-  referrerPtr->setCstNode(cst->get(0));
-  referrerPtr->node.initialize(*referrerPtr, refText, cst->get(0), assignment,
-                               linker);
+  document->parseResult.astArena = std::make_unique<pegium::AstArena>(*cst);
+  auto &arena = *document->parseResult.astArena;
+  arena.attachDocument(*document);
+  auto *referrer = arena.create<LinkerReferrer>();
+  referrer->setCstNode(cst->get(0));
+  referrer->node.initialize(*referrer, refText, cst->get(0), assignment,
+                            linker);
 
-  document->parseResult.value = std::move(referrer);
+  document->parseResult.value = referrer;
   document->parseResult.cst = std::move(cst);
-  document->references.push_back(ReferenceHandle::direct(&referrerPtr->node));
-  return {.document = std::move(document), .referrer = referrerPtr};
+  document->parseResult.references.push_back(ReferenceHandle::direct(&referrer->node));
+  return {.document = std::move(document), .referrer = referrer};
 }
 
 bool has_diagnostic_message(const workspace::Document &document,
@@ -353,30 +365,30 @@ make_linker_parser(const Linker *&linkerRef) {
         "node");
     static const DummyLiteral literal;
     assert(linkerRef != nullptr);
-    auto root = std::make_unique<LinkerRoot>();
     auto cst = std::make_unique<RootCstNode>(text::TextSnapshot::copy(text));
+    result.astArena = std::make_unique<pegium::AstArena>(*cst);
+    auto &arena = *result.astArena;
+    auto *root = arena.create<LinkerRoot>();
     CstBuilder builder(*cst);
     builder.leaf(0, static_cast<TextOffset>(text.size()), &literal);
     root->setCstNode(cst->get(0));
 
-    auto node = std::make_unique<LinkerNode>();
+    auto *node = arena.create<LinkerNode>();
     node->name = "a";
-    auto *nodePtr = node.get();
-    nodePtr->setCstNode(cst->get(0));
-    root->nodes.push_back(std::move(node));
-    nodePtr->setContainer(*root);
+    node->setCstNode(cst->get(0));
+    root->nodes.push_back(node);
+    node->setContainer(*root);
 
-    auto referrer = std::make_unique<LinkerReferrer>();
-    auto *referrerPtr = referrer.get();
-    referrerPtr->setCstNode(cst->get(0));
-    referrerPtr->node.initialize(*referrerPtr, "a", cst->get(0), assignment,
-                                 *linkerRef);
-    root->referrers.push_back(std::move(referrer));
-    referrerPtr->setContainer(*root);
+    auto *referrer = arena.create<LinkerReferrer>();
+    referrer->setCstNode(cst->get(0));
+    referrer->node.initialize(*referrer, "a", cst->get(0), assignment,
+                              *linkerRef);
+    root->referrers.push_back(referrer);
+    referrer->setContainer(*root);
 
-    result.value = std::move(root);
+    result.value = root;
     result.cst = std::move(cst);
-    result.references.push_back(ReferenceHandle::direct(&referrerPtr->node));
+    result.references.push_back(ReferenceHandle::direct(&referrer->node));
   };
   return parser;
 }
@@ -397,7 +409,7 @@ TEST(DefaultLinkerTest, DetectsCyclicReferenceResolution) {
                                     "linker", "node a\nreferrer a\n");
   ASSERT_NE(document, nullptr);
 
-  auto *root = dynamic_cast<LinkerRoot *>(document->parseResult.value.get());
+  auto *root = dynamic_cast<LinkerRoot *>(document->parseResult.value);
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(root->referrers.size(), 1u);
 
@@ -628,17 +640,17 @@ TEST(DefaultLinkerTest, ReinitializingReferenceResetsCachedResolution) {
   const auto documentId = fixture.document->id;
   const auto firstPtr = fixture.target;
 
-  auto second = std::make_unique<LinkerNode>();
+  auto &arena = *fixture.document->parseResult.astArena;
+  auto *second = arena.create<LinkerNode>();
   second->name = "b";
-  auto *secondPtr = second.get();
   static const DummyLiteral literal;
   CstBuilder builder(*fixture.document->parseResult.cst);
   builder.leaf(0, 1, &literal);
-  secondPtr->setCstNode(fixture.document->parseResult.cst->get(1));
+  second->setCstNode(fixture.document->parseResult.cst->get(1));
   auto *root =
-      static_cast<LinkerRoot *>(fixture.document->parseResult.value.get());
-  root->nodes.push_back(std::move(second));
-  secondPtr->setContainer(*root);
+      static_cast<LinkerRoot *>(fixture.document->parseResult.value);
+  root->nodes.push_back(second);
+  second->setContainer(*root);
 
   services->references.scopeProvider = std::make_unique<StaticScopeProvider>(
       std::vector<workspace::AstNodeDescription>{
@@ -649,7 +661,7 @@ TEST(DefaultLinkerTest, ReinitializingReferenceResetsCachedResolution) {
           {.name = "b",
            .type = std::type_index(typeid(LinkerNode)),
            .documentId = documentId,
-           .symbolId = fixture.document->makeSymbolId(*secondPtr)}});
+           .symbolId = fixture.document->makeSymbolId(*second)}});
 
   auto *linker = services->references.linker.get();
   ASSERT_NE(linker, nullptr);
@@ -669,7 +681,7 @@ TEST(DefaultLinkerTest, ReinitializingReferenceResetsCachedResolution) {
                        refFixture.referrer->getCstNode(), assignment, *linker);
 
   EXPECT_EQ(reference.state(), ReferenceState::Unresolved);
-  EXPECT_EQ(reference.get(), secondPtr);
+  EXPECT_EQ(reference.get(), second);
   EXPECT_EQ(reference.get()->name, "b");
 }
 

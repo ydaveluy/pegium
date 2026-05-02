@@ -1,13 +1,13 @@
 #pragma once
 
 #include <cassert>
-#include <memory>
 #include <pegium/core/grammar/Nest.hpp>
 #include <pegium/core/parser/AssignmentHelpers.hpp>
 #include <pegium/core/parser/Introspection.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/AstReflectionBootstrap.hpp>
+#include <pegium/core/syntax-tree/AstArena.hpp>
 #include <string_view>
 #include <type_traits>
 
@@ -20,17 +20,16 @@ struct Nest final : grammar::Nest {
   static constexpr bool nullable = true;
   static constexpr bool isFailureSafe = true;
 
-  std::unique_ptr<AstNode>
-  getValue(std::unique_ptr<AstNode> current) const override {
-    auto newNode = std::make_unique<T>();
-    const ValueBuildContext context{};
+  AstNode *getValue(AstNode *current, AstArena &arena) const override {
+    auto *newNode = arena.create<T>();
+    ValueBuildContext context{};
+    context.arena = &arena;
     using FeatureType = helpers::AttrType<feature>;
     static_assert(std::derived_from<FeatureType, AstNode>);
     assert(current != nullptr);
-    auto *featureNode = static_cast<FeatureType *>(current.release());
+    auto *featureNode = static_cast<FeatureType *>(current);
     helpers::AssignmentHelper<helpers::MemberType<feature>>{}(
-        newNode.get(), feature, std::unique_ptr<FeatureType>(featureNode),
-        context);
+        newNode, feature, featureNode, context);
     return newNode;
   }
 

@@ -45,7 +45,7 @@ TEST(GroupRecovery, delete_run_terminal_respects_hidden_trivia_boundary) {
   // boundary protecting the next iteration.
   const auto result = parseRule(entry, "def x ?? def y;", skipper);
   ASSERT_TRUE(result.value);
-  const auto *module = dynamic_cast<RecoveryModule *>(result.value.get());
+  const auto *module = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(module, nullptr);
   // The second definition's name must still be `y`. If the
   // delete-run had crossed the boundary it would have absorbed the
@@ -53,9 +53,9 @@ TEST(GroupRecovery, delete_run_terminal_respects_hidden_trivia_boundary) {
   // (or would have started on `y;` with a missing keyword).
   ASSERT_GE(module->statements.size(), 2U);
   const auto *firstDef =
-      dynamic_cast<RecoveryDefinition *>(module->statements[0].get());
+      dynamic_cast<RecoveryDefinition *>(module->statements[0]);
   const auto *secondDef =
-      dynamic_cast<RecoveryDefinition *>(module->statements[1].get());
+      dynamic_cast<RecoveryDefinition *>(module->statements[1]);
   ASSERT_NE(firstDef, nullptr);
   ASSERT_NE(secondDef, nullptr);
   EXPECT_EQ(firstDef->name, "x");

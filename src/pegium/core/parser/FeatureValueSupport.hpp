@@ -67,16 +67,22 @@ public:
   }
 
   template <typename T>
-  [[nodiscard]] static grammar::FeatureValue
-  read_feature_value(const std::unique_ptr<T> &value) {
-    if (!value) {
+    requires std::derived_from<T, AstNode>
+  [[nodiscard]] static grammar::FeatureValue read_feature_value(T *value) {
+    if (value == nullptr) {
       return grammar::FeatureValue(grammar::RuleValue(nullptr));
     }
-    if constexpr (std::derived_from<T, AstNode>) {
-      return grammar::FeatureValue(static_cast<const AstNode *>(value.get()));
-    } else {
-      return make_feature_value(*value);
+    return grammar::FeatureValue(static_cast<const AstNode *>(value));
+  }
+
+  template <typename T>
+    requires std::derived_from<T, AstNode>
+  [[nodiscard]] static grammar::FeatureValue
+  read_feature_value(const T *value) {
+    if (value == nullptr) {
+      return grammar::FeatureValue(grammar::RuleValue(nullptr));
     }
+    return grammar::FeatureValue(static_cast<const AstNode *>(value));
   }
 
   template <typename T>

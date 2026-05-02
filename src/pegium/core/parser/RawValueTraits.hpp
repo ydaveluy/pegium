@@ -18,15 +18,43 @@ template <typename> struct AcceptAnyRawValue : std::true_type {};
 template <typename T> struct RawValueDependentFalse : std::false_type {};
 
 template <typename Expr>
-concept HasRawValueMethod = requires(const std::remove_cvref_t<Expr> &expression,
-                                     const CstNodeView &node) {
-  expression.getRawValue(node);
+concept HasRawValueMethodWithContext =
+    requires(const std::remove_cvref_t<Expr> &expression,
+             const CstNodeView &node, const ValueBuildContext &context) {
+      expression.getRawValue(node, context);
+    };
+
+template <typename Expr>
+concept HasRawValueMethodNoContext =
+    requires(const std::remove_cvref_t<Expr> &expression,
+             const CstNodeView &node) { expression.getRawValue(node); };
+
+template <typename Expr>
+concept HasRawValueMethod =
+    HasRawValueMethodWithContext<Expr> || HasRawValueMethodNoContext<Expr>;
+
+template <typename Expr> struct RawValueTypeImpl;
+
+template <typename Expr>
+  requires HasRawValueMethodNoContext<Expr>
+struct RawValueTypeImpl<Expr> {
+  using type = std::remove_cvref_t<decltype(std::declval<
+                                                const std::remove_cvref_t<Expr> &>()
+                                                .getRawValue(
+                                                    std::declval<const CstNodeView &>()))>;
 };
 
 template <typename Expr>
-using RawValueType =
-    std::remove_cvref_t<decltype(std::declval<const std::remove_cvref_t<Expr> &>()
-                                     .getRawValue(std::declval<const CstNodeView &>()))>;
+  requires(!HasRawValueMethodNoContext<Expr> && HasRawValueMethodWithContext<Expr>)
+struct RawValueTypeImpl<Expr> {
+  using type = std::remove_cvref_t<decltype(std::declval<
+                                                const std::remove_cvref_t<Expr> &>()
+                                                .getRawValue(
+                                                    std::declval<const CstNodeView &>(),
+                                                    std::declval<const ValueBuildContext &>()))>;
+};
+
+template <typename Expr> using RawValueType = typename RawValueTypeImpl<Expr>::type;
 
 template <typename Expr, template <typename> class RawValuePredicate,
           bool = HasRawValueMethod<Expr>>

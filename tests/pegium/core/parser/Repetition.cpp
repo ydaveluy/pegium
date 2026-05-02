@@ -542,7 +542,7 @@ TEST(RepetitionTest,
   ASSERT_TRUE(result.value);
   EXPECT_TRUE(result.fullMatch);
 
-  auto *state = dynamic_cast<RepetitionProbeState *>(result.value.get());
+  auto *state = dynamic_cast<RepetitionProbeState *>(result.value);
   ASSERT_NE(state, nullptr);
   ASSERT_EQ(state->transitions.size(), 1u);
   ASSERT_NE(state->transitions[0], nullptr);

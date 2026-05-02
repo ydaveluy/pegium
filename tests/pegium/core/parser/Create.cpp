@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 #include <pegium/core/TestCstBuilderHarness.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/syntax-tree/AstArena.hpp>
+#include <pegium/core/syntax-tree/RootCstNode.hpp>
+#include <pegium/core/text/TextSnapshot.hpp>
 using namespace pegium::parser;
 
 namespace {
@@ -14,7 +17,9 @@ TEST(CreateTest, CreatesRequestedNodeType) {
 
   EXPECT_EQ(makeChild.getKind(), pegium::grammar::ElementKind::Create);
 
-  auto created = makeChild.getValue();
+  pegium::RootCstNode dummyCst{pegium::text::TextSnapshot::copy("")};
+  pegium::AstArena arena{dummyCst};
+  auto *created = makeChild.getValue(arena);
   EXPECT_TRUE(pegium::ast_ptr_cast<ChildNode>(created) != nullptr);
 }
 

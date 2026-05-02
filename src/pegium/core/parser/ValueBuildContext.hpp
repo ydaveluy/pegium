@@ -16,6 +16,7 @@ struct ValueBuildContext {
   const references::Linker *linker = nullptr;
   const grammar::Assignment *assignment = nullptr;
   std::vector<ParseDiagnostic> *diagnostics = nullptr;
+  AstArena *arena = nullptr;
 
   [[nodiscard]] ValueBuildContext
   withAssignment(const grammar::Assignment &nextAssignment) const noexcept {

@@ -272,11 +272,11 @@ TEST(ArithmeticsModuleTest, DivisionByZeroTargetsRightOperand) {
       "5 / 0;\n");
 
   ASSERT_NE(document, nullptr);
-  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
+  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
-  auto *evaluation = dynamic_cast<ast::Evaluation *>(module->statements[0].get());
+  auto *evaluation = dynamic_cast<ast::Evaluation *>(module->statements[0]);
   ASSERT_NE(evaluation, nullptr);
-  auto *binary = dynamic_cast<ast::BinaryExpression *>(evaluation->expression.get());
+  auto *binary = dynamic_cast<ast::BinaryExpression *>(evaluation->expression);
   ASSERT_NE(binary, nullptr);
 
   const auto *diagnostic =
@@ -353,10 +353,10 @@ TEST(ArithmeticsModuleTest, DuplicateDefinitionNamesAreDetectedOnNameRanges) {
   auto diagnostics = find_diagnostics(*document, "Duplicate definition name: x");
   ASSERT_EQ(diagnostics.size(), 2u);
 
-  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
+  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
-  auto *first = dynamic_cast<ast::Definition *>(module->statements[0].get());
-  auto *second = dynamic_cast<ast::Definition *>(module->statements[1].get());
+  auto *first = dynamic_cast<ast::Definition *>(module->statements[0]);
+  auto *second = dynamic_cast<ast::Definition *>(module->statements[1]);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(second, nullptr);
 
@@ -388,11 +388,11 @@ TEST(ArithmeticsModuleTest, DirectFunctionRecursionIsReportedOnFunctionReference
       find_diagnostic(*document, "Recursion is not allowed [factorial()]");
   ASSERT_NE(diagnostic, nullptr);
 
-  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
+  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
-  auto *definition = dynamic_cast<ast::Definition *>(module->statements[0].get());
+  auto *definition = dynamic_cast<ast::Definition *>(module->statements[0]);
   ASSERT_NE(definition, nullptr);
-  auto *call = dynamic_cast<ast::FunctionCall *>(definition->expr.get());
+  auto *call = dynamic_cast<ast::FunctionCall *>(definition->expr);
   ASSERT_NE(call, nullptr);
   const auto [begin, end] =
       pegium::validation::range_for_feature<&ast::FunctionCall::func>(*call);
@@ -456,11 +456,11 @@ TEST(ArithmeticsModuleTest, FunctionCallArityMismatchTargetsArgumentsRange) {
       find_diagnostic(*document, "Function add expects 2 parameters, but 3 were given.");
   ASSERT_NE(diagnostic, nullptr);
 
-  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
+  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
-  auto *evaluation = dynamic_cast<ast::Evaluation *>(module->statements[1].get());
+  auto *evaluation = dynamic_cast<ast::Evaluation *>(module->statements[1]);
   ASSERT_NE(evaluation, nullptr);
-  auto *call = dynamic_cast<ast::FunctionCall *>(evaluation->expression.get());
+  auto *call = dynamic_cast<ast::FunctionCall *>(evaluation->expression);
   ASSERT_NE(call, nullptr);
   const auto [begin, firstEndIgnored] =
       pegium::validation::range_for_feature(*call, "args", 0u);

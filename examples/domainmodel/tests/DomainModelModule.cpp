@@ -272,17 +272,17 @@ TEST(DomainModelModuleTest, ScopeComputationQualifiesExportsAndLocalSymbols) {
   ASSERT_NE(services.references.scopeComputation, nullptr);
 
   auto *model =
-      dynamic_cast<domainmodel::ast::DomainModel *>(document->parseResult.value.get());
+      dynamic_cast<domainmodel::ast::DomainModel *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
   ASSERT_EQ(model->elements.size(), 1u);
 
   auto *blog =
-      dynamic_cast<domainmodel::ast::PackageDeclaration *>(model->elements[0].get());
+      dynamic_cast<domainmodel::ast::PackageDeclaration *>(model->elements[0]);
   ASSERT_NE(blog, nullptr);
   ASSERT_EQ(blog->elements.size(), 2u);
 
   auto *internal = dynamic_cast<domainmodel::ast::PackageDeclaration *>(
-      blog->elements[1].get());
+      blog->elements[1]);
   ASSERT_NE(internal, nullptr);
 
   const auto exports =
@@ -335,7 +335,7 @@ TEST(DomainModelModuleTest, FindsCrossReferencesFromDeclarations) {
   ASSERT_NE(services.references.references, nullptr);
 
   auto *model = dynamic_cast<domainmodel::ast::DomainModel *>(
-      datatypeDocument->parseResult.value.get());
+      datatypeDocument->parseResult.value);
   ASSERT_NE(model, nullptr);
   ASSERT_FALSE(model->elements.empty());
 
@@ -366,7 +366,7 @@ TEST(DomainModelModuleTest, ReindexesCrossReferencesAfterDocumentUpdate) {
   ASSERT_NE(services.references.references, nullptr);
 
   auto *initialModel = dynamic_cast<domainmodel::ast::DomainModel *>(
-      superDocument->parseResult.value.get());
+      superDocument->parseResult.value);
   ASSERT_NE(initialModel, nullptr);
   ASSERT_FALSE(initialModel->elements.empty());
   EXPECT_TRUE(services.references.references->findReferences(
@@ -385,7 +385,7 @@ TEST(DomainModelModuleTest, ReindexesCrossReferencesAfterDocumentUpdate) {
       shared->workspace.documents->getDocument(superDocument->uri);
   ASSERT_NE(updatedSuperDocument, nullptr);
   auto *updatedModel = dynamic_cast<domainmodel::ast::DomainModel *>(
-      updatedSuperDocument->parseResult.value.get());
+      updatedSuperDocument->parseResult.value);
   ASSERT_NE(updatedModel, nullptr);
   ASSERT_FALSE(updatedModel->elements.empty());
 
