@@ -9,9 +9,10 @@ namespace pegium {
 
 class AstNode;
 
-/// Set of `std::type_index`es using a fast pointer-based hash.
+/// Set of `std::type_index`es using fast pointer-based hash and equality.
 using TypeIndexSet =
-    std::unordered_set<std::type_index, utils::FastTypeIndexHash>;
+    std::unordered_set<std::type_index, utils::FastTypeIndexHash,
+                       utils::FastTypeIndexEqual>;
 
 /// Runtime registry describing subtype relationships between AST types.
 ///

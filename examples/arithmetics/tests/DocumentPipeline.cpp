@@ -547,7 +547,7 @@ TEST_F(DocumentPipelineIntegrationTest,
       << parseDump;
   EXPECT_FALSE(test::has_diagnostic_message(*document, "Unexpected token `Sqrt`"))
       << parseDump;
-  EXPECT_FALSE(test::has_diagnostic_message(*document, "Unresolved reference: qrt"))
+  EXPECT_FALSE(test::has_diagnostic_message(*document, "named 'qrt'"))
       << parseDump;
 }
 
@@ -930,7 +930,7 @@ TEST_F(DocumentPipelineIntegrationTest,
 
   EXPECT_FALSE(test::has_diagnostic_message(*document, "Unexpected token `Sqrt(1/0)`"));
   EXPECT_TRUE(test::has_diagnostic_message(*document, "Unexpected token `xxx`") ||
-              test::has_diagnostic_message(*document, "Unresolved reference: xxx"));
+              test::has_diagnostic_message(*document, "named 'xxx'"));
   EXPECT_TRUE(test::has_diagnostic_message(*document, "Division by zero"));
 }
 
@@ -1139,7 +1139,7 @@ TEST_F(DocumentPipelineIntegrationTest,
   EXPECT_FALSE(
       test::has_diagnostic_message(*document, "Unexpected token `Sqrt(81/0)`"))
       << parseDump;
-  EXPECT_TRUE(test::has_diagnostic_message(*document, "Unresolved reference: sada"));
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "named 'sada'"));
   EXPECT_TRUE(test::has_diagnostic_message(*document, "Division by zero"));
 }
 
@@ -1202,7 +1202,7 @@ TEST_F(DocumentPipelineIntegrationTest,
       test::has_diagnostic_message(*document, "Unexpected token `sada`"));
   EXPECT_FALSE(
       test::has_diagnostic_message(*document, "Unexpected token `Sqrt(81/0)`"));
-  EXPECT_TRUE(test::has_diagnostic_message(*document, "Unresolved reference: sada"));
+  EXPECT_TRUE(test::has_diagnostic_message(*document, "named 'sada'"));
   EXPECT_TRUE(test::has_diagnostic_message(*document, "Division by zero"));
 }
 

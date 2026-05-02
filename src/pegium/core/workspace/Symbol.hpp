@@ -74,26 +74,17 @@ struct ScopeEntryBucket {
 
   std::type_index type = std::type_index(typeid(void));
   std::deque<AstNodeDescription> ownedEntries;
-  /// Marked mutable so `LocalSymbols::forContainer` can populate it lazily on
-  /// first read without giving up the const-qualified accessor pattern.
-  mutable NameIndex entriesByName;
+  NameIndex entriesByName;
 };
 
 /// Collection of typed scope entry buckets.
 ///
 /// `std::deque` keeps existing buckets at stable addresses when a new one is
-/// appended, so the description pointers held by `entriesByName` remain valid.
-/// In practice each container has only a handful of distinct symbol types, so
-/// a linear scan over `buckets` is faster than maintaining a side index.
-///
-/// `indexed` is false while the structure is being populated by `LocalSymbols`
-/// — only `ownedEntries` are filled. The name index inside each bucket is
-/// built lazily on the first `forContainer` lookup, so the symbol-collection
-/// phase pays one hash-map insertion per symbol instead of two.
-struct BucketedScopeEntries {
-  std::deque<ScopeEntryBucket> buckets;
-  mutable bool indexed = false;
-};
+/// appended, so the description pointers held by `ScopeEntryBucket::entriesByName`
+/// remain valid. In practice each container has only a handful of distinct
+/// symbol types, so a linear scan over the buckets is faster than maintaining a
+/// side index.
+using BucketedScopeEntries = std::deque<ScopeEntryBucket>;
 
 /// Stable key identifying one AST node across workspace indexes.
 struct NodeKey {
@@ -156,18 +147,37 @@ struct ReferenceDescription {
   }
 };
 
+/// Categorization of why a reference failed to resolve. The diagnostic message
+/// is built on demand from the reference's metadata via
+/// `AbstractReference::getErrorMessage`.
+enum class LinkingErrorKind : std::uint8_t {
+  /// Document hasn't reached `ComputedScopes` yet — the reference stays
+  /// `Unresolved` and the linker retries later.
+  Retryable,
+  /// Scope provider returned no candidate matching the reference text.
+  NotFound,
+  /// `CyclicReferenceResolution` thrown during resolution.
+  Cycle,
+  /// Resolver caught a `std::exception` (full text logged via observability).
+  Exception,
+};
+
 /// Linking failure payload returned by reference resolution helpers.
 struct LinkingError {
   ReferenceInfo info;
-  std::string message;
-  std::optional<AstNodeDescription> targetDescription;
-  bool retryable = false;
+  LinkingErrorKind kind = LinkingErrorKind::NotFound;
 };
 
 /// Fully resolved AST node together with its stable description.
+///
+/// `description` is a non-owning pointer into stable scope storage (the
+/// `std::deque<AstNodeDescription>` inside `ScopeEntryBucket::ownedEntries`).
+/// Pointer stability is guaranteed for the lifetime of the source document's
+/// `LocalSymbols` / global index entries — which is the same lifetime callers
+/// already assume for `Reference` resolutions.
 struct ResolvedAstNodeDescription {
   const AstNode *node = nullptr;
-  AstNodeDescription description;
+  const AstNodeDescription *description = nullptr;
 };
 
 /// Result of resolving one symbol description.

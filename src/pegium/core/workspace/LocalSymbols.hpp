@@ -16,9 +16,10 @@ namespace pegium::workspace {
 /// indexed by symbol type and name.
 ///
 /// Descriptions are stored once, in a `BucketedScopeEntries` per container.
-/// The `ScopeProvider` consumes the bucketed view directly via
-/// `forContainer`, eliminating the per-document rebuild that previously ran
-/// on first lookup.
+/// The `ScopeProvider` consumes the bucketed view directly via `forContainer`.
+/// The per-bucket name index is populated eagerly during `emplace`, so once
+/// the build phase completes the structure is fully immutable and safe to
+/// query from multiple reader threads concurrently.
 ///
 /// Copy is disabled because the per-bucket name index holds raw pointers and
 /// `string_view`s into the owned descriptions — duplicating the storage would
@@ -53,23 +54,12 @@ public:
   }
 
   /// Returns the bucketed entries for `container`, or nullptr if no symbol is
-  /// bound to it. Lazily populates the per-bucket name index on first call,
-  /// so collection-time `emplace` only has to push to the deque.
-  ///
-  /// The lazy build is single-threaded by contract: it runs once per document
-  /// when the linker first probes `container`, before any parallel reader can
-  /// observe this `BucketedScopeEntries`. May throw `std::bad_alloc` if the
-  /// name-index hash map cannot grow.
+  /// bound to it. After the build phase completes, this is a pure const
+  /// lookup: no mutation, safe under concurrent reads.
   [[nodiscard]] const BucketedScopeEntries *
   forContainer(const AstNode *container) const {
     const auto it = _byContainer.find(container);
-    if (it == _byContainer.end()) {
-      return nullptr;
-    }
-    if (!it->second.indexed) {
-      buildNameIndex(it->second);
-    }
-    return std::addressof(it->second);
+    return it == _byContainer.end() ? nullptr : std::addressof(it->second);
   }
 
   [[nodiscard]] const_iterator begin() const noexcept {
@@ -80,10 +70,6 @@ public:
   }
 
 private:
-  /// Populates `bucketed.entriesByName` for every bucket. Mutates the cache
-  /// state through `mutable` members on a logically-const accessor.
-  static void buildNameIndex(const BucketedScopeEntries &bucketed);
-
   map_type _byContainer;
   std::size_t _totalSize = 0;
 };

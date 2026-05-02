@@ -29,4 +29,17 @@ struct FastTypeIndexHash {
   }
 };
 
+/// Pointer-based equality for `std::type_index`.
+///
+/// `std::equal_to<std::type_index>` defers to `type_index::operator==`, which
+/// `strcmp`s the mangled type name on libstdc++ for cross-DSO safety. Within a
+/// single binary `type_info` objects are unique per type, so comparing the
+/// `name()` pointer is both correct and one instruction.
+struct FastTypeIndexEqual {
+  [[nodiscard]] bool operator()(const std::type_index &a,
+                                const std::type_index &b) const noexcept {
+    return a.name() == b.name();
+  }
+};
+
 } // namespace pegium::utils

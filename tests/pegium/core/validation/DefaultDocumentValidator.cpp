@@ -94,7 +94,8 @@ TEST(DefaultDocumentValidatorTest, SupportsBuiltInAndCustomCategories) {
       validator.validateDocument(document, builtInOnly, {});
   ASSERT_EQ(builtInDiagnostics.size(), 1u);
   EXPECT_EQ(builtInDiagnostics.front().message,
-            "Unresolved reference: UnknownSymbol");
+            "Could not resolve reference to ValidationNodeA named "
+            "'UnknownSymbol'.");
   EXPECT_EQ(builtInDiagnostics.front().source, "mini");
   EXPECT_EQ(builtInDiagnostics.front().begin, 7);
   EXPECT_EQ(builtInDiagnostics.front().end, 20);
@@ -224,7 +225,9 @@ TEST(DefaultDocumentValidatorTest, UsesReferenceNodeRangeWhenAvailable) {
   const auto diagnostics =
       validator.validateDocument(document, builtInOnly, {});
   ASSERT_EQ(diagnostics.size(), 1u);
-  EXPECT_EQ(diagnostics.front().message, "Unresolved reference: UnknownSymbol");
+  EXPECT_EQ(diagnostics.front().message,
+            "Could not resolve reference to ValidationNodeA named "
+            "'UnknownSymbol'.");
   EXPECT_EQ(diagnostics.front().begin, 7u);
   EXPECT_EQ(diagnostics.front().end, 20u);
 }

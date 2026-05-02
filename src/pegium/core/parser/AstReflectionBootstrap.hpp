@@ -214,10 +214,13 @@ private:
 
   AstReflection *_reflection = nullptr;
   std::unordered_set<VisitedKey, VisitedKeyHash> _visited;
-  std::unordered_map<std::type_index, const AstNodeTypeInfo *>
+  std::unordered_map<std::type_index, const AstNodeTypeInfo *,
+                     utils::FastTypeIndexHash, utils::FastTypeIndexEqual>
       _producedTypesByType;
   std::vector<const AstNodeTypeInfo *> _referenceAssignments;
-  std::unordered_set<std::type_index> _knownTypes;
+  std::unordered_set<std::type_index, utils::FastTypeIndexHash,
+                     utils::FastTypeIndexEqual>
+      _knownTypes;
   std::unordered_set<DirectSubtypeEdge, DirectSubtypeEdgeHash>
       _directSubtypeEdges;
   bool _finalized = false;

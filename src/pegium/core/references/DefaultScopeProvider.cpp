@@ -62,7 +62,7 @@ using DescriptionVisitor =
 find_scope_entry(const pegium::SharedCoreServices &shared,
                  const workspace::BucketedScopeEntries &entries,
                  std::type_index referenceType, std::string_view name) noexcept {
-  for (const auto &bucket : entries.buckets) {
+  for (const auto &bucket : entries) {
     if (!accepts_bucket(shared, referenceType, bucket)) {
       continue;
     }
@@ -81,7 +81,7 @@ find_scope_entry(const pegium::SharedCoreServices &shared,
                                  std::type_index referenceType,
                                  std::string_view name,
                                  DescriptionVisitor visitor) {
-  for (const auto &bucket : entries.buckets) {
+  for (const auto &bucket : entries) {
     if (!accepts_bucket(shared, referenceType, bucket)) {
       continue;
     }

@@ -106,7 +106,7 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsInSameDocument) {
   EXPECT_EQ(reference.getRefText(), "Alice");
   EXPECT_FALSE(reference.hasError());
   ASSERT_EQ(reference.size(), 2u);
-  ASSERT_NE(reference.data(), nullptr);
+  ASSERT_FALSE(reference.items().empty());
   ASSERT_NE(reference.front(), nullptr);
   ASSERT_NE(reference.back(), nullptr);
   EXPECT_EQ(reference.front()->name, "Alice");
@@ -116,10 +116,11 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsInSameDocument) {
   EXPECT_TRUE(reference);
 
   std::unordered_set<const Person *> uniqueTargets;
-  for (const auto *target : reference) {
-    ASSERT_NE(target, nullptr);
-    EXPECT_EQ(target->name, "Alice");
-    uniqueTargets.insert(target);
+  for (const auto &item : reference) {
+    ASSERT_NE(item.ref, nullptr);
+    ASSERT_NE(item.description, nullptr);
+    EXPECT_EQ(item.ref->name, "Alice");
+    uniqueTargets.insert(item.ref);
   }
   EXPECT_EQ(uniqueTargets.size(), 2u);
 
@@ -267,7 +268,7 @@ TEST(MultiReferenceTest, ReportsUnresolvedReferenceWhenNoCandidateMatches) {
       services.workspace.referenceDescriptionProvider->createDescriptions(
           *document)
           .empty());
-  EXPECT_TRUE(has_diagnostic_message(*document, "Unresolved reference: Alice"));
+  EXPECT_TRUE(has_diagnostic_message(*document, "named 'Alice'"));
 }
 
 } // namespace

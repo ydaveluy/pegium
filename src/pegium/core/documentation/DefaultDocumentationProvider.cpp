@@ -212,7 +212,7 @@ DefaultDocumentationProvider::findNameInLocalSymbols(const AstNode &node,
     if (entries == nullptr) {
       continue;
     }
-    for (const auto &bucket : entries->buckets) {
+    for (const auto &bucket : *entries) {
       const auto it = bucket.entriesByName.find(name);
       if (it != bucket.entriesByName.end() && !it->second.empty()) {
         return *it->second.first;

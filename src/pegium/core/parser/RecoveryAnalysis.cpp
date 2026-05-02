@@ -56,23 +56,15 @@ run_strict_parse_with_context(const grammar::ParserRule &entryRule,
   return result;
 }
 
-[[nodiscard]] bool
-has_committed_visible_prefix(const FailureSnapshot &snapshot,
-                             TextOffset parsedLength) noexcept {
-  if (parsedLength == 0) {
-    return false;
-  }
-  return std::ranges::any_of(snapshot.failureLeafHistory,
-                             [parsedLength](const FailureLeaf &leaf) {
-                               return leaf.endOffset <= parsedLength;
-                             });
-}
-
 } // namespace
 
 bool should_fallback_to_parsed_length_snapshot(
     const FailureSnapshot &snapshot, TextOffset parsedLength) noexcept {
-  if (!has_committed_visible_prefix(snapshot, parsedLength)) {
+  if (parsedLength == 0 ||
+      std::ranges::none_of(snapshot.failureLeafHistory,
+                           [parsedLength](const FailureLeaf &leaf) {
+                             return leaf.endOffset <= parsedLength;
+                           })) {
     return false;
   }
   if (!snapshot.hasFailureToken ||

@@ -22,6 +22,7 @@
 #include <pegium/core/syntax-tree/AstFeatures.hpp>
 #include <pegium/core/syntax-tree/CstUtils.hpp>
 #include <pegium/core/utils/TransparentStringHash.hpp>
+#include <pegium/core/utils/TypeIndexHash.hpp>
 
 namespace pegium {
 
@@ -655,7 +656,9 @@ private:
   void registerHiddenFormatter(std::string_view terminalRuleName,
                                HiddenNodeCallback callback);
 
-  std::unordered_map<std::type_index, UntypedFormattingCallback> _formatters;
+  std::unordered_map<std::type_index, UntypedFormattingCallback,
+                     utils::FastTypeIndexHash, utils::FastTypeIndexEqual>
+      _formatters;
   utils::TransparentStringMap<HiddenNodeCallback> _hiddenFormatters;
 };
 

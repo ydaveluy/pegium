@@ -143,7 +143,7 @@ std::vector<std::string> collect_local_names(const workspace::LocalSymbols &symb
   names.reserve(symbols.size());
   for (const auto &[container, entries] : symbols) {
     (void)container;
-    for (const auto &bucket : entries.buckets) {
+    for (const auto &bucket : entries) {
       for (const auto &description : bucket.ownedEntries) {
         names.push_back(description.name);
       }

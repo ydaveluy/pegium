@@ -29,9 +29,11 @@ private:
   void registerTypeInternal(std::type_index type);
 
   TypeIndexSet _types;
-  std::unordered_map<std::type_index, TypeIndexSet, utils::FastTypeIndexHash>
+  std::unordered_map<std::type_index, TypeIndexSet, utils::FastTypeIndexHash,
+                     utils::FastTypeIndexEqual>
       _supertypesByType;
-  std::unordered_map<std::type_index, TypeIndexSet, utils::FastTypeIndexHash>
+  std::unordered_map<std::type_index, TypeIndexSet, utils::FastTypeIndexHash,
+                     utils::FastTypeIndexEqual>
       _subtypesByType;
 };
 

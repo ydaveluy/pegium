@@ -39,7 +39,9 @@ bool DefaultAstReflection::isInstance(const AstNode &node,
 
 bool DefaultAstReflection::isSubtype(std::type_index subtype,
                                      std::type_index supertype) const {
-  if (subtype == supertype) {
+  // `type_index::operator==` falls back to `strcmp` on libstdc++; comparing
+  // the `name()` pointers is correct within a single DSO and one instruction.
+  if (utils::FastTypeIndexEqual{}(subtype, supertype)) {
     return true;
   }
   if (const auto it = _supertypesByType.find(subtype);

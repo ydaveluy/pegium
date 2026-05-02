@@ -14,6 +14,7 @@
 #include <variant>
 #include <vector>
 
+#include <pegium/core/syntax-tree/AstReflection.hpp>
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
 #include <pegium/core/syntax-tree/Reference.hpp>
 
@@ -22,6 +23,11 @@ namespace pegium {
 class AstArena;
 
 struct AstNode;
+
+/// Returns the reflection registry for `node`'s arena, or nullptr when no
+/// language services are bound (standalone test fixtures).
+[[nodiscard]] const AstReflection *
+ast_reflection_of(const AstNode &node) noexcept;
 
 /// Base type for every AST node produced by pegium parsers.
 ///
@@ -162,7 +168,7 @@ struct AstNode {
   const T *getContainer() const noexcept {
     const auto *item = this;
     do {
-      if (const auto *casted = dynamic_cast<const T *>(item)) {
+      if (auto *casted = ast_ptr_cast<const T>(item)) {
         return casted;
       }
       item = item->getContainer();
@@ -178,7 +184,7 @@ struct AstNode {
   T *getContainer() noexcept {
     auto *item = this;
     do {
-      if (auto *casted = dynamic_cast<T *>(item)) {
+      if (auto *casted = ast_ptr_cast<T>(item)) {
         return casted;
       }
       item = item->getContainer();
@@ -239,7 +245,7 @@ private:
                            const T *, T *>;
     return std::forward<Range>(range) |
            std::views::filter([](Ptr ptr) noexcept {
-             return dynamic_cast<CastedPtr>(ptr) != nullptr;
+             return is_a<T>(ptr);
            }) |
            std::views::transform(
                [](Ptr ptr) noexcept { return static_cast<CastedPtr>(ptr); });
@@ -357,17 +363,43 @@ concept DefaultConstructibleAstNode =
 // parser design, not a recommendation to encode semantic invariants in
 // constructors.
 
+/// Returns whether `node` is an instance of `T`.
+///
+/// Uses the document-bound `AstReflection` registry (O(1) `isSubtype`) when
+/// available, falling back to `dynamic_cast` for standalone nodes that are
+/// not attached to any arena.
+template <typename T>
+  requires std::derived_from<T, AstNode>
+[[nodiscard]] bool is_a(const AstNode &node) noexcept {
+  if (const auto *reflection = ast_reflection_of(node);
+      reflection != nullptr) {
+    return reflection->isInstance(node, typeid(T));
+  }
+  return dynamic_cast<const T *>(&node) != nullptr;
+}
+
+/// Pointer overload.
+template <typename T>
+  requires std::derived_from<T, AstNode>
+[[nodiscard]] bool is_a(const AstNode *node) noexcept {
+  return node != nullptr && is_a<T>(*node);
+}
+
 /// Casts an AST node pointer to a concrete derived type, returning nullptr on
 /// type mismatch.
 template <typename T, typename U>
-T *ast_ptr_cast(U *ptr) noexcept {
+  requires std::derived_from<std::remove_cv_t<T>, AstNode> &&
+           std::derived_from<std::remove_cv_t<U>, AstNode>
+[[nodiscard]] T *ast_ptr_cast(U *ptr) noexcept {
+  if (ptr == nullptr) {
+    return nullptr;
+  }
+  if (const auto *reflection = ast_reflection_of(*ptr);
+      reflection != nullptr) {
+    return reflection->isInstance(*ptr, typeid(T)) ? static_cast<T *>(ptr)
+                                                   : nullptr;
+  }
   return dynamic_cast<T *>(ptr);
-}
-
-/// Const overload.
-template <typename T, typename U>
-const T *ast_ptr_cast(const U *ptr) noexcept {
-  return dynamic_cast<const T *>(ptr);
 }
 
 } // namespace pegium

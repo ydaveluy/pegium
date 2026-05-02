@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <pegium/core/syntax-tree/AstNode.hpp>
+#include <pegium/core/syntax-tree/AstReflection.hpp>
 #include <pegium/core/syntax-tree/RootCstNode.hpp>
 
 namespace pegium {
@@ -48,14 +49,23 @@ public:
   /// Returns the originating CST root.
   [[nodiscard]] RootCstNode *cstRoot() const noexcept { return _cstRoot; }
 
-  /// Attaches the workspace document that owns this arena.
-  void attachDocument(const workspace::Document &document) noexcept {
+  /// Attaches the workspace document that owns this arena and the reflection
+  /// registry used by `pegium::ast_cast` / `pegium::is_a`.
+  void attachDocument(const workspace::Document &document,
+                      const AstReflection *reflection = nullptr) noexcept {
     _document = std::addressof(document);
+    _reflection = reflection;
   }
 
   /// Returns the attached workspace document, or nullptr when standalone.
   [[nodiscard]] const workspace::Document *document() const noexcept {
     return _document;
+  }
+
+  /// Returns the AST reflection registry attached to this arena, or nullptr
+  /// when no language services are bound (e.g. standalone test fixtures).
+  [[nodiscard]] const AstReflection *reflection() const noexcept {
+    return _reflection;
   }
 
   /// Allocates and constructs a `T` inside the arena.
@@ -121,6 +131,7 @@ private:
   NodeId _count = 0;
   RootCstNode *_cstRoot;
   const workspace::Document *_document = nullptr;
+  const AstReflection *_reflection = nullptr;
 };
 
 } // namespace pegium
