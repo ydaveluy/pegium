@@ -51,17 +51,6 @@ next_visible_leaf_at_or_after(const workspace::Document &document,
 [[nodiscard]] FoundToken find_found_token(const workspace::Document &document,
                                           TextOffset offset);
 
-ValidationAcceptor
-make_collecting_acceptor(std::vector<pegium::Diagnostic> &diagnostics,
-                         const std::string &source) {
-  return ValidationAcceptor{
-      [&diagnostics, &source](pegium::Diagnostic diagnostic) {
-    if (diagnostic.source.empty()) {
-      diagnostic.source = source;
-    }
-    diagnostics.push_back(std::move(diagnostic));
-  }};
-}
 
 [[nodiscard]] std::string quote_keyword(std::string_view value) {
   return "'" + std::string(value) + "'";
@@ -618,7 +607,7 @@ void DefaultDocumentValidator::processLinkingErrors(
     std::vector<pegium::Diagnostic> &diagnostics, const std::string &source,
     const utils::CancellationToken &cancelToken) const {
   std::uint32_t cancelPollCounter = 0;
-  for (const auto &handle : document.references) {
+  for (const auto &handle : document.parseResult.references) {
     if ((++cancelPollCounter & 0x3fU) == 0U) {
       utils::throw_if_cancelled(cancelToken);
     }
@@ -655,50 +644,33 @@ void DefaultDocumentValidator::validateAst(
     const AstNode &rootNode, std::vector<pegium::Diagnostic> &diagnostics,
     const ValidationOptions &options, const std::string &source,
     const utils::CancellationToken &cancelToken) const {
-  const ValidationAcceptor acceptor{
-      make_collecting_acceptor(diagnostics, source)};
-  validateAstBefore(rootNode, acceptor, options.categories, cancelToken);
-  validateAstNodes(rootNode, acceptor, options.categories, cancelToken);
-  validateAstAfter(rootNode, acceptor, options.categories, cancelToken);
-}
+  // Inline collector lambda: kept on this stack frame so the function_ref
+  // inside `acceptor` stays valid for every callee below.
+  const auto collect = [&diagnostics, &source](pegium::Diagnostic diagnostic) {
+    if (diagnostic.source.empty()) {
+      diagnostic.source = source;
+    }
+    diagnostics.push_back(std::move(diagnostic));
+  };
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(collect)};
+  const auto &registry = *services.validation.validationRegistry;
+  const auto categories = std::span<const std::string>(options.categories);
 
-void DefaultDocumentValidator::validateAstBefore(
-    const AstNode &rootNode, const ValidationAcceptor &acceptor,
-    std::span<const std::string> categories,
-    const utils::CancellationToken &cancelToken) const {
-  const auto *validationRegistry =
-      services.validation.validationRegistry.get();
-  for (const auto &checkBefore : validationRegistry->checksBefore()) {
+  for (const auto &checkBefore : registry.checksBefore()) {
     utils::throw_if_cancelled(cancelToken);
     checkBefore(rootNode, acceptor, categories, cancelToken);
   }
-}
 
-void DefaultDocumentValidator::validateAstNodes(
-    const AstNode &rootNode, const ValidationAcceptor &acceptor,
-    std::span<const std::string> categories,
-    const utils::CancellationToken &cancelToken) const {
-  const auto *validationRegistry =
-      services.validation.validationRegistry.get();
-  auto preparedChecks = validationRegistry->prepareChecks(categories);
-  preparedChecks->run(rootNode, acceptor, cancelToken);
-
+  registry.runChecks(rootNode, acceptor, categories, cancelToken);
   std::uint32_t cancelPollCounter = 0;
   for (const auto *node : rootNode.getAllContent()) {
     if ((++cancelPollCounter & 0x3fU) == 0U) {
       utils::throw_if_cancelled(cancelToken);
     }
-    preparedChecks->run(*node, acceptor, cancelToken);
+    registry.runChecks(*node, acceptor, categories, cancelToken);
   }
-}
 
-void DefaultDocumentValidator::validateAstAfter(
-    const AstNode &rootNode, const ValidationAcceptor &acceptor,
-    std::span<const std::string> categories,
-    const utils::CancellationToken &cancelToken) const {
-  const auto *validationRegistry =
-      services.validation.validationRegistry.get();
-  for (const auto &checkAfter : validationRegistry->checksAfter()) {
+  for (const auto &checkAfter : registry.checksAfter()) {
     utils::throw_if_cancelled(cancelToken);
     checkAfter(rootNode, acceptor, categories, cancelToken);
   }

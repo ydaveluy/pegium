@@ -125,7 +125,7 @@ TEST(DefaultDocumentHighlightProviderTest,
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->references.nameProvider, nullptr);
 
-  auto *target = document->parseResult.value.get();
+  auto *target = document->parseResult.value;
   ASSERT_NE(target, nullptr);
   recordingReferences->declarations.push_back(target);
   if (auto nameNode = services->references.nameProvider->getNameNode(*target);

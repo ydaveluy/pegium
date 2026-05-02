@@ -27,7 +27,7 @@ std::string get_definition_name(const AbstractDefinition *definition) {
 pegium::AstNode *resolve_definition(Module &module,
                                     const std::string &identifier) {
   for (auto &statement : module.statements) {
-    auto *definition = dynamic_cast<Definition *>(statement.get());
+    auto *definition = dynamic_cast<Definition *>(statement);
     if (!definition) {
       continue;
     }
@@ -38,7 +38,7 @@ pegium::AstNode *resolve_definition(Module &module,
 
     for (auto &arg : definition->args) {
       if (arg && arg->name == identifier) {
-        return arg.get();
+        return arg;
       }
     }
   }
@@ -194,7 +194,7 @@ std::vector<double> evaluate_module(ast::Module &module) {
   std::vector<double> orderedResults;
   for (const auto &statement : module.statements) {
     if (const auto *evaluation =
-            dynamic_cast<const ast::Evaluation *>(statement.get())) {
+            dynamic_cast<const ast::Evaluation *>(statement)) {
       orderedResults.push_back(results.at(evaluation));
     }
   }

@@ -13,9 +13,9 @@ std::vector<ReferenceDescription>
 DefaultReferenceDescriptionProvider::createDescriptions(
     const Document &document, const utils::CancellationToken &cancelToken) const {
   std::vector<ReferenceDescription> descriptions;
-  descriptions.reserve(document.references.size());
+  descriptions.reserve(document.parseResult.references.size());
 
-  for (const auto &handle : document.references) {
+  for (const auto &handle : document.parseResult.references) {
     utils::throw_if_cancelled(cancelToken);
     const auto &reference = *handle.getConst();
     if (!reference.isResolved()) {

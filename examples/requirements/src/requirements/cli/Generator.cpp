@@ -49,7 +49,7 @@ std::string generate_summary_file_html_content(
         }
         const bool referencesRequirement = std::ranges::any_of(
             test->requirements, [&](const auto &reference) {
-              return reference.get() == requirement.get();
+              return reference.get() == requirement;
             });
         if (!referencesRequirement) {
           continue;

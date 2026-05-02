@@ -14,6 +14,7 @@
 #include <pegium/core/grammar/Assignment.hpp>
 #include <pegium/core/grammar/Literal.hpp>
 #include <pegium/core/parser/RecoveryConstants.hpp>
+#include <pegium/core/syntax-tree/AstArena.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
 #include <pegium/core/syntax-tree/RootCstNode.hpp>
 #include <pegium/core/text/TextSnapshot.hpp>
@@ -346,11 +347,25 @@ struct RecoveryReport {
 
 /// Complete parser output for one document parse.
 struct ParseResult {
+  /// Arena that owns every AstNode reachable from `value`.
+  ///
+  /// Declared BEFORE `cst` so that:
+  /// - the implicit move assignment destroys the previous `astArena` first,
+  ///   while the previous `cst` (and its pool) is still alive;
+  /// - the destructor body explicitly resets `astArena` first to satisfy the
+  ///   same ordering against the implicit member destruction.
+  /// AST nodes are allocated from the CST root's monotonic buffer pool, so
+  /// the arena MUST be torn down before the CST.
+  std::unique_ptr<AstArena> astArena;
+
   /// Concrete syntax tree built from the selected parse attempt.
   std::unique_ptr<RootCstNode> cst;
 
-  /// Converted semantic value or AST root when conversion succeeded.
-  std::unique_ptr<AstNode> value;
+  /// AST root produced by conversion, or nullptr when conversion failed.
+  ///
+  /// Non-owning: the root and every reachable child are stored inside
+  /// `astArena`.
+  AstNode *value = nullptr;
 
   /// Collected reference handles extracted from the parsed value.
   std::vector<ReferenceHandle> references;
@@ -375,6 +390,17 @@ struct ParseResult {
 
   /// Whether the selected parse attempt matched the full input.
   bool fullMatch = false;
+
+  ParseResult() = default;
+  ParseResult(const ParseResult &) = delete;
+  ParseResult &operator=(const ParseResult &) = delete;
+  ParseResult(ParseResult &&) = default;
+  ParseResult &operator=(ParseResult &&) = default;
+
+  /// Reset `astArena` first so AST node destructors run while the CST pool
+  /// is still alive. The implicit member destruction afterwards releases
+  /// `cst` (and its pool) and finds an already-empty `astArena`.
+  ~ParseResult() noexcept { astArena.reset(); }
 };
 
 /// Abstract parser interface implemented by generated or hand-written parsers.

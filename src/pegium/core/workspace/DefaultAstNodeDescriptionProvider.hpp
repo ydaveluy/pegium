@@ -1,7 +1,5 @@
 #pragma once
 
-#include <string>
-
 #include <pegium/core/services/DefaultCoreService.hpp>
 #include <pegium/core/workspace/AstNodeDescriptionProvider.hpp>
 
@@ -19,8 +17,7 @@ public:
 
   [[nodiscard]] std::optional<AstNodeDescription>
   createDescription(const AstNode &node, const Document &document,
-                    std::string name) const override;
-
+                    references::AstNodeName nameInfo) const override;
 };
 
 } // namespace pegium::workspace

@@ -42,7 +42,7 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
       << "recoveryAttemptRuns regressed\n" << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(summarize_module_statements(*module), "def:a | def:b | def:c | def:d | def:root")
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
@@ -89,7 +89,7 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
       << "recoveryAttemptRuns regressed\n" << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(summarize_module_statements(*module),
             "def:a | def:b | def:c | def:d | def:root | def:sqrt")
@@ -122,7 +122,7 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
       << "recoveryAttemptRuns regressed\n" << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(summarize_module_statements(*module), "def:root | def:sqrt")
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
@@ -167,7 +167,7 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
       << "recoveryAttemptRuns regressed\n" << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(summarize_module_statements(*module),
             "def:a | def:b | def:c | def:d | def:root | def:sqrt | eval | eval | eval | eval | eval")
@@ -213,7 +213,7 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
       << "recoveryAttemptRuns regressed\n" << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(
       summarize_module_statements(*module),
@@ -262,7 +262,7 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
       << "recoveryAttemptRuns regressed\n" << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(
       summarize_module_statements(*module),
@@ -311,7 +311,7 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
       << "recoveryAttemptRuns regressed\n" << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(
       summarize_module_statements(*module),
@@ -355,7 +355,7 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_LT(parsed.recoveryReport.recoveryAttemptRuns, 256u)
       << "recoveryAttemptRuns regressed\n" << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(summarize_module_statements(*module),
             "def:a | def:b | def:b1 | def:b2 | def:c | def:d | def:root | def:sqrt | eval | eval")

@@ -81,8 +81,8 @@ TEST(InfixRuleTest, BuildsTypedBinaryExpressionAndSetsContainers) {
   EXPECT_EQ(binary->left->getContainer(), binary);
   EXPECT_EQ(binary->right->getContainer(), binary);
 
-  auto *left = dynamic_cast<LiteralExpr *>(binary->left.get());
-  auto *right = dynamic_cast<LiteralExpr *>(binary->right.get());
+  auto *left = dynamic_cast<LiteralExpr *>(binary->left);
+  auto *right = dynamic_cast<LiteralExpr *>(binary->right);
   ASSERT_TRUE(left != nullptr);
   ASSERT_TRUE(right != nullptr);
   EXPECT_EQ(left->name, "a");
@@ -97,16 +97,16 @@ TEST(InfixRuleTest, OrderedChoiceOperatorKeepsCompileTimeTypedRecursion) {
   ASSERT_TRUE(binary != nullptr);
   EXPECT_EQ(binary->op, "-");
 
-  auto *leftBinary = dynamic_cast<BinaryExpr *>(binary->left.get());
-  auto *rightLeaf = dynamic_cast<LiteralExpr *>(binary->right.get());
+  auto *leftBinary = dynamic_cast<BinaryExpr *>(binary->left);
+  auto *rightLeaf = dynamic_cast<LiteralExpr *>(binary->right);
   ASSERT_TRUE(leftBinary != nullptr);
   ASSERT_TRUE(rightLeaf != nullptr);
   EXPECT_EQ(rightLeaf->name, "c");
   EXPECT_EQ(binary->right->getContainer(), binary);
 
   EXPECT_EQ(leftBinary->op, "-");
-  auto *leftLeaf = dynamic_cast<LiteralExpr *>(leftBinary->left.get());
-  auto *middleLeaf = dynamic_cast<LiteralExpr *>(leftBinary->right.get());
+  auto *leftLeaf = dynamic_cast<LiteralExpr *>(leftBinary->left);
+  auto *middleLeaf = dynamic_cast<LiteralExpr *>(leftBinary->right);
   ASSERT_TRUE(leftLeaf != nullptr);
   ASSERT_TRUE(middleLeaf != nullptr);
   EXPECT_EQ(leftLeaf->name, "a");
@@ -124,8 +124,8 @@ TEST(InfixRuleTest, EnumOperatorIsAssignedFromTypedTerminalRawValue) {
   ASSERT_TRUE(binary->left != nullptr);
   ASSERT_TRUE(binary->right != nullptr);
 
-  auto *left = dynamic_cast<LiteralExpr *>(binary->left.get());
-  auto *right = dynamic_cast<LiteralExpr *>(binary->right.get());
+  auto *left = dynamic_cast<LiteralExpr *>(binary->left);
+  auto *right = dynamic_cast<LiteralExpr *>(binary->right);
   ASSERT_TRUE(left != nullptr);
   ASSERT_TRUE(right != nullptr);
   EXPECT_EQ(left->name, "a");

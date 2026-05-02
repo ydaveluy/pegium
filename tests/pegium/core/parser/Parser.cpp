@@ -70,7 +70,7 @@ struct RecursivePrintRule final : pegium::grammar::ParserRule {
 
   std::string_view getName() const noexcept override { return "Recursive"; }
 
-  std::unique_ptr<pegium::AstNode>
+  pegium::AstNode *
   getValue(const pegium::CstNodeView &,
            const pegium::parser::ValueBuildContext &) const override {
     return nullptr;

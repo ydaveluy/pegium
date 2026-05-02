@@ -732,7 +732,7 @@ void mutate_text(std::string &text, std::string_view mutationProgram) {
   const auto textSize = static_cast<TextOffset>(text.size());
 
   EXPECT_EQ(document.state, workspace::DocumentState::Validated);
-  EXPECT_EQ(document.references.size(), document.parseResult.references.size());
+  EXPECT_EQ(document.parseResult.references.size(), document.parseResult.references.size());
   EXPECT_LE(document.parsedLength(), textSize);
   EXPECT_LE(document.parseResult.lastVisibleCursorOffset, textSize);
   EXPECT_LE(document.parseResult.failureVisibleCursorOffset, textSize);
@@ -825,7 +825,7 @@ void mutate_text(std::string &text, std::string_view mutationProgram) {
 
   std::size_t resolvedReferenceCount = 0;
   std::size_t errorReferenceCount = 0;
-  for (const auto &handle : document.references) {
+  for (const auto &handle : document.parseResult.references) {
     const auto *reference = handle.getConst();
     EXPECT_NE(reference, nullptr);
     EXPECT_NE(reference->state(), ReferenceState::Unresolved);
@@ -862,7 +862,7 @@ void mutate_text(std::string &text, std::string_view mutationProgram) {
       .failureVisibleCursorOffset =
           document.parseResult.failureVisibleCursorOffset,
       .maxCursorOffset = document.parseResult.maxCursorOffset,
-      .referenceCount = document.references.size(),
+      .referenceCount = document.parseResult.references.size(),
       .resolvedReferenceCount = resolvedReferenceCount,
       .errorReferenceCount = errorReferenceCount,
       .parseDiagnostics = std::move(parseDiagnostics),

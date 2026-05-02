@@ -135,22 +135,23 @@ make_unresolved_reference_parser(const references::Linker *&linkerRef) {
     static const grammar::Literal &literal = dummy_literal();
     assert(linkerRef != nullptr);
 
-    auto root = std::make_unique<RelinkRoot>();
     auto cst = std::make_unique<RootCstNode>(text::TextSnapshot::copy(text));
+    result.astArena = std::make_unique<pegium::AstArena>(*cst);
+    auto &arena = *result.astArena;
+    auto *root = arena.create<RelinkRoot>();
     CstBuilder builder(*cst);
     builder.leaf(0, static_cast<TextOffset>(text.size()), &literal);
     root->setCstNode(cst->get(0));
-    auto referrer = std::make_unique<RelinkReferrer>();
-    auto *referrerPtr = referrer.get();
-    referrerPtr->setCstNode(cst->get(0));
-    referrerPtr->node.initialize(*referrerPtr, "missing", cst->get(0), assignment,
-                                 *linkerRef);
-    root->referrers.push_back(std::move(referrer));
-    referrerPtr->setContainer(*root);
+    auto *referrer = arena.create<RelinkReferrer>();
+    referrer->setCstNode(cst->get(0));
+    referrer->node.initialize(*referrer, "missing", cst->get(0), assignment,
+                              *linkerRef);
+    root->referrers.push_back(referrer);
+    referrer->setContainer(*root);
 
-    result.value = std::move(root);
+    result.value = root;
     result.cst = std::move(cst);
-    result.references.push_back(ReferenceHandle::direct(&referrerPtr->node));
+    result.references.push_back(ReferenceHandle::direct(&referrer->node));
   };
   return parser;
 }
@@ -206,8 +207,8 @@ TEST(DefaultDocumentBuilderTest,
   ASSERT_NE(document, nullptr);
   ASSERT_EQ(document->state, DocumentState::Validated);
   ASSERT_EQ(linkerPtr->linkCalls, 1u);
-  ASSERT_FALSE(document->references.empty());
-  ASSERT_TRUE(document->references.front().getConst()->hasError());
+  ASSERT_FALSE(document->parseResult.references.empty());
+  ASSERT_TRUE(document->parseResult.references.front().getConst()->hasError());
 
   shared->workspace.documentBuilder->update({}, {});
 

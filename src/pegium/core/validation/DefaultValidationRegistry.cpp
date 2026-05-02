@@ -13,6 +13,7 @@
 #include <pegium/core/services/SharedCoreServices.hpp>
 #include <pegium/core/syntax-tree/AstUtils.hpp>
 #include <pegium/core/utils/Errors.hpp>
+#include <pegium/core/utils/TypeIndexHash.hpp>
 #include <pegium/core/validation/DiagnosticRanges.hpp>
 
 namespace pegium::validation {
@@ -21,7 +22,7 @@ namespace detail {
 
 struct CompiledValidationCheckEntry {
   std::type_index targetType = std::type_index(typeid(AstNode));
-  ValidationCheck check;
+  ValidationCheck check;        // unwrapped: try/catch is hoisted to PreparedChecks::run
   std::string category;
   std::size_t categoryId = 0;
 };
@@ -29,7 +30,8 @@ struct CompiledValidationCheckEntry {
 using CompiledValidationCheckList =
     std::vector<const CompiledValidationCheckEntry *>;
 using CompiledValidationCheckIndex =
-    std::unordered_map<std::type_index, CompiledValidationCheckList>;
+    std::unordered_map<std::type_index, CompiledValidationCheckList,
+                       utils::FastTypeIndexHash>;
 
 struct CompiledValidationRegistry {
   std::vector<std::string> knownCategories;
@@ -38,6 +40,7 @@ struct CompiledValidationRegistry {
   CompiledValidationCheckIndex checksByType;
   std::vector<ValidationPreparation> checksBefore;
   std::vector<ValidationPreparation> checksAfter;
+  std::shared_ptr<observability::ObservabilitySink> sink;
 };
 
 } // namespace detail
@@ -60,29 +63,6 @@ void publish_validation_observation(
     observation.state = document->state;
   }
   sink.publish(observation);
-}
-
-[[nodiscard]] ValidationCheck wrap_validation_check(
-    ValidationCheck check,
-    const std::shared_ptr<observability::ObservabilitySink> &sink,
-    std::string category) {
-  return [check = std::move(check), sink, category = std::move(category)](
-             const AstNode &node, const ValidationAcceptor &acceptor,
-             const utils::CancellationToken &cancelToken) {
-    try {
-      check(node, acceptor, cancelToken);
-    } catch (const std::exception &error) {
-      if (dynamic_cast<const utils::OperationCancelled *>(&error) != nullptr) {
-        throw;
-      }
-      auto message = std::string("An error occurred during validation: ") +
-                     error.what();
-      publish_validation_observation(
-          *sink, node, observability::ObservationCode::ValidationCheckThrew,
-          message, category);
-      acceptor.error(node, message);
-    }
-  };
 }
 
 [[nodiscard]] ValidationPreparation wrap_validation_preparation(
@@ -109,76 +89,25 @@ void publish_validation_observation(
   };
 }
 
-class PreparedChecksImpl final : public ValidationRegistry::PreparedChecks {
-public:
-  explicit PreparedChecksImpl(
-      std::shared_ptr<const detail::CompiledValidationRegistry> compiled)
-      : _compiled(std::move(compiled)), _checksByType(&_compiled->checksByType) {
-  }
-
-  PreparedChecksImpl(
-      std::shared_ptr<const detail::CompiledValidationRegistry> compiled,
-      detail::CompiledValidationCheckIndex filteredChecksByType)
-      : _compiled(std::move(compiled)),
-        _filteredChecksByType(std::move(filteredChecksByType)),
-        _checksByType(&_filteredChecksByType) {}
-
-  void run(const AstNode &node, const ValidationAcceptor &acceptor,
-           const utils::CancellationToken &cancelToken) const override {
-    const auto checksIt = _checksByType->find(std::type_index(typeid(node)));
-    if (checksIt == _checksByType->end()) {
-      return;
-    }
-
-    for (const auto *entry : checksIt->second) {
-      utils::throw_if_cancelled(cancelToken);
-      entry->check(node, acceptor, cancelToken);
-    }
-  }
-
-private:
-  std::shared_ptr<const detail::CompiledValidationRegistry> _compiled;
-  detail::CompiledValidationCheckIndex _filteredChecksByType;
-  const detail::CompiledValidationCheckIndex *_checksByType = nullptr;
-};
-
-[[nodiscard]] detail::CompiledValidationCheckIndex
-build_filtered_check_index(
+/// Returns a per-category bitmask sized to `compiled.knownCategories`.
+/// Empty `categories` enables every category. Unknown category names are
+/// silently ignored.
+[[nodiscard]] std::vector<bool> enabled_category_mask_for(
     const detail::CompiledValidationRegistry &compiled,
-    std::span<const std::string> categories) {
-  std::vector<bool> enabledCategories(compiled.knownCategories.size(), false);
-  std::size_t enabledCategoryCount = 0;
+    std::span<const std::string> categories) noexcept {
+  const auto categoryCount = compiled.knownCategories.size();
+  if (categories.empty()) {
+    return std::vector<bool>(categoryCount, true);
+  }
+  std::vector<bool> mask(categoryCount, false);
   for (const auto &category : categories) {
     const auto categoryIt = compiled.categoryIdsByName.find(category);
     if (categoryIt == compiled.categoryIdsByName.end()) {
       continue;
     }
-    if (!enabledCategories[categoryIt->second]) {
-      enabledCategories[categoryIt->second] = true;
-      ++enabledCategoryCount;
-    }
+    mask[categoryIt->second] = true;
   }
-
-  if (enabledCategoryCount == 0) {
-    return {};
-  }
-
-  detail::CompiledValidationCheckIndex filteredChecksByType;
-  filteredChecksByType.reserve(compiled.checksByType.size());
-  for (const auto &[nodeType, checks] : compiled.checksByType) {
-    detail::CompiledValidationCheckList filteredChecks;
-    filteredChecks.reserve(checks.size());
-    for (const auto *entry : checks) {
-      if (enabledCategories[entry->categoryId]) {
-        filteredChecks.push_back(entry);
-      }
-    }
-    if (!filteredChecks.empty()) {
-      filteredChecksByType.try_emplace(nodeType, std::move(filteredChecks));
-    }
-  }
-
-  return filteredChecksByType;
+  return mask;
 }
 
 } // namespace
@@ -230,6 +159,8 @@ DefaultValidationRegistry::compiledRegistry() const {
     }
   }
 
+  compiled->sink = services.shared.observabilitySink;
+
   _compiled = std::move(compiled);
   _compiledDirty = false;
 
@@ -247,9 +178,7 @@ void DefaultValidationRegistry::registerTypedCheck(
   const std::string storedCategory(category);
   _registeredChecks.push_back(RegisteredValidationCheckEntry{
       .targetType = registration.targetType,
-      .check = wrap_validation_check(
-          std::move(registration.check), services.shared.observabilitySink,
-          storedCategory),
+      .check = std::move(registration.check),
       .category = storedCategory});
   if (std::ranges::find(_knownCategories, storedCategory) ==
       _knownCategories.end()) {
@@ -258,15 +187,77 @@ void DefaultValidationRegistry::registerTypedCheck(
   _compiledDirty = true;
 }
 
-std::unique_ptr<const ValidationRegistry::PreparedChecks>
-DefaultValidationRegistry::prepareChecks(
+const std::vector<bool> &DefaultValidationRegistry::enabled_category_mask(
+    const detail::CompiledValidationRegistry &compiled,
     std::span<const std::string> categories) const {
-  auto compiled = compiledRegistry();
-  if (categories.empty()) {
-    return std::make_unique<PreparedChecksImpl>(std::move(compiled));
+  // Identity-based caching: when the validator iterates an AST it passes the
+  // same `categories` span on every call to `runChecks`, so we recognise the
+  // pointer/size pair and skip the (compiled.knownCategories.size()) hashes.
+  if (_cachedMaskCompiled == &compiled &&
+      _cachedMaskCategoriesData == categories.data() &&
+      _cachedMaskCategoriesSize == categories.size()) {
+    return _cachedMask;
   }
-  return std::make_unique<PreparedChecksImpl>(
-      compiled, build_filtered_check_index(*compiled, categories));
+  _cachedMask = enabled_category_mask_for(compiled, categories);
+  _cachedMaskCompiled = &compiled;
+  _cachedMaskCategoriesData = categories.data();
+  _cachedMaskCategoriesSize = categories.size();
+  return _cachedMask;
+}
+
+void DefaultValidationRegistry::runChecks(
+    const AstNode &node, const ValidationAcceptor &acceptor,
+    std::span<const std::string> categories,
+    const utils::CancellationToken &cancelToken) const {
+  // Refresh the compiled snapshot if dirty, then use a raw pointer to avoid
+  // an atomic refcount bump per call (50k nodes × 2 ops would be measurable).
+  // The snapshot is owned by `_compiled` and lives at least until the next
+  // mutating registry operation, which is forbidden during validation.
+  if (_compiledDirty) {
+    (void)compiledRegistry();
+  }
+  const auto &compiled = *_compiled;
+  const auto checksIt =
+      compiled.checksByType.find(std::type_index(typeid(node)));
+  if (checksIt == compiled.checksByType.end()) {
+    return;
+  }
+
+  const auto &mask = enabled_category_mask(compiled, categories);
+  if (mask.empty()) {
+    return;
+  }
+
+  for (const auto *entry : checksIt->second) {
+    utils::throw_if_cancelled(cancelToken);
+    if (entry->categoryId >= mask.size() || !mask[entry->categoryId]) {
+      continue;
+    }
+    try {
+      entry->check(node, acceptor, cancelToken);
+    } catch (const std::exception &error) {
+      if (dynamic_cast<const utils::OperationCancelled *>(&error) != nullptr) {
+        throw;
+      }
+      auto message = std::string("An error occurred during validation: ") +
+                     error.what();
+      publish_validation_observation(
+          *compiled.sink, node,
+          observability::ObservationCode::ValidationCheckThrew, message,
+          entry->category);
+      acceptor.error(node, message);
+    }
+  }
+}
+
+std::span<const ValidationPreparation>
+DefaultValidationRegistry::checksBefore() const noexcept {
+  return _registeredChecksBefore;
+}
+
+std::span<const ValidationPreparation>
+DefaultValidationRegistry::checksAfter() const noexcept {
+  return _registeredChecksAfter;
 }
 
 std::vector<std::string>
@@ -300,16 +291,6 @@ void DefaultValidationRegistry::registerAfterDocument(
       "An error occurred during tear-down of the validation: ",
       "An error occurred during tear-down of the validation"));
   _compiledDirty = true;
-}
-
-std::span<const ValidationPreparation>
-DefaultValidationRegistry::checksBefore() const noexcept {
-  return _registeredChecksBefore;
-}
-
-std::span<const ValidationPreparation>
-DefaultValidationRegistry::checksAfter() const noexcept {
-  return _registeredChecksAfter;
 }
 
 } // namespace pegium::validation

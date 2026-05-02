@@ -1,12 +1,12 @@
 #pragma once
 
 #include <concepts>
-#include <memory>
 #include <pegium/core/grammar/Create.hpp>
 #include <pegium/core/parser/Introspection.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/AstReflectionBootstrap.hpp>
+#include <pegium/core/syntax-tree/AstArena.hpp>
 #include <string_view>
 
 namespace pegium::parser {
@@ -21,8 +21,8 @@ struct Create final : grammar::Create {
   static constexpr bool nullable = true;
   static constexpr bool isFailureSafe = true;
 
-  std::unique_ptr<AstNode> getValue() const override {
-    return std::make_unique<T>();
+  AstNode *getValue(AstArena &arena) const override {
+    return arena.create<T>();
   }
 
   std::string_view getTypeName() const noexcept override {

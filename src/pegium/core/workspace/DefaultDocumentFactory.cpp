@@ -8,6 +8,7 @@
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/ServiceRegistry.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/syntax-tree/AstArena.hpp>
 #include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 
@@ -156,9 +157,11 @@ void DefaultDocumentFactory::parse(
   utils::throw_if_cancelled(cancelToken);
   document.parseResult = services.parser->parse(snapshot(document.textDocument()),
                                                 cancelToken);
-  document.references = document.parseResult.references;
   if (document.parseResult.cst != nullptr) {
     document.parseResult.cst->attachDocument(document);
+  }
+  if (document.parseResult.astArena != nullptr) {
+    document.parseResult.astArena->attachDocument(document);
   }
 }
 

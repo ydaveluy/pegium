@@ -64,22 +64,22 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_TRUE(explicitSemicolonDocument->parseRecovered()) << explicitDump;
 
   auto *missingModule =
-      dynamic_cast<ast::Module *>(missingParsed.value.get());
+      dynamic_cast<ast::Module *>(missingParsed.value);
   auto *explicitModule =
-      dynamic_cast<ast::Module *>(explicitParsed.value.get());
+      dynamic_cast<ast::Module *>(explicitParsed.value);
   ASSERT_NE(missingModule, nullptr) << missingDump;
   ASSERT_NE(explicitModule, nullptr) << explicitDump;
 
   auto *missingLastEvaluation = dynamic_cast<ast::Evaluation *>(
-      missingModule->statements.back().get());
+      missingModule->statements.back());
   auto *explicitLastEvaluation = dynamic_cast<ast::Evaluation *>(
-      explicitModule->statements.back().get());
+      explicitModule->statements.back());
   ASSERT_NE(missingLastEvaluation, nullptr) << missingDump;
   ASSERT_NE(explicitLastEvaluation, nullptr) << explicitDump;
   auto *missingLastCall = dynamic_cast<ast::FunctionCall *>(
-      missingLastEvaluation->expression.get());
+      missingLastEvaluation->expression);
   auto *explicitLastCall = dynamic_cast<ast::FunctionCall *>(
-      explicitLastEvaluation->expression.get());
+      explicitLastEvaluation->expression);
   ASSERT_NE(missingLastCall, nullptr)
       << missingDump << " :: "
       << summarize_module_statement_shapes(*missingModule);
@@ -109,14 +109,14 @@ TEST(ArithmeticsLanguageTest, SingleBrokenCallKeepsFunctionNameLocal) {
   EXPECT_TRUE(document->parseSucceeded()) << parseDump;
   EXPECT_TRUE(document->parseRecovered()) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_EQ(module->statements.size(), 1u) << parseDump;
   auto *evaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.front().get());
+      dynamic_cast<ast::Evaluation *>(module->statements.front());
   ASSERT_NE(evaluation, nullptr) << parseDump;
   auto *call =
-      dynamic_cast<ast::FunctionCall *>(evaluation->expression.get());
+      dynamic_cast<ast::FunctionCall *>(evaluation->expression);
   ASSERT_NE(call, nullptr) << parseDump;
   EXPECT_EQ(call->func.getRefText(), "root") << parseDump;
   EXPECT_FALSE(call->args.empty()) << parseDump;
@@ -174,9 +174,9 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_TRUE(commentedDocument->parseRecovered()) << commentedDump;
 
   auto *standaloneModule =
-      dynamic_cast<ast::Module *>(standaloneParsed.value.get());
+      dynamic_cast<ast::Module *>(standaloneParsed.value);
   auto *commentedModule =
-      dynamic_cast<ast::Module *>(commentedParsed.value.get());
+      dynamic_cast<ast::Module *>(commentedParsed.value);
   ASSERT_NE(standaloneModule, nullptr) << standaloneDump;
   ASSERT_NE(commentedModule, nullptr) << commentedDump;
   const auto standaloneMarker = withStandalone.find("\nxx\n");
@@ -205,13 +205,13 @@ TEST(ArithmeticsLanguageTest,
       << standaloneDump;
 
   auto *standaloneLastEvaluation = dynamic_cast<ast::Evaluation *>(
-      standaloneModule->statements.back().get());
+      standaloneModule->statements.back());
   auto *commentedLastEvaluation = dynamic_cast<ast::Evaluation *>(
-      commentedModule->statements.back().get());
+      commentedModule->statements.back());
   ASSERT_NE(standaloneLastEvaluation, nullptr) << standaloneDump;
   ASSERT_NE(commentedLastEvaluation, nullptr) << commentedDump;
-  EXPECT_EQ(summarize_expression(standaloneLastEvaluation->expression.get()),
-            summarize_expression(commentedLastEvaluation->expression.get()))
+  EXPECT_EQ(summarize_expression(standaloneLastEvaluation->expression),
+            summarize_expression(commentedLastEvaluation->expression))
       << standaloneDump << " / " << commentedDump;
 }
 
@@ -225,7 +225,7 @@ TEST(ArithmeticsLanguageTest, ParsesAndEvaluatesModule) {
       pegium::test::make_file_uri("language.calc"), "arithmetics");
 
   ASSERT_TRUE(document->parseSucceeded());
-  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
+  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
 
   const auto results = evaluate_module(*module);
@@ -266,16 +266,16 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(module->statements.size(), 9u)
       << parseDump << " :: " << summarize_module_statements(*module) << " :: "
       << summarize_module_statement_shapes(*module);
   auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr) << parseDump;
   auto *lastBinary =
-      dynamic_cast<ast::BinaryExpression *>(lastEvaluation->expression.get());
+      dynamic_cast<ast::BinaryExpression *>(lastEvaluation->expression);
   ASSERT_NE(lastBinary, nullptr) << parseDump;
   EXPECT_EQ(lastBinary->op, "%") << parseDump;
 }
@@ -317,17 +317,17 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_GE(module->statements.size(), 8u)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   auto *firstDefinition =
-      dynamic_cast<ast::Definition *>(module->statements.front().get());
+      dynamic_cast<ast::Definition *>(module->statements.front());
   ASSERT_NE(firstDefinition, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   EXPECT_EQ(firstDefinition->name, "a");
   ASSERT_NE(firstDefinition->expr, nullptr) << parseDump;
-  EXPECT_EQ(summarize_expression(firstDefinition->expr.get()),
+  EXPECT_EQ(summarize_expression(firstDefinition->expr),
             "number:5.000000")
       << parseDump;
   EXPECT_NE(parseDump.find("Inserted:':'"), std::string::npos) << parseDump;
@@ -389,25 +389,25 @@ TEST(ArithmeticsLanguageTest,
       << parseDump;
   EXPECT_LE(syntaxDiagnosticCount, 3) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_GE(module->statements.size(), 2u)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 
   auto *firstDefinition =
-      dynamic_cast<ast::Definition *>(module->statements[0].get());
+      dynamic_cast<ast::Definition *>(module->statements[0]);
   auto *secondDefinition =
-      dynamic_cast<ast::Definition *>(module->statements[1].get());
+      dynamic_cast<ast::Definition *>(module->statements[1]);
   ASSERT_NE(firstDefinition, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   ASSERT_NE(secondDefinition, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   EXPECT_EQ(firstDefinition->name, "a") << parseDump;
   EXPECT_EQ(secondDefinition->name, "b") << parseDump;
-  EXPECT_EQ(summarize_expression(firstDefinition->expr.get()),
+  EXPECT_EQ(summarize_expression(firstDefinition->expr),
             "number:5.000000")
       << parseDump;
-  EXPECT_EQ(summarize_expression(secondDefinition->expr.get()),
+  EXPECT_EQ(summarize_expression(secondDefinition->expr),
             "number:3.000000")
       << parseDump;
 }
@@ -456,25 +456,25 @@ TEST(ArithmeticsLanguageTest,
       }))
       << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_EQ(module->statements.size(), 2u)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 
   auto *firstDefinition =
-      dynamic_cast<ast::Definition *>(module->statements[0].get());
+      dynamic_cast<ast::Definition *>(module->statements[0]);
   auto *secondDefinition =
-      dynamic_cast<ast::Definition *>(module->statements[1].get());
+      dynamic_cast<ast::Definition *>(module->statements[1]);
   ASSERT_NE(firstDefinition, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   ASSERT_NE(secondDefinition, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   EXPECT_EQ(firstDefinition->name, "a") << parseDump;
   EXPECT_EQ(secondDefinition->name, "b") << parseDump;
-  EXPECT_EQ(summarize_expression(firstDefinition->expr.get()),
+  EXPECT_EQ(summarize_expression(firstDefinition->expr),
             "number:5.000000")
       << parseDump;
-  EXPECT_EQ(summarize_expression(secondDefinition->expr.get()),
+  EXPECT_EQ(summarize_expression(secondDefinition->expr),
             "number:3.000000")
       << parseDump;
 }
@@ -522,17 +522,17 @@ TEST(ArithmeticsLanguageTest,
                static_cast<pegium::TextOffset>(starsPos + 4u);
   })) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(module->statements.size(), 9u)
       << parseDump << " :: " << summarize_module_statements(*module) << " :: "
       << summarize_module_statement_shapes(*module);
 
   auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr) << parseDump;
   auto *lastBinary =
-      dynamic_cast<ast::BinaryExpression *>(lastEvaluation->expression.get());
+      dynamic_cast<ast::BinaryExpression *>(lastEvaluation->expression);
   ASSERT_NE(lastBinary, nullptr) << parseDump;
   EXPECT_EQ(lastBinary->op, "/");
 }
@@ -586,13 +586,13 @@ TEST(ArithmeticsLanguageTest,
                static_cast<pegium::TextOffset>(starsPos + operatorRun.size() + 1u);
   })) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   EXPECT_EQ(module->statements.size(), 9u)
       << parseDump << " :: " << summarize_module_statements(*module) << " :: "
       << summarize_module_statement_shapes(*module);
   auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 }
@@ -637,16 +637,16 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_GE(module->statements.size(), 10u)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 
   auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements[9].get());
+      dynamic_cast<ast::Evaluation *>(module->statements[9]);
   ASSERT_NE(lastEvaluation, nullptr) << parseDump;
   auto *lastCall =
-      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression.get());
+      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   EXPECT_EQ(lastCall->func.getRefText(), "root");
@@ -692,16 +692,16 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_GE(module->statements.size(), 10u)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 
   auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements[9].get());
+      dynamic_cast<ast::Evaluation *>(module->statements[9]);
   ASSERT_NE(lastEvaluation, nullptr) << parseDump;
   auto *lastCall =
-      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression.get());
+      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   EXPECT_EQ(lastCall->func.getRefText(), "root");
@@ -749,16 +749,16 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_GE(module->statements.size(), 11u)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 
   auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr) << parseDump;
   auto *lastCall =
-      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression.get());
+      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   EXPECT_EQ(lastCall->func.getRefText(), "root");
@@ -804,17 +804,17 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_GE(module->statements.size(), 11u)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 
   auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   auto *lastCall =
-      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression.get());
+      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   EXPECT_EQ(lastCall->func.getRefText(), "root");
@@ -861,17 +861,17 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_GE(module->statements.size(), 11u)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 
   auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   auto *lastCall =
-      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression.get());
+      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   EXPECT_EQ(lastCall->func.getRefText(), "root");
@@ -917,17 +917,17 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << parseDump;
   ASSERT_GE(module->statements.size(), 11u)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
 
   auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back().get());
+      dynamic_cast<ast::Evaluation *>(module->statements.back());
   ASSERT_NE(lastEvaluation, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   auto *lastCall =
-      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression.get());
+      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression);
   ASSERT_NE(lastCall, nullptr)
       << parseDump << " :: " << summarize_module_statement_shapes(*module);
   EXPECT_EQ(lastCall->func.getRefText(), "root");
@@ -963,9 +963,9 @@ TEST(ArithmeticsLanguageTest, CommentProviderReturnsLeadingBlockComment) {
   auto services =
       arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
-  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
+  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
-  auto *definition = dynamic_cast<ast::Definition *>(module->statements.front().get());
+  auto *definition = dynamic_cast<ast::Definition *>(module->statements.front());
   ASSERT_NE(definition, nullptr);
 
   const auto comment =
@@ -992,9 +992,9 @@ TEST(ArithmeticsLanguageTest, DocumentationProviderRendersJSDocMarkdown) {
   auto services =
       arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
 
-  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value.get());
+  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value);
   ASSERT_NE(module, nullptr);
-  auto *definition = dynamic_cast<ast::Definition *>(module->statements.front().get());
+  auto *definition = dynamic_cast<ast::Definition *>(module->statements.front());
   ASSERT_NE(definition, nullptr);
 
   const auto documentation = services->documentation.documentationProvider

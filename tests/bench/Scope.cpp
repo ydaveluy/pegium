@@ -61,7 +61,7 @@ ScopeBenchSource make_scope_source(std::size_t targetBytes) {
 
 const AbstractReference &find_reference(const workspace::Document &document,
                                         std::string_view refText) {
-  for (const auto &handle : document.references) {
+  for (const auto &handle : document.parseResult.references) {
     const auto &reference = *handle.getConst();
     if (reference.getRefText() == refText) {
       return reference;

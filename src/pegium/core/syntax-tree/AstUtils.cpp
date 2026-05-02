@@ -2,13 +2,21 @@
 
 #include <memory>
 
+#include <pegium/core/syntax-tree/AstArena.hpp>
 #include <pegium/core/utils/Errors.hpp>
 
 namespace pegium {
 
+CstNodeView AstNode::getCstNode() const noexcept {
+  if (_arena == nullptr || _cstNodeId == kNoNode) {
+    return CstNodeView{};
+  }
+  return CstNodeView{_arena->cstRoot(), _cstNodeId};
+}
+
 const workspace::Document *tryGetDocument(const AstNode &node) noexcept {
-  if (node.hasCstNode()) {
-    return node.getCstNode().root().tryGetDocument();
+  if (const auto *arena = node.arena(); arena != nullptr) {
+    return arena->document();
   }
   return nullptr;
 }

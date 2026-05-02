@@ -48,13 +48,13 @@ inline std::string summarize_module_statements(const ast::Module &module) {
       summary += " | ";
     }
     if (const auto *definition =
-            dynamic_cast<const ast::Definition *>(statement.get());
+            dynamic_cast<const ast::Definition *>(statement);
         definition != nullptr) {
       summary += "def:";
       summary += definition->name;
       continue;
     }
-    if (dynamic_cast<const ast::Evaluation *>(statement.get()) != nullptr) {
+    if (dynamic_cast<const ast::Evaluation *>(statement) != nullptr) {
       summary += "eval";
       continue;
     }
@@ -78,13 +78,13 @@ inline std::string summarize_expression(const ast::Expression *expression) {
   if (const auto *grouped =
           dynamic_cast<const ast::GroupedExpression *>(expression);
       grouped != nullptr) {
-    return "group(" + summarize_expression(grouped->expression.get()) + ")";
+    return "group(" + summarize_expression(grouped->expression) + ")";
   }
   if (const auto *binary =
           dynamic_cast<const ast::BinaryExpression *>(expression);
       binary != nullptr) {
-    return "binary(" + summarize_expression(binary->left.get()) + " " +
-           binary->op + " " + summarize_expression(binary->right.get()) + ")";
+    return "binary(" + summarize_expression(binary->left) + " " +
+           binary->op + " " + summarize_expression(binary->right) + ")";
   }
   return "other-expr";
 }
@@ -96,17 +96,17 @@ inline std::string summarize_module_statement_shapes(const ast::Module &module) 
       summary += " | ";
     }
     if (const auto *definition =
-            dynamic_cast<const ast::Definition *>(statement.get());
+            dynamic_cast<const ast::Definition *>(statement);
         definition != nullptr) {
       summary += "def:";
       summary += definition->name;
       continue;
     }
     if (const auto *evaluation =
-            dynamic_cast<const ast::Evaluation *>(statement.get());
+            dynamic_cast<const ast::Evaluation *>(statement);
         evaluation != nullptr) {
       summary += "eval:";
-      summary += summarize_expression(evaluation->expression.get());
+      summary += summarize_expression(evaluation->expression);
       continue;
     }
     summary += "other";

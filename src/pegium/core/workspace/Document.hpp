@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -44,9 +43,6 @@ struct Document {
 
   parser::ParseResult parseResult;
   LocalSymbols localSymbols;
-  /// Concrete reference handles collected during parsing. Entries are never
-  /// null and always point to reference objects owned by this document AST.
-  std::vector<ReferenceHandle> references;
 
   std::vector<pegium::Diagnostic> diagnostics;
 
@@ -105,11 +101,7 @@ struct Document {
 private:
   void attachTextDocument(std::shared_ptr<TextDocument> textDocument);
   void resetAnalysisState() noexcept;
-  void buildAstNodeIndexLocked() const;
   std::shared_ptr<TextDocument> _textDocument;
-  mutable std::mutex _astNodeIndexMutex;
-  mutable std::vector<const AstNode *> _astNodesBySymbolId;
-  mutable bool _astNodeIndexBuilt = false;
 };
 
 } // namespace pegium::workspace

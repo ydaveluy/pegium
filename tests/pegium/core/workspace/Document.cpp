@@ -90,7 +90,7 @@ TEST(DocumentTest, AttachTextDocumentRebindsSnapshotWithoutResettingState) {
   document.state = DocumentState::Validated;
   document.parseResult.fullMatch = true;
   document.localSymbols.emplace(nullptr, AstNodeDescription{});
-  document.references.clear();
+  document.parseResult.references.clear();
   document.diagnostics.push_back({});
 
   auto updated = std::make_shared<TextDocument>(document.textDocument());
@@ -114,7 +114,7 @@ TEST(DocumentTest, FindsAstNodesBySymbolId) {
   pegium::test::apply_parse_result(
       document, parser.parse(document.textDocument().getText()));
 
-  auto *root = dynamic_cast<IndexedRoot *>(document.parseResult.value.get());
+  auto *root = dynamic_cast<IndexedRoot *>(document.parseResult.value);
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(root->nodes.size(), 2u);
 
@@ -122,8 +122,8 @@ TEST(DocumentTest, FindsAstNodesBySymbolId) {
   const auto secondSymbolId = document.makeSymbolId(*root->nodes[1]);
   const auto unknownSymbolId = secondSymbolId + 1;
 
-  EXPECT_EQ(document.findAstNode(firstSymbolId), root->nodes[0].get());
-  EXPECT_EQ(document.findAstNode(secondSymbolId), root->nodes[1].get());
+  EXPECT_EQ(document.findAstNode(firstSymbolId), root->nodes[0]);
+  EXPECT_EQ(document.findAstNode(secondSymbolId), root->nodes[1]);
   EXPECT_EQ(document.findAstNode(unknownSymbolId), nullptr);
 }
 

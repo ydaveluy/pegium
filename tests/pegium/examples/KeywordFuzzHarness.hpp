@@ -179,7 +179,7 @@ void expect_recovered(ParserFactory &parserFactory,
   const auto parseDump =
       pegium::test::dump_parse_diagnostics(parsed.parseDiagnostics);
   const auto label = describe_mutations(mutations);
-  EXPECT_TRUE(parsed.value.get() != nullptr)
+  EXPECT_TRUE(parsed.value != nullptr)
       << label << "\n----\n" << text << "\n----\n" << parseDump;
   EXPECT_TRUE(parsed.fullMatch)
       << label << "\n----\n" << text << "\n----\n" << parseDump;

@@ -61,7 +61,7 @@ ValidationAcceptNode &parse_validation_accept_node(workspace::Document &document
                   append<&ValidationAcceptNode::tags>("two"_kw)};
 
   pegium::test::parse_rule(root, document, SkipperBuilder().build());
-  auto *node = dynamic_cast<ValidationAcceptNode *>(document.parseResult.value.get());
+  auto *node = dynamic_cast<ValidationAcceptNode *>(document.parseResult.value);
   EXPECT_NE(node, nullptr);
   return *node;
 }
@@ -73,10 +73,11 @@ TEST(ValidationAcceptorTest, EmitsDiagnosticForSelectedPropertySubrange) {
   auto &node = parse_validation_accept_node(document);
 
   pegium::Diagnostic diagnostic;
-  const ValidationAcceptor acceptor{
+  auto acceptorCb = 
       [&diagnostic](pegium::Diagnostic value) {
-        diagnostic = std::move(value);
-      }};
+        diagnostic = std::move(value);      };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
 
   acceptor.error(node, "Invalid name")
       .property<&ValidationAcceptNode::name>()
@@ -116,10 +117,11 @@ TEST(ValidationAcceptorTest, SelectsIndexedVectorPropertyAssignment) {
   auto &node = parse_validation_accept_node(document);
 
   pegium::Diagnostic diagnostic;
-  const ValidationAcceptor acceptor{
+  auto acceptorCb = 
       [&diagnostic](pegium::Diagnostic value) {
-        diagnostic = std::move(value);
-      }};
+        diagnostic = std::move(value);      };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
 
   acceptor.warning(node, "Second tag")
       .property<&ValidationAcceptNode::tags>(1u);
@@ -137,10 +139,11 @@ TEST(ValidationAcceptorTest, AppendsRelatedInformationFromListAndSpan) {
   auto &node = parse_validation_accept_node(document);
 
   pegium::Diagnostic diagnostic;
-  const ValidationAcceptor acceptor{
+  auto acceptorCb = 
       [&diagnostic](pegium::Diagnostic value) {
-        diagnostic = std::move(value);
-      }};
+        diagnostic = std::move(value);      };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
 
   const std::array<pegium::DiagnosticRelatedInformation, 1> extra{
       pegium::DiagnosticRelatedInformation{

@@ -79,15 +79,15 @@ TEST(RequirementsRecoveryProbeBatchTest,
   EXPECT_FALSE(observation.incomplete);
 
   auto *model =
-      dynamic_cast<ast::RequirementModel *>(document->parseResult.value.get());
+      dynamic_cast<ast::RequirementModel *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
   ASSERT_EQ(model->environments.size(), 2u);
   EXPECT_EQ(model->environments[0]->name, "prod");
   EXPECT_EQ(model->environments[1]->name, "staging");
   ASSERT_EQ(model->requirements.size(), 3u);
-  auto *headRequirement = model->requirements[0].get();
-  auto *baseRequirement = model->requirements[1].get();
-  auto *featureRequirement = model->requirements[2].get();
+  auto *headRequirement = model->requirements[0];
+  auto *baseRequirement = model->requirements[1];
+  auto *featureRequirement = model->requirements[2];
   ASSERT_NE(headRequirement, nullptr);
   ASSERT_NE(baseRequirement, nullptr);
   ASSERT_NE(featureRequirement, nullptr);

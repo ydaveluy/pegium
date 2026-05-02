@@ -117,7 +117,7 @@ TEST(ArithmeticsLanguageTest,
       }))
       << defaultDump;
 
-  auto *defaultModule = dynamic_cast<ast::Module *>(defaultParsed.value.get());
+  auto *defaultModule = dynamic_cast<ast::Module *>(defaultParsed.value);
   ASSERT_NE(defaultModule, nullptr) << defaultDump;
   EXPECT_GE(defaultModule->statements.size(), 25u)
       << summarize_module_statement_shapes(*defaultModule);
@@ -149,7 +149,7 @@ TEST(ArithmeticsLanguageTest,
       }))
       << dump;
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value.get());
+  auto *module = dynamic_cast<ast::Module *>(parsed.value);
   ASSERT_NE(module, nullptr) << dump;
   EXPECT_GE(module->statements.size(), 30u)
       << summarize_module_statement_shapes(*module);

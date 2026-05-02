@@ -8,11 +8,13 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 namespace pegium::references {
 
 std::optional<std::string>
-DefaultNameProvider::getName(const AstNode &node) const noexcept {
+DefaultNameProvider::getName(const AstNode &node) const {
+  // Fast path: `NamedAstNode` exposes the name directly — no CST walk.
   if (const auto *namedNode = dynamic_cast<const NamedAstNode *>(&node);
       namedNode != nullptr) {
     if (namedNode->name.empty()) {
@@ -20,20 +22,45 @@ DefaultNameProvider::getName(const AstNode &node) const noexcept {
     }
     return namedNode->name;
   }
+  // Fallback (rare): non-NamedAstNode — defer to the full lookup.
+  return NameProvider::getName(node);
+}
 
-  const auto nameNode = getNameNode(node);
-  if (!nameNode.has_value()) {
-    return std::nullopt;
+AstNodeName DefaultNameProvider::nameOf(const AstNode &node) const {
+  // The CST source is always reported when present, independently of the
+  // name validity: `getNameNode()` callers (LSP rename/highlight) need the
+  // location of the `name` assignment even when the produced value is
+  // empty or non-string. `nameOf` callers gate behaviour on `info.empty()`
+  // when they need both pieces.
+  AstNodeName info;
+  if (node.hasCstNode()) {
+    if (auto cst = find_node_for_feature(node.getCstNode(), "name");
+        cst.has_value()) {
+      info.cstNode = *cst;
+    }
   }
 
-  const auto *grammarElement = nameNode->getGrammarElement();
+  // Fast path: `NamedAstNode` exposes the name directly.
+  if (const auto *namedNode = dynamic_cast<const NamedAstNode *>(&node);
+      namedNode != nullptr) {
+    if (!namedNode->name.empty()) {
+      info.name = namedNode->name;
+    }
+    return info;
+  }
+
+  // Fallback: read the `name` feature value through the grammar.
+  if (!info.cstNode.valid()) {
+    return info;
+  }
+  const auto *grammarElement = info.cstNode.getGrammarElement();
   assert(grammarElement != nullptr);
   assert(grammarElement->getKind() == grammar::ElementKind::Assignment);
   const auto &assignment =
       *static_cast<const grammar::Assignment *>(grammarElement);
   const auto value = assignment.getValue(&node);
   if (!value.isRuleValue()) {
-    return std::nullopt;
+    return info;
   }
   auto name = std::visit(
       []<typename T>(const T &item) -> std::string {
@@ -47,18 +74,10 @@ DefaultNameProvider::getName(const AstNode &node) const noexcept {
         }
       },
       value.ruleValue());
-  if (name.empty()) {
-    return std::nullopt;
+  if (!name.empty()) {
+    info.name = std::move(name);
   }
-  return name;
-}
-
-std::optional<CstNodeView>
-DefaultNameProvider::getNameNode(const AstNode &node) const noexcept {
-  if (!node.hasCstNode()) {
-    return std::nullopt;
-  }
-  return find_node_for_feature(node.getCstNode(), "name");
+  return info;
 }
 
 } // namespace pegium::references

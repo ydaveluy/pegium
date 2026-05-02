@@ -17,7 +17,7 @@ struct RecoveryPerfStatementNode : pegium::AstNode {
 
 struct RecoveryPerfModuleNode : pegium::AstNode {
   std::string name;
-  std::vector<std::unique_ptr<RecoveryPerfStatementNode>> statements;
+  std::vector<RecoveryPerfStatementNode *> statements;
 };
 
 struct RecoveryPerfFixture : public ::testing::Test {

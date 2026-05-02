@@ -2,6 +2,7 @@
 
 #include <charconv>
 #include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/syntax-tree/AstArena.hpp>
 #include <pegium/core/workspace/Document.hpp>
 #include <stdexcept>
 #include <string>
@@ -84,9 +85,11 @@ BenchmarkTimings run_iteration(const std::string &source,
   using Clock = std::chrono::steady_clock;
   const auto start = Clock::now();
   document.parseResult = parser.parse(text::TextSnapshot::copy(document.textDocument().getText()));
-  document.references = document.parseResult.references;
   if (document.parseResult.cst != nullptr) {
     document.parseResult.cst->attachDocument(document);
+  }
+  if (document.parseResult.astArena != nullptr) {
+    document.parseResult.astArena->attachDocument(document);
   }
   const auto end = Clock::now();
 

@@ -39,19 +39,19 @@ DomainModelScopeComputation::collectExportedSymbols(
       continue;
     }
 
-    auto name = services.references.nameProvider->getName(*type);
-    if (!name.has_value()) {
+    auto info = services.references.nameProvider->nameOf(*type);
+    if (info.empty()) {
       continue;
     }
 
     if (const auto *package =
             dynamic_cast<const PackageDeclaration *>(type->getContainer());
         package != nullptr && qualifiedNameProvider != nullptr) {
-      *name = qualifiedNameProvider->getQualifiedName(*package, *name);
+      info.name = qualifiedNameProvider->getQualifiedName(*package, info.name);
     }
     if (auto description =
             services.workspace.astNodeDescriptionProvider->createDescription(
-                *type, document, std::move(*name));
+                *type, document, std::move(info));
         description.has_value()) {
       symbols.push_back(std::move(*description));
     }
@@ -67,7 +67,7 @@ pegium::workspace::LocalSymbols DomainModelScopeComputation::collectLocalSymbols
     return symbols;
   }
 
-  const auto *model = dynamic_cast<const DomainModel *>(document.parseResult.value.get());
+  const auto *model = dynamic_cast<const DomainModel *>(document.parseResult.value);
   if (model == nullptr) {
     return symbols;
   }
@@ -94,21 +94,21 @@ DomainModelScopeComputation::processContainer(
       continue;
     }
 
-    if (const auto *type = dynamic_cast<const Type *>(element.get())) {
-      auto name = services.references.nameProvider->getName(*type);
-      if (!name.has_value()) {
+    if (const auto *type = dynamic_cast<const Type *>(element)) {
+      auto info = services.references.nameProvider->nameOf(*type);
+      if (info.empty()) {
         continue;
       }
       if (auto description =
               services.workspace.astNodeDescriptionProvider->createDescription(
-                  *type, document, std::move(*name));
+                  *type, document, std::move(info));
           description.has_value()) {
         localDescriptions.push_back(std::move(*description));
       }
       continue;
     }
 
-    const auto *package = dynamic_cast<const PackageDeclaration *>(element.get());
+    const auto *package = dynamic_cast<const PackageDeclaration *>(element);
     if (package == nullptr) {
       continue;
     }

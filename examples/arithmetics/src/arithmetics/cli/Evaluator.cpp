@@ -30,7 +30,7 @@ int eval_file(std::string_view fileName,
   const auto results = arithmetics::interpret_evaluations(*module);
   for (const auto &statement : module->statements) {
     const auto *evaluation =
-        dynamic_cast<const arithmetics::ast::Evaluation *>(statement.get());
+        dynamic_cast<const arithmetics::ast::Evaluation *>(statement);
     if (evaluation == nullptr || evaluation->expression == nullptr) {
       continue;
     }

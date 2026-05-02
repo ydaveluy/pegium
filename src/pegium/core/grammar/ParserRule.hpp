@@ -27,7 +27,7 @@ struct ParserRule : AbstractRule {
   constexpr ElementKind getKind() const noexcept override {
     return ElementKind::ParserRule;
   }
-  virtual std::unique_ptr<AstNode>
+  virtual AstNode *
   getValue(const CstNodeView &, const parser::ValueBuildContext &) const = 0;
   virtual bool rule(parser::ParseContext &) const = 0;
   virtual bool rule(parser::TrackedParseContext &) const = 0;

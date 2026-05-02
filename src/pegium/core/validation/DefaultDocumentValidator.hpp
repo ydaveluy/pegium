@@ -38,18 +38,6 @@ private:
                    std::vector<pegium::Diagnostic> &diagnostics,
                    const ValidationOptions &options, const std::string &source,
                    const utils::CancellationToken &cancelToken) const;
-  void validateAstBefore(const AstNode &rootNode,
-                         const ValidationAcceptor &acceptor,
-                         std::span<const std::string> categories,
-                         const utils::CancellationToken &cancelToken) const;
-  void validateAstNodes(const AstNode &rootNode,
-                        const ValidationAcceptor &acceptor,
-                        std::span<const std::string> categories,
-                        const utils::CancellationToken &cancelToken) const;
-  void validateAstAfter(const AstNode &rootNode,
-                        const ValidationAcceptor &acceptor,
-                        std::span<const std::string> categories,
-                        const utils::CancellationToken &cancelToken) const;
 };
 
 } // namespace pegium::validation

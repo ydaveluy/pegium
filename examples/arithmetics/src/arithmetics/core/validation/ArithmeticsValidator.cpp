@@ -89,7 +89,7 @@ void erase_normalizable_value(
   }
 
   if (const auto *grouped = dynamic_cast<const GroupedExpression *>(expression)) {
-    erase_normalizable_value(grouped->expression.get(), context);
+    erase_normalizable_value(grouped->expression, context);
   }
 
   context.erase(expression);
@@ -139,21 +139,21 @@ void evaluate_normalizable_expressions(
     it->second = result;
   }
 
-  erase_normalizable_value(binary->left.get(), context);
-  erase_normalizable_value(binary->right.get(), context);
+  erase_normalizable_value(binary->left, context);
+  erase_normalizable_value(binary->right, context);
 }
 
 template <typename Node>
 std::unordered_map<std::string_view, std::vector<const Node *>>
-group_named_nodes(std::span<const std::unique_ptr<Node>> nodes) {
+group_named_nodes(std::span<Node *const> nodes) {
   std::unordered_map<std::string_view, std::vector<const Node *>> groups;
   groups.reserve(nodes.size());
 
-  for (const auto &node : nodes) {
+  for (const auto *node : nodes) {
     if (node == nullptr || node->name.empty()) {
       continue;
     }
-    groups[node->name].push_back(node.get());
+    groups[node->name].push_back(node);
   }
 
   return groups;
@@ -175,7 +175,7 @@ void collect_nested_function_calls(const Definition &host,
   }
 
   if (const auto *grouped = dynamic_cast<const GroupedExpression *>(expression)) {
-    collect_nested_function_calls(host, grouped->expression.get(), calls);
+    collect_nested_function_calls(host, grouped->expression, calls);
     return;
   }
 
@@ -187,15 +187,15 @@ void collect_nested_function_calls(const Definition &host,
   }
 
   if (const auto *binary = dynamic_cast<const BinaryExpression *>(expression)) {
-    collect_nested_function_calls(host, binary->left.get(), calls);
-    collect_nested_function_calls(host, binary->right.get(), calls);
+    collect_nested_function_calls(host, binary->left, calls);
+    collect_nested_function_calls(host, binary->right, calls);
   }
 }
 
 std::vector<NestedFunctionCall> select_nested_function_calls(
     const Definition &host) {
   std::vector<NestedFunctionCall> calls;
-  collect_nested_function_calls(host, host.expr.get(), calls);
+  collect_nested_function_calls(host, host.expr, calls);
   return calls;
 }
 
@@ -304,7 +304,7 @@ void ArithmeticsValidator::checkDivByZero(
 void ArithmeticsValidator::checkUniqueParameters(
     const Definition &definition,
     const pegium::validation::ValidationAcceptor &accept) const {
-  const auto params = group_named_nodes(std::span(definition.args));
+  const auto params = group_named_nodes<DeclaredParameter>(std::span(definition.args));
   for (const auto &[name, symbols] : params) {
     if (symbols.size() <= 1u) {
       continue;
@@ -321,7 +321,7 @@ void ArithmeticsValidator::checkNormalizable(
     const Definition &definition,
     const pegium::validation::ValidationAcceptor &accept) const {
   if (!definition.expr ||
-      dynamic_cast<const NumberLiteral *>(definition.expr.get()) != nullptr) {
+      dynamic_cast<const NumberLiteral *>(definition.expr) != nullptr) {
     return;
   }
 
@@ -353,7 +353,7 @@ void ArithmeticsValidator::checkUniqueDefinitions(
   names.reserve(module.statements.size());
 
   for (const auto &statement : module.statements) {
-    const auto *definition = dynamic_cast<const Definition *>(statement.get());
+    const auto *definition = dynamic_cast<const Definition *>(statement);
     if (definition == nullptr || definition->name.empty()) {
       continue;
     }
@@ -380,7 +380,7 @@ void ArithmeticsValidator::checkFunctionRecursion(
   std::vector<FunctionCallCycle> callCycles;
 
   for (const auto &statement : module.statements) {
-    const auto *definition = dynamic_cast<const Definition *>(statement.get());
+    const auto *definition = dynamic_cast<const Definition *>(statement);
     if (definition == nullptr) {
       continue;
     }

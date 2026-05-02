@@ -28,7 +28,9 @@ struct MemberTraits<Member> {
     using type = T;
     static constexpr bool isMany = false;
   };
-  template <typename T> struct AttributeType<std::unique_ptr<T>> {
+  template <typename T>
+    requires std::derived_from<T, AstNode>
+  struct AttributeType<T *> {
     using type = T;
     static constexpr bool isMany = false;
   };
@@ -45,7 +47,9 @@ struct MemberTraits<Member> {
     using type = std::string;
     static constexpr bool isMany = false;
   };
-  template <typename T> struct AttributeType<std::vector<std::unique_ptr<T>>> {
+  template <typename T>
+    requires std::derived_from<T, AstNode>
+  struct AttributeType<std::vector<T *>> {
     using type = T;
     static constexpr bool isMany = true;
   };
@@ -225,30 +229,17 @@ struct AssignmentHelper<std::optional<MultiReference<T>>> {
   }
 };
 
-template <typename T> struct AssignmentHelper<std::unique_ptr<T>> {
+template <typename T>
+  requires std::derived_from<T, AstNode>
+struct AssignmentHelper<T *> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> &&
              std::derived_from<Node, Base> && std::derived_from<U, T>
-  void operator()(Node *node, std::unique_ptr<T> Base::*member,
-                  std::unique_ptr<U> &&value,
+  void operator()(Node *node, T *Base::*member, U *value,
                   const ValueBuildContext & /*context*/) const {
-    auto &target = node->*member;
-    target = std::move(value);
-    if constexpr (std::derived_from<T, AstNode>) {
-      if (target) {
-        target->setContainer(*node);
-      }
-    }
-  }
-
-  template <typename Node, typename Base, typename U>
-    requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
-  void operator()(Node *node, std::unique_ptr<T> Base::*member,
-                  U &&value, const ValueBuildContext & /*context*/) const {
-    auto &target = node->*member;
-    target = std::make_unique<U>(std::forward<U>(value));
-    if constexpr (std::derived_from<T, AstNode>) {
-      target->setContainer(*node);
+    node->*member = value;
+    if (value != nullptr) {
+      value->setContainer(*node);
     }
   }
 };
@@ -260,7 +251,7 @@ template <typename T> struct AssignmentHelper<std::vector<T>> {
                   const ValueBuildContext &) const {
 
     static_assert(!std::derived_from<T, AstNode>,
-                  "An AstNode must be stored in a std::unique_ptr");
+                  "An AstNode must be stored as a raw pointer (T *)");
     if constexpr (std::is_convertible_v<U, T>) {
       (node->*member).emplace_back(std::forward<U>(value));
     } else if constexpr (std::is_constructible_v<T, U>) {
@@ -271,31 +262,18 @@ template <typename T> struct AssignmentHelper<std::vector<T>> {
   }
 };
 
-template <typename T> struct AssignmentHelper<std::vector<std::unique_ptr<T>>> {
+template <typename T>
+  requires std::derived_from<T, AstNode>
+struct AssignmentHelper<std::vector<T *>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> &&
              std::derived_from<Node, Base> && std::derived_from<U, T>
-  void operator()(Node *node, std::vector<std::unique_ptr<T>> Base::*member,
-                  std::unique_ptr<U> &&value,
+  void operator()(Node *node, std::vector<T *> Base::*member, U *value,
                   const ValueBuildContext & /*context*/) const {
-    auto &target = node->*member;
-    if constexpr (std::derived_from<T, AstNode>) {
+    if (value != nullptr) {
       value->setContainer(*node);
     }
-    target.emplace_back(std::move(value));
-  }
-
-  template <typename Node, typename Base, typename U>
-    requires std::derived_from<Node, AstNode> &&
-             std::derived_from<Node, Base> && std::derived_from<U, T>
-  void operator()(Node *node, std::vector<std::unique_ptr<T>> Base::*member,
-                  U &&value, const ValueBuildContext & /*context*/) const {
-    auto &target = node->*member;
-    auto ptr = std::make_unique<U>(std::forward<U>(value));
-    if constexpr (std::derived_from<U, AstNode>) {
-      ptr->setContainer(*node);
-    }
-    target.emplace_back(std::move(ptr));
+    (node->*member).push_back(value);
   }
 };
 
@@ -326,10 +304,10 @@ struct IsValidAssignmentImpl<feature, Element,
               // or AttrType constructible from the given type
               std::constructible_from<helpers::AttrType<feature>,
                                       typename Element::type> ||
-              // or AttrType constructible from a shared_ptr of the given type
+              // or AttrType constructible from a raw pointer of the given type
               std::constructible_from<
                   helpers::AttrType<feature>,
-                  std::unique_ptr<typename Element::type>>)> {};
+                  typename Element::type *>)> {};
 
 template <auto feature, typename... Element>
 struct IsValidAssignmentImpl<feature, OrderedChoice<Element...>, void>

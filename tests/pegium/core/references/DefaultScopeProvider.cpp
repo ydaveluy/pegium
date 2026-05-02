@@ -250,43 +250,44 @@ ScopedDocumentFixture make_scoped_document(pegium::SharedCoreServices &shared,
   CstBuilder builder(*cst);
   builder.leaf(0, 1, &literal);
 
-  auto root = std::make_unique<ScopeRoot>();
-  auto *rootPtr = root.get();
-  rootPtr->setCstNode(cst->get(0));
+  document->parseResult.astArena = std::make_unique<pegium::AstArena>(*cst);
 
-  auto outer = std::make_unique<ScopeBlock>();
-  auto *outerPtr = outer.get();
-  outerPtr->setCstNode(cst->get(0));
 
-  auto inner = std::make_unique<ScopeBlock>();
-  auto *innerPtr = inner.get();
-  innerPtr->setCstNode(cst->get(0));
+  auto &arena = *document->parseResult.astArena;
+  arena.attachDocument(*document);
+  auto *root = arena.create<ScopeRoot>();
+  root->setCstNode(cst->get(0));
+
+  auto *outer = arena.create<ScopeBlock>();
+  outer->setCstNode(cst->get(0));
+
+  auto *inner = arena.create<ScopeBlock>();
+  inner->setCstNode(cst->get(0));
 
   static const TestReferenceAssignment<RefHolder, TargetNode> assignment("ref");
-  auto holder = std::make_unique<RefHolder>();
-  auto *holderPtr = holder.get();
-  holderPtr->setCstNode(cst->get(0));
-  holderPtr->ref.initialize(*holderPtr, std::move(refText), CstNodeView{},
-                            assignment, linker);
+  auto *holder = arena.create<RefHolder>();
+  holder->setCstNode(cst->get(0));
+  holder->ref.initialize(*holder, std::move(refText), CstNodeView{},
+                         assignment, linker);
 
-  inner->refs.push_back(std::move(holder));
-  holderPtr->setContainer(*innerPtr);
+  inner->refs.push_back(holder);
+  holder->setContainer(*inner);
 
-  outer->blocks.push_back(std::move(inner));
-  innerPtr->setContainer(*outerPtr);
+  outer->blocks.push_back(inner);
+  inner->setContainer(*outer);
 
-  root->blocks.push_back(std::move(outer));
-  outerPtr->setContainer(*rootPtr);
+  root->blocks.push_back(outer);
+  outer->setContainer(*root);
 
-  document->parseResult.value = std::move(root);
+  document->parseResult.value = root;
   document->parseResult.cst = std::move(cst);
-  document->references.push_back(ReferenceHandle::direct(&holderPtr->ref));
+  document->parseResult.references.push_back(ReferenceHandle::direct(&holder->ref));
 
   return {.document = std::move(document),
-          .root = rootPtr,
-          .outer = outerPtr,
-          .inner = innerPtr,
-          .holder = holderPtr};
+          .root = root,
+          .outer = outer,
+          .inner = inner,
+          .holder = holder};
 }
 
 template <typename Holder, typename TargetType>
@@ -305,15 +306,18 @@ make_attached_reference_holder(pegium::SharedCoreServices &shared,
   builder.leaf(0, static_cast<TextOffset>(refText.size()), &literal);
 
   static const TestReferenceAssignment<Holder, TargetType> assignment("ref");
-  auto holder = std::make_unique<Holder>();
-  auto *holderPtr = holder.get();
-  holderPtr->setCstNode(cst->get(0));
-  holderPtr->ref.initialize(*holderPtr, refText, cst->get(0), assignment, linker);
+  document->parseResult.astArena = std::make_unique<pegium::AstArena>(*cst);
 
-  document->parseResult.value = std::move(holder);
+  auto &arena = *document->parseResult.astArena;
+  arena.attachDocument(*document);
+  auto *holder = arena.create<Holder>();
+  holder->setCstNode(cst->get(0));
+  holder->ref.initialize(*holder, refText, cst->get(0), assignment, linker);
+
+  document->parseResult.value = holder;
   document->parseResult.cst = std::move(cst);
-  document->references.push_back(ReferenceHandle::direct(&holderPtr->ref));
-  return {.document = std::move(document), .holder = holderPtr};
+  document->parseResult.references.push_back(ReferenceHandle::direct(&holder->ref));
+  return {.document = std::move(document), .holder = holder};
 }
 
 std::vector<std::string>

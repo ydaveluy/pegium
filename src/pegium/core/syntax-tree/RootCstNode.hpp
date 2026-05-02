@@ -52,6 +52,13 @@ public:
     return _text.view();
   }
 
+  /// Returns the underlying monotonic buffer resource backing CST node
+  /// allocations. `AstArena` shares this pool so that AST nodes don't pay a
+  /// separate upfront buffer and so that doublings happen in a single chain.
+  [[nodiscard]] std::pmr::memory_resource *memoryResource() noexcept {
+    return std::addressof(_pool);
+  }
+
   /// Attaches the workspace document that owns this CST in document pipelines.
   void attachDocument(const workspace::Document &document) noexcept {
     _document = std::addressof(document);

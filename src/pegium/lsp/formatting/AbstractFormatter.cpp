@@ -1115,7 +1115,7 @@ std::vector<::lsp::TextEdit> AbstractFormatter::doDocumentFormat(
     const std::optional<::lsp::Range> &range,
     const utils::CancellationToken &cancelToken) const {
   utils::throw_if_cancelled(cancelToken);
-  const auto *root = document.parseResult.value.get();
+  const auto *root = document.parseResult.value;
   if (root == nullptr || !root->hasCstNode()) {
     return {};
   }

@@ -35,11 +35,11 @@ TEST(RecoveryTest, OptionalInfixExpressionKeepsRecoveredPrefixBeforeDelimiter) {
       << parseDump;
 
   auto *parsedEvaluation =
-      dynamic_cast<RecoveryExpressionEvaluation *>(result.value.get());
+      dynamic_cast<RecoveryExpressionEvaluation *>(result.value);
   ASSERT_NE(parsedEvaluation, nullptr) << parseDump;
   ASSERT_NE(parsedEvaluation->expression, nullptr) << parseDump;
   auto *parsedNumber = dynamic_cast<RecoveryNumberExpression *>(
-      parsedEvaluation->expression.get());
+      parsedEvaluation->expression);
   ASSERT_NE(parsedNumber, nullptr) << parseDump;
   EXPECT_EQ(parsedNumber->value, 81);
 }
@@ -106,7 +106,7 @@ TEST(RecoveryTest,
       << parseDump;
 
   auto *parsedEvaluation =
-      dynamic_cast<RecoveryExpressionEvaluation *>(result.value.get());
+      dynamic_cast<RecoveryExpressionEvaluation *>(result.value);
   ASSERT_NE(parsedEvaluation, nullptr) << parseDump;
 }
 
@@ -188,19 +188,19 @@ TEST(RecoveryTest, UnexpectedTokenAfterOperatorUsesGenericDeleteInPrimary) {
       }))
       << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 2u) << parseDump;
 
   auto *evaluationNode = dynamic_cast<RecoveryExpressionEvaluation *>(
-      parsedModule->statements[1].get());
+      parsedModule->statements[1]);
   ASSERT_NE(evaluationNode, nullptr) << parseDump;
   auto *binary = dynamic_cast<RecoveryBinaryExpression *>(
-      evaluationNode->expression.get());
+      evaluationNode->expression);
   ASSERT_NE(binary, nullptr) << parseDump;
-  auto *left = dynamic_cast<RecoveryNumberExpression *>(binary->left.get());
+  auto *left = dynamic_cast<RecoveryNumberExpression *>(binary->left);
   auto *right =
-      dynamic_cast<RecoveryReferenceExpression *>(binary->right.get());
+      dynamic_cast<RecoveryReferenceExpression *>(binary->right);
   ASSERT_NE(left, nullptr) << parseDump;
   ASSERT_NE(right, nullptr) << parseDump;
   EXPECT_EQ(left->value, 2) << parseDump;
@@ -262,18 +262,18 @@ TEST(RecoveryTest,
       }))
       << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 3u) << parseDump;
 
   auto *evaluationNode = dynamic_cast<RecoveryExpressionEvaluation *>(
-      parsedModule->statements[1].get());
+      parsedModule->statements[1]);
   ASSERT_NE(evaluationNode, nullptr);
   auto *binary = dynamic_cast<RecoveryBinaryExpression *>(
-      evaluationNode->expression.get());
+      evaluationNode->expression);
   ASSERT_NE(binary, nullptr);
-  auto *left = dynamic_cast<RecoveryNumberExpression *>(binary->left.get());
-  auto *right = dynamic_cast<RecoveryNumberExpression *>(binary->right.get());
+  auto *left = dynamic_cast<RecoveryNumberExpression *>(binary->left);
+  auto *right = dynamic_cast<RecoveryNumberExpression *>(binary->right);
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr) << parseDump;
   EXPECT_EQ(left->value, 2);
@@ -281,7 +281,7 @@ TEST(RecoveryTest,
   EXPECT_EQ(right->value, 7);
 
   auto *secondDefinition = dynamic_cast<RecoveryDefinitionWithExpr *>(
-      parsedModule->statements[2].get());
+      parsedModule->statements[2]);
   ASSERT_NE(secondDefinition, nullptr);
   EXPECT_EQ(secondDefinition->name, "b");
 }
@@ -341,18 +341,18 @@ TEST(
                            .size());
       }));
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   ASSERT_EQ(parsedModule->statements.size(), 3u);
 
   auto *evaluationNode = dynamic_cast<RecoveryExpressionEvaluation *>(
-      parsedModule->statements[1].get());
+      parsedModule->statements[1]);
   ASSERT_NE(evaluationNode, nullptr);
   auto *binary = dynamic_cast<RecoveryBinaryExpression *>(
-      evaluationNode->expression.get());
+      evaluationNode->expression);
   ASSERT_NE(binary, nullptr);
-  auto *left = dynamic_cast<RecoveryNumberExpression *>(binary->left.get());
-  auto *right = dynamic_cast<RecoveryNumberExpression *>(binary->right.get());
+  auto *left = dynamic_cast<RecoveryNumberExpression *>(binary->left);
+  auto *right = dynamic_cast<RecoveryNumberExpression *>(binary->right);
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr);
   EXPECT_EQ(left->value, 2);
@@ -360,7 +360,7 @@ TEST(
   EXPECT_EQ(right->value, 7);
 
   auto *secondDefinition = dynamic_cast<RecoveryDefinitionWithExpr *>(
-      parsedModule->statements[2].get());
+      parsedModule->statements[2]);
   ASSERT_NE(secondDefinition, nullptr);
   EXPECT_EQ(secondDefinition->name, "b");
 }
@@ -417,7 +417,7 @@ TEST(
       }))
       << parseDump;
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr) << parseDump;
   ASSERT_EQ(parsedModule->statements.size(), 4u) << parseDump;
 }
@@ -490,7 +490,7 @@ TEST(RecoveryTest,
   EXPECT_TRUE(result.fullMatch);
   EXPECT_FALSE(result.parseDiagnostics.empty());
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value.get());
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
   ASSERT_NE(parsedModule, nullptr);
   ASSERT_GE(parsedModule->statements.size(), 3u);
 }
@@ -530,7 +530,7 @@ TEST(RecoveryTest,
       << parseDump;
 
   auto *parsedBlock =
-      dynamic_cast<RecoveryFeatureListNode *>(result.value.get());
+      dynamic_cast<RecoveryFeatureListNode *>(result.value);
   ASSERT_NE(parsedBlock, nullptr);
   ASSERT_EQ(parsedBlock->features.size(), 2u) << parseDump;
   ASSERT_NE(parsedBlock->features[0], nullptr);
@@ -579,7 +579,7 @@ TEST(
       << parseDump;
 
   auto *parsedBlock =
-      dynamic_cast<RecoveryFeatureListNode *>(result.value.get());
+      dynamic_cast<RecoveryFeatureListNode *>(result.value);
   ASSERT_NE(parsedBlock, nullptr);
   ASSERT_EQ(parsedBlock->features.size(), 2u) << parseDump;
   ASSERT_NE(parsedBlock->features[0], nullptr);
@@ -634,7 +634,7 @@ TEST(
       }))
       << parseDump;
 
-  auto *parsedState = dynamic_cast<RecoveryStateNode *>(result.value.get());
+  auto *parsedState = dynamic_cast<RecoveryStateNode *>(result.value);
   ASSERT_NE(parsedState, nullptr) << parseDump;
   EXPECT_EQ(parsedState->name, "Idle");
   ASSERT_EQ(parsedState->transitions.size(), 1u) << parseDump;
@@ -680,7 +680,7 @@ TEST(RecoveryTest,
                                    }))
       << parseDump;
 
-  auto *parsedModel = dynamic_cast<RecoveryStateModelNode *>(result.value.get());
+  auto *parsedModel = dynamic_cast<RecoveryStateModelNode *>(result.value);
   ASSERT_NE(parsedModel, nullptr) << parseDump;
   ASSERT_EQ(parsedModel->states.size(), 2u) << parseDump;
   ASSERT_NE(parsedModel->states[0], nullptr) << parseDump;
@@ -736,11 +736,11 @@ TEST(RecoveryTest,
       }))
       << parseDump;
 
-  auto *parsedModel = dynamic_cast<RecoveryDomainModelNode *>(result.value.get());
+  auto *parsedModel = dynamic_cast<RecoveryDomainModelNode *>(result.value);
   ASSERT_NE(parsedModel, nullptr) << parseDump;
   ASSERT_EQ(parsedModel->elements.size(), 1u) << parseDump;
   auto *blog =
-      dynamic_cast<RecoveryEntityNode *>(parsedModel->elements.front().get());
+      dynamic_cast<RecoveryEntityNode *>(parsedModel->elements.front());
   ASSERT_NE(blog, nullptr) << parseDump;
   EXPECT_EQ(blog->name, "Blog") << parseDump;
   ASSERT_EQ(blog->features.size(), 1u) << parseDump;
@@ -784,11 +784,11 @@ TEST(RecoveryTest,
   EXPECT_TRUE(result.result.recoveryReport.hasRecovered) << parseDump;
 
   auto *parsedModel =
-      dynamic_cast<RecoveryDomainModelNode *>(result.value.get());
+      dynamic_cast<RecoveryDomainModelNode *>(result.value);
   ASSERT_NE(parsedModel, nullptr) << parseDump;
   ASSERT_EQ(parsedModel->elements.size(), 1u) << parseDump;
   auto *parsedEntity =
-      dynamic_cast<RecoveryEntityNode *>(parsedModel->elements.front().get());
+      dynamic_cast<RecoveryEntityNode *>(parsedModel->elements.front());
   ASSERT_NE(parsedEntity, nullptr) << parseDump;
   EXPECT_EQ(parsedEntity->name, "Blog");
 }

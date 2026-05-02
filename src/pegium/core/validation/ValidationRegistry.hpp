@@ -1,10 +1,10 @@
 #pragma once
 
 #include <concepts>
+#include <cstdint>
 #include <functional>
 #include <initializer_list>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -131,15 +131,6 @@ using ValidationPreparation =
 /// Registry of validation checks grouped by target type and category.
 class ValidationRegistry {
 public:
-  /// Immutable prepared snapshot of the checks currently registered.
-  class PreparedChecks {
-  public:
-    virtual ~PreparedChecks() noexcept = default;
-
-    virtual void run(const AstNode &node, const ValidationAcceptor &acceptor,
-                     const utils::CancellationToken &cancelToken) const = 0;
-  };
-
   /// Type-erased registration payload for one validation check.
   struct ValidationCheckRegistration {
     std::type_index targetType = std::type_index(typeid(AstNode));
@@ -213,23 +204,35 @@ public:
     }
   }
 
-  // Builds an immutable snapshot of the currently registered checks.
-  // Later registrations only affect future preparations.
-  [[nodiscard]] virtual std::unique_ptr<const PreparedChecks>
-  prepareChecks(std::span<const std::string> categories = {}) const = 0;
-
-  // Validation categories reflect the registry state currently available for
-  // future preparations.
+  // Validation categories currently registered.
   [[nodiscard]] virtual std::vector<std::string>
   getAllValidationCategories() const = 0;
 
   virtual void registerBeforeDocument(ValidationPreparation check) = 0;
   virtual void registerAfterDocument(ValidationPreparation check) = 0;
 
+  /// Returns the registered "before document" preparation hooks, in
+  /// registration order.
   [[nodiscard]] virtual std::span<const ValidationPreparation>
   checksBefore() const noexcept = 0;
+
+  /// Returns the registered "after document" preparation hooks, in
+  /// registration order.
   [[nodiscard]] virtual std::span<const ValidationPreparation>
   checksAfter() const noexcept = 0;
+
+  /// Runs every check applicable to `node` (by dynamic type) whose category
+  /// is enabled by `categories` (empty = every category). Caught exceptions
+  /// become validation diagnostics, except `OperationCancelled` which
+  /// propagates.
+  ///
+  /// Implementations may cache work across consecutive calls that pass the
+  /// same `categories` span (identity-based). Callers iterating an AST should
+  /// keep the same `categories` span alive for the duration of the loop.
+  virtual void runChecks(const AstNode &node,
+                         const ValidationAcceptor &acceptor,
+                         std::span<const std::string> categories,
+                         const utils::CancellationToken &cancelToken) const = 0;
 
 private:
   virtual void registerTypedCheck(ValidationCheckRegistration registration,

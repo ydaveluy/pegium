@@ -33,13 +33,13 @@ void StatemachineValidator::checkUniqueStatesAndEvents(
   std::unordered_map<std::string, std::vector<const Event *>> eventsByName;
   for (const auto &event : model.events) {
     if (event) {
-      eventsByName[event->name].push_back(event.get());
+      eventsByName[event->name].push_back(event);
     }
   }
   std::unordered_map<std::string, std::vector<const State *>> statesByName;
   for (const auto &state : model.states) {
     if (state) {
-      statesByName[state->name].push_back(state.get());
+      statesByName[state->name].push_back(state);
     }
   }
 

@@ -29,7 +29,7 @@ const AbstractReference *
 find_reference_at_offset(const workspace::Document &document, TextOffset offset) {
   const AbstractReference *best = nullptr;
   TextOffset bestSpan = std::numeric_limits<TextOffset>::max();
-  for (const auto &handle : document.references) {
+  for (const auto &handle : document.parseResult.references) {
     const auto &reference = *handle.getConst();
     const auto refNode = reference.getRefNode();
     if (!refNode.valid()) {

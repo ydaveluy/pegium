@@ -19,7 +19,7 @@ TEST(DomainModelLanguageTest, ParsesEntityModel) {
       pegium::test::make_file_uri("language.dmodel"), "domain-model");
 
   ASSERT_TRUE(document->parseSucceeded());
-  auto *model = dynamic_cast<ast::DomainModel *>(document->parseResult.value.get());
+  auto *model = dynamic_cast<ast::DomainModel *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
   ASSERT_EQ(model->elements.size(), 1u);
 }
@@ -41,15 +41,15 @@ TEST(DomainModelLanguageTest, ResolvesTypeReferenceToEntitySubtype) {
   ASSERT_TRUE(document->parseSucceeded());
 
   auto *model =
-      dynamic_cast<ast::DomainModel *>(document->parseResult.value.get());
+      dynamic_cast<ast::DomainModel *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
   ASSERT_EQ(model->elements.size(), 2u);
 
-  auto *blog = dynamic_cast<ast::Entity *>(model->elements[1].get());
+  auto *blog = dynamic_cast<ast::Entity *>(model->elements[1]);
   ASSERT_NE(blog, nullptr);
   ASSERT_EQ(blog->features.size(), 1u);
   ASSERT_NE(blog->features.front(), nullptr);
-  ASSERT_NE(blog->features.front()->type.get(), nullptr);
+  ASSERT_TRUE(blog->features.front()->type);
   const auto *person =
       dynamic_cast<const ast::Entity *>(blog->features.front()->type.get());
   ASSERT_NE(person, nullptr);
@@ -77,12 +77,12 @@ TEST(DomainModelLanguageTest,
   EXPECT_FALSE(pegium::test::has_parse_diagnostic_kind(
       parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete));
 
-  auto *model = dynamic_cast<ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr);
   ASSERT_EQ(model->elements.size(), 2u);
 
-  auto *post = dynamic_cast<ast::Entity *>(model->elements[0].get());
-  auto *comment = dynamic_cast<ast::Entity *>(model->elements[1].get());
+  auto *post = dynamic_cast<ast::Entity *>(model->elements[0]);
+  auto *comment = dynamic_cast<ast::Entity *>(model->elements[1]);
   ASSERT_NE(post, nullptr);
   ASSERT_NE(comment, nullptr);
   EXPECT_EQ(post->name, "Post");

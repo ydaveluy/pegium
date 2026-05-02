@@ -42,7 +42,7 @@ TEST(RequirementsLanguageTest, ParsesRequirementModel) {
 
   ASSERT_TRUE(document->parseSucceeded());
   auto *model =
-      dynamic_cast<ast::RequirementModel *>(document->parseResult.value.get());
+      dynamic_cast<ast::RequirementModel *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
   ASSERT_EQ(model->requirements.size(), 1u);
 }
@@ -64,14 +64,14 @@ TEST(RequirementsLanguageTest, LinksEnvironmentMultiReferencesAndReportsUnresolv
   const auto &parsed = document->parseResult;
   const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
   auto *model =
-      dynamic_cast<ast::RequirementModel *>(parsed.value.get());
+      dynamic_cast<ast::RequirementModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << "fullMatch=" << parsed.fullMatch
                             << " recovered=" << parsed.recoveryReport.hasRecovered
                             << " parsedLength=" << parsed.parsedLength << " "
                             << parseDump;
   ASSERT_EQ(model->requirements.size(), 1u);
 
-  auto *requirement = model->requirements.front().get();
+  auto *requirement = model->requirements.front();
   ASSERT_NE(requirement, nullptr);
   ASSERT_EQ(requirement->environments.size(), 3u);
 

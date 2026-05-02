@@ -313,7 +313,7 @@ bool DefaultDocumentBuilder::resultsAreIncomplete(
 bool DefaultDocumentBuilder::shouldRelink(
     const Document &document,
     const std::unordered_set<DocumentId> &changedDocumentIds) const {
-  if (std::ranges::any_of(document.references,
+  if (std::ranges::any_of(document.parseResult.references,
                           [](const ReferenceHandle &handle) {
                             return handle.getConst()->hasError();
                           })) {

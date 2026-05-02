@@ -24,7 +24,7 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
   const auto &parsed = document.parseResult;
   const auto parseDump =
       pegium::test::dump_parse_diagnostics(parsed.parseDiagnostics);
-  auto *model = dynamic_cast<const ast::Statemachine *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::Statemachine *>(parsed.value);
   ASSERT_NE(model, nullptr) << sample.label << " :: " << parseDump;
 
   if (sample.label == "missing_arrow_character.statemachine") {
@@ -38,10 +38,10 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->states.size(), 1u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_states(*model);
-    auto *idle = model->states.front().get();
+    auto *idle = model->states.front();
     ASSERT_NE(idle, nullptr);
     ASSERT_EQ(idle->transitions.size(), 1u);
-    auto *transition = idle->transitions.front().get();
+    auto *transition = idle->transitions.front();
     ASSERT_NE(transition, nullptr);
     EXPECT_EQ(transition->event.getRefText(), "Start");
     EXPECT_EQ(transition->state.getRefText(), "Idle");
@@ -53,7 +53,7 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
         << sample.label << " :: " << parseDump << " :: "
         << summarize_states(*model);
     ASSERT_EQ(model->states.size(), 1u);
-    auto *idle = model->states.front().get();
+    auto *idle = model->states.front();
     ASSERT_NE(idle, nullptr);
     EXPECT_EQ(idle->name, "Idle");
     return;
@@ -63,7 +63,7 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->states.size(), 1u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_states(*model);
-    auto *idle = model->states.front().get();
+    auto *idle = model->states.front();
     ASSERT_NE(idle, nullptr);
     EXPECT_EQ(idle->name, "Idle");
     return;
@@ -73,7 +73,7 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->states.size(), 1u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_states(*model);
-    auto *idle = model->states.front().get();
+    auto *idle = model->states.front();
     ASSERT_NE(idle, nullptr);
     EXPECT_EQ(idle->name, "Idle");
     ASSERT_EQ(idle->transitions.size(), 1u);
@@ -96,12 +96,12 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->states.size(), 2u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_states(*model);
-    auto *idle = model->states.front().get();
+    auto *idle = model->states.front();
     ASSERT_NE(idle, nullptr);
     EXPECT_EQ(idle->name, "Idle");
     EXPECT_GE(idle->transitions.size(), 1u);
     EXPECT_NE(idle->transitions.front(), nullptr);
-    auto *running = model->states.back().get();
+    auto *running = model->states.back();
     ASSERT_NE(running, nullptr);
     EXPECT_EQ(running->name, "Running");
   }

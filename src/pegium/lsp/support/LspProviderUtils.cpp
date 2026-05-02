@@ -237,7 +237,7 @@ std::optional<LocationData> resolve_reference_target_location(
   const AbstractReference *selectedReference = nullptr;
   TextOffset selectedWidth = std::numeric_limits<TextOffset>::max();
 
-  for (const auto &handle : document.references) {
+  for (const auto &handle : document.parseResult.references) {
     const auto &reference = *handle.getConst();
     const auto refNode = reference.getRefNode();
     if (!refNode.valid()) {

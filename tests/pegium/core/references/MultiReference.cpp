@@ -94,7 +94,7 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsInSameDocument) {
       "hello Alice\n");
 
   ASSERT_NE(document, nullptr);
-  auto *model = dynamic_cast<Model *>(document->parseResult.value.get());
+  auto *model = dynamic_cast<Model *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
   ASSERT_EQ(model->persons.size(), 3u);
   ASSERT_EQ(model->greetings.size(), 1u);
@@ -153,7 +153,7 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsAcrossDocuments) {
       "hello Alice\n");
   ASSERT_NE(secondDocument, nullptr);
 
-  auto *model = dynamic_cast<Model *>(secondDocument->parseResult.value.get());
+  auto *model = dynamic_cast<Model *>(secondDocument->parseResult.value);
   ASSERT_NE(model, nullptr);
   const auto &reference = model->greetings.front()->person;
   ASSERT_EQ(reference.size(), 3u);
@@ -187,7 +187,7 @@ TEST(MultiReferenceTest, IndexesOneLogicalReferenceAgainstEachResolvedTarget) {
       "hello Alice\n");
   ASSERT_NE(document, nullptr);
 
-  auto *model = dynamic_cast<Model *>(document->parseResult.value.get());
+  auto *model = dynamic_cast<Model *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
 
   const auto firstAliceKey = workspace::NodeKey{
@@ -220,7 +220,7 @@ TEST(MultiReferenceTest,
       "hello Alice\n");
   ASSERT_NE(document, nullptr);
 
-  auto *model = dynamic_cast<Model *>(document->parseResult.value.get());
+  auto *model = dynamic_cast<Model *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
 
   const auto &services = shared->serviceRegistry->getServices(document->uri);
@@ -251,7 +251,7 @@ TEST(MultiReferenceTest, ReportsUnresolvedReferenceWhenNoCandidateMatches) {
       "hello Alice\n");
 
   ASSERT_NE(document, nullptr);
-  auto *model = dynamic_cast<Model *>(document->parseResult.value.get());
+  auto *model = dynamic_cast<Model *>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
   ASSERT_EQ(model->greetings.size(), 1u);
 

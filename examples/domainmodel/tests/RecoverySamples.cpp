@@ -15,21 +15,21 @@ std::string summarize_elements(const ast::DomainModel &model) {
     if (!summary.empty()) {
       summary += " | ";
     }
-    if (const auto *entity = dynamic_cast<const ast::Entity *>(element.get());
+    if (const auto *entity = dynamic_cast<const ast::Entity *>(element);
         entity != nullptr) {
       summary += "entity:";
       summary += entity->name;
       continue;
     }
     if (const auto *dataType =
-            dynamic_cast<const ast::DataType *>(element.get());
+            dynamic_cast<const ast::DataType *>(element);
         dataType != nullptr) {
       summary += "datatype:";
       summary += dataType->name;
       continue;
     }
     if (const auto *package =
-            dynamic_cast<const ast::PackageDeclaration *>(element.get());
+            dynamic_cast<const ast::PackageDeclaration *>(element);
         package != nullptr) {
       summary += "package:";
       summary += package->name;
@@ -45,7 +45,7 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
   const auto &parsed = document.parseResult;
   const auto parseDump =
       pegium::test::dump_parse_diagnostics(parsed.parseDiagnostics);
-  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << sample.label << " :: " << parseDump;
 
   if (sample.label == "duplicate_feature_colon.dmodel") {
@@ -59,7 +59,7 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->elements.size(), 1u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_elements(*model);
-    auto *blog = dynamic_cast<ast::Entity *>(model->elements.front().get());
+    auto *blog = dynamic_cast<ast::Entity *>(model->elements.front());
     ASSERT_NE(blog, nullptr)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_elements(*model);
@@ -71,7 +71,7 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->elements.size(), 2u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_elements(*model);
-    auto *post = dynamic_cast<ast::Entity *>(model->elements[1].get());
+    auto *post = dynamic_cast<ast::Entity *>(model->elements[1]);
     ASSERT_NE(post, nullptr);
     EXPECT_EQ(post->name, "Post");
     ASSERT_TRUE(post->superType.has_value());
@@ -83,8 +83,8 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->elements.size(), 2u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_elements(*model);
-    auto *blog = dynamic_cast<ast::Entity *>(model->elements[0].get());
-    auto *comment = dynamic_cast<ast::Entity *>(model->elements[1].get());
+    auto *blog = dynamic_cast<ast::Entity *>(model->elements[0]);
+    auto *comment = dynamic_cast<ast::Entity *>(model->elements[1]);
     ASSERT_NE(blog, nullptr);
     ASSERT_NE(comment, nullptr);
     EXPECT_EQ(blog->name, "Blog");
@@ -101,8 +101,8 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->elements.size(), 2u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_elements(*model);
-    auto *post = dynamic_cast<ast::Entity *>(model->elements[0].get());
-    auto *comment = dynamic_cast<ast::Entity *>(model->elements[1].get());
+    auto *post = dynamic_cast<ast::Entity *>(model->elements[0]);
+    auto *comment = dynamic_cast<ast::Entity *>(model->elements[1]);
     ASSERT_NE(post, nullptr);
     ASSERT_NE(comment, nullptr);
     EXPECT_EQ(post->name, "Post");
@@ -119,7 +119,7 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->elements.size(), 1u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_elements(*model);
-    auto *blog = dynamic_cast<ast::Entity *>(model->elements.front().get());
+    auto *blog = dynamic_cast<ast::Entity *>(model->elements.front());
     ASSERT_NE(blog, nullptr)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_elements(*model);
@@ -135,7 +135,7 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->elements.size(), 1u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_elements(*model);
-    auto *blog = dynamic_cast<ast::Entity *>(model->elements.front().get());
+    auto *blog = dynamic_cast<ast::Entity *>(model->elements.front());
     ASSERT_NE(blog, nullptr);
     EXPECT_EQ(blog->name, "Blog");
     ASSERT_EQ(blog->features.size(), 1u);
@@ -158,9 +158,9 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
     ASSERT_EQ(model->elements.size(), 3u)
         << sample.label << " :: " << parseDump << " :: "
         << summarize_elements(*model);
-    auto *blog = dynamic_cast<ast::Entity *>(model->elements[0].get());
-    auto *hasAuthor = dynamic_cast<ast::Entity *>(model->elements[1].get());
-    auto *post = dynamic_cast<ast::Entity *>(model->elements[2].get());
+    auto *blog = dynamic_cast<ast::Entity *>(model->elements[0]);
+    auto *hasAuthor = dynamic_cast<ast::Entity *>(model->elements[1]);
+    auto *post = dynamic_cast<ast::Entity *>(model->elements[2]);
     ASSERT_NE(blog, nullptr);
     ASSERT_NE(hasAuthor, nullptr);
     ASSERT_NE(post, nullptr);
@@ -177,12 +177,12 @@ void validate_sample(const pegium::test::NamedSampleFile &sample,
         << sample.label << " :: " << parseDump << " :: "
         << summarize_elements(*model);
     if (auto *blog =
-            dynamic_cast<ast::Entity *>(model->elements.front().get())) {
+            dynamic_cast<ast::Entity *>(model->elements.front())) {
       EXPECT_EQ(blog->name, "Blog");
       return;
     }
     auto *pkg =
-        dynamic_cast<ast::PackageDeclaration *>(model->elements.front().get());
+        dynamic_cast<ast::PackageDeclaration *>(model->elements.front());
     ASSERT_NE(pkg, nullptr) << sample.label << " :: " << parseDump << " :: "
                             << summarize_elements(*model);
     EXPECT_EQ(pkg->name, "Blog");
@@ -271,15 +271,15 @@ TEST(DomainModelRecoveryRegressionTest,
       parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete))
       << parseDump;
 
-  auto *model = dynamic_cast<ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << parseDump;
   ASSERT_EQ(model->elements.size(), 4u)
       << parseDump << " :: " << summarize_elements(*model);
 
-  auto *blog = dynamic_cast<ast::Entity *>(model->elements[0].get());
-  auto *hasAuthor = dynamic_cast<ast::Entity *>(model->elements[1].get());
-  auto *post = dynamic_cast<ast::Entity *>(model->elements[2].get());
-  auto *comment = dynamic_cast<ast::Entity *>(model->elements[3].get());
+  auto *blog = dynamic_cast<ast::Entity *>(model->elements[0]);
+  auto *hasAuthor = dynamic_cast<ast::Entity *>(model->elements[1]);
+  auto *post = dynamic_cast<ast::Entity *>(model->elements[2]);
+  auto *comment = dynamic_cast<ast::Entity *>(model->elements[3]);
   ASSERT_NE(blog, nullptr);
   ASSERT_NE(hasAuthor, nullptr);
   ASSERT_NE(post, nullptr);
@@ -340,16 +340,16 @@ TEST(DomainModelRecoveryRegressionTest,
       parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete))
       << parseDump;
 
-  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << parseDump;
   ASSERT_EQ(model->elements.size(), 1u)
       << parseDump << "\n" << summarize_elements(*model);
-  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0].get());
+  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0]);
   ASSERT_NE(pkg, nullptr);
   ASSERT_EQ(pkg->elements.size(), 6u);
-  auto *person = dynamic_cast<ast::Entity *>(pkg->elements[2].get());
-  auto *author = dynamic_cast<ast::Entity *>(pkg->elements[3].get());
-  auto *post = dynamic_cast<ast::Entity *>(pkg->elements[4].get());
+  auto *person = dynamic_cast<ast::Entity *>(pkg->elements[2]);
+  auto *author = dynamic_cast<ast::Entity *>(pkg->elements[3]);
+  auto *post = dynamic_cast<ast::Entity *>(pkg->elements[4]);
   ASSERT_NE(person, nullptr);
   ASSERT_NE(author, nullptr);
   ASSERT_NE(post, nullptr);
@@ -407,14 +407,14 @@ TEST(DomainModelRecoveryRegressionTest,
       parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete))
       << parseDump;
 
-  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << parseDump;
   ASSERT_EQ(model->elements.size(), 1u)
       << parseDump << "\n" << summarize_elements(*model);
-  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0].get());
+  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0]);
   ASSERT_NE(pkg, nullptr);
   ASSERT_EQ(pkg->elements.size(), 6u);
-  auto *author = dynamic_cast<ast::Entity *>(pkg->elements[3].get());
+  auto *author = dynamic_cast<ast::Entity *>(pkg->elements[3]);
   ASSERT_NE(author, nullptr);
   EXPECT_EQ(author->name, "Author");
   ASSERT_EQ(author->features.size(), 1u);
@@ -464,14 +464,14 @@ TEST(DomainModelRecoveryRegressionTest,
       parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete))
       << parseDump;
 
-  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << parseDump;
   ASSERT_EQ(model->elements.size(), 1u)
       << parseDump << "\n" << summarize_elements(*model);
-  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0].get());
+  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0]);
   ASSERT_NE(pkg, nullptr);
   ASSERT_GE(pkg->elements.size(), 4u);
-  auto *person = dynamic_cast<ast::Entity *>(pkg->elements[2].get());
+  auto *person = dynamic_cast<ast::Entity *>(pkg->elements[2]);
   ASSERT_NE(person, nullptr);
   EXPECT_EQ(person->name, "Person");
   ASSERT_EQ(person->features.size(), 2u);
@@ -521,15 +521,15 @@ TEST(DomainModelRecoveryRegressionTest,
       parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete))
       << parseDump;
 
-  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << parseDump;
   ASSERT_EQ(model->elements.size(), 1u)
       << parseDump << "\n" << summarize_elements(*model);
-  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0].get());
+  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0]);
   ASSERT_NE(pkg, nullptr);
   ASSERT_GE(pkg->elements.size(), 4u);
-  auto *person = dynamic_cast<ast::Entity *>(pkg->elements[2].get());
-  auto *author = dynamic_cast<ast::Entity *>(pkg->elements[3].get());
+  auto *person = dynamic_cast<ast::Entity *>(pkg->elements[2]);
+  auto *author = dynamic_cast<ast::Entity *>(pkg->elements[3]);
   ASSERT_NE(person, nullptr);
   ASSERT_NE(author, nullptr);
   EXPECT_EQ(person->name, "Person");
@@ -579,14 +579,14 @@ TEST(DomainModelRecoveryRegressionTest,
       parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete))
       << parseDump;
 
-  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << parseDump;
   ASSERT_EQ(model->elements.size(), 1u)
       << parseDump << "\n" << summarize_elements(*model);
-  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0].get());
+  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0]);
   ASSERT_NE(pkg, nullptr);
   ASSERT_GE(pkg->elements.size(), 5u);
-  auto *post = dynamic_cast<ast::Entity *>(pkg->elements[4].get());
+  auto *post = dynamic_cast<ast::Entity *>(pkg->elements[4]);
   ASSERT_NE(post, nullptr);
   ASSERT_EQ(post->features.size(), 3u);
   ASSERT_NE(post->features[2], nullptr);
@@ -636,15 +636,15 @@ TEST(DomainModelRecoveryRegressionTest,
       parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete))
       << parseDump;
 
-  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << parseDump;
   ASSERT_EQ(model->elements.size(), 1u) << summarize_elements(*model);
-  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0].get());
+  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0]);
   ASSERT_NE(pkg, nullptr);
   ASSERT_EQ(pkg->elements.size(), 6u);
-  auto *person = dynamic_cast<ast::Entity *>(pkg->elements[2].get());
-  auto *author = dynamic_cast<ast::Entity *>(pkg->elements[3].get());
-  auto *post = dynamic_cast<ast::Entity *>(pkg->elements[4].get());
+  auto *person = dynamic_cast<ast::Entity *>(pkg->elements[2]);
+  auto *author = dynamic_cast<ast::Entity *>(pkg->elements[3]);
+  auto *post = dynamic_cast<ast::Entity *>(pkg->elements[4]);
   ASSERT_NE(person, nullptr);
   ASSERT_NE(author, nullptr);
   ASSERT_NE(post, nullptr);
@@ -784,15 +784,15 @@ TEST(DomainModelRecoveryRegressionTest,
   EXPECT_FALSE(pegium::test::has_parse_diagnostic_kind(
       parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete))
       << parseDump;
-  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << parseDump;
   ASSERT_EQ(model->elements.size(), 1u) << summarize_elements(*model);
-  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0].get());
+  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0]);
   ASSERT_NE(pkg, nullptr);
   ASSERT_EQ(pkg->elements.size(), 6u);
-  auto *person = dynamic_cast<ast::Entity *>(pkg->elements[2].get());
-  auto *author = dynamic_cast<ast::Entity *>(pkg->elements[3].get());
-  auto *post = dynamic_cast<ast::Entity *>(pkg->elements[4].get());
+  auto *person = dynamic_cast<ast::Entity *>(pkg->elements[2]);
+  auto *author = dynamic_cast<ast::Entity *>(pkg->elements[3]);
+  auto *post = dynamic_cast<ast::Entity *>(pkg->elements[4]);
   ASSERT_NE(person, nullptr);
   ASSERT_NE(author, nullptr);
   ASSERT_NE(post, nullptr);
@@ -846,14 +846,14 @@ TEST(DomainModelRecoveryRegressionTest,
   EXPECT_FALSE(pegium::test::has_parse_diagnostic_kind(
       parsed.parseDiagnostics, pegium::parser::ParseDiagnosticKind::Incomplete))
       << parseDump;
-  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value.get());
+  auto *model = dynamic_cast<const ast::DomainModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << parseDump;
   ASSERT_EQ(model->elements.size(), 1u)
       << parseDump << "\n" << summarize_elements(*model);
-  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0].get());
+  auto *pkg = dynamic_cast<ast::PackageDeclaration *>(model->elements[0]);
   ASSERT_NE(pkg, nullptr);
   ASSERT_EQ(pkg->elements.size(), 6u);
-  auto *post = dynamic_cast<ast::Entity *>(pkg->elements[4].get());
+  auto *post = dynamic_cast<ast::Entity *>(pkg->elements[4]);
   ASSERT_NE(post, nullptr);
   ASSERT_EQ(post->features.size(), 3u);
   EXPECT_EQ(post->features[1]->type.getRefText(), "Author");
