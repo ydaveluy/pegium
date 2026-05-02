@@ -251,31 +251,6 @@ TEST(DefaultServiceRegistryTest,
             "calc");
 }
 
-TEST(DefaultServiceRegistryTest, InstallsAstNodeLocatorByDefault) {
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  auto services = test::make_uninstalled_core_services(*shared, "calc", {".calc"});
-  pegium::installDefaultCoreServices(*services);
-
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->workspace.astNodeLocator, nullptr);
-  EXPECT_TRUE(services->isComplete());
-}
-
-TEST(DefaultServiceRegistryTest, RequiresAstNodeLocatorForRegistration) {
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  auto services = test::make_uninstalled_core_services(*shared, "calc", {".calc"});
-  pegium::installDefaultCoreServices(*services);
-
-  ASSERT_NE(services, nullptr);
-  services->workspace.astNodeLocator.reset();
-
-  EXPECT_FALSE(services->isComplete());
-  EXPECT_THROW(shared->serviceRegistry->registerServices(std::move(services)),
-               std::invalid_argument);
-}
-
 TEST(DefaultServiceRegistryTest, BootstrapsAstReflectionFromParserGrammar) {
   auto shared = test::make_empty_shared_core_services();
   pegium::installDefaultSharedCoreServices(*shared);

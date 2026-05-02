@@ -128,7 +128,6 @@ ParseResult PegiumParser::parse(text::TextSnapshot text,
       const ValueBuildContext context{
           .references = &result.references,
           .linker = services.references.linker.get(),
-          .property = {},
           .diagnostics = &result.parseDiagnostics,
       };
       result.value = entryRule.getValue(*matchedNode, context);

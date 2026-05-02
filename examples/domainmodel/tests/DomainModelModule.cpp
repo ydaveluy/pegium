@@ -196,9 +196,7 @@ TEST(DomainModelModuleTest, InstallsLanguageSpecificOverrides) {
   parent.name = "blog";
   domainmodel::ast::PackageDeclaration child;
   child.name = "internal";
-  child.setContainer<domainmodel::ast::PackageDeclaration,
-                     &domainmodel::ast::PackageDeclaration::elements>(parent,
-                                                                        0);
+  child.setContainer(parent);
   EXPECT_EQ(qualifiedNames.getQualifiedName(child, "Author"), "blog.internal.Author");
 }
 

@@ -2,7 +2,7 @@
 
 #include <cassert>
 #include <limits>
-#include <stdexcept>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_set>
@@ -14,42 +14,13 @@
 #include <pegium/core/syntax-tree/AstUtils.hpp>
 #include <pegium/core/syntax-tree/Reference.hpp>
 #include <pegium/core/utils/TransparentStringHash.hpp>
-#include <pegium/core/workspace/DefaultAstNodeLocator.hpp>
 #include <pegium/core/workspace/Document.hpp>
+#include <pegium/core/workspace/Symbol.hpp>
 
 namespace pegium::converter {
 namespace {
 
 using FeatureAssignments = std::vector<const grammar::Assignment *>;
-
-const AstNode *root_node(const AstNode &node) {
-  auto *current = &node;
-  while (current->getContainer() != nullptr) {
-    current = current->getContainer();
-  }
-  return current;
-}
-
-bool belongs_to_root(const AstNode &node, const AstNode &root) {
-  return root_node(node) == &root;
-}
-
-const workspace::AstNodeLocator &ast_node_locator() {
-  static const workspace::DefaultAstNodeLocator locator;
-  return locator;
-}
-
-std::string build_ast_path(const AstNode &node, const AstNode &root) {
-  if (!belongs_to_root(node, root)) {
-    return {};
-  }
-
-  try {
-    return "#" + ast_node_locator().getAstNodePath(node);
-  } catch (const std::invalid_argument &) {
-    return {};
-  }
-}
 
 void collect_child_ast_root_ids(const AstNode &node,
                                 std::unordered_set<NodeId> &ids) {
@@ -89,6 +60,18 @@ void collect_feature_assignments(const CstNodeView &node,
   }
 }
 
+// Builds the JSON `$ref` value pointing to a node within the same document.
+// Cross-document references are intentionally skipped.
+[[nodiscard]] std::optional<std::string>
+build_local_ref(const workspace::AstNodeDescription &description,
+                const workspace::Document *document) {
+  if (document == nullptr || description.documentId != document->id ||
+      description.symbolId == workspace::InvalidSymbolId) {
+    return std::nullopt;
+  }
+  return "#" + std::to_string(description.symbolId);
+}
+
 pegium::JsonValue convert_rule_value(const grammar::RuleValue &value) {
   return std::visit(
       []<typename T>(const T &item) {
@@ -121,14 +104,14 @@ pegium::JsonValue convert_rule_value(const grammar::RuleValue &value) {
 }
 
 pegium::JsonValue
-convert_feature_value(const grammar::FeatureValue &value, const AstNode &root,
+convert_feature_value(const grammar::FeatureValue &value,
+                      const workspace::Document *document,
                       const AstJsonConversionOptions &options);
 
 pegium::JsonValue convert_reference(const AbstractReference &reference,
-                                      const AstNode &root,
-                                      const AstJsonConversionOptions &options) {
+                                    const workspace::Document *document,
+                                    const AstJsonConversionOptions &options) {
   pegium::JsonValue::Object object;
-  const auto *document = tryGetDocument(root);
   const bool canResolve =
       document == nullptr ||
       document->state >= workspace::DocumentState::ComputedScopes;
@@ -137,32 +120,27 @@ pegium::JsonValue convert_reference(const AbstractReference &reference,
     object.try_emplace("$refText", reference.getRefText());
   }
 
-  pegium::JsonValue::Array refs;
   if (reference.isMultiReference()) {
+    pegium::JsonValue::Array refs;
     const auto *multi = static_cast<const AbstractMultiReference *>(&reference);
     if (reference.isResolved() || canResolve) {
       const auto count = multi->resolvedDescriptionCount();
       refs.reserve(count);
       for (std::size_t index = 0; index < count; ++index) {
         const auto &description = multi->resolvedDescriptionAt(index);
-        if (document == nullptr || description.documentId != document->id) {
-          continue;
-        }
-        const auto &target = document->getAstNode(description.symbolId);
-        const auto path = build_ast_path(target, root);
-        if (!path.empty()) {
-          refs.emplace_back(path);
+        if (auto ref = build_local_ref(description, document); ref) {
+          refs.emplace_back(std::move(*ref));
         }
       }
     }
     object.try_emplace("$refs", std::move(refs));
   } else if (reference.isResolved() || canResolve) {
-    if (const auto *target =
-            static_cast<const AbstractSingleReference &>(reference).resolve();
-        target != nullptr) {
-      const auto path = build_ast_path(*target, root);
-      if (!path.empty()) {
-        object.try_emplace("$ref", std::move(path));
+    const auto &single =
+        static_cast<const AbstractSingleReference &>(reference);
+    if (single.resolve() != nullptr) {
+      if (auto ref = build_local_ref(single.resolvedDescription(), document);
+          ref) {
+        object.try_emplace("$ref", std::move(*ref));
       }
     }
   }
@@ -176,7 +154,8 @@ pegium::JsonValue convert_reference(const AbstractReference &reference,
 }
 
 pegium::JsonValue
-convert_feature_value(const grammar::FeatureValue &value, const AstNode &root,
+convert_feature_value(const grammar::FeatureValue &value,
+                      const workspace::Document *document,
                       const AstJsonConversionOptions &options) {
   if (value.isRuleValue()) {
     return convert_rule_value(value.ruleValue());
@@ -188,13 +167,14 @@ convert_feature_value(const grammar::FeatureValue &value, const AstNode &root,
   }
   if (value.isReference()) {
     const auto *reference = value.reference().value;
-    return reference == nullptr ? pegium::JsonValue(nullptr)
-                                : convert_reference(*reference, root, options);
+    return reference == nullptr
+               ? pegium::JsonValue(nullptr)
+               : convert_reference(*reference, document, options);
   }
 
   pegium::JsonValue::Array array;
   for (const auto &item : value.array()) {
-    array.emplace_back(convert_feature_value(item, root, options));
+    array.emplace_back(convert_feature_value(item, document, options));
   }
   return pegium::JsonValue(std::move(array));
 }
@@ -224,7 +204,7 @@ pegium::JsonValue AstJsonConverter::convert(const AstNode &node,
   }
 
   utils::TransparentStringSet seenFeatures;
-  const auto *root = root_node(node);
+  const auto *document = tryGetDocument(node);
   for (const auto *assignment : assignments) {
     const auto feature = std::string(assignment->getFeature());
     if (!seenFeatures.insert(feature).second) {
@@ -232,7 +212,7 @@ pegium::JsonValue AstJsonConverter::convert(const AstNode &node,
     }
     object.try_emplace(
         feature,
-        convert_feature_value(assignment->getValue(&node), *root, options));
+        convert_feature_value(assignment->getValue(&node), document, options));
   }
 
   return pegium::JsonValue(std::move(object));

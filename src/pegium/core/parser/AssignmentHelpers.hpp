@@ -73,13 +73,13 @@ inline void register_handle(const ValueBuildContext &context,
 
 template <typename T, typename Ref, typename Node>
 void initialize_reference(Ref &reference, Node &node, std::string refText,
-                          std::optional<CstNodeView> refNode,
+                          CstNodeView refNode,
                           const ValueBuildContext &context) {
   assert(context.linker != nullptr);
   assert(context.assignment != nullptr);
   assert(context.assignment->isReference());
   assert(context.assignment->getType() == std::type_index(typeid(T)));
-  reference.initialize(node, std::move(refText), std::move(refNode),
+  reference.initialize(node, std::move(refText), refNode,
                        *context.assignment, *context.linker);
 }
 
@@ -110,10 +110,11 @@ make_reference_text(const MultiReference<T> &reference) {
 
 template <typename T, typename Ref, typename Node, typename U>
 void initialize_reference_from_value(Ref &reference, Node &node, U &&value,
-                                     std::optional<CstNodeView> refNode,
+                                     CstNodeView refNode,
                                      const ValueBuildContext &context) {
-  initialize_reference<T>(reference, node, make_reference_text(std::forward<U>(value)),
-                          std::move(refNode), context);
+  initialize_reference<T>(reference, node,
+                          make_reference_text(std::forward<U>(value)), refNode,
+                          context);
 }
 
 // Generic
@@ -121,7 +122,7 @@ template <typename T> struct AssignmentHelper {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, T Base::*member, U &&value,
-                  const ValueBuildContext &context) const {
+                  const ValueBuildContext & /*context*/) const {
 
     if constexpr (std::is_convertible_v<U, T>) {
       node->*member = std::forward<U>(value);
@@ -132,7 +133,7 @@ template <typename T> struct AssignmentHelper {
     }
     // set the container
     if constexpr (std::derived_from<T, AstNode>) {
-      (node->*member).attachToContainer(*node, context.property);
+      (node->*member).setContainer(*node);
     }
   }
 };
@@ -141,18 +142,8 @@ template <typename T> struct AssignmentHelper<Reference<T>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, Reference<T> Base::*member, U &&value,
-                  const ValueBuildContext &context) const {
-    initialize_reference_from_value<T>(node->*member, *node,
-                                       std::forward<U>(value), std::nullopt,
-                                       context);
-    helpers::register_handle(context, ReferenceHandle::direct(&(node->*member)));
-  }
-
-  template <typename Node, typename Base, typename U>
-    requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
-  void operator()(Node *node, Reference<T> Base::*member, U &&value,
-                  const CstNodeView &sourceNode,
-                  const ValueBuildContext &context) const {
+                  const ValueBuildContext &context,
+                  CstNodeView sourceNode = {}) const {
     initialize_reference_from_value<T>(node->*member, *node,
                                        std::forward<U>(value), sourceNode,
                                        context);
@@ -164,44 +155,21 @@ template <typename T> struct AssignmentHelper<MultiReference<T>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, MultiReference<T> Base::*member, U &&value,
-                  const ValueBuildContext &context) const {
-    initialize_reference_from_value<T>(node->*member, *node,
-                                       std::forward<U>(value), std::nullopt,
-                                       context);
-    helpers::register_handle(context, ReferenceHandle::direct(&(node->*member)));
-  }
-
-  template <typename Node, typename Base, typename U>
-    requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
-  void operator()(Node *node, MultiReference<T> Base::*member, U &&value,
-                  const CstNodeView &sourceNode,
-                  const ValueBuildContext &context) const {
+                  const ValueBuildContext &context,
+                  CstNodeView sourceNode = {}) const {
     initialize_reference_from_value<T>(node->*member, *node,
                                        std::forward<U>(value), sourceNode,
                                        context);
     helpers::register_handle(context, ReferenceHandle::direct(&(node->*member)));
   }
 };
+
 template <typename T> struct AssignmentHelper<std::vector<Reference<T>>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, std::vector<Reference<T>> Base::*member,
-                  U &&value, const ValueBuildContext &context) const {
-    auto &referencesVector = node->*member;
-    referencesVector.emplace_back();
-    const auto index = referencesVector.size() - 1;
-    initialize_reference_from_value<T>(referencesVector.back(), *node,
-                                       std::forward<U>(value), std::nullopt,
-                                       context);
-    helpers::register_handle(context,
-                             ReferenceHandle::indexed(&referencesVector, index));
-  }
-
-  template <typename Node, typename Base, typename U>
-    requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
-  void operator()(Node *node, std::vector<Reference<T>> Base::*member,
-                  U &&value, const CstNodeView &sourceNode,
-                  const ValueBuildContext &context) const {
+                  U &&value, const ValueBuildContext &context,
+                  CstNodeView sourceNode = {}) const {
     auto &referencesVector = node->*member;
     referencesVector.emplace_back();
     const auto index = referencesVector.size() - 1;
@@ -218,27 +186,17 @@ struct AssignmentHelper<std::optional<Reference<T>>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, std::optional<Reference<T>> Base::*member,
-                  U &&value, const ValueBuildContext &context) const {
+                  U &&value, const ValueBuildContext &context,
+                  CstNodeView sourceNode = {}) const {
     auto &target = node->*member;
     target.emplace();
+    // When no source node is provided and the value is itself a Reference,
+    // inherit the source node from the value.
     if constexpr (std::same_as<std::remove_cvref_t<U>, Reference<T>>) {
-      const auto refNode = value.getRefNode();
-      initialize_reference_from_value<T>(*target, *node, std::forward<U>(value),
-                                         refNode, context);
-    } else {
-      initialize_reference_from_value<T>(*target, *node, std::forward<U>(value),
-                                         std::nullopt, context);
+      if (!sourceNode.valid()) {
+        sourceNode = value.getRefNode();
+      }
     }
-    helpers::register_handle(context, ReferenceHandle::optional(&(node->*member)));
-  }
-
-  template <typename Node, typename Base, typename U>
-    requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
-  void operator()(Node *node, std::optional<Reference<T>> Base::*member,
-                  U &&value, const CstNodeView &sourceNode,
-                  const ValueBuildContext &context) const {
-    auto &target = node->*member;
-    target.emplace();
     initialize_reference_from_value<T>(*target, *node, std::forward<U>(value),
                                        sourceNode, context);
     helpers::register_handle(context, ReferenceHandle::optional(&(node->*member)));
@@ -250,27 +208,17 @@ struct AssignmentHelper<std::optional<MultiReference<T>>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, std::optional<MultiReference<T>> Base::*member,
-                  U &&value, const ValueBuildContext &context) const {
+                  U &&value, const ValueBuildContext &context,
+                  CstNodeView sourceNode = {}) const {
     auto &target = node->*member;
     target.emplace();
+    // When no source node is provided and the value is itself a MultiReference,
+    // inherit the source node from the value.
     if constexpr (std::same_as<std::remove_cvref_t<U>, MultiReference<T>>) {
-      const auto refNode = value.getRefNode();
-      initialize_reference_from_value<T>(*target, *node, std::forward<U>(value),
-                                         refNode, context);
-    } else {
-      initialize_reference_from_value<T>(*target, *node, std::forward<U>(value),
-                                         std::nullopt, context);
+      if (!sourceNode.valid()) {
+        sourceNode = value.getRefNode();
+      }
     }
-    helpers::register_handle(context, ReferenceHandle::optional(&(node->*member)));
-  }
-
-  template <typename Node, typename Base, typename U>
-    requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
-  void operator()(Node *node, std::optional<MultiReference<T>> Base::*member,
-                  U &&value, const CstNodeView &sourceNode,
-                  const ValueBuildContext &context) const {
-    auto &target = node->*member;
-    target.emplace();
     initialize_reference_from_value<T>(*target, *node, std::forward<U>(value),
                                        sourceNode, context);
     helpers::register_handle(context, ReferenceHandle::optional(&(node->*member)));
@@ -283,12 +231,12 @@ template <typename T> struct AssignmentHelper<std::unique_ptr<T>> {
              std::derived_from<Node, Base> && std::derived_from<U, T>
   void operator()(Node *node, std::unique_ptr<T> Base::*member,
                   std::unique_ptr<U> &&value,
-                  const ValueBuildContext &context) const {
+                  const ValueBuildContext & /*context*/) const {
     auto &target = node->*member;
     target = std::move(value);
     if constexpr (std::derived_from<T, AstNode>) {
       if (target) {
-        target->attachToContainer(*node, context.property);
+        target->setContainer(*node);
       }
     }
   }
@@ -296,11 +244,11 @@ template <typename T> struct AssignmentHelper<std::unique_ptr<T>> {
   template <typename Node, typename Base, typename U>
     requires std::derived_from<Node, AstNode> && std::derived_from<Node, Base>
   void operator()(Node *node, std::unique_ptr<T> Base::*member,
-                  U &&value, const ValueBuildContext &context) const {
+                  U &&value, const ValueBuildContext & /*context*/) const {
     auto &target = node->*member;
     target = std::make_unique<U>(std::forward<U>(value));
     if constexpr (std::derived_from<T, AstNode>) {
-      target->attachToContainer(*node, context.property);
+      target->setContainer(*node);
     }
   }
 };
@@ -329,10 +277,10 @@ template <typename T> struct AssignmentHelper<std::vector<std::unique_ptr<T>>> {
              std::derived_from<Node, Base> && std::derived_from<U, T>
   void operator()(Node *node, std::vector<std::unique_ptr<T>> Base::*member,
                   std::unique_ptr<U> &&value,
-                  const ValueBuildContext &context) const {
+                  const ValueBuildContext & /*context*/) const {
     auto &target = node->*member;
     if constexpr (std::derived_from<T, AstNode>) {
-      value->attachToContainer(*node, context.property, target.size());
+      value->setContainer(*node);
     }
     target.emplace_back(std::move(value));
   }
@@ -341,11 +289,11 @@ template <typename T> struct AssignmentHelper<std::vector<std::unique_ptr<T>>> {
     requires std::derived_from<Node, AstNode> &&
              std::derived_from<Node, Base> && std::derived_from<U, T>
   void operator()(Node *node, std::vector<std::unique_ptr<T>> Base::*member,
-                  U &&value, const ValueBuildContext &context) const {
+                  U &&value, const ValueBuildContext & /*context*/) const {
     auto &target = node->*member;
     auto ptr = std::make_unique<U>(std::forward<U>(value));
     if constexpr (std::derived_from<U, AstNode>) {
-      ptr->attachToContainer(*node, context.property, target.size());
+      ptr->setContainer(*node);
     }
     target.emplace_back(std::move(ptr));
   }

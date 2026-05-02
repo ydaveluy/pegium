@@ -136,15 +136,15 @@ TEST(DefaultReferenceDescriptionProviderTest,
   auto *targetPtr = target.get();
   targetPtr->setCstNode(cst->get(0));
   root->targets.push_back(std::move(target));
-  targetPtr->setContainer<RootNode, &RootNode::targets>(*root, 0);
+  targetPtr->setContainer(*root);
 
   auto ref = std::make_unique<RefNode>();
   auto *refPtr = ref.get();
   refPtr->setCstNode(cst->get(1));
   refPtr->target.initialize(
-      *refPtr, "alpha", std::nullopt, assignment, *linker);
+      *refPtr, "alpha", CstNodeView{}, assignment, *linker);
   root->refs.push_back(std::move(ref));
-  refPtr->setContainer<RootNode, &RootNode::refs>(*root, 0);
+  refPtr->setContainer(*root);
 
   root->setCstNode(cst->get(1));
   document->parseResult.value = std::move(root);

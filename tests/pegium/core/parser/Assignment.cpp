@@ -468,10 +468,10 @@ TEST(AssignmentTest, OptionalReferenceAndPointerAssignmentsAreHandled) {
   ASSERT_TRUE(resultValue != nullptr);
 
   const auto refOneNode = resultValue->refOne.getRefNode();
-  ASSERT_TRUE(refOneNode.has_value());
-  EXPECT_EQ(refOneNode->getText(), "ref");
-  EXPECT_EQ(refOneNode->getBegin(), 4u);
-  EXPECT_EQ(refOneNode->getEnd(), 7u);
+  ASSERT_TRUE(refOneNode.valid());
+  EXPECT_EQ(refOneNode.getText(), "ref");
+  EXPECT_EQ(refOneNode.getBegin(), 4u);
+  EXPECT_EQ(refOneNode.getEnd(), 7u);
 
   ASSERT_TRUE(resultValue->child != nullptr);
   EXPECT_EQ(resultValue->child->getContainer(), resultValue);
@@ -511,10 +511,10 @@ TEST(AssignmentTest, ReferenceAssignmentsCaptureSourceCstNode) {
   ASSERT_TRUE(resultValue != nullptr);
 
   const auto refNode = resultValue->refOne.getRefNode();
-  ASSERT_TRUE(refNode.has_value());
-  EXPECT_EQ(refNode->getText(), "ref");
-  EXPECT_EQ(refNode->getBegin(), 4u);
-  EXPECT_EQ(refNode->getEnd(), 7u);
+  ASSERT_TRUE(refNode.valid());
+  EXPECT_EQ(refNode.getText(), "ref");
+  EXPECT_EQ(refNode.getBegin(), 4u);
+  EXPECT_EQ(refNode.getEnd(), 7u);
 }
 
 TEST(AssignmentTest, OptionalReferenceAssignmentsAcceptDataTypeRules) {
@@ -686,7 +686,6 @@ TEST(AssignmentTest, OrderedChoiceSupportsVariantBoolAndAstNodeValues) {
         std::get<std::unique_ptr<StrictChildNode>>(resultValue->value);
     ASSERT_TRUE(child != nullptr);
     EXPECT_EQ(child->getContainer(), resultValue);
-    EXPECT_EQ(child->getContainerPropertyName(), "value");
   }
 }
 

@@ -100,9 +100,7 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsInSameDocument) {
   ASSERT_EQ(model->greetings.size(), 1u);
 
   const auto &services = shared->serviceRegistry->getServices(document->uri);
-  ASSERT_NE(services.workspace.astNodeLocator, nullptr);
   ASSERT_NE(services.workspace.referenceDescriptionProvider, nullptr);
-  const auto &locator = *services.workspace.astNodeLocator;
 
   const auto &reference = model->greetings.front()->person;
   EXPECT_EQ(reference.getRefText(), "Alice");
@@ -117,13 +115,13 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsInSameDocument) {
   EXPECT_EQ(reference[1]->name, "Alice");
   EXPECT_TRUE(reference);
 
-  std::unordered_set<std::string> targetPaths;
+  std::unordered_set<const Person *> uniqueTargets;
   for (const auto *target : reference) {
     ASSERT_NE(target, nullptr);
     EXPECT_EQ(target->name, "Alice");
-    targetPaths.insert(locator.getAstNodePath(*target));
+    uniqueTargets.insert(target);
   }
-  EXPECT_EQ(targetPaths.size(), 2u);
+  EXPECT_EQ(uniqueTargets.size(), 2u);
 
   const auto descriptions =
       services.workspace.referenceDescriptionProvider->createDescriptions(

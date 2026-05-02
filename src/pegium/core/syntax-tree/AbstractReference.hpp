@@ -182,12 +182,10 @@ public:
   [[nodiscard]] std::type_index getReferenceType() const noexcept;
   [[nodiscard]] std::string_view getFeature() const noexcept;
 
-  [[nodiscard]] std::optional<CstNodeView> getRefNode() const noexcept {
-    if (_refNode.valid()) {
-      return _refNode;
-    }
-    return std::nullopt;
-  }
+  /// Returns the originating CST node, or an invalid view when none is set.
+  ///
+  /// Callers should check `view.valid()` before using the result.
+  [[nodiscard]] CstNodeView getRefNode() const noexcept { return _refNode; }
 
   void setRefNode(const CstNodeView &node) noexcept {
     _refNode = node;
@@ -224,13 +222,13 @@ public:
   [[nodiscard]] virtual bool isMultiReference() const noexcept = 0;
 
   void initialize(AstNode &container, std::string refText,
-                  std::optional<CstNodeView> refNode,
+                  CstNodeView refNode,
                   const grammar::Assignment &assignment,
                   const references::Linker &linker) noexcept {
     _container = std::addressof(container);
     _assignment = std::addressof(assignment);
     _refText = std::move(refText);
-    _refNode = refNode.value_or(CstNodeView{});
+    _refNode = refNode;
     _linker = std::addressof(linker);
     clearLinkStateUnlocked();
   }

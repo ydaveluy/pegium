@@ -23,7 +23,7 @@ struct Nest final : grammar::Nest {
   std::unique_ptr<AstNode>
   getValue(std::unique_ptr<AstNode> current) const override {
     auto newNode = std::make_unique<T>();
-    const ValueBuildContext context{.property = detail::member_name_v<feature>};
+    const ValueBuildContext context{};
     using FeatureType = helpers::AttrType<feature>;
     static_assert(std::derived_from<FeatureType, AstNode>);
     assert(current != nullptr);

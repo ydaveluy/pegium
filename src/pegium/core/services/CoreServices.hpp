@@ -16,7 +16,6 @@
 #include <pegium/core/validation/DocumentValidator.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
 #include <pegium/core/workspace/AstNodeDescriptionProvider.hpp>
-#include <pegium/core/workspace/AstNodeLocator.hpp>
 #include <pegium/core/workspace/ReferenceDescriptionProvider.hpp>
 
 namespace pegium {
@@ -62,8 +61,6 @@ struct ValidationServices {
 
 /// Workspace-facing services owned by one language.
 struct WorkspaceServices {
-  // Required for a complete language service; installed by default.
-  std::unique_ptr<workspace::AstNodeLocator> astNodeLocator;
   // Required for a complete language service; installed by default.
   std::unique_ptr<workspace::AstNodeDescriptionProvider>
       astNodeDescriptionProvider;

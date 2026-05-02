@@ -173,15 +173,9 @@ public:
     if constexpr (pegium::is_reference_v<AttrType>) {
       if constexpr (std::same_as<RawValueType, std::string> ||
                     std::same_as<RawValueType, std::string_view>) {
-        auto refText = std::string{std::forward<Value>(value)};
-        if (sourceNode != nullptr) {
-          helpers::AssignmentHelper<AttrType>{}(astNode, member,
-                                                std::move(refText), *sourceNode,
-                                                context);
-        } else {
-          helpers::AssignmentHelper<AttrType>{}(astNode, member,
-                                                std::move(refText), context);
-        }
+        helpers::AssignmentHelper<AttrType>{}(
+            astNode, member, std::string{std::forward<Value>(value)}, context,
+            sourceNode != nullptr ? *sourceNode : CstNodeView{});
         return true;
       }
       return false;
@@ -382,7 +376,7 @@ public:
               value ? dynamic_cast<AlternativePointee *>(value.get()) : nullptr;
           if (castedPtr) {
             value.release();
-            castedPtr->attachToContainer(*astNode, context.property);
+            castedPtr->setContainer(*astNode);
             target = Alternative(castedPtr);
             return true;
           }

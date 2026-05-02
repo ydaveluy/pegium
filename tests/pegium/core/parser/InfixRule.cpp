@@ -79,9 +79,7 @@ TEST(InfixRuleTest, BuildsTypedBinaryExpressionAndSetsContainers) {
   ASSERT_TRUE(binary->right != nullptr);
   EXPECT_EQ(binary->op, "+");
   EXPECT_EQ(binary->left->getContainer(), binary);
-  EXPECT_EQ(binary->left->getContainerPropertyName(), "left");
   EXPECT_EQ(binary->right->getContainer(), binary);
-  EXPECT_EQ(binary->right->getContainerPropertyName(), "right");
 
   auto *left = dynamic_cast<LiteralExpr *>(binary->left.get());
   auto *right = dynamic_cast<LiteralExpr *>(binary->right.get());
@@ -114,7 +112,6 @@ TEST(InfixRuleTest, OrderedChoiceOperatorKeepsCompileTimeTypedRecursion) {
   EXPECT_EQ(leftLeaf->name, "a");
   EXPECT_EQ(middleLeaf->name, "b");
   EXPECT_EQ(leftBinary->getContainer(), binary);
-  EXPECT_EQ(leftBinary->getContainerPropertyName(), "left");
 }
 
 TEST(InfixRuleTest, EnumOperatorIsAssignedFromTypedTerminalRawValue) {

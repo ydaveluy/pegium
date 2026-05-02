@@ -146,7 +146,7 @@ make_unresolved_reference_parser(const references::Linker *&linkerRef) {
     referrerPtr->node.initialize(*referrerPtr, "missing", cst->get(0), assignment,
                                  *linkerRef);
     root->referrers.push_back(std::move(referrer));
-    referrerPtr->setContainer<RelinkRoot, &RelinkRoot::referrers>(*root, 0);
+    referrerPtr->setContainer(*root);
 
     result.value = std::move(root);
     result.cst = std::move(cst);

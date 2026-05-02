@@ -10,13 +10,12 @@
 #include <pegium/core/validation/DefaultDocumentValidator.hpp>
 #include <pegium/core/validation/DefaultValidationRegistry.hpp>
 #include <pegium/core/workspace/DefaultAstNodeDescriptionProvider.hpp>
-#include <pegium/core/workspace/DefaultAstNodeLocator.hpp>
 #include <pegium/core/workspace/DefaultReferenceDescriptionProvider.hpp>
 
 namespace pegium {
 
 bool CoreServices::isComplete() const noexcept {
-  return parser && references.nameProvider && workspace.astNodeLocator &&
+  return parser && references.nameProvider &&
          workspace.astNodeDescriptionProvider &&
          workspace.referenceDescriptionProvider &&
          references.scopeProvider && references.references &&
@@ -38,10 +37,6 @@ void installDefaultCoreServices(CoreServices &services) {
   if (!services.references.nameProvider) {
     services.references.nameProvider =
         std::make_unique<references::DefaultNameProvider>();
-  }
-  if (!services.workspace.astNodeLocator) {
-    services.workspace.astNodeLocator =
-        std::make_unique<workspace::DefaultAstNodeLocator>();
   }
   if (!services.workspace.astNodeDescriptionProvider) {
     services.workspace.astNodeDescriptionProvider =
