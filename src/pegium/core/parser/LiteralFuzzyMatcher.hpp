@@ -60,4 +60,16 @@ find_best_literal_fuzzy_candidate(std::string_view literal,
                                   std::string_view input,
                                   bool caseSensitive) noexcept;
 
+/// Strict-pass single-edit detector. Returns true iff `literal` matches a
+/// prefix of `window` of length L = N (substitute / transpose), L = N+1
+/// (insert in window) or L = N-1 (delete from window) with exactly one
+/// edit operation. Equivalent to the strict-path DP probe
+/// (`find_best_literal_fuzzy_candidate(...).distance == 1 && |consumed-N|
+/// <= 1`) but runs in O(N) without the Levenshtein DP — keeps the
+/// failure-tracking strict pass free of recovery DP cost.
+[[nodiscard]] bool
+literal_has_single_edit_strict_match(std::string_view literal,
+                                     std::string_view window,
+                                     bool caseSensitive) noexcept;
+
 } // namespace pegium::parser::detail

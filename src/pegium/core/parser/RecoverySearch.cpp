@@ -12,6 +12,7 @@
 #include <pegium/core/grammar/OrderedChoice.hpp>
 #include <pegium/core/grammar/Repetition.hpp>
 #include <pegium/core/grammar/UnorderedGroup.hpp>
+#include <pegium/core/parser/EditableRecoverySupport.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
 #include <pegium/core/parser/RecoveryDebug.hpp>
@@ -20,17 +21,6 @@
 #include <pegium/core/syntax-tree/CstBuilder.hpp>
 
 namespace pegium::parser::detail {
-
-namespace {
-
-[[nodiscard]] bool
-recovery_attempt_establishes_replay_contract(
-    const RecoveryAttempt &attempt) noexcept {
-  return attempt.fullMatch || attempt.stableAfterRecovery ||
-         attempt.reachedRecoveryTarget;
-}
-
-} // namespace
 
 AttemptFacts
 derive_attempt_facts(const RecoveryAttempt &attempt) noexcept {
@@ -41,104 +31,38 @@ derive_attempt_facts(const RecoveryAttempt &attempt) noexcept {
     return facts;
   }
 
-  // Pass 1 — aggregate per-edit data.
-  facts.hasDeleteOnlyRecovery = true;
-  bool firstEditIsDeleteAtZero = false;
-  bool firstEditIsInsertAtZero = false;
-  bool destructiveEditAfterRootInsert = false;
-  bool anyDeleteAtStablePrefix = false;
-  for (std::size_t index = 0; index < attempt.recoveryEdits.size(); ++index) {
-    const auto &entry = attempt.recoveryEdits[index];
-    facts.firstEditOffset =
-        std::min(facts.firstEditOffset, entry.beginOffset);
-    facts.lastEditOffset =
-        std::max(facts.lastEditOffset, entry.endOffset);
-    if (entry.kind == ParseDiagnosticKind::Inserted) {
-      facts.hasInsertedRecovery = true;
-    }
-    if (entry.kind != ParseDiagnosticKind::Deleted) {
-      facts.hasDeleteOnlyRecovery = false;
-    }
-    if (entry.kind == ParseDiagnosticKind::Deleted && entry.offset == 0) {
-      firstEditIsDeleteAtZero = true;
-    }
-    if (index == 0u && entry.kind == ParseDiagnosticKind::Inserted &&
-        entry.beginOffset == 0 && entry.endOffset == 0) {
-      firstEditIsInsertAtZero = true;
-    }
-    const bool entryIsDestructive =
-        entry.kind == ParseDiagnosticKind::Deleted ||
-        entry.kind == ParseDiagnosticKind::Replaced;
-    if (firstEditIsInsertAtZero && index > 0u && entryIsDestructive &&
-        entry.beginOffset > 0) {
-      destructiveEditAfterRootInsert = true;
-    }
-    if (attempt.hasStablePrefix &&
-        entry.kind == ParseDiagnosticKind::Deleted &&
-        entry.beginOffset == attempt.stablePrefixOffset) {
-      anyDeleteAtStablePrefix = true;
-    }
-  }
+  // Pass 1 — aggregate per-edit data via the shared edit-slice summary.
+  // Recovery edits are pushed in offset order, so the first edit's begin
+  // offset is the minimum and the running max captures the last end offset.
+  const auto editSummary =
+      summarize_edits_since(attempt.recoveryEdits, 0);
+  facts.firstEditOffset = editSummary.firstEditBeginOffset;
+  facts.lastEditOffset = editSummary.maxEndOffset;
+  facts.hasDeleteOnlyRecovery = editSummary.allDeleted;
 
   // Pass 2 — derive composite booleans from aggregates + attempt fields.
   facts.continuesAfterFirstEdit =
       attempt.parsedLength > facts.lastEditOffset;
   facts.hasCursorProgressPastLastEdit =
       attempt.maxCursorOffset > facts.lastEditOffset;
-  facts.hasVisibleProgressPastLastEdit =
-      attempt.lastVisibleCursorOffset > facts.lastEditOffset;
-  facts.hasCursorProgressBetweenOrPastEdits =
-      facts.hasCursorProgressPastLastEdit ||
-      (attempt.recoveryEdits.size() > 1u &&
-       attempt.lastVisibleCursorOffset > facts.firstEditOffset &&
-       facts.lastEditOffset <= attempt.lastVisibleCursorOffset);
 
   facts.preservesStablePrefixBeforeFirstEdit =
       attempt.hasStablePrefix &&
-      facts.firstEditOffset != std::numeric_limits<TextOffset>::max() &&
       facts.firstEditOffset >= attempt.stablePrefixOffset;
-
-  facts.startsWithUnstablePrefixDelete =
-      !attempt.hasStablePrefix && facts.firstEditOffset == 0 &&
-      firstEditIsDeleteAtZero;
-  facts.startsWithUnstablePrefixInsertThenDestructiveSuffixEdit =
-      !attempt.hasStablePrefix && firstEditIsInsertAtZero &&
-      destructiveEditAfterRootInsert;
-
-  facts.startsWithStableBoundaryDeleteWithoutContinuation =
-      attempt.hasStablePrefix &&
-      facts.firstEditOffset == attempt.stablePrefixOffset &&
-      !facts.hasDeleteOnlyRecovery &&
-      !facts.continuesAfterFirstEdit &&
-      anyDeleteAtStablePrefix;
 
   facts.hasEditPastReplayWindowHorizon =
       attempt.replayWindow.has_value() &&
       facts.lastEditOffset > attempt.replayWindow->maxCursorOffset;
 
-  facts.hasCommittedReplayPrefix =
-      recovery_attempt_establishes_replay_contract(attempt) ||
-      facts.continuesAfterFirstEdit;
-
-  const bool singleInsertAtNonZero =
+  const bool singleInsert =
       attempt.recoveryEdits.size() == 1u &&
-      attempt.recoveryEdits.front().kind == ParseDiagnosticKind::Inserted &&
-      attempt.recoveryEdits.front().beginOffset ==
-          attempt.recoveryEdits.front().endOffset &&
-      facts.firstEditOffset != 0;
+      attempt.recoveryEdits.front().kind == ParseDiagnosticKind::Inserted;
   facts.allowsLocalGapRecoveryWithoutStablePrefix =
-      !attempt.hasStablePrefix && !attempt.fullMatch &&
-      !attempt.stableAfterRecovery && attempt.reachedRecoveryTarget &&
-      singleInsertAtNonZero && facts.continuesAfterFirstEdit &&
-      facts.hasVisibleProgressPastLastEdit &&
-      facts.hasCursorProgressPastLastEdit;
+      !attempt.hasStablePrefix && !attempt.stableAfterRecovery &&
+      attempt.reachedRecoveryTarget && singleInsert;
 
   facts.allowsLocalDeleteGapRecoveryWithoutStablePrefix =
-      !attempt.hasStablePrefix && !attempt.fullMatch &&
-      facts.firstEditOffset != 0 && facts.hasDeleteOnlyRecovery &&
-      facts.continuesAfterFirstEdit &&
-      facts.hasVisibleProgressPastLastEdit &&
-      facts.hasCursorProgressPastLastEdit;
+      !attempt.hasStablePrefix && facts.hasDeleteOnlyRecovery;
 
   return facts;
 }
@@ -196,7 +120,6 @@ struct RecoveryWindowPrefixContract {
 
 struct CommittedPrefixContract {
   TextOffset resumeFloor = 0;
-  TextOffset boundaryFloor = 0;
   std::size_t preservedEditCount = 0u;
 };
 
@@ -208,7 +131,6 @@ struct StrictFailureStageResult {
 
 struct WindowRecoverySearchResult {
   std::optional<RecoveryAttempt> attempt;
-  std::optional<FailureSnapshot> relocalizedFailure;
   bool isFallback = false;
 };
 
@@ -222,97 +144,15 @@ void consider_window_attempt_candidate(
 committed_replay_prefix_contract(
     const RecoveryAttempt &selectedAttempt) noexcept;
 
-[[nodiscard]] bool localizes_current_failure_site(
-    const RecoveryAttempt &candidate,
-    const RecoveryAttempt &selectedAttempt) noexcept;
-
 [[nodiscard]] constexpr bool
 same_syntax_script_entry(const SyntaxScriptEntry &lhs,
                          const SyntaxScriptEntry &rhs) noexcept;
 
-[[nodiscard]] bool
-deleted_source_starts_with_inserted_literal(const SyntaxScriptEntry &inserted,
-                                            const SyntaxScriptEntry &deleted,
-                                            std::string_view source) noexcept {
-  if (inserted.element == nullptr ||
-      inserted.element->getKind() != grammar::ElementKind::Literal) {
-    return false;
-  }
-  const auto &literal =
-      static_cast<const grammar::Literal &>(*inserted.element);
-  const auto value = literal.getValue();
-  if (value.empty() || deleted.beginOffset > source.size() ||
-      deleted.endOffset > source.size() ||
-      deleted.endOffset - deleted.beginOffset < value.size()) {
-    return false;
-  }
-  return source.substr(deleted.beginOffset, value.size()) == value;
-}
-
-[[nodiscard]] bool
-plausible_insert_delete_compensation_pair(const SyntaxScriptEntry &lhs,
-                                          const SyntaxScriptEntry &rhs,
-                                          std::string_view source) noexcept {
-  const bool lhsInserted = lhs.kind == ParseDiagnosticKind::Inserted;
-  const bool rhsInserted = rhs.kind == ParseDiagnosticKind::Inserted;
-  const bool lhsDeleted = lhs.kind == ParseDiagnosticKind::Deleted;
-  const bool rhsDeleted = rhs.kind == ParseDiagnosticKind::Deleted;
-  if (!((lhsInserted && rhsDeleted) || (rhsInserted && lhsDeleted))) {
-    return false;
-  }
-
-  const auto &inserted = lhsInserted ? lhs : rhs;
-  const auto &deleted = lhsDeleted ? lhs : rhs;
-  return inserted.beginOffset == inserted.endOffset &&
-         deleted.beginOffset < deleted.endOffset &&
-         inserted.beginOffset <= deleted.beginOffset &&
-         (elements_equivalent_for_replay(inserted.element, deleted.element) ||
-          deleted_source_starts_with_inserted_literal(inserted, deleted,
-                                                      source));
-}
-
-[[nodiscard]] std::size_t
-replay_horizon_preserved_edit_count(const RecoveryAttempt &attempt) noexcept {
-  if (!attempt.replayWindow.has_value() ||
-      !attempt.facts.hasEditPastReplayWindowHorizon) {
-    return attempt.recoveryEdits.size();
-  }
-  // Preserve every edit the parser actually parsed past. The original
-  // window's `maxCursorOffset` is the strict-failure anchor; once the
-  // recovery committed and the parser advanced through these edits to
-  // `parsedLength`, they are not speculative anymore. Dropping them would
-  // force the next window to rediscover them, but its editFloorOffset
-  // typically blocks edits below the previous window's anchor — leaving
-  // the cascade with no valid edit position and stranding the parse.
-  const auto horizon =
-      std::max(attempt.parsedLength, attempt.facts.lastEditOffset);
-  std::size_t count = 0u;
-  while (count < attempt.recoveryEdits.size()) {
-    const auto &entry = attempt.recoveryEdits[count];
-    if (entry.beginOffset > horizon || entry.endOffset > horizon) {
-      break;
-    }
-    ++count;
-  }
-  return count;
-}
-
-[[nodiscard]] TextOffset
-replay_horizon_resume_floor(const RecoveryAttempt &attempt,
-                            std::size_t preservedEditCount) noexcept {
-  if (preservedEditCount < attempt.recoveryEdits.size()) {
-    return attempt.recoveryEdits[preservedEditCount].beginOffset;
-  }
-  return std::max(attempt.parsedLength, attempt.facts.lastEditOffset);
-}
-
 [[nodiscard]] TextOffset
 visible_leaf_stable_prefix_offset(const FailureSnapshot &snapshot) noexcept {
-  const auto stableLeafEnd =
-      snapshot.hasFailureToken &&
-              snapshot.failureTokenIndex < snapshot.failureLeafHistory.size()
-          ? snapshot.failureTokenIndex
-          : snapshot.failureLeafHistory.size();
+  const auto stableLeafEnd = snapshot.hasFailureToken
+                                 ? snapshot.failureTokenIndex
+                                 : snapshot.failureLeafHistory.size();
   TextOffset stablePrefixOffset = 0;
   for (std::size_t index = 0; index < stableLeafEnd; ++index) {
     const auto &leaf = snapshot.failureLeafHistory[index];
@@ -327,51 +167,7 @@ visible_leaf_stable_prefix_offset(const FailureSnapshot &snapshot) noexcept {
 [[nodiscard]] RecoveryWindowPrefixContract recovery_window_prefix_contract(
     const FailureSnapshot &snapshot,
     const RecoveryAttempt &selectedAttempt) noexcept {
-  if (selectedAttempt.status ==
-          RecoveryAttemptStatus::RecoveredButNotCredible &&
-      selectedAttempt.facts.hasEditPastReplayWindowHorizon) {
-    if (selectedAttempt.stableAfterRecovery &&
-        selectedAttempt.facts.hasVisibleProgressPastLastEdit) {
-      const auto boundaryFloor = std::max(selectedAttempt.parsedLength,
-                                          selectedAttempt.facts.lastEditOffset);
-      return {.editFloorOffset = boundaryFloor,
-              .stablePrefixOffset = boundaryFloor,
-              .hasStablePrefix = true};
-    }
-    const auto preservedEditCount =
-        replay_horizon_preserved_edit_count(selectedAttempt);
-    if (preservedEditCount < selectedAttempt.recoveryEdits.size()) {
-      const auto resumeFloor =
-          replay_horizon_resume_floor(selectedAttempt, preservedEditCount);
-      return {.editFloorOffset = resumeFloor,
-              .stablePrefixOffset = resumeFloor,
-              .hasStablePrefix = true};
-    }
-  }
-
-  const bool strictPrefixOnly =
-      selectedAttempt.recoveryEdits.empty() && selectedAttempt.parsedLength != 0;
-  if (strictPrefixOnly ||
-      (selectedAttempt.parsedLength != 0 && selectedAttempt.fullMatch)) {
-    return {.editFloorOffset = selectedAttempt.parsedLength,
-            .stablePrefixOffset = selectedAttempt.parsedLength,
-            .hasStablePrefix = true};
-  }
-  if (selectedAttempt.parsedLength != 0 && selectedAttempt.stableAfterRecovery) {
-    if (const auto stablePrefixOffset =
-            visible_leaf_stable_prefix_offset(snapshot);
-        stablePrefixOffset != 0 &&
-        stablePrefixOffset < selectedAttempt.parsedLength) {
-      return {.editFloorOffset = stablePrefixOffset,
-              .stablePrefixOffset = stablePrefixOffset,
-              .hasStablePrefix = true};
-    }
-    return {.editFloorOffset = selectedAttempt.parsedLength,
-            .stablePrefixOffset = selectedAttempt.parsedLength,
-            .hasStablePrefix = true};
-  }
-  if (!selectedAttempt.recoveryEdits.empty() &&
-      selectedAttempt.parsedLength != 0) {
+  if (selectedAttempt.parsedLength != 0) {
     return {.editFloorOffset = selectedAttempt.parsedLength,
             .stablePrefixOffset = selectedAttempt.parsedLength,
             .hasStablePrefix = true};
@@ -383,8 +179,7 @@ visible_leaf_stable_prefix_offset(const FailureSnapshot &snapshot) noexcept {
             .stablePrefixOffset = stablePrefixOffset,
             .hasStablePrefix = true};
   }
-  if (!snapshot.hasFailureToken ||
-      snapshot.failureTokenIndex >= snapshot.failureLeafHistory.size()) {
+  if (!snapshot.hasFailureToken) {
     return {};
   }
   return {
@@ -397,8 +192,7 @@ visible_leaf_stable_prefix_offset(const FailureSnapshot &snapshot) noexcept {
 [[nodiscard]] TextOffset
 failure_visible_cursor_offset(const FailureSnapshot &snapshot,
                               TextOffset fallbackOffset) noexcept {
-  if (snapshot.hasFailureToken &&
-      snapshot.failureTokenIndex < snapshot.failureLeafHistory.size()) {
+  if (snapshot.hasFailureToken) {
     return snapshot.failureLeafHistory[snapshot.failureTokenIndex].endOffset;
   }
   if (!snapshot.failureLeafHistory.empty()) {
@@ -434,9 +228,8 @@ parse_strict_capturing_failure(const grammar::ParserRule &entryRule,
   // successful parse is wasteful, so we first try a bare `ParseContext` and
   // only re-run with a `TrackedParseContext` if the strict parse did not
   // reach `fullMatch`.
-  const StrictFailureEngine strictFailureEngine;
   auto strictResult =
-      strictFailureEngine.runStrictParse(entryRule, skipper, text, cancelToken);
+      run_strict_parse(entryRule, skipper, text, cancelToken);
   result.strictAttempt.cst = std::move(strictResult.cst);
   fill_strict_attempt_from_summary(result.strictAttempt, strictResult.summary,
                                    inputSize);
@@ -482,7 +275,7 @@ last_failure_leaf_end_offset(const FailureSnapshot &snapshot) noexcept {
              : snapshot.failureLeafHistory.back().endOffset;
 }
 
-/// Phase F/B — Edit pruning post-hoc.
+/// Edit pruning post-hoc.
 ///
 /// Greedy exploration inside a single recovery attempt can commit to more
 /// edits than strictly needed. For example, inserting the leading `(` of a
@@ -528,11 +321,6 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
   // Keep pruning until no edit can be dropped while preserving a full match.
   // Each outer iteration restarts the scan from the first edit because dropping
   // one edit can unlock another whose necessity depended on the earlier one.
-  // Pair pruning is intentionally narrow and reserved for small local scripts:
-  // only an inserted element followed by a delete of the same replay-equivalent
-  // element is considered. That covers the common "insert early delimiter,
-  // delete real later delimiter" compensation without turning pruning into a
-  // second speculative recovery search.
   const auto tryPrunedEditSet =
       [&](auto shouldDrop) -> std::optional<RecoveryAttempt> {
     RecoveryAttemptSpec prunedSpec;
@@ -591,29 +379,6 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
         break;
       }
     }
-    if (changed || attempt.recoveryEdits.size() > 4u) {
-      continue;
-    }
-    for (std::size_t i = 0; i + 1u < attempt.recoveryEdits.size(); ++i) {
-      for (std::size_t j = i + 1u; j < attempt.recoveryEdits.size(); ++j) {
-        if (!plausible_insert_delete_compensation_pair(attempt.recoveryEdits[i],
-                                                       attempt.recoveryEdits[j],
-                                                       text.view())) {
-          continue;
-        }
-        if (auto prunedAttempt =
-                tryPrunedEditSet([i, j](std::size_t candidateIndex) noexcept {
-                  return candidateIndex == i || candidateIndex == j;
-                })) {
-          attempt = std::move(*prunedAttempt);
-          changed = true;
-          break;
-        }
-      }
-      if (changed) {
-        break;
-      }
-    }
   }
 
   if (attempt.recoveryEdits.size() < editCountBeforePruning) {
@@ -645,15 +410,15 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
   choiceRecoverCacheHits += primaryAttempt.choiceRecoverCacheHits;
   choiceRecoverCacheMisses += primaryAttempt.choiceRecoverCacheMisses;
 
-  // Phase F/B — minimize the edit set before the ranker sees the attempt.
+  // Minimize the edit set before the ranker sees the attempt.
   primaryAttempt = minimize_recovery_edits(
       entryRule, skipper, options, text, spec, std::move(primaryAttempt),
       choiceRecoverCacheHits, choiceRecoverCacheMisses, cancelToken);
 
-  // Phase F/A — minimal-edit strategy probe. Complements F/D (option
-  // insert gate) and the InfixRule rhs-region constraint: those remove
-  // enumeration-time speculation, but edits accumulated via a rebound
-  // recovery that has already crossed an earlier committed edit can
+  // Minimal-edit strategy probe. Complements the option-insert gate and
+  // the InfixRule rhs-region constraint: those remove enumeration-time
+  // speculation, but edits accumulated via a rebound recovery that has
+  // already crossed an earlier committed edit can
   // still produce multi-edit paths. Running a second attempt with
   // `maxRecoveryEditsPerAttempt = 1` exposes a single-edit candidate
   // to the shared `RecoveryKey` ranker. Not counted against the
@@ -700,7 +465,7 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
     }
   }
 
-  // Phase F/A2 — alternative-strategy probes. When the primary attempt
+  // Alternative-strategy probes. When the primary attempt
   // settles for `RecoveredButNotCredible` because its greedy local
   // recovery picked the wrong cascade (consumed past a missing closing
   // delimiter, then resorted to delete-scan), alternative attempts
@@ -744,7 +509,7 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
       }
     };
 
-    // Probe 1: forbid consecutive deletes. Targets cases where the primary's
+    // Forbid consecutive deletes. Targets cases where the primary's
     // delete-scan produced a non-credible "skip ahead" path while an
     // Insert-only repair would actually reach `fullMatch` (e.g. a missing
     // `}` whose Insert lands cleanly when the dispatcher cannot fall back to
@@ -756,50 +521,6 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
     if (primaryHasDeletes && options.maxConsecutiveCodepointDeletes > 0u) {
       ParseOptions probe = options;
       probe.maxConsecutiveCodepointDeletes = 0u;
-      runProbe(probe);
-    }
-
-    // Probe 2: 4x cost budget. Targets cascade cases where the primary
-    // stopped short because the cumulative edit cost across multiple typoed
-    // tokens exceeded the per-attempt budget. The wider budget lets a longer
-    // Replace cascade reach `fullMatch` when each individual Replace is cheap
-    // (cost 1) but there are many of them.
-    if (options.maxRecoveryEditCost <
-        std::numeric_limits<std::uint32_t>::max() / 4u) {
-      ParseOptions probe = options;
-      probe.maxRecoveryEditCost = options.maxRecoveryEditCost * 4u;
-      runProbe(probe);
-    }
-
-    // Probe 3: full-width window. Targets cascade cases where the primary's
-    // narrow initial window committed to a path that cannot reach the latest
-    // typo before exhausting its forward stability budget.
-    if (options.recoveryWindowTokenCount <
-        options.maxRecoveryWindowTokenCount) {
-      ParseOptions probe = options;
-      probe.recoveryWindowTokenCount = options.maxRecoveryWindowTokenCount;
-      runProbe(probe);
-    }
-
-    // Probe 4: relaxed stability requirement. Targets cases where the
-    // primary's `RecoveredButNotCredible` verdict came from the strict
-    // 2-token stability check rejecting a partial repair that could have
-    // continued.
-    if (options.recoveryStabilityTokenCount > 0u) {
-      ParseOptions probe = options;
-      probe.recoveryStabilityTokenCount = 0u;
-      runProbe(probe);
-    }
-
-    // Probe 5: extended attempt budget combined with the previous relaxations.
-    // Targets the deepest cascade explorations.
-    if (options.maxRecoveryAttempts <
-        std::numeric_limits<std::uint32_t>::max() / 4u) {
-      ParseOptions probe = options;
-      probe.maxRecoveryAttempts = options.maxRecoveryAttempts * 4u;
-      probe.maxRecoveryEditCost = options.maxRecoveryEditCost * 4u;
-      probe.recoveryStabilityTokenCount = 0u;
-      probe.recoveryWindowTokenCount = options.maxRecoveryWindowTokenCount;
       runProbe(probe);
     }
   }
@@ -824,127 +545,56 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
   if (candidate.recoveryEdits.size() <= contract.preservedEditCount) {
     return false;
   }
-  return candidate.fullMatch || candidate.parsedLength > contract.resumeFloor ||
-         candidate.maxCursorOffset > contract.resumeFloor;
+  return candidate.parsedLength > contract.resumeFloor;
 }
 
-/// Window-attempt classification used to drive `validate_window_attempt`.
-///
-/// The two paths the validator serves diverge in their ranking rules and
-/// in which gates apply:
-///   - `Selectable`: the candidate is `is_selectable_recovery_attempt`
-///     (Credible or Stable). It may replace the current selected attempt
-///     based on the central `is_better_recovery_attempt` ranking.
-///   - `NonCredibleFallback`: the candidate is not selectable but the
-///     entry rule matched. It may replace a non-fullMatch selected
-///     attempt provided it strictly outranks an existing non-credible
-///     fallback.
-enum class WindowAttemptKind : std::uint8_t {
-  Selectable,
-  NonCredibleFallback,
-};
-
-/// Verdict returned by `validate_window_attempt`. `Accept` is the only
-/// accepting value; every other value names the gate that rejected the
-/// candidate. The named rejections allow tracing and diagnostics to
-/// refer to a single source of truth instead of inferring the reason
-/// from boolean control flow.
-enum class WindowAttemptVerdict : std::uint8_t {
-  Accept,
-  RejectCommittedPrefixViolation,
-  RejectBoundaryRewrite,
-  RejectSelectedFullMatch,
-  RejectNoSiteExtension,
-  RejectNotBetterThanSelected,
-};
-
-/// Single decision predicate for window-attempt acceptance. Replaces
-/// the previously-separate `qualifies_selectable_window_attempt` and
-/// `qualifies_fallback_window_attempt` whose committed-prefix /
-/// boundary-rewrite / continuation gates were duplicated. The two
-/// paths now share the same gate sequence; only the final ranking
-/// rule differs by `kind`.
-[[nodiscard]] WindowAttemptVerdict validate_window_attempt(
+/// Single decision predicate for window-attempt acceptance. The two
+/// paths share the same committed-prefix / boundary-rewrite / continuation
+/// gates; only the final ranking rule differs by
+/// `requireStrictlyBetterNonCredible`. When `false`, the candidate is
+/// `is_selectable_recovery_attempt` (Credible or Stable) and may replace
+/// the current selected attempt based on the central
+/// `is_better_recovery_attempt` ranking. When `true`, the candidate is
+/// not selectable but the entry rule matched, and it may replace a
+/// non-fullMatch selected attempt provided it strictly outranks an
+/// existing non-credible fallback.
+[[nodiscard]] bool validate_window_attempt(
     const RecoveryAttempt &candidate,
     const RecoveryAttempt &selectedAttempt,
-    bool continuingRecovery, WindowAttemptKind kind) noexcept {
-  // Selectable escape clause: a continuing full match strictly better
-  // than the current non-credible fallback is accepted unconditionally
-  // (otherwise a late window that discovers a credible global parse
-  // would be rejected on the sole ground that its edit list is shorter
-  // than the tentatively-committed one).
-  if (kind == WindowAttemptKind::Selectable) {
-    const bool replacesNonCredibleFallbackWithFullMatch =
-        continuingRecovery && candidate.fullMatch &&
-        candidate.status != RecoveryAttemptStatus::RecoveredButNotCredible &&
-        selectedAttempt.status ==
-            RecoveryAttemptStatus::RecoveredButNotCredible &&
-        !selectedAttempt.fullMatch &&
-        is_better_recovery_attempt(candidate, selectedAttempt);
-    if (replacesNonCredibleFallbackWithFullMatch) {
-      return WindowAttemptVerdict::Accept;
-    }
-  }
-
+    bool continuingRecovery,
+    bool requireStrictlyBetterNonCredible) noexcept {
   CommittedPrefixContract committedReplayContract;
   if (!preserves_committed_replay_prefix(candidate, selectedAttempt,
-                                         committedReplayContract)) {
-    return WindowAttemptVerdict::RejectCommittedPrefixViolation;
-  }
-  if (selectedAttempt.facts.hasCommittedReplayPrefix &&
+                                         committedReplayContract) ||
       rewrites_committed_replay_boundary(candidate, committedReplayContract)) {
-    return WindowAttemptVerdict::RejectBoundaryRewrite;
+    return false;
   }
-  if (continuingRecovery && candidate.fullMatch && !selectedAttempt.fullMatch &&
-      candidate.recoveryEdits.size() == selectedAttempt.recoveryEdits.size() &&
-      std::equal(candidate.recoveryEdits.begin(), candidate.recoveryEdits.end(),
-                 selectedAttempt.recoveryEdits.begin(),
-                 same_syntax_script_entry)) {
-    return WindowAttemptVerdict::Accept;
-  }
-
-  // Fallback-only veto: if the selected attempt already produced a full
-  // match, no fallback can improve on it.
-  if (kind == WindowAttemptKind::NonCredibleFallback &&
-      selectedAttempt.fullMatch) {
-    return WindowAttemptVerdict::RejectSelectedFullMatch;
-  }
-
   // Continuation rule (shared): a candidate that does not extend the
   // current recovery site cannot accept under continuation.
   if (continuingRecovery) {
-    return extends_current_recovery_site(candidate, committedReplayContract)
-               ? WindowAttemptVerdict::Accept
-               : WindowAttemptVerdict::RejectNoSiteExtension;
+    return extends_current_recovery_site(candidate, committedReplayContract);
   }
 
-  // Non-continuing ranking rules diverge by kind.
-  if (kind == WindowAttemptKind::Selectable) {
-    return is_better_recovery_attempt(candidate, selectedAttempt)
-               ? WindowAttemptVerdict::Accept
-               : WindowAttemptVerdict::RejectNotBetterThanSelected;
+  // Non-continuing ranking rule.
+  if (!requireStrictlyBetterNonCredible) {
+    return is_better_recovery_attempt(candidate, selectedAttempt);
   }
 
   // Non-credible fallback, non-continuing: only beat a non-credible
   // selected when strictly better. The eligibility of `candidate` as a
   // non-credible fallback (`satisfies_non_credible_fallback_contract`)
   // is gated at the call site once and is not re-checked here.
-  if (selectedAttempt.entryRuleMatched &&
-      selectedAttempt.status == RecoveryAttemptStatus::RecoveredButNotCredible &&
-      !is_better_recovery_attempt(candidate, selectedAttempt)) {
-    return WindowAttemptVerdict::RejectNotBetterThanSelected;
-  }
-  return WindowAttemptVerdict::Accept;
+  return selectedAttempt.status !=
+             RecoveryAttemptStatus::RecoveredButNotCredible ||
+         is_better_recovery_attempt(candidate, selectedAttempt);
 }
 
 void consider_window_attempt_candidate(
     WindowRecoverySearchResult &result, RecoveryAttempt attempt,
     const RecoveryAttempt &selectedAttempt, bool continuingRecovery) {
   if (is_selectable_recovery_attempt(attempt)) {
-    const auto verdict =
-        validate_window_attempt(attempt, selectedAttempt, continuingRecovery,
-                                WindowAttemptKind::Selectable);
-    if (verdict == WindowAttemptVerdict::Accept) {
+    if (validate_window_attempt(attempt, selectedAttempt, continuingRecovery,
+                                /*requireStrictlyBetterNonCredible=*/false)) {
       result.attempt = std::move(attempt);
       result.isFallback = false;
     }
@@ -953,15 +603,10 @@ void consider_window_attempt_candidate(
   if (attempt.entryRuleMatched &&
       (continuingRecovery ||
        satisfies_non_credible_fallback_contract(attempt, selectedAttempt))) {
-    const auto verdict =
-        validate_window_attempt(attempt, selectedAttempt, continuingRecovery,
-                                WindowAttemptKind::NonCredibleFallback);
-    if (verdict == WindowAttemptVerdict::Accept) {
+    if (validate_window_attempt(attempt, selectedAttempt, continuingRecovery,
+                                /*requireStrictlyBetterNonCredible=*/true)) {
       result.attempt = std::move(attempt);
       result.isFallback = true;
-    } else if (continuingRecovery &&
-               localizes_current_failure_site(attempt, selectedAttempt)) {
-      result.relocalizedFailure = *attempt.failureSnapshot;
     }
     return;
   }
@@ -990,18 +635,6 @@ void apply_window_acceptance(RecoveryAttempt acceptedAttempt,
 #endif
 }
 
-[[nodiscard]] bool apply_qualified_window_acceptance(
-    WindowRecoverySearchResult &windowSearch,
-    const RecoveryWindow &window,
-    RecoveryAttempt &selectedAttempt) {
-  if (!windowSearch.attempt.has_value()) {
-    return false;
-  }
-  apply_window_acceptance(std::move(*windowSearch.attempt), window,
-                          selectedAttempt, windowSearch.isFallback);
-  return true;
-}
-
 [[nodiscard]] constexpr bool same_syntax_script_entry(
     const SyntaxScriptEntry &lhs,
     const SyntaxScriptEntry &rhs) noexcept {
@@ -1028,16 +661,13 @@ can_try_prefix_delete_retry(const grammar::ParserRule &entryRule,
     return false;
   }
   const auto &first = recoveryEdits.front();
-  if (first.kind != ParseDiagnosticKind::Inserted || first.beginOffset != 0 ||
-      first.endOffset != 0) {
+  if (first.kind != ParseDiagnosticKind::Inserted || first.beginOffset != 0) {
     return false;
   }
   return std::ranges::any_of(recoveryEdits.begin() + 1, recoveryEdits.end(),
                              [](const SyntaxScriptEntry &entry) noexcept {
-                               const bool destructive =
-                                   entry.kind == ParseDiagnosticKind::Deleted ||
-                                   entry.kind == ParseDiagnosticKind::Replaced;
-                               return destructive && entry.beginOffset > 0;
+                               return is_destructive_edit_kind(entry.kind) &&
+                                      entry.beginOffset > 0;
                              });
 }
 
@@ -1073,18 +703,15 @@ try_prefix_delete_retry_entry_rule(RecoveryContext &ctx,
             const auto &firstRetryEdit = retryEdits[retryEditCountBefore];
             const bool startsWithSyntheticInsert =
                 firstRetryEdit.kind == ParseDiagnosticKind::Inserted &&
-                firstRetryEdit.beginOffset == retryStartOffset &&
-                firstRetryEdit.endOffset == retryStartOffset;
+                firstRetryEdit.beginOffset == retryStartOffset;
             if (startsWithSyntheticInsert) {
               retryInsertThenDestructiveSuffix = std::ranges::any_of(
                   retryEdits.begin() +
                       static_cast<std::ptrdiff_t>(retryEditCountBefore + 1u),
                   retryEdits.end(),
                   [retryStartOffset](const SyntaxScriptEntry &entry) {
-                    const bool destructive =
-                        entry.kind == ParseDiagnosticKind::Deleted ||
-                        entry.kind == ParseDiagnosticKind::Replaced;
-                    return destructive && entry.beginOffset > retryStartOffset;
+                    return is_destructive_edit_kind(entry.kind) &&
+                           entry.beginOffset > retryStartOffset;
                   });
             }
           }
@@ -1099,7 +726,7 @@ try_prefix_delete_retry_entry_rule(RecoveryContext &ctx,
             return true;
           }
         }
-        ctx.skipAfterDelete = false;
+        ctx.skipAfterDelete = previousSkipAfterDelete;
         return false;
       },
       {.disableDeleteRetry = false, .extendThroughHiddenTrivia = false});
@@ -1187,6 +814,7 @@ execute_recovery_parse(const grammar::ParserRule &entryRule,
   parseCtx.maxEditsPerAttempt = options.maxRecoveryEditsPerAttempt;
   parseCtx.maxEditCost = options.maxRecoveryEditCost;
   parseCtx.maxResyncSkipBytes = options.maxResyncSkipBytes;
+  parseCtx.maxRecoveryRuleEntries = options.maxRecoveryRuleEntries;
   parseCtx.choiceRecoverCache.setDisabled(
       options.diagnostics.recoveryCacheDisabled);
 
@@ -1328,12 +956,6 @@ orchestrate_recovery_search(const grammar::ParserRule &entryRule,
 
   FailureSnapshot currentFailure = *std::move(strictFailureStage.failureSnapshot);
   TextOffset previousRecoveryEditFloor = 0;
-  // Tracks the last observed relocalization offset so the outer loop can
-  // detect an unproductive relocalization cycle: if a continuing recovery
-  // keeps reporting the same (or later) failure offset without ever
-  // committing a new edit, we have converged without progress and must
-  // stop rather than burn the attempt budget on identical replans.
-  std::optional<TextOffset> previousRelocalizationOffset;
   while (true) {
     if (recovery_attempt_budget_exhausted(result, options)) {
       return result;
@@ -1348,7 +970,6 @@ orchestrate_recovery_search(const grammar::ParserRule &entryRule,
 
     RecoveryWindow committedWindow{};
     bool siteCommitted = false;
-    bool relocalizedCurrentFailure = false;
     // The committed-prefix replay info depends on the currently selected
     // attempt, which only changes when a window commits (after which we
     // break the inner loop). Compute it once per outer iteration instead of
@@ -1374,32 +995,12 @@ orchestrate_recovery_search(const grammar::ParserRule &entryRule,
           result.budgetedRecoveryAttemptRuns,
           result.choiceRecoverCacheHits, result.choiceRecoverCacheMisses,
           cancelToken);
-      if (apply_qualified_window_acceptance(windowSearch, window,
-                                            result.selectedAttempt)) {
+      if (windowSearch.attempt.has_value()) {
+        apply_window_acceptance(std::move(*windowSearch.attempt), window,
+                                result.selectedAttempt, windowSearch.isFallback);
         committedWindow = result.selectedAttempt.replayWindow.value_or(window);
         result.selectedWindows.push_back(committedWindow);
         siteCommitted = true;
-        // A real commit cleared the previous relocalization cycle (if
-        // any); reset the tracker so later sites can still relocalize.
-        previousRelocalizationOffset.reset();
-        break;
-      }
-      if (windowSearch.relocalizedFailure.has_value()) {
-        const auto nextOffset =
-            failure_visible_cursor_offset(*windowSearch.relocalizedFailure,
-                                          std::numeric_limits<TextOffset>::max());
-        if (previousRelocalizationOffset.has_value() &&
-            nextOffset >= *previousRelocalizationOffset) {
-          // Unproductive relocalization cycle: the next candidate
-          // points at the same (or later) failure offset as the
-          // previous one, yet no new edit committed. Further outer
-          // iterations would re-plan the identical window and produce
-          // the same non-accepting attempt. Stop here.
-          return result;
-        }
-        previousRelocalizationOffset = nextOffset;
-        currentFailure = *std::move(windowSearch.relocalizedFailure);
-        relocalizedCurrentFailure = true;
         break;
       }
       if (!windowPlanner.tryWiden()) {
@@ -1407,9 +1008,6 @@ orchestrate_recovery_search(const grammar::ParserRule &entryRule,
       }
     }
 
-    if (relocalizedCurrentFailure) {
-      continue;
-    }
     if (!siteCommitted) {
       return result;
     }
@@ -1439,19 +1037,11 @@ void classify_recovery_attempt(RecoveryAttempt &attempt) noexcept {
     return;
   }
 
-  const bool editsContinueAfterFirstEdit =
-      !facts.hasEdits || facts.continuesAfterFirstEdit;
-  const bool preservesStablePrefixWithinReplayHorizon =
-      facts.preservesStablePrefixBeforeFirstEdit &&
-      !facts.hasEditPastReplayWindowHorizon;
-  // A full match that reached EOF with genuine continuation past its first
-  // edit is the strongest possible success signal; the budget exists to cap
-  // exploratory edits, not to reject a complete parse.
-  const bool fullMatchWithContinuation =
-      attempt.fullMatch && editsContinueAfterFirstEdit;
+  // A full match is the strongest possible success signal; the budget exists
+  // to cap exploratory edits, not to reject a complete parse.
   if (attempt.editCost > attempt.configuredMaxEditCost &&
-      !fullMatchWithContinuation &&
-      !preservesStablePrefixWithinReplayHorizon &&
+      !attempt.fullMatch &&
+      !facts.preservesStablePrefixBeforeFirstEdit &&
       !facts.allowsLocalGapRecoveryWithoutStablePrefix) {
     attempt.status =
         facts.hasEdits ? RecoveredButNotCredible : StrictFailure;
@@ -1465,18 +1055,15 @@ void classify_recovery_attempt(RecoveryAttempt &attempt) noexcept {
       attempt.status = RecoveredButNotCredible;
       return;
     }
-    if (facts.startsWithStableBoundaryDeleteWithoutContinuation ||
-        deleteOnlyWithoutContinuation ||
-        facts.startsWithUnstablePrefixInsertThenDestructiveSuffixEdit) {
+    if (deleteOnlyWithoutContinuation) {
       attempt.status = RecoveredButNotCredible;
       return;
     }
     attempt.status = Stable;
   } else if (attempt.reachedRecoveryTarget &&
-             !facts.startsWithUnstablePrefixDelete &&
-             editsContinueAfterFirstEdit) {
+             facts.continuesAfterFirstEdit) {
     attempt.status = Credible;
-  } else if (attempt.completedRecoveryWindows > 0 || facts.hasEdits) {
+  } else if (facts.hasEdits) {
     attempt.status = RecoveredButNotCredible;
   } else {
     attempt.status = StrictFailure;
@@ -1506,16 +1093,6 @@ bool is_selectable_recovery_attempt(const RecoveryAttempt &attempt) noexcept {
     };
   }
 
-  const bool establishesLocalInsertedFallback =
-      attempt.recoveryEdits.size() == 1u && facts.hasInsertedRecovery &&
-      facts.continuesAfterFirstEdit && facts.hasVisibleProgressPastLastEdit;
-  if (establishesLocalInsertedFallback) {
-    return CommittedPrefixContract{
-        .resumeFloor = facts.firstEditOffset,
-        .preservedEditCount = 0u,
-    };
-  }
-
   // When the entry rule's leading literal failed strictly and was
   // repaired by a fuzzy Replace at offset 0, there is no "stable
   // prefix" by definition — the strictly-matched prefix length is
@@ -1539,7 +1116,6 @@ bool is_selectable_recovery_attempt(const RecoveryAttempt &attempt) noexcept {
   // (preservedEditCount = full edit set), letting downstream failures
   // open their own credible windows past the entry-rule prefix.
   const bool firstEditIsReplaceAtRoot =
-      !attempt.recoveryEdits.empty() &&
       attempt.recoveryEdits.front().beginOffset == 0 &&
       attempt.recoveryEdits.front().kind == ParseDiagnosticKind::Replaced;
   if (!attempt.hasStablePrefix && firstEditIsReplaceAtRoot &&
@@ -1584,36 +1160,17 @@ namespace {
 [[nodiscard]] bool rewrites_committed_replay_boundary(
     const RecoveryAttempt &candidate,
     const CommittedPrefixContract &contract) noexcept {
-  if (contract.preservedEditCount >= candidate.recoveryEdits.size()) {
-    return false;
-  }
-
-  const auto firstNewEditOffset =
-      candidate.recoveryEdits[contract.preservedEditCount].beginOffset;
-  if (firstNewEditOffset < contract.resumeFloor) {
-    return true;
-  }
-
-  if (contract.preservedEditCount == 0u && !candidate.hasStablePrefix) {
-    return false;
-  }
-
-  if (contract.resumeFloor >= contract.boundaryFloor) {
-    return false;
-  }
-  const auto newEdits =
-      std::span(candidate.recoveryEdits).subspan(contract.preservedEditCount);
-  return std::ranges::any_of(
-      newEdits, [&](const SyntaxScriptEntry &entry) noexcept {
-        return entry.beginOffset == contract.resumeFloor &&
-               entry.kind != ParseDiagnosticKind::Inserted;
-      });
+  return contract.preservedEditCount < candidate.recoveryEdits.size() &&
+         candidate.recoveryEdits[contract.preservedEditCount].beginOffset <
+             contract.resumeFloor;
 }
 
-} // namespace
-
-namespace {
-
+// The boundary edit (the one whose endOffset == lastEditOffset) is preserved
+// only when the parse made visible progress past it (parsedLength >
+// lastEditOffset → resumeFloor = parsedLength, boundary edit endOffset <
+// resumeFloor). When the parse stopped at the boundary edit (parsedLength <=
+// lastEditOffset → resumeFloor = lastEditOffset), the boundary edit is NOT
+// preserved: the next recovery attempt will redo it from scratch.
 [[nodiscard]] CommittedPrefixContract
 committed_replay_prefix_contract(
     const RecoveryAttempt &selectedAttempt) noexcept {
@@ -1621,71 +1178,14 @@ committed_replay_prefix_contract(
   if (selectedAttempt.recoveryEdits.empty()) {
     return contract;
   }
-  const auto &facts = selectedAttempt.facts;
-  contract.boundaryFloor =
-      std::max(selectedAttempt.parsedLength, facts.lastEditOffset);
-  if (selectedAttempt.status == RecoveryAttemptStatus::RecoveredButNotCredible &&
-      facts.hasCursorProgressBetweenOrPastEdits) {
-    if (selectedAttempt.stableAfterRecovery &&
-        facts.hasVisibleProgressPastLastEdit) {
-      contract.resumeFloor = contract.boundaryFloor;
-      contract.preservedEditCount = selectedAttempt.recoveryEdits.size();
-      return contract;
-    }
-    const auto preservedEditCount =
-        replay_horizon_preserved_edit_count(selectedAttempt);
-    contract.resumeFloor =
-        replay_horizon_resume_floor(selectedAttempt, preservedEditCount);
-    contract.preservedEditCount = preservedEditCount;
-    return contract;
-  }
-  if (recovery_attempt_establishes_replay_contract(selectedAttempt)) {
-    contract.resumeFloor = contract.boundaryFloor;
-    contract.preservedEditCount = selectedAttempt.recoveryEdits.size();
-    return contract;
-  }
-  contract.resumeFloor = contract.boundaryFloor;
-  if (selectedAttempt.failureSnapshot.has_value()) {
-    const auto &failureSnapshot = *selectedAttempt.failureSnapshot;
-    if (failureSnapshot.hasFailureToken &&
-        failureSnapshot.failureTokenIndex <
-            failureSnapshot.failureLeafHistory.size()) {
-      contract.resumeFloor =
-          std::min(contract.resumeFloor,
-                   failureSnapshot
-                       .failureLeafHistory[failureSnapshot.failureTokenIndex]
-                       .beginOffset);
-    }
-  }
+  contract.resumeFloor =
+      std::max(selectedAttempt.parsedLength, selectedAttempt.facts.lastEditOffset);
   while (contract.preservedEditCount < selectedAttempt.recoveryEdits.size() &&
          selectedAttempt.recoveryEdits[contract.preservedEditCount].endOffset <
              contract.resumeFloor) {
     ++contract.preservedEditCount;
   }
   return contract;
-}
-
-[[nodiscard]] bool localizes_current_failure_site(
-    const RecoveryAttempt &candidate,
-    const RecoveryAttempt &selectedAttempt) noexcept {
-  if (!candidate.entryRuleMatched || !candidate.failureSnapshot.has_value() ||
-      !selectedAttempt.failureSnapshot.has_value() ||
-      selectedAttempt.status != RecoveryAttemptStatus::RecoveredButNotCredible ||
-      candidate.recoveryEdits.size() != selectedAttempt.recoveryEdits.size()) {
-    return false;
-  }
-  if (!std::equal(candidate.recoveryEdits.begin(), candidate.recoveryEdits.end(),
-                  selectedAttempt.recoveryEdits.begin(),
-                  same_syntax_script_entry)) {
-    return false;
-  }
-  const auto candidateFailureOffset =
-      failure_visible_cursor_offset(*candidate.failureSnapshot,
-                                    candidate.parsedLength);
-  const auto selectedFailureOffset =
-      failure_visible_cursor_offset(*selectedAttempt.failureSnapshot,
-                                    selectedAttempt.parsedLength);
-  return candidateFailureOffset < selectedFailureOffset;
 }
 
 } // namespace
@@ -1706,7 +1206,6 @@ bool satisfies_non_credible_fallback_contract(
 
   if (selectedFacts.hasEdits &&
       selectedAttempt.status == RecoveryAttemptStatus::RecoveredButNotCredible &&
-      selectedFacts.hasCursorProgressPastLastEdit &&
       contract->preservedEditCount == selectedAttempt.recoveryEdits.size()) {
     const auto committedSourceFloor =
         std::max(selectedAttempt.parsedLength, selectedFacts.lastEditOffset);
@@ -1714,7 +1213,7 @@ bool satisfies_non_credible_fallback_contract(
                               .subspan(contract->preservedEditCount);
     const bool rewritesCommittedSource = std::ranges::any_of(
         newEdits, [&](const SyntaxScriptEntry &entry) noexcept {
-          return entry.beginOffset == committedSourceFloor &&
+          return entry.beginOffset >= committedSourceFloor &&
                  entry.kind != ParseDiagnosticKind::Inserted;
         });
     if (rewritesCommittedSource) {
@@ -1722,36 +1221,17 @@ bool satisfies_non_credible_fallback_contract(
     }
   }
 
-  if (!candidateFacts.hasCursorProgressBetweenOrPastEdits ||
+  if (!candidateFacts.hasCursorProgressPastLastEdit ||
       candidate.maxCursorOffset <= contract->resumeFloor) {
     return false;
   }
 
   if (contract->preservedEditCount == 0u) {
-    // Root-replace recovery escape hatch: the entry rule's leading
-    // literal was repaired by a fuzzy Replace at offset 0. No stable
-    // prefix exists by definition, but the parser advanced past the
-    // replace (parsedLength > replace.endOffset). Treat the
-    // post-replace region as the de-facto stable continuation.
-    const bool firstEditIsReplaceAtRoot =
-        !candidate.recoveryEdits.empty() &&
-        candidate.recoveryEdits.front().beginOffset == 0 &&
-        candidate.recoveryEdits.front().kind ==
-            ParseDiagnosticKind::Replaced &&
-        candidate.parsedLength >
-            candidate.recoveryEdits.front().endOffset;
-    if (!candidate.hasStablePrefix &&
-        !candidateFacts.hasVisibleProgressPastLastEdit &&
-        !firstEditIsReplaceAtRoot) {
-      return false;
-    }
     return !candidateFacts.hasDeleteOnlyRecovery ||
-           candidateFacts.continuesAfterFirstEdit ||
-           firstEditIsReplaceAtRoot;
+           candidateFacts.continuesAfterFirstEdit;
   }
 
-  return candidate.parsedLength > selectedAttempt.parsedLength ||
-         candidate.maxCursorOffset > selectedAttempt.maxCursorOffset;
+  return candidate.parsedLength > selectedAttempt.parsedLength;
 }
 
 [[nodiscard]] RecoveryKey
@@ -1759,9 +1239,15 @@ recovery_attempt_key(const RecoveryAttempt &attempt) noexcept {
   const bool selectableAttempt =
       attempt.status == RecoveryAttemptStatus::Credible ||
       attempt.status == RecoveryAttemptStatus::Stable;
-  const auto &facts = attempt.facts;
+  // Read the two facts directly from the attempt rather than from
+  // `attempt.facts`: the cached `facts` is populated by
+  // `classify_recovery_attempt`, and a caller that ranks attempts before
+  // classification would otherwise see a default zero-edit shape and
+  // build a silently wrong key.
+  const bool hasEdits = !attempt.recoveryEdits.empty();
   const TextOffset effectiveFirstEditOffset =
-      facts.hasEdits ? facts.firstEditOffset : attempt.parsedLength;
+      hasEdits ? attempt.recoveryEdits.front().beginOffset
+               : attempt.parsedLength;
   return {
       .fullMatch = attempt.fullMatch,
       .matched = selectableAttempt,

@@ -45,20 +45,13 @@ struct AttemptFacts {
   bool continuesAfterFirstEdit = false;
 
   bool hasEdits = false;
-  bool hasInsertedRecovery = false;
   bool hasDeleteOnlyRecovery = false;
 
   bool hasCursorProgressPastLastEdit = false;
-  bool hasVisibleProgressPastLastEdit = false;
-  bool hasCursorProgressBetweenOrPastEdits = false;
 
   bool preservesStablePrefixBeforeFirstEdit = false;
-  bool startsWithUnstablePrefixDelete = false;
-  bool startsWithStableBoundaryDeleteWithoutContinuation = false;
-  bool startsWithUnstablePrefixInsertThenDestructiveSuffixEdit = false;
 
   bool hasEditPastReplayWindowHorizon = false;
-  bool hasCommittedReplayPrefix = false;
 
   bool allowsLocalGapRecoveryWithoutStablePrefix = false;
   bool allowsLocalDeleteGapRecoveryWithoutStablePrefix = false;

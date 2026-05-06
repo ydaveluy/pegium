@@ -1,10 +1,13 @@
 # AGENTS.md
 
+
 ## Repository expectations
 
 - build with -j32
 - never run `ctest` while a build is still running; wait for the active build to finish successfully first
-- run all tests with ctest 
+- run all tests with ctest
+- only build and test when it is relevant
+- build time is long so perform batch changes before building
 
 ## User architecture preferences
 

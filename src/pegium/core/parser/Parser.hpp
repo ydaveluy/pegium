@@ -13,6 +13,7 @@
 #include <pegium/core/grammar/AbstractRule.hpp>
 #include <pegium/core/grammar/Assignment.hpp>
 #include <pegium/core/grammar/Literal.hpp>
+#include <pegium/core/parser/ParseDiagnosticKind.hpp>
 #include <pegium/core/parser/RecoveryConstants.hpp>
 #include <pegium/core/syntax-tree/AstArena.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
@@ -25,31 +26,6 @@ struct ParserRule;
 }
 
 namespace pegium::parser {
-/// Category of diagnostic emitted by parsing, recovery, or value conversion.
-enum class ParseDiagnosticKind {
-  /// Recovery inserted a missing construct without consuming source text.
-  Inserted,
-  /// Recovery skipped a portion of source text.
-  Deleted,
-  /// Recovery consumed source text as another expected construct.
-  Replaced,
-  /// Parsing stopped at end of input while more content was still expected.
-  Incomplete,
-  /// Parsing resumed after a previous syntax issue.
-  Recovered,
-  /// CST parsing succeeded but value conversion failed afterwards.
-  ConversionError,
-};
-
-/// Writes a human-readable name for a diagnostic kind.
-std::ostream &operator<<(std::ostream &os, ParseDiagnosticKind kind);
-
-/// Returns whether a diagnostic kind belongs to syntax parsing rather than AST conversion.
-[[nodiscard]] constexpr bool
-isSyntaxParseDiagnostic(ParseDiagnosticKind kind) noexcept {
-  return kind != ParseDiagnosticKind::ConversionError;
-}
-
 /// One parser diagnostic anchored to a source range and optional grammar element.
 struct ParseDiagnostic {
   /// Diagnostic category.
@@ -139,6 +115,15 @@ struct ParseOptions {
   /// validation-only). Prevents pathological inputs or fuzzer cases from
   /// driving unbounded recovery work.
   std::uint32_t maxTotalRecoveryAttemptRuns = 1024;
+
+  /// Hard cap on the cumulative number of `ParserRule` recovery entries
+  /// allowed within one recovery window. Bounds the speculative search tree
+  /// when a pathological grammar shape (e.g. unclosed nested call
+  /// expressions) would otherwise cause `evaluate_editable_recovery_candidate`
+  /// to explore exponentially many branches. Reaching the cap makes the
+  /// inner recovery fail fast so the outer driver falls back to a less
+  /// ambitious candidate.
+  std::uint32_t maxRecoveryRuleEntries = 12000;
 
   /// Number of strict visible leaves that must parse after a recovery edit
   /// before the edit is considered stable.

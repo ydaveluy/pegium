@@ -113,7 +113,7 @@ template <typename Element> struct InfixOperatorValueSupport {
     if constexpr (detail::SupportedRuleValueType<RawType>) {
       return detail::toRuleValue(std::forward<RawValue>(rawValue));
     } else {
-      static_assert(detail::RawValueDependentFalse<RawType>::value,
+      static_assert(opt::detail::DependentFalse_v<RawType>,
                     "InfixOperator raw value must be convertible to grammar::RuleValue.");
     }
   }
@@ -375,7 +375,7 @@ template <typename Model, typename... Operators> struct InfixRuleExpectSupport {
       }
 
       const auto checkpoint = ctx.mark();
-      auto noEditGuard = ctx.withEditState(false, false, false);
+      auto noEditGuard = ctx.withEditTrackingDisabled();
       (void)noEditGuard;
       if (parse(op, ctx)) {
         if (ctx.frontierBlocked()) {
@@ -404,7 +404,7 @@ template <typename Model, typename... Operators> struct InfixRuleExpectSupport {
       bool merged = false;
       if (precedence >= minPrecedence) {
         const auto checkpoint = ctx.mark();
-        auto noEditGuard = ctx.withEditState(false, false, false);
+        auto noEditGuard = ctx.withEditTrackingDisabled();
         (void)noEditGuard;
         if (parse(op, ctx) && ctx.frontierBlocked()) {
           auto operatorFrontier = capture_frontier_since(ctx, checkpoint);

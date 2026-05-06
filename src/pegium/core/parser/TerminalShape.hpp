@@ -17,13 +17,12 @@
 ///                               single codepoint; single-codepoint
 ///                               replacements must stay conservative.
 ///   - `startsLikeWord`          the canonical text begins with a
-///                               word-like codepoint; used to
-///                               detect leading-edge boundary
-///                               violations during fuzzy match.
+///                               word-like codepoint; detects
+///                               leading-edge boundary violations
+///                               during fuzzy match.
 ///   - `endsLikeWord`            the canonical text ends with a
-///                               word-like codepoint; used to
-///                               detect trailing-edge boundary
-///                               violations.
+///                               word-like codepoint; detects
+///                               trailing-edge boundary violations.
 ///   - `boundarySensitive`       true iff the terminal must respect
 ///                               word boundaries on either side
 ///                               (typically derived from the two
@@ -36,13 +35,13 @@
 #include <string_view>
 #include <type_traits>
 
+#include <pegium/core/utils/TextUtils.hpp>
+
 namespace pegium::parser::detail {
 
 inline constexpr std::uint32_t kMaxScopedSyntheticInsertCanonicalTextLength = 2;
 
-/// The closed lexical shape of a terminal. Six fields. Adding a
-/// field requires removing or merging an existing one (the density
-/// ceiling rule applies to local types too).
+/// The closed lexical shape of a terminal.
 struct TerminalShape {
   bool hasCanonicalText = false;
   std::uint32_t canonicalTextLength = 0;
@@ -53,9 +52,7 @@ struct TerminalShape {
 
   /// Replace requires multi-codepoint canonical text —
   /// single-codepoint replacements stay conservative and go through
-  /// stricter paths. Mirrors the legacy
-  /// `LexicalRecoveryProfile::allowsReplace` so helpers can swap
-  /// parameter type without changing their body.
+  /// stricter paths.
   [[nodiscard]] constexpr bool allowsReplace() const noexcept {
     return hasCanonicalText && !singleCodepoint;
   }
@@ -89,7 +86,13 @@ make_terminal_shape_from_literal(std::string_view canonicalText,
   shape.hasCanonicalText = true;
   shape.canonicalTextLength =
       static_cast<std::uint32_t>(canonicalText.size());
-  shape.singleCodepoint = canonicalText.size() == 1U;
+  // `singleCodepoint` must compare codepoint count, not byte count: a
+  // multi-byte UTF-8 single codepoint (`é`, `→`, …) is still a single
+  // codepoint and should retain `allowsInsert()` semantics.
+  shape.singleCodepoint =
+      !canonicalText.empty() &&
+      pegium::utils::utf8_codepoint_length(canonicalText.front()) ==
+          canonicalText.size();
   shape.startsLikeWord = startsLikeWord;
   shape.endsLikeWord = endsLikeWord;
   shape.boundarySensitive = startsLikeWord || endsLikeWord;
@@ -97,13 +100,10 @@ make_terminal_shape_from_literal(std::string_view canonicalText,
 }
 
 /// Closed legality facts the terminal recovery predicates consume.
-///
-/// Disambiguated from the legacy `TerminalRecoveryFacts` in
-/// `TerminalRecoverySupport.hpp` so both can coexist during the
-/// migration. The legacy struct carries the trivia/insertion
-/// scaffolding the existing helpers consume; this struct carries the
-/// closed legality vocabulary the `is_terminal_*_legal` predicates
-/// consume.
+/// Distinct from `TerminalRecoveryFacts` (in
+/// `TerminalRecoverySupport.hpp`) which carries the trivia/insertion
+/// scaffolding helpers consume; this struct carries the closed
+/// legality vocabulary `is_terminal_*_legal` predicates consume.
 struct TerminalLegalityFacts {
   /// True iff the recovery budget allows another fuzzy `Replace`
   /// candidate at the current position (`maxRecoveryEditCost` minus

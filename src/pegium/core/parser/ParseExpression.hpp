@@ -136,10 +136,9 @@ struct Wrapper {
 
   Wrapper() = default;
 
-  Wrapper(const Wrapper &other) noexcept
-      : _ops(other._ops) {
+  Wrapper(const Wrapper &other) noexcept : _ops(other._ops) {
     if (other._obj) {
-      _obj = _ops.clone(other._obj);
+      _obj = _ops->clone(other._obj);
     }
   }
 
@@ -152,7 +151,7 @@ struct Wrapper {
     reset();
     _ops = other._ops;
     if (other._obj) {
-      _obj = _ops.clone(other._obj);
+      _obj = _ops->clone(other._obj);
     }
     return *this;
   }
@@ -171,78 +170,68 @@ struct Wrapper {
     using W = Model<Element>;
 
     reset();
-    _ops = W::ops;
+    _ops = &W::ops;
     _obj = new W(std::forward<Element>(element));
   }
 
-  bool has_value() const noexcept { return _obj != nullptr; }
-
   bool has_terminal() const noexcept {
-    return _obj != nullptr && _ops.terminal != nullptr;
+    return _obj != nullptr && _ops->terminal != nullptr;
   }
 
   bool has_recovery_probe() const noexcept {
-    return _obj != nullptr && _ops.probeRecoverable != nullptr;
+    return _obj != nullptr && _ops->probeRecoverable != nullptr;
   }
 
   bool has_entry_recovery_probe() const noexcept {
-    return _obj != nullptr && _ops.probeRecoverableAtEntry != nullptr;
+    return _obj != nullptr && _ops->probeRecoverableAtEntry != nullptr;
   }
 
   bool has_entry_recovery_consumes_visible_probe() const noexcept {
     return _obj != nullptr &&
-           _ops.probeRecoverableAtEntryConsumesVisible != nullptr;
-  }
-
-  bool has_fast_probe() const noexcept {
-    return _obj != nullptr && _ops.fastProbeTracked != nullptr;
+           _ops->probeRecoverableAtEntryConsumesVisible != nullptr;
   }
 
   const char *try_terminal(const char *begin) const noexcept {
-    return has_terminal() ? _ops.terminal(_obj, begin) : nullptr;
-  }
-
-  const char *try_terminal(const std::string &text) const noexcept {
-    return try_terminal(text.c_str());
+    return has_terminal() ? _ops->terminal(_obj, begin) : nullptr;
   }
 
   bool probe_recoverable(RecoveryContext &ctx) const {
-    return has_recovery_probe() ? _ops.probeRecoverable(_obj, ctx) : false;
+    return has_recovery_probe() ? _ops->probeRecoverable(_obj, ctx) : false;
   }
 
   bool probe_recoverable_at_entry(RecoveryContext &ctx) const {
-    return has_entry_recovery_probe() ? _ops.probeRecoverableAtEntry(_obj, ctx)
-                                      : false;
+    return has_entry_recovery_probe()
+               ? _ops->probeRecoverableAtEntry(_obj, ctx)
+               : false;
   }
 
   bool probe_recoverable_at_entry_consumes_visible(RecoveryContext &ctx) const {
     return has_entry_recovery_consumes_visible_probe()
-               ? _ops.probeRecoverableAtEntryConsumesVisible(_obj, ctx)
+               ? _ops->probeRecoverableAtEntryConsumesVisible(_obj, ctx)
                : false;
   }
 
   bool fast_probe(TrackedParseContext &ctx) const {
-    return has_fast_probe() ? _ops.fastProbeTracked(_obj, ctx)
-                            : probe(*this, ctx);
+    return _ops->fastProbeTracked(_obj, ctx);
   }
 
   const grammar::AbstractElement *element() const noexcept {
-    assert(_obj && _ops.elem && "Missing element wrapper!");
-    return _ops.elem(_obj);
+    assert(_obj && _ops && "Missing element wrapper!");
+    return _ops->elem(_obj);
   }
 
   void init(AstReflectionInitContext &ctx) const {
-    assert(_obj && _ops.init && "Missing init wrapper!");
-    _ops.init(_obj, ctx);
+    assert(_obj && _ops && "Missing init wrapper!");
+    _ops->init(_obj, ctx);
   }
 
   void reset() noexcept {
     if (!_obj) {
       return;
     }
-    _ops.destroy(_obj);
+    _ops->destroy(_obj);
     _obj = nullptr;
-    _ops = {};
+    _ops = nullptr;
   }
 
 private:
@@ -250,24 +239,21 @@ private:
 
   void move_from(Wrapper &&other) noexcept {
     _obj = std::exchange(other._obj, nullptr);
-    _ops = std::exchange(other._ops, {});
+    _ops = std::exchange(other._ops, nullptr);
   }
 
   template <ParseModeContext Context>
   bool parse_impl(Context &ctx) const {
+    assert(_obj && _ops && "Missing element wrapper!");
     if constexpr (std::same_as<std::remove_cvref_t<Context>, ParseContext>) {
-      assert(_obj && _ops.parse && "Missing element wrapper!");
-      return _ops.parse(_obj, ctx);
+      return _ops->parse(_obj, ctx);
     } else if constexpr (std::same_as<std::remove_cvref_t<Context>,
                                       TrackedParseContext>) {
-      assert(_obj && _ops.parseTracked && "Missing tracked element wrapper!");
-      return _ops.parseTracked(_obj, ctx);
+      return _ops->parseTracked(_obj, ctx);
     } else if constexpr (RecoveryParseModeContext<Context>) {
-      assert(_obj && _ops.parseRecover && "Missing element wrapper!");
-      return _ops.parseRecover(_obj, ctx);
+      return _ops->parseRecover(_obj, ctx);
     } else {
-      assert(_obj && _ops.parseExpect && "Missing element wrapper!");
-      return _ops.parseExpect(_obj, ctx);
+      return _ops->parseExpect(_obj, ctx);
     }
   }
 
@@ -367,6 +353,9 @@ private:
   };
 
   void *_obj = nullptr;
-  Ops _ops{};
+  // Points to a `Model<T>::ops` static instance (one per Element type).
+  // Sharing the table by pointer keeps each Wrapper to two pointers
+  // instead of copying the full ~104-byte function-pointer table.
+  const Ops *_ops = nullptr;
 };
 } // namespace pegium::parser

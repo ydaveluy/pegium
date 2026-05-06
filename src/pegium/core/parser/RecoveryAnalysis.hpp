@@ -135,14 +135,11 @@ private:
   std::vector<FailureLeaf> _visibleLeaves;
 };
 
-class StrictFailureEngine {
-public:
-  [[nodiscard]] StrictParseResult
-  runStrictParse(const grammar::ParserRule &entryRule, const Skipper &skipper,
+[[nodiscard]] StrictParseResult
+run_strict_parse(const grammar::ParserRule &entryRule, const Skipper &skipper,
                  const text::TextSnapshot &text,
                  const utils::CancellationToken &cancelToken = {},
-                 FailureHistoryRecorder *failureRecorder = nullptr) const;
-};
+                 FailureHistoryRecorder *failureRecorder = nullptr);
 
 [[nodiscard]] StrictFailureEngineResult
 run_strict_parse_with_failure_snapshot(

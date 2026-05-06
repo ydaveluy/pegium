@@ -35,7 +35,6 @@
 using pegium::parser::detail::boundary_repair_outranks_no_edit_iteration;
 using pegium::parser::detail::CandidateEnvelope;
 using pegium::parser::detail::CandidateOrigin;
-using pegium::parser::detail::ContinuationRequirement;
 using pegium::parser::detail::destructive_extension_outranks_anchor_base;
 using pegium::parser::detail::extension_outranks_anchor_base;
 using pegium::parser::detail::ReplayPrefixClass;
@@ -78,8 +77,6 @@ make_boundary_repair_outranks_pair() noexcept {
   candidate.key.editCost = 2;
   candidate.key.progressAfterEdits = 12;
   candidate.contract.replayPrefix = ReplayPrefixClass::SameCommittedPrefix;
-  candidate.contract.continuation =
-      ContinuationRequirement::VisibleContinuationAfterEdit;
   CandidateEnvelope committed;
   committed.key.matched = true;
   committed.key.firstEditOffset = 5;
@@ -101,8 +98,6 @@ make_destructive_extension_outranks_pair() noexcept {
   next.key.progressAfterEdits = 15;
   next.contract.replayPrefix =
       ReplayPrefixClass::ExtendedCommittedPrefix;
-  next.contract.continuation =
-      ContinuationRequirement::VisibleContinuationAfterEdit;
   CandidateEnvelope current;
   current.key.matched = true;
   current.key.firstEditOffset = 8;
@@ -307,8 +302,6 @@ TEST(FamilyRedundancyRatioGuard,
   next.key.progressAfterEdits = 126;
   next.contract.replayPrefix =
       ReplayPrefixClass::ExtendedCommittedPrefix;
-  next.contract.continuation =
-      ContinuationRequirement::VisibleContinuationAfterEdit;
   next.origin = CandidateOrigin::RepetitionIteration;
   CandidateEnvelope current;
   current.key.matched = true;
@@ -317,8 +310,6 @@ TEST(FamilyRedundancyRatioGuard,
   current.key.progressAfterEdits = 71;
   current.contract.replayPrefix =
       ReplayPrefixClass::ExtendedCommittedPrefix;
-  current.contract.continuation =
-      ContinuationRequirement::VisibleContinuationAfterEdit;
   current.origin = CandidateOrigin::RepetitionIteration;
   EXPECT_FALSE(destructive_extension_outranks_anchor_base(next, current));
 }
@@ -334,8 +325,6 @@ TEST(FamilyRedundancyRatioGuard,
   next.key.progressAfterEdits = 18;
   next.contract.replayPrefix =
       ReplayPrefixClass::ExtendedCommittedPrefix;
-  next.contract.continuation =
-      ContinuationRequirement::VisibleContinuationAfterEdit;
   next.origin = CandidateOrigin::RepetitionIteration;
   CandidateEnvelope current;
   current.key.matched = true;
@@ -344,8 +333,6 @@ TEST(FamilyRedundancyRatioGuard,
   current.key.progressAfterEdits = 14;
   current.contract.replayPrefix =
       ReplayPrefixClass::ExtendedCommittedPrefix;
-  current.contract.continuation =
-      ContinuationRequirement::VisibleContinuationAfterEdit;
   current.origin = CandidateOrigin::RepetitionIteration;
   EXPECT_TRUE(destructive_extension_outranks_anchor_base(next, current));
 }
@@ -364,8 +351,6 @@ TEST(FamilyRedundancyRatioGuard,
   next.key.progressAfterEdits = 60;
   next.contract.replayPrefix =
       ReplayPrefixClass::ExtendedCommittedPrefix;
-  next.contract.continuation =
-      ContinuationRequirement::VisibleContinuationAfterEdit;
   next.origin = CandidateOrigin::RepetitionIteration;
   CandidateEnvelope current;
   current.key.matched = true;
@@ -373,8 +358,6 @@ TEST(FamilyRedundancyRatioGuard,
   current.key.editCost = 2;
   current.key.progressAfterEdits = 20;
   current.contract.replayPrefix = ReplayPrefixClass::NewLocalPrefix;
-  current.contract.continuation =
-      ContinuationRequirement::VisibleContinuationAfterEdit;
   current.origin = CandidateOrigin::RepetitionIteration;
   EXPECT_TRUE(destructive_extension_outranks_anchor_base(next, current));
 }

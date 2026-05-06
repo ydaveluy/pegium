@@ -3,12 +3,61 @@
 /// Helpers for evaluating recovery candidates in editable parse modes.
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
 
 namespace pegium::parser::detail {
+
+/// True iff `kind` commits the candidate to a strictly different replay
+/// prefix. Both `Deleted` and `Replaced` consume source text and shift
+/// what a downstream replay must reproduce; an `Inserted` edit alone
+/// does not. Recovery's family-redundancy and replay-prefix
+/// classifications collapse to this single predicate.
+[[nodiscard]] constexpr bool
+is_destructive_edit_kind(ParseDiagnosticKind kind) noexcept {
+  return kind == ParseDiagnosticKind::Deleted ||
+         kind == ParseDiagnosticKind::Replaced;
+}
+
+/// Summary of the edit-script slice [`baseEditCount`, end()): the first
+/// edit's begin offset, the maximum end offset, and whether any edit in
+/// the slice is destructive (`Deleted` or `Replaced`). Both
+/// `EditableRecoveryCandidate` and `StructuralProgressRecoveryCandidate`
+/// constructors collapse the same loop into this projection.
+struct EditSliceSummary {
+  TextOffset firstEditBeginOffset = 0;
+  TextOffset maxEndOffset = 0;
+  bool hasDestructiveEdit = false;
+  /// True iff the slice is non-empty and every edit in it is `Deleted`
+  /// (no inserts, no replaces). Default `false` on an empty slice so
+  /// callers that only consult this when the slice is non-empty get a
+  /// safe default.
+  bool allDeleted = false;
+};
+
+[[nodiscard]] inline EditSliceSummary
+summarize_edits_since(std::span<const SyntaxScriptEntry> edits,
+                      std::size_t baseEditCount) noexcept {
+  EditSliceSummary summary{};
+  if (baseEditCount >= edits.size()) {
+    return summary;
+  }
+  summary.firstEditBeginOffset = edits[baseEditCount].beginOffset;
+  summary.allDeleted = true;
+  for (std::size_t i = baseEditCount; i < edits.size(); ++i) {
+    summary.hasDestructiveEdit =
+        summary.hasDestructiveEdit || is_destructive_edit_kind(edits[i].kind);
+    summary.maxEndOffset = std::max(summary.maxEndOffset, edits[i].endOffset);
+    if (edits[i].kind != ParseDiagnosticKind::Deleted) {
+      summary.allDeleted = false;
+    }
+  }
+  return summary;
+}
 
 [[nodiscard]] inline TextOffset
 post_skip_cursor_offset(RecoveryContext &ctx) {
@@ -42,9 +91,6 @@ evaluate_editable_recovery_candidate(RecoveryContext &ctx,
         static_cast<std::uint32_t>(ctx.recoveryEditCount() -
                                    baseRecoveryEditCount);
     if (ctx.recoveryEditCount() > baseRecoveryEditCount) {
-      const auto edits = ctx.recoveryEditsView();
-      const auto &firstEdit = edits[baseRecoveryEditCount];
-      candidate.firstEditOffset = firstEdit.beginOffset;
       // Both `Deleted` and `Replaced` commit to a strictly different
       // replay prefix than an insert-only candidate, so both belong to
       // the destructive equivalence class consumed by the family-
@@ -53,26 +99,20 @@ evaluate_editable_recovery_candidate(RecoveryContext &ctx,
       // as `NewLocalPrefix`, which silently drops the
       // `extension_outranks_anchor_base` ratio guard and lets a sibling
       // insert-only path with the same cost win on enumeration order.
-      candidate.hasDeleteEdit =
-          firstEdit.kind == ParseDiagnosticKind::Deleted ||
-          firstEdit.kind == ParseDiagnosticKind::Replaced;
-      TextOffset maxEndOffset = firstEdit.endOffset;
-      for (std::size_t i = baseRecoveryEditCount + 1u; i < edits.size(); ++i) {
-        candidate.hasDeleteEdit =
-            candidate.hasDeleteEdit ||
-            edits[i].kind == ParseDiagnosticKind::Deleted ||
-            edits[i].kind == ParseDiagnosticKind::Replaced;
-        maxEndOffset = std::max(maxEndOffset, edits[i].endOffset);
-      }
-      candidate.editSpan = maxEndOffset > firstEdit.beginOffset
-                               ? maxEndOffset - firstEdit.beginOffset
-                               : 0;
+      const auto editSummary = summarize_edits_since(ctx.recoveryEditsView(),
+                                                     baseRecoveryEditCount);
+      candidate.firstEditOffset = editSummary.firstEditBeginOffset;
+      candidate.hasDestructiveEdit = editSummary.hasDestructiveEdit;
+      candidate.editSpan =
+          editSummary.maxEndOffset > editSummary.firstEditBeginOffset
+              ? editSummary.maxEndOffset - editSummary.firstEditBeginOffset
+              : 0;
     }
     candidate.reachedEof =
         candidate.postSkipCursorOffset >=
         static_cast<TextOffset>(ctx.end - ctx.begin);
     candidate.replayPrefix = classify_editable_replay_prefix(
-        candidate.editCount, candidate.hasDeleteEdit);
+        candidate.editCount, candidate.hasDestructiveEdit);
   }
   ctx.rewind(entryCheckpoint);
   ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);

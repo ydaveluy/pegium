@@ -29,34 +29,15 @@ enum class ChoiceAttemptKind : std::uint8_t {
   None,
   NoEditReplay,
   Editable,
-  RestartReplay,
-};
-
-enum class RestartReplayMode : std::uint8_t {
-  Editable,
-  NoEdit,
 };
 
 struct ChoiceAttempt {
   std::size_t branchIndex = 0;
   ChoiceAttemptKind kind = ChoiceAttemptKind::None;
-  /// Legacy candidate, retained because replay reads its mutable
-  /// state (`cursorOffset`, `editSpan`, `reachedEof`) and the
-  /// dispatch's non-decision sites still consult it. The
-  /// decision-relevant projection is mirrored on `envelope` and is
-  /// the single channel the family-redundancy filter and the central
-  /// `RecoveryKey` ranking read.
-  EditableRecoveryCandidate recovery{};
   /// Closed-vocabulary view consumed by admission, family-redundancy
-  /// and ranking. Built from `recovery` via `to_candidate_envelope`
-  /// at every construction site so the two stay in sync; the
-  /// dispatch reads the envelope for decisions and never the legacy
-  /// candidate for those.
+  /// and ranking. Built via `to_candidate_envelope` at every construction
+  /// site; the dispatch reads the envelope for decisions.
   CandidateEnvelope envelope{};
-  TextOffset restartRetryCursorOffset = 0;
-  RestartReplayMode restartReplayMode = RestartReplayMode::Editable;
-  bool startedWithoutEdits = false;
-  bool branchHasStrictStartSignal = false;
   /// Post-evaluation cumulative cursors. These monotonic side effects are
   /// produced by exploring all branches, but replaying the single winner does
   /// not reproduce them. Cache hits must reapply these values to keep the
@@ -107,36 +88,29 @@ struct RecoveryPolicyFingerprint {
   bool hadEdits = false;
   bool insideEditWindow = false;
   bool completedWindowContinuation = false;
+  // Read by Repetition / UnorderedGroup / InfixRule recovery decisions
+  // (`Repetition.hpp:242`, `UnorderedGroup.hpp:102`, `InfixRule.hpp:670`).
+  // A choice attempt cached at one value can replay a wrong winner if the
+  // bit flips between visits.
+  bool frontierBlocked = false;
+  // Gates `insertSynthetic`/`deleteOneCodepoint`/`replaceLeaf` at every
+  // edit site (`ParseContext.cpp:48,89,133,213`). Flipped by
+  // `EditStateGuard` (e.g. `withEditTrackingDisabled` in `InfixRule`).
+  bool trackEditState = false;
+  // Index into committed-recovery-edits replay; controls whether edits
+  // are admissible at the current cursor (`ParseContext.cpp:53,97,141`).
+  std::uint32_t committedRecoveryEditIndex = 0;
+  // Per-attempt edit budgets. Mutated by `ExtendedDeleteScanBudgetScope`
+  // (`RecoveryUtils.hpp:54-55`); affects which candidates are admissible.
+  std::uint32_t remainingEditCount = 0;
+  std::uint32_t remainingConsecutiveDeletes = 0;
 
+  // Defaulted: every field participates in the cache key, so adding a
+  // new field automatically extends the comparison. Manually written
+  // comparisons silently drop a new field — a cache-poisoning footgun.
   [[nodiscard]] friend bool
   operator==(const RecoveryPolicyFingerprint &a,
-             const RecoveryPolicyFingerprint &b) noexcept {
-    return a.followProbeFn == b.followProbeFn &&
-           a.followProbeData == b.followProbeData &&
-           a.recoverableFollowProbeFn == b.recoverableFollowProbeFn &&
-           a.recoverableFollowProbeData == b.recoverableFollowProbeData &&
-           a.recoverableFollowConsumesVisibleProbeFn ==
-               b.recoverableFollowConsumesVisibleProbeFn &&
-           a.recoverableFollowConsumesVisibleProbeData ==
-               b.recoverableFollowConsumesVisibleProbeData &&
-           a.remainingEditBudget == b.remainingEditBudget &&
-           a.consecutiveDeletes == b.consecutiveDeletes &&
-           a.editFloorOffset == b.editFloorOffset &&
-           a.allowInsert == b.allowInsert && a.allowDelete == b.allowDelete &&
-           a.allowDeleteRetry == b.allowDeleteRetry &&
-           a.allowExtendedDeleteScan == b.allowExtendedDeleteScan &&
-           a.skipAfterDelete == b.skipAfterDelete &&
-           a.allowDestructiveWindowContinuation ==
-               b.allowDestructiveWindowContinuation &&
-           a.allowLeadingTerminalInsertScope ==
-               b.allowLeadingTerminalInsertScope &&
-           a.allowProvisionalFuzzyReplace == b.allowProvisionalFuzzyReplace &&
-           a.provisionalFuzzyReplaceAnchorOffset ==
-               b.provisionalFuzzyReplaceAnchorOffset &&
-           a.inRecoveryPhase == b.inRecoveryPhase && a.hadEdits == b.hadEdits &&
-           a.insideEditWindow == b.insideEditWindow &&
-           a.completedWindowContinuation == b.completedWindowContinuation;
-  }
+             const RecoveryPolicyFingerprint &b) noexcept = default;
 };
 
 static_assert(std::is_trivially_copyable_v<RecoveryPolicyFingerprint>);
@@ -161,15 +135,9 @@ public:
   static_assert((kCapacity & (kCapacity - 1)) == 0,
                 "ChoiceRecoverCache capacity must be a power of two.");
 
-  ChoiceRecoverCache() : _entries(std::make_unique<std::array<Entry, kCapacity>>()) {}
+  ChoiceRecoverCache();
 
-  void reset() noexcept {
-    for (auto &entry : *_entries) {
-      entry.occupied = false;
-    }
-    _hits = 0;
-    _misses = 0;
-  }
+  void reset() noexcept;
 
   /// Toggles the cache off without dropping its storage. When disabled,
   /// `tryGet` always returns `nullptr` and the caller is forced to recompute
@@ -181,116 +149,29 @@ public:
   [[nodiscard]] bool isDisabled() const noexcept { return _disabled; }
 
   [[nodiscard]] const ChoiceAttempt *
-  tryGet(const ChoiceRecoverCacheKey &key) noexcept {
-    if (_disabled) {
-      ++_misses;
-      return nullptr;
-    }
-    const auto index = slot(key);
-    const auto &entry = (*_entries)[index];
-    if (!entry.occupied || !keys_equal(entry.key, key)) {
-      ++_misses;
-      return nullptr;
-    }
-    ++_hits;
-    return &entry.value;
-  }
+  tryGet(const ChoiceRecoverCacheKey &key) noexcept;
 
   void store(const ChoiceRecoverCacheKey &key,
-             const ChoiceAttempt &value) noexcept {
-    const auto index = slot(key);
-    auto &entry = (*_entries)[index];
-    entry.key = key;
-    entry.value = value;
-    entry.occupied = true;
-  }
+             const ChoiceAttempt &value) noexcept;
 
   [[nodiscard]] std::uint64_t hits() const noexcept { return _hits; }
   [[nodiscard]] std::uint64_t misses() const noexcept { return _misses; }
 
 private:
+  // Generation-counter eviction: each entry stores the generation at which
+  // it was written. `reset()` increments `_currentGeneration`; tryGet
+  // accepts only entries whose generation matches the current one.
+  // Avoids walking 8192 cells every reset (O(1) instead of O(N)).
   struct Entry {
     ChoiceRecoverCacheKey key{};
     ChoiceAttempt value{};
-    bool occupied = false;
+    std::uint32_t generation = 0;
   };
-
-  static std::size_t slot(const ChoiceRecoverCacheKey &key) noexcept {
-    auto h = static_cast<std::uint64_t>(
-        reinterpret_cast<std::uintptr_t>(key.choice));
-    h ^= static_cast<std::uint64_t>(key.cursorOffset) * 0x9E3779B97F4A7C15ULL;
-    h ^= static_cast<std::uint64_t>(key.maxCursorOffset) *
-         0x3C79AC492BA7B653ULL;
-    h ^= static_cast<std::uint64_t>(key.furthestVisibleLeafCount) *
-         0x6A5D39EAE116586DULL;
-    h ^= static_cast<std::uint64_t>(key.currentVisibleLeafCount) *
-         0x3A1F5B8D2C7E9011ULL;
-    h ^= mix_policy(key.policy);
-    h ^= h >> 33;
-    h *= 0xFF51AFD7ED558CCDULL;
-    h ^= h >> 33;
-    return static_cast<std::size_t>(h) & (kCapacity - 1);
-  }
-
-  static std::uint64_t
-  mix_policy(const RecoveryPolicyFingerprint &policy) noexcept {
-    auto h = static_cast<std::uint64_t>(
-        reinterpret_cast<std::uintptr_t>(policy.followProbeFn));
-    h ^= static_cast<std::uint64_t>(
-             reinterpret_cast<std::uintptr_t>(policy.followProbeData)) *
-         0x7F4A7C15A24BAED4ULL;
-    h ^= static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(
-             policy.recoverableFollowProbeFn)) *
-         0xBF58476D1CE4E5B9ULL;
-    h ^= static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(
-             policy.recoverableFollowProbeData)) *
-         0x165667B19E3779F9ULL;
-    h ^= static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(
-             policy.recoverableFollowConsumesVisibleProbeFn)) *
-         0x9E3779B185EBCA87ULL;
-    h ^= static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(
-             policy.recoverableFollowConsumesVisibleProbeData)) *
-         0xC2B2AE3D27D4EB2FULL;
-    h ^= static_cast<std::uint64_t>(policy.remainingEditBudget) *
-         0xC2B2AE3D27D4EB4FULL;
-    h ^= static_cast<std::uint64_t>(policy.consecutiveDeletes) *
-         0x94D049BB133111EBULL;
-    h ^= static_cast<std::uint64_t>(policy.editFloorOffset) *
-         0x85EBCA77C2B2AE63ULL;
-    h ^= static_cast<std::uint64_t>(
-             policy.provisionalFuzzyReplaceAnchorOffset) *
-         0x27D4EB2F165667C5ULL;
-    const auto bools =
-        (static_cast<std::uint32_t>(policy.allowInsert) << 0) |
-        (static_cast<std::uint32_t>(policy.allowDelete) << 1) |
-        (static_cast<std::uint32_t>(policy.allowDeleteRetry) << 2) |
-        (static_cast<std::uint32_t>(policy.allowExtendedDeleteScan) << 3) |
-        (static_cast<std::uint32_t>(policy.skipAfterDelete) << 4) |
-        (static_cast<std::uint32_t>(policy.allowDestructiveWindowContinuation)
-         << 5) |
-        (static_cast<std::uint32_t>(policy.allowLeadingTerminalInsertScope)
-         << 6) |
-        (static_cast<std::uint32_t>(policy.allowProvisionalFuzzyReplace) << 7) |
-        (static_cast<std::uint32_t>(policy.inRecoveryPhase) << 8) |
-        (static_cast<std::uint32_t>(policy.hadEdits) << 9) |
-        (static_cast<std::uint32_t>(policy.insideEditWindow) << 10) |
-        (static_cast<std::uint32_t>(policy.completedWindowContinuation) << 11);
-    h ^= static_cast<std::uint64_t>(bools) * 0xD1B54A32D192ED03ULL;
-    return h;
-  }
-
-  static bool keys_equal(const ChoiceRecoverCacheKey &a,
-                         const ChoiceRecoverCacheKey &b) noexcept {
-    return a.choice == b.choice && a.cursorOffset == b.cursorOffset &&
-           a.maxCursorOffset == b.maxCursorOffset &&
-           a.furthestVisibleLeafCount == b.furthestVisibleLeafCount &&
-           a.currentVisibleLeafCount == b.currentVisibleLeafCount &&
-           a.policy == b.policy;
-  }
 
   std::unique_ptr<std::array<Entry, kCapacity>> _entries;
   std::uint64_t _hits = 0;
   std::uint64_t _misses = 0;
+  std::uint32_t _currentGeneration = 1;
   bool _disabled = false;
 };
 

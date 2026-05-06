@@ -19,7 +19,6 @@
 namespace pegium::parser {
 
 template <Expression... Elements> struct Group;
-template <Expression... Elements> struct GroupWithSkipper;
 
 template <auto literal, bool case_sensitive = true>
 struct Literal final : grammar::Literal {
@@ -47,7 +46,7 @@ private:
   friend struct detail::ParseAccess;
   friend struct detail::ProbeAccess;
   template <Expression... Elements> friend struct Group;
-  template <Expression... Elements> friend struct GroupWithSkipper;
+  template <typename> friend struct SkipperWrapped;
 
   using LocalRecoveryChoice = detail::TerminalRecoveryCandidate;
 
@@ -61,10 +60,8 @@ private:
       (void)cursorStart;
       return filteredCandidates;
     } else {
-      constexpr auto lexicalProfile = detail::classify_literal_recovery_profile(
-          std::string_view{literal.begin(), literal.size()});
       return detail::collect_literal_replace_candidates(
-          ctx, cursorStart, getValue(), case_sensitive, lexicalProfile,
+          ctx, cursorStart, getValue(), case_sensitive, terminalShape,
           terminalRecoveryFacts);
     }
   }
@@ -74,9 +71,6 @@ private:
       Context &ctx, const char *cursorStart, const char *matchedEnd,
       const detail::LiteralFuzzyCandidates &fuzzyCandidates,
       detail::TerminalRecoveryFacts terminalRecoveryFacts) const {
-    constexpr auto terminalShape =
-        detail::classify_literal_recovery_profile(
-            std::string_view{literal.begin(), literal.size()});
     LocalRecoveryChoice bestChoice;
     auto considerChoice = [&bestChoice](const LocalRecoveryChoice &choice) {
       if (detail::is_better_recovery_key(
@@ -158,8 +152,7 @@ private:
         [this, &ctx, cursorStart, &choice]() {
           const char *const fuzzyEnd = cursorStart + choice.consumed;
           if (!detail::can_apply_recovery_match(ctx, fuzzyEnd) ||
-              !detail::apply_replace_leaf_recovery_edit(
-                  ctx, fuzzyEnd, this, choice.cost.budgetCost)) {
+              !ctx.replaceLeaf(fuzzyEnd, this, choice.cost.budgetCost)) {
             return false;
           }
           if constexpr (RecoveryParseModeContext<Context>) {
@@ -178,7 +171,7 @@ private:
           }
         },
         [this, &ctx, cursorStart, terminalRecoveryFacts]() {
-          return detail::apply_delete_scan_terminal_candidate(
+          return detail::recover_by_terminal_delete_scan(
               ctx,
               [this, &ctx, cursorStart](const char *scanStart) noexcept
                   -> const char * {
@@ -217,17 +210,8 @@ private:
   bool parse_terminal_recovery_impl(
       Context &ctx,
       const detail::TerminalRecoveryFacts &terminalRecoveryFacts) const {
-    const auto effectiveRecoveryFacts = [&]() {
-      auto facts = terminalRecoveryFacts;
-      if (!facts.triviaGap.hasHiddenGap() &&
-          !facts.triviaGap.visibleSourceAfterLocalSkip) {
-        facts.triviaGap = detail::current_local_skip_trivia_gap_profile(ctx);
-      }
-      facts.allowProvisionalLowConfidenceReplace =
-          facts.allowProvisionalLowConfidenceReplace ||
-          detail::allows_provisional_fuzzy_replace_here(ctx);
-      return facts;
-    }();
+    const auto effectiveRecoveryFacts =
+        detail::effective_terminal_recovery_facts(ctx, terminalRecoveryFacts);
     const char *const cursorStart = ctx.cursor();
     const bool hasHadEdits = []<typename Ctx>(const Ctx &currentCtx) constexpr
                                  noexcept {
@@ -239,11 +223,20 @@ private:
                                    return false;
                                  }(ctx);
     const char *const matchedEnd = terminal(cursorStart);
-    constexpr auto terminalShape =
-        detail::classify_literal_recovery_profile(
-            std::string_view{literal.begin(), literal.size()});
     const auto hasWordBoundaryViolation = [&ctx](const char *end) noexcept {
       return has_word_boundary_violation(ctx, end);
+    };
+    const auto applyFuzzyRecovery = [&]() -> bool {
+      const auto fuzzyCandidates =
+          (hasHadEdits &&
+           !detail::allows_fuzzy_replace_after_prior_edits(terminalShape))
+              ? detail::LiteralFuzzyCandidates{}
+              : findReplaceCandidates(ctx, cursorStart, effectiveRecoveryFacts);
+      const auto bestChoice = selectLocalRecoveryChoice(
+          ctx, cursorStart, matchedEnd, fuzzyCandidates,
+          effectiveRecoveryFacts);
+      return applyLocalRecoveryChoice(ctx, bestChoice, cursorStart, matchedEnd,
+                                      effectiveRecoveryFacts);
     };
 
     if constexpr (RecoveryParseModeContext<Context>) {
@@ -259,17 +252,7 @@ private:
       if (!ctx.canEdit()) {
         return false;
       }
-      const auto fuzzyCandidates =
-          (hasHadEdits &&
-           !detail::allows_fuzzy_replace_after_prior_edits(
-               terminalShape))
-              ? detail::LiteralFuzzyCandidates{}
-              : findReplaceCandidates(ctx, cursorStart, effectiveRecoveryFacts);
-      if (const auto bestChoice = selectLocalRecoveryChoice(
-              ctx, cursorStart, matchedEnd, fuzzyCandidates,
-              effectiveRecoveryFacts);
-          applyLocalRecoveryChoice(ctx, bestChoice, cursorStart, matchedEnd,
-                                   effectiveRecoveryFacts)) {
+      if (applyFuzzyRecovery()) {
         return true;
       }
 
@@ -316,18 +299,7 @@ private:
       if (!ctx.canEdit()) {
         return false;
       }
-
-      const auto fuzzyCandidates =
-          (hasHadEdits &&
-           !detail::allows_fuzzy_replace_after_prior_edits(
-               terminalShape))
-              ? detail::LiteralFuzzyCandidates{}
-              : findReplaceCandidates(ctx, cursorStart, effectiveRecoveryFacts);
-      const auto bestChoice = selectLocalRecoveryChoice(
-          ctx, cursorStart, matchedEnd, fuzzyCandidates,
-          effectiveRecoveryFacts);
-      return applyLocalRecoveryChoice(ctx, bestChoice, cursorStart, matchedEnd,
-                                      effectiveRecoveryFacts);
+      return applyFuzzyRecovery();
     }
   }
 
@@ -393,10 +365,10 @@ public:
     }
     if constexpr (allow_replace) {
       constexpr std::size_t kLiteralSize = literal.size();
-      // Single-edit threshold: only worth running the DP for keywords long
-      // enough that a 1-edit near-match is meaningful (4+ chars). Below that
-      // most identifiers would fuzzy-match every short keyword and a number
-      // of existing recovery unit tests intentionally cover the
+      // Single-edit threshold: only worth probing for keywords long
+      // enough that a 1-edit near-match is meaningful (4+ chars). Below
+      // that most identifiers would fuzzy-match every short keyword and
+      // a number of existing recovery unit tests intentionally cover the
       // delete-prefix-then-low-confidence-replace path.
       if constexpr (kLiteralSize < 4U) {
         return false;
@@ -405,27 +377,17 @@ public:
       const std::size_t window = kLiteralSize + kSlack;
       const auto remaining = static_cast<std::size_t>(ctx.end - cursorStart);
       const std::string_view view{cursorStart, std::min(window, remaining)};
-      const auto best = detail::find_best_literal_fuzzy_candidate(
-          getValue(), view, case_sensitive);
-      if (!best.has_value()) {
-        return false;
-      }
-      // Only accept high-confidence single-edit near-matches: distance == 1
-      // and the consumed window is within 1 char of the literal length.
-      // Anything looser starts rejecting legitimate identifiers that just
-      // happen to share a prefix with a keyword.
-      const auto consumed = best->consumed;
-      const auto delta = consumed > kLiteralSize ? consumed - kLiteralSize
-                                                  : kLiteralSize - consumed;
-      return best->distance == 1U && delta <= 1U;
+      // Linear O(N) single-edit detector keeps the failure-tracking strict
+      // pass free of the recovery Levenshtein DP. The acceptance set is
+      // identical to the original DP probe (`distance == 1 &&
+      // |consumed - N| <= 1`).
+      return detail::literal_has_single_edit_strict_match(getValue(), view,
+                                                          case_sensitive);
     }
     return false;
   }
 
   bool probeRecoverable(RecoveryContext &ctx) const noexcept {
-    constexpr auto terminalShape =
-        detail::classify_literal_recovery_profile(
-            std::string_view{literal.begin(), literal.size()});
     const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
         .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
     };
@@ -464,9 +426,6 @@ public:
   }
 
   bool probeRecoverableAtEntry(RecoveryContext &ctx) const noexcept {
-    constexpr auto terminalShape =
-        detail::classify_literal_recovery_profile(
-            std::string_view{literal.begin(), literal.size()});
     const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
         .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
     };
@@ -517,9 +476,6 @@ public:
 
   bool
   probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const noexcept {
-    constexpr auto terminalShape =
-        detail::classify_literal_recovery_profile(
-            std::string_view{literal.begin(), literal.size()});
     const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
         .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
     };

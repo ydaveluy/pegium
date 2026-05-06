@@ -63,18 +63,18 @@ if(BUILD_TESTING)
 
     function(pegium_register_gtest_target target)
         set(options)
-        set(oneValueArgs)
+        set(oneValueArgs TEST_FILTER)
         set(multiValueArgs LABELS)
         cmake_parse_arguments(PEGIUM_GTEST "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-        if(PEGIUM_GTEST_LABELS)
-            gtest_discover_tests(${target}
-                DISCOVERY_MODE PRE_TEST
-                PROPERTIES LABELS "${PEGIUM_GTEST_LABELS}"
-            )
-        else()
-            gtest_discover_tests(${target} DISCOVERY_MODE PRE_TEST)
+        set(discover_args DISCOVERY_MODE PRE_TEST)
+        if(PEGIUM_GTEST_TEST_FILTER)
+            list(APPEND discover_args TEST_FILTER "${PEGIUM_GTEST_TEST_FILTER}")
         endif()
+        if(PEGIUM_GTEST_LABELS)
+            list(APPEND discover_args PROPERTIES LABELS "${PEGIUM_GTEST_LABELS}")
+        endif()
+        gtest_discover_tests(${target} ${discover_args})
 
         set_property(GLOBAL APPEND PROPERTY PEGIUM_GTEST_TARGETS ${target})
     endfunction()

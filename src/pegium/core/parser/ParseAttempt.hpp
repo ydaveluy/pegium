@@ -87,7 +87,7 @@ inline bool attempt_parse_strict(Context &ctx, const E &expression) {
 
 template <Expression E>
 inline bool attempt_parse_no_edits(RecoveryContext &ctx, const E &expression) {
-  auto noEditGuard = ctx.withEditState(false, false, false);
+  auto noEditGuard = ctx.withEditTrackingDisabled();
   (void)noEditGuard;
   return detail::attempt_parse_recovery_strict_view(ctx, expression);
 }
@@ -115,9 +115,25 @@ inline NoEditParseObservation observe_no_edit_parse(RecoveryContext &ctx,
                                                                 Probe) {
   const auto startOffset = ctx.cursorOffset();
   const auto furthestExploredOffsetBefore = ctx.furthestExploredOffset();
-  auto noEditGuard = ctx.withEditState(false, false, false);
+  auto noEditGuard = ctx.withEditTrackingDisabled();
   (void)noEditGuard;
   TrackedParseContext &strictCtx = ctx;
+  const auto cursor_advanced = [&] {
+    return ctx.cursorOffset() > startOffset ||
+           ctx.furthestExploredOffset() >
+               std::max(startOffset, furthestExploredOffsetBefore);
+  };
+  const auto failed_observation_with = [&](bool cursorAdvanced) {
+    bool startedWithoutEdits = cursorAdvanced;
+    if (!startedWithoutEdits &&
+        startSignalFallback == NoEditStartSignalFallback::Probe) {
+      startedWithoutEdits = probe_started_without_edits(ctx, expression);
+    }
+    return NoEditParseObservation{
+        .matched = false,
+        .startedWithoutEdits = startedWithoutEdits,
+    };
+  };
   bool matched = false;
   if constexpr (!requires_checkpoint_on_failure_v<E>) {
     matched = parse(expression, strictCtx);
@@ -125,41 +141,17 @@ inline NoEditParseObservation observe_no_edit_parse(RecoveryContext &ctx,
     const auto checkpoint = ctx.mark();
     matched = parse(expression, strictCtx);
     if (!matched) {
-      bool startedWithoutEdits =
-          ctx.cursorOffset() > startOffset ||
-          ctx.furthestExploredOffset() >
-              std::max(startOffset, furthestExploredOffsetBefore);
+      const bool cursorAdvanced = cursor_advanced();
       ctx.rewind(checkpoint);
-      if (!startedWithoutEdits &&
-          startSignalFallback == NoEditStartSignalFallback::Probe) {
-        startedWithoutEdits = probe_started_without_edits(ctx, expression);
-      }
-      return {
-          .matched = false,
-          .startedWithoutEdits = startedWithoutEdits,
-      };
+      return failed_observation_with(cursorAdvanced);
     }
   }
   if (!matched) {
-    bool startedWithoutEdits =
-        ctx.cursorOffset() > startOffset ||
-        ctx.furthestExploredOffset() >
-            std::max(startOffset, furthestExploredOffsetBefore);
-    if (!startedWithoutEdits &&
-        startSignalFallback == NoEditStartSignalFallback::Probe) {
-      startedWithoutEdits = probe_started_without_edits(ctx, expression);
-    }
-    return {
-        .matched = false,
-        .startedWithoutEdits = startedWithoutEdits,
-    };
+    return failed_observation_with(cursor_advanced());
   }
   return {
-      .matched = matched,
-      .startedWithoutEdits =
-          matched || ctx.cursorOffset() > startOffset ||
-          ctx.furthestExploredOffset() >
-              std::max(startOffset, furthestExploredOffsetBefore),
+      .matched = true,
+      .startedWithoutEdits = true,
   };
 }
 

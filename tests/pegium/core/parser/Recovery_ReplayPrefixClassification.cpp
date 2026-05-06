@@ -3,9 +3,9 @@
 /// `OrderedChoice` dominance reads the closed `ReplayPrefixClass`
 /// axis of `RecoveryContract`. Each `EditableRecoveryCandidate` is
 /// classified at construction via
-/// `classify_editable_replay_prefix(editCount, hasDeleteEdit)`. The
+/// `classify_editable_replay_prefix(editCount, hasDestructiveEdit)`. The
 /// dominance predicate reads the closed enum field instead of
-/// re-deriving the family from raw edit counts and `hasDeleteEdit`
+/// re-deriving the family from raw edit counts and `hasDestructiveEdit`
 /// flags.
 ///
 /// This suite pins the closed mapping the classifier implements:
@@ -46,20 +46,20 @@ TEST(ReplayPrefixClassification, zero_edits_classify_as_empty) {
 TEST(ReplayPrefixClassification,
      non_zero_edits_with_delete_classify_as_extended_committed_prefix) {
   EXPECT_EQ(
-      classify_editable_replay_prefix(/*editCount=*/1, /*hasDeleteEdit=*/true),
+      classify_editable_replay_prefix(/*editCount=*/1, /*hasDestructiveEdit=*/true),
       ReplayPrefixClass::ExtendedCommittedPrefix);
   EXPECT_EQ(
-      classify_editable_replay_prefix(/*editCount=*/5, /*hasDeleteEdit=*/true),
+      classify_editable_replay_prefix(/*editCount=*/5, /*hasDestructiveEdit=*/true),
       ReplayPrefixClass::ExtendedCommittedPrefix);
 }
 
 TEST(ReplayPrefixClassification,
      insert_only_edits_classify_as_new_local_prefix) {
   EXPECT_EQ(
-      classify_editable_replay_prefix(/*editCount=*/1, /*hasDeleteEdit=*/false),
+      classify_editable_replay_prefix(/*editCount=*/1, /*hasDestructiveEdit=*/false),
       ReplayPrefixClass::NewLocalPrefix);
   EXPECT_EQ(
-      classify_editable_replay_prefix(/*editCount=*/3, /*hasDeleteEdit=*/false),
+      classify_editable_replay_prefix(/*editCount=*/3, /*hasDestructiveEdit=*/false),
       ReplayPrefixClass::NewLocalPrefix);
 }
 
@@ -71,12 +71,12 @@ TEST(ReplayPrefixClassification,
   // construction sites do not have such a snapshot at hand and must
   // never produce this value through the classifier.
   for (std::uint32_t editCount = 0; editCount <= 4u; ++editCount) {
-    for (const bool hasDeleteEdit : {false, true}) {
+    for (const bool hasDestructiveEdit : {false, true}) {
       const auto cls =
-          classify_editable_replay_prefix(editCount, hasDeleteEdit);
+          classify_editable_replay_prefix(editCount, hasDestructiveEdit);
       EXPECT_NE(cls, ReplayPrefixClass::SameCommittedPrefix)
           << "editCount=" << editCount
-          << " hasDeleteEdit=" << hasDeleteEdit;
+          << " hasDestructiveEdit=" << hasDestructiveEdit;
     }
   }
 }
@@ -90,7 +90,7 @@ TEST(ReplayPrefixClassification, default_constructed_candidate_is_empty) {
   const EditableRecoveryCandidate candidate;
   EXPECT_EQ(candidate.replayPrefix, ReplayPrefixClass::Empty);
   EXPECT_EQ(candidate.editCount, 0u);
-  EXPECT_FALSE(candidate.hasDeleteEdit);
+  EXPECT_FALSE(candidate.hasDestructiveEdit);
 }
 
 // -----------------------------------------------------------------------------

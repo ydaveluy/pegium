@@ -12,24 +12,6 @@
 
 namespace pegium::parser::detail {
 
-/// Continuation the candidate must demonstrate after its last edit
-/// before being admissible.
-enum class ContinuationRequirement : std::uint8_t {
-  /// No continuation needed (e.g. candidate ends at EOF or accepts
-  /// strictly without edits).
-  None,
-  /// The candidate must lead into a strictly-accepting continuation.
-  StrictContinuation,
-  /// The candidate may lead into a recoverable continuation.
-  RecoverableContinuation,
-  /// The candidate must show at least one visible non-synthetic leaf
-  /// consumed strictly after `lastEditOffset` within the current site.
-  /// This is the lazy `visibleContinuationAfterEdit` query.
-  VisibleContinuationAfterEdit,
-  /// The candidate ends at EOF.
-  EofContinuation,
-};
-
 /// Class of the candidate's replay prefix relative to the committed
 /// prefix already applied at the site. Necessary but never sufficient
 /// for replay-equivalence.
@@ -47,16 +29,14 @@ enum class ReplayPrefixClass : std::uint8_t {
   NewLocalPrefix,
 };
 
-/// The contract bundle. Reduced to the two axes that admission and
+/// The contract bundle. Reduced to the single axis that admission and
 /// dominance predicates actually consume.
 struct RecoveryContract {
-  ContinuationRequirement continuation = ContinuationRequirement::None;
   ReplayPrefixClass replayPrefix = ReplayPrefixClass::Empty;
 
   [[nodiscard]] friend bool operator==(const RecoveryContract &a,
                                         const RecoveryContract &b) noexcept {
-    return a.continuation == b.continuation &&
-           a.replayPrefix == b.replayPrefix;
+    return a.replayPrefix == b.replayPrefix;
   }
 };
 

@@ -56,7 +56,13 @@ private:
       return;
     }
 
-    const auto resolution = _linker->resolve(*this);
+    workspace::ResolvedAstNodeDescriptionOrError resolution;
+    try {
+      resolution = _linker->resolve(*this);
+    } catch (const CyclicReferenceResolution &) {
+      applyLinkingError(workspace::LinkingErrorKind::Cycle);
+      return;
+    }
 
     if (const auto *error = std::get_if<workspace::LinkingError>(&resolution);
         error != nullptr) {
@@ -183,7 +189,13 @@ private:
       return;
     }
 
-    const auto resolution = _linker->resolveAll(*this);
+    workspace::ResolvedAstNodeDescriptionsOrError resolution;
+    try {
+      resolution = _linker->resolveAll(*this);
+    } catch (const CyclicReferenceResolution &) {
+      applyLinkingError(workspace::LinkingErrorKind::Cycle);
+      return;
+    }
 
     if (const auto *error = std::get_if<workspace::LinkingError>(&resolution);
         error != nullptr) {

@@ -12,13 +12,13 @@
 #include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/SkipperBuilder.hpp>
+#include <pegium/core/parser/SkipperWrapped.hpp>
 #include <pegium/core/parser/StepTrace.hpp>
 #include <string>
 #include <tuple>
 
 namespace pegium::parser {
 
-template <Expression... Elements> struct UnorderedGroupWithSkipper;
 
 template <Expression... Elements>
 struct UnorderedGroup : grammar::UnorderedGroup {
@@ -178,13 +178,13 @@ public:
   template <std::convertible_to<Skipper> LocalSkipper>
     requires std::copy_constructible<std::tuple<Elements...>>
   auto with_skipper(LocalSkipper &&localSkipper) const & {
-    return UnorderedGroupWithSkipper<Elements...>{
+    return SkipperWrapped<UnorderedGroup<Elements...>>{
         *this, static_cast<Skipper>(std::forward<LocalSkipper>(localSkipper))};
   }
 
   template <std::convertible_to<Skipper> LocalSkipper>
   auto with_skipper(LocalSkipper &&localSkipper) && {
-    return UnorderedGroupWithSkipper<Elements...>{
+    return SkipperWrapped<UnorderedGroup<Elements...>>{
         std::move(*this),
         static_cast<Skipper>(std::forward<LocalSkipper>(localSkipper))};
   }
@@ -298,44 +298,7 @@ public:
 };
 
 template <Expression... Elements>
-struct UnorderedGroupWithSkipper final : UnorderedGroup<Elements...>,
-                                         CompletionSkipperProvider {
-  using Base = UnorderedGroup<Elements...>;
-  static constexpr bool nullable = Base::nullable;
-  static constexpr bool isFailureSafe = Base::isFailureSafe;
-
-  explicit UnorderedGroupWithSkipper(const Base &base, Skipper localSkipper)
-      : Base(base), _localSkipper(std::move(localSkipper)) {}
-  explicit UnorderedGroupWithSkipper(Base &&base, Skipper localSkipper)
-      : Base(std::move(base)), _localSkipper(std::move(localSkipper)) {}
-
-  UnorderedGroupWithSkipper(UnorderedGroupWithSkipper &&) noexcept = default;
-  UnorderedGroupWithSkipper(const UnorderedGroupWithSkipper &) = default;
-  UnorderedGroupWithSkipper &
-  operator=(UnorderedGroupWithSkipper &&) noexcept = default;
-  UnorderedGroupWithSkipper &
-  operator=(const UnorderedGroupWithSkipper &) = default;
-  [[nodiscard]] const Skipper *
-  getCompletionSkipper() const noexcept override {
-    return std::addressof(_localSkipper);
-  }
-
-private:
-  friend struct detail::ParseAccess;
-  friend struct detail::InitAccess;
-
-  template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
-    auto localSkipperGuard = ctx.with_skipper(_localSkipper);
-    (void)localSkipperGuard;
-    return parse(static_cast<const Base &>(*this), ctx);
-  }
-
-  void init_impl(AstReflectionInitContext &ctx) const {
-    static_cast<const Base &>(*this).init_impl(ctx);
-  }
-
-  Skipper _localSkipper;
-};
+using UnorderedGroupWithSkipper = SkipperWrapped<UnorderedGroup<Elements...>>;
 
 namespace detail {
 

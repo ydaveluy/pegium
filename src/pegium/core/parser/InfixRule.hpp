@@ -32,20 +32,12 @@
 
 namespace pegium::parser::detail {
 
-/// Closed list of `Infix` recovery candidate families. The 3 values are
-/// exhaustive and frozen by the density-ceiling rule: a new family
-/// requires removing or merging an existing one. This vocabulary is
-/// private to `InfixRule` — no other combinator references it. Lives
-/// inline in `InfixRule.hpp` (rather than its own header) because the
-/// fan-out is exactly one combinator and there is no closed exhaustive
-/// table that would justify exposing the type beyond the rule.
+/// Closed list of `Infix` recovery candidate families. Private to
+/// `InfixRule` — no other combinator references this vocabulary.
 ///
-/// Strict-path discipline: this declaration is recovery-side. None of
-/// these types are constructed on the strict-only nominal path.
+/// Strict-path discipline: recovery-side; none of these types are
+/// constructed on the strict-only nominal path.
 enum class InfixCandidateFamily : std::uint8_t {
-  /// The tail stops here: no strict operator at the cursor, no
-  /// parent follow stronger than the tail. No local edit.
-  StopTail,
   /// The tail continues: a strict operator at the cursor followed
   /// by RHS strict or recoverable acceptance.
   ContinueTail,
@@ -63,14 +55,6 @@ enum class InfixCandidateFamily : std::uint8_t {
 struct InfixCandidateFamilyFacts {
   /// True iff a strict operator accepts at the current cursor.
   bool strictOperatorAtCursor = false;
-
-  /// True iff a recoverable operator accepts at the current cursor
-  /// (typically a fuzzy operator match).
-  bool recoverableOperatorAtCursor = false;
-
-  /// True iff the parent's strict follow accepts at the current
-  /// cursor and would prefer the expression terminate.
-  bool parentFollowStrict = false;
 
   /// True iff a strict RHS primary accepts immediately after the
   /// operator. Necessary for `ContinueTail`.
@@ -97,17 +81,6 @@ struct InfixCandidateFamilyFacts {
 
 static_assert(std::is_trivially_copyable_v<InfixCandidateFamilyFacts>);
 static_assert(sizeof(InfixCandidateFamilyFacts) <= 8);
-
-/// Closed legality predicate for `StopTail`. The tail stops when
-/// no strict operator accepts at the cursor — there is nothing to
-/// continue with. Recoverable operators alone are not enough:
-/// operators are never synthesised, so a recoverable-only operator
-/// cannot drive `ContinueTail` either; in such a case `StopTail` is
-/// still the admissible default.
-[[nodiscard]] constexpr bool
-is_stop_tail_legal(const InfixCandidateFamilyFacts &facts) noexcept {
-  return !facts.strictOperatorAtCursor;
-}
 
 /// Closed legality predicate for `ContinueTail`. Continuation
 /// requires a strict operator at the cursor (operators are never
@@ -141,8 +114,6 @@ is_infix_candidate_family_legal(
     InfixCandidateFamily family,
     const InfixCandidateFamilyFacts &facts) noexcept {
   switch (family) {
-  case InfixCandidateFamily::StopTail:
-    return is_stop_tail_legal(facts);
   case InfixCandidateFamily::ContinueTail:
     return is_continue_tail_legal(facts);
   case InfixCandidateFamily::DeleteOperatorNoise:
@@ -155,61 +126,12 @@ is_infix_candidate_family_legal(
 [[nodiscard]] constexpr const char *
 infix_candidate_family_name(InfixCandidateFamily family) noexcept {
   switch (family) {
-  case InfixCandidateFamily::StopTail:
-    return "StopTail";
   case InfixCandidateFamily::ContinueTail:
     return "ContinueTail";
   case InfixCandidateFamily::DeleteOperatorNoise:
     return "DeleteOperatorNoise";
   }
   return "Unknown";
-}
-
-/// `LocalRhsNoiseCleanup`: closed local contract that disciplines
-/// the RHS noise cleanup inside `Infix`. NOT a selection axis;
-/// the dispatch must read this contract only as a check on the
-/// existing observation/admission/replay obligations.
-///
-/// The contract carries three flags:
-///
-///   - `respectsObservationObligation`: the noise scan observes
-///     without durable mutation (checkpoint/rewind covers all
-///     state mutated by the scan). Required: `true`.
-///   - `respectsReplayObligation`: the candidate produced by the
-///     scan replays the same noise edits exactly. Required:
-///     `true`.
-///   - `policyMutationVisibleInFingerprint`: any policy field the
-///     scan flips (for instance `allowDelete`) is folded into the
-///     `RecoveryPolicyFingerprint` so the cache cannot collapse a
-///     hit across the flipped state. Required: `true`.
-///
-/// Construction outside `Infix` is forbidden — `LocalRhsNoiseCleanup`
-/// cannot be referenced by another combinator or by
-/// `RecoveryContract`. The legality predicate
-/// `is_local_rhs_noise_cleanup_admissible` lets `Infix` assert that a
-/// candidate respects the contract before it enters the pipeline.
-struct LocalRhsNoiseCleanup {
-  bool respectsObservationObligation = false;
-  bool respectsReplayObligation = false;
-  bool policyMutationVisibleInFingerprint = false;
-
-  [[nodiscard]] friend bool
-  operator==(const LocalRhsNoiseCleanup &a,
-             const LocalRhsNoiseCleanup &b) noexcept = default;
-};
-
-static_assert(std::is_trivially_copyable_v<LocalRhsNoiseCleanup>);
-static_assert(sizeof(LocalRhsNoiseCleanup) <= 4);
-
-/// True iff the contract has all three obligations satisfied.
-/// `Infix`'s noise cleanup MUST verify this before admitting a
-/// `DeleteOperatorNoise` candidate.
-[[nodiscard]] constexpr bool
-is_local_rhs_noise_cleanup_admissible(
-    const LocalRhsNoiseCleanup &contract) noexcept {
-  return contract.respectsObservationObligation &&
-         contract.respectsReplayObligation &&
-         contract.policyMutationVisibleInFingerprint;
 }
 
 /// RAII guard that disables `skipAfterDelete` for the duration of an
@@ -424,11 +346,8 @@ struct InfixRule final : grammar::InfixRule {
   /// `select_editable_tail_candidate_by_recovery_key` iterates a
   /// `std::array<EditableTailCandidate, 2>` (one for `ContinueTail`,
   /// one for `DeleteOperatorNoise`) and selects via the central
-  /// `RecoveryKey` ranker. The bound is the static array size of 2.
-  /// The `StopTail` family is admission-only (it accepts the current
-  /// state without a candidate evaluation), so it is not counted.
-  /// The bound is independent of operator arity, expression depth,
-  /// and input length.
+  /// `RecoveryKey` ranker. The bound is the static array size of 2,
+  /// independent of operator arity, expression depth, and input length.
   static constexpr std::size_t kMaxRecoveryCandidatesPerCall = 2U;
 
   // ------------------- ctor -------------------
@@ -709,16 +628,15 @@ private:
         // Real codepoint-delete count captured by the observable
         // `observe_stray_operator_run_delete_count` scan from the
         // pre-operator-match cursor. Used to project a real
-        // `RecoveryKey` for the `DeleteOperatorNoise` candidate
-        // instead of the legacy single-delete cost estimate. Empty
-        // when the scan would not admit a recovery from this cursor.
+        // `RecoveryKey` for the `DeleteOperatorNoise` candidate.
+        // Empty when the scan would not admit a recovery from this
+        // cursor.
         std::optional<std::uint32_t> strayOperatorRunDeleteCount;
         TextOffset strayOperatorRunFirstEditOffset = 0;
         bool exposedPrimary = true;
         bool matchedPrimary = false;
         bool advancedPrimary = false;
         bool rhsPrimaryObservedWithoutEdits = false;
-        bool crossedSkippedTrivia = false;
         bool multipleImmediateEditsAtStart = false;
       };
 
@@ -891,7 +809,7 @@ private:
           }
           ctx.skip();
           const auto rhsStart = ctx.cursor();
-          auto rhsNoEditGuard = ctx.withEditState(false, false, false);
+          auto rhsNoEditGuard = ctx.withEditTrackingDisabled();
           (void)rhsNoEditGuard;
           if (!parse(model->primary, ctx)) {
             ctx.rewind(nodeCheckpoint);
@@ -972,13 +890,12 @@ private:
                                                       nextMinPrecedence);
           }
         }
-        const bool previousAllowInsert = ctx.allowInsert;
-        const bool previousAllowDelete = ctx.allowDelete;
-        ctx.allowInsert = false;
-        ctx.allowDelete = false;
+        // RAII restore of the edit permissions: an exception inside
+        // `attempt_parse_editable` (e.g. cancellation) must not leave the
+        // context with both flags pinned to false.
+        auto editGuard = ctx.withEditPermissions(false, false);
+        (void)editGuard;
         const bool matched = parser::attempt_parse_editable(ctx, op);
-        ctx.allowInsert = previousAllowInsert;
-        ctx.allowDelete = previousAllowDelete;
         if (matched) {
           nextMinPrecedence =
               detail::infix_next_min_precedence<decltype(op)>(precedence);
@@ -1018,11 +935,12 @@ private:
             return observation;
           }
         }
-        const bool previousAllowExtendedDeleteScan =
-            ctx.allowExtendedDeleteScan;
-        ctx.allowExtendedDeleteScan = false;
-        observation.matchedPrimary = parse(model->primary, ctx);
-        ctx.allowExtendedDeleteScan = previousAllowExtendedDeleteScan;
+        {
+          detail::ScopedBoolOverride extendedDeleteGuard{
+              ctx.allowExtendedDeleteScan, false};
+          (void)extendedDeleteGuard;
+          observation.matchedPrimary = parse(model->primary, ctx);
+        }
         observation.advancedPrimary = ctx.cursor() != observation.rhsStart;
         observation.postMatchCursorOffset = ctx.cursorOffset();
         if (!observation.matchedPrimary || !observation.advancedPrimary) {
@@ -1034,8 +952,6 @@ private:
         const auto edits = ctx.recoveryEditsView();
         observation.immediateEditCount = static_cast<std::uint32_t>(
             ctx.recoveryEditCount() - observation.baseRecoveryEditCount);
-        observation.crossedSkippedTrivia = rhs_primary_crossed_skipped_trivia(
-            ctx, observation.rhsStart);
         observation.multipleImmediateEditsAtStart =
             observation.immediateEditCount > 1u &&
             edits[observation.baseRecoveryEditCount].offset ==
@@ -1066,25 +982,12 @@ private:
         return observation;
       }
 
-      [[nodiscard]] static bool rhs_primary_crossed_skipped_trivia(
-          RecoveryContext &ctx, const char *rhsStart) {
-        const char *cursor = rhsStart;
-        while (cursor < ctx.cursor()) {
-          const char *const skipped = ctx.skip_without_builder(cursor);
-          if (skipped > cursor) {
-            return true;
-          }
-          ++cursor;
-        }
-        return false;
-      }
 
       [[nodiscard]] static bool
       continue_editable_tail_candidate_is_legal(
           const EditableTailObservation &observation) noexcept {
         return observation.exposedPrimary && observation.matchedPrimary &&
                observation.advancedPrimary &&
-               !observation.crossedSkippedTrivia &&
                !observation.multipleImmediateEditsAtStart;
       }
 
@@ -1095,7 +998,6 @@ private:
             continue_editable_tail_candidate_is_legal(observation);
         detail::InfixCandidateFamilyFacts facts;
         facts.strictOperatorAtCursor = true;
-        facts.recoverableOperatorAtCursor = true;
         facts.strictRhsPrimaryAfterOperator =
             continuationObserved && observation.immediateEditCount == 0u;
         facts.recoverableRhsPrimaryAfterOperator = continuationObserved;
@@ -1111,21 +1013,13 @@ private:
         facts.operatorNoiseDeleteBudgetAvailable =
             observation.strayOperatorRunDeleteCount.has_value();
 
-        const detail::LocalRhsNoiseCleanup noiseCleanup{
-            .respectsObservationObligation =
-                observation.strayOperatorRunDeleteCount.has_value(),
-            .respectsReplayObligation =
-                observation.strayOperatorRunDeleteCount.has_value(),
-            .policyMutationVisibleInFingerprint = true,
-        };
         const bool continueTailLegal =
             continuationObserved &&
             detail::is_infix_candidate_family_legal(
                 detail::InfixCandidateFamily::ContinueTail, facts);
         const bool deleteNoiseLegal =
             detail::is_infix_candidate_family_legal(
-                detail::InfixCandidateFamily::DeleteOperatorNoise, facts) &&
-            detail::is_local_rhs_noise_cleanup_admissible(noiseCleanup);
+                detail::InfixCandidateFamily::DeleteOperatorNoise, facts);
 
         return {{
             {.kind = detail::InfixCandidateFamily::ContinueTail,
@@ -1188,16 +1082,15 @@ private:
             considerCandidate(candidate, key);
           } else {
             // Real DeleteOperatorNoise cost from the observable scan
-            // (`observe_stray_operator_run_delete_count`). Replaces the
-            // legacy single-delete estimate so the candidate's
-            // `RecoveryKey` reflects the actual codepoint count the
-            // committed `recover_stray_operator_run` would produce.
+            // (`observe_stray_operator_run_delete_count`). The
+            // candidate's `RecoveryKey` reflects the actual codepoint
+            // count the committed `recover_stray_operator_run` would
+            // produce.
             //
             // When the observable scan reports `nullopt`, the scan
             // would not admit a recovery from the pre-operator-match
-            // cursor; the candidate is structurally inadmissible and
-            // we skip it (replaces the implicit "always-considered"
-            // contract that the legacy estimate carried).
+            // cursor: the candidate is structurally inadmissible and
+            // we skip it.
             if (!observation.strayOperatorRunDeleteCount.has_value()) {
               continue;
             }
@@ -1243,15 +1136,17 @@ private:
         if (candidate.rhsPrimaryObservedWithoutEdits) {
           matchedPrimary = parser::attempt_parse_no_edits(ctx, model->primary);
         } else {
-          const bool previousAllowExtendedDeleteScan =
-              ctx.allowExtendedDeleteScan;
-          ctx.allowExtendedDeleteScan = false;
+          detail::ScopedBoolOverride extendedDeleteGuard{
+              ctx.allowExtendedDeleteScan, false};
+          (void)extendedDeleteGuard;
           matchedPrimary = parse(model->primary, ctx);
-          ctx.allowExtendedDeleteScan = previousAllowExtendedDeleteScan;
         }
-        assert(matchedPrimary && ctx.cursor() != rhsStart &&
-               "Observed editable infix RHS must replay successfully");
         if (!matchedPrimary || ctx.cursor() == rhsStart) {
+          // Speculative observation can disagree with replay when a
+          // sibling recovery path mutates state (max cursor, failure
+          // history, fingerprint-affecting edits) between the observation
+          // and the replay. Reject the candidate and let the enclosing
+          // recovery attempt compete normally instead of asserting.
           return {.matched = false, .stopTail = false};
         }
         ctx.skip();
@@ -1270,8 +1165,7 @@ private:
       /// admit a `DeleteOperatorNoise` recovery from the current cursor
       /// (operator probe fails or the scan runs past its budget without
       /// matching). Used to project a real `RecoveryKey` for the
-      /// `DeleteOperatorNoise` candidate at selection time, replacing
-      /// the legacy single-delete cost estimate.
+      /// `DeleteOperatorNoise` candidate at selection time.
       [[nodiscard]] static std::optional<std::uint32_t>
       observe_stray_operator_run_delete_count(const Model *model,
                                               RecoveryContext &ctx,

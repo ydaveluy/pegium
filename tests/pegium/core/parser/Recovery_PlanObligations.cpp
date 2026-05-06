@@ -1,8 +1,8 @@
 /// Integration assertions for invariants that have no predicate-level
 /// equivalent. The bulk of the closed-vocabulary tests live in
-/// `Recovery_TerminalShape.cpp`, `Recovery_InfixCandidateFamily.cpp`
-/// and `Recovery_GroupTransition.cpp`; the two scenarios in this file
-/// exercise the dispatch wiring end-to-end on a small grammar.
+/// `Recovery_TerminalShape.cpp` and `Recovery_InfixCandidateFamily.cpp`;
+/// the two scenarios in this file exercise the dispatch wiring
+/// end-to-end on a small grammar.
 
 #include "RecoveryTestSupport.hpp"
 

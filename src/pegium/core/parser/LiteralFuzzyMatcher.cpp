@@ -15,10 +15,13 @@ namespace {
 
 constexpr std::uint32_t kNoMatch =
     std::numeric_limits<std::uint32_t>::max() / 4u;
-constexpr std::uint32_t kInsertionCost = 1u;
-constexpr std::uint32_t kDeletionCost = 4u;
-constexpr std::uint32_t kSubstitutionCost = 2u;
-constexpr std::uint32_t kTranspositionCost = 2u;
+constexpr std::uint32_t kInsertionCost =
+    default_edit_cost(ParseDiagnosticKind::Inserted);
+constexpr std::uint32_t kDeletionCost =
+    default_edit_cost(ParseDiagnosticKind::Deleted);
+constexpr std::uint32_t kSubstitutionCost =
+    default_edit_cost(ParseDiagnosticKind::Replaced);
+constexpr std::uint32_t kTranspositionCost = kSubstitutionCost;
 constexpr std::uint32_t kReferenceLiteralLength = 5u;
 
 enum class ParentOp : std::uint8_t {
@@ -163,25 +166,7 @@ same_candidate(const LiteralFuzzyCandidate &lhs,
 [[nodiscard]] constexpr bool
 is_better_candidate(const LiteralFuzzyCandidate &lhs,
                     const LiteralFuzzyCandidate &rhs) noexcept {
-  if (lhs.cost.primaryRankCost != rhs.cost.primaryRankCost) {
-    return lhs.cost.primaryRankCost < rhs.cost.primaryRankCost;
-  }
-  if (lhs.cost.secondaryRankCost != rhs.cost.secondaryRankCost) {
-    return lhs.cost.secondaryRankCost < rhs.cost.secondaryRankCost;
-  }
-  if (lhs.distance != rhs.distance) {
-    return lhs.distance < rhs.distance;
-  }
-  if (lhs.substitutionCount != rhs.substitutionCount) {
-    return lhs.substitutionCount < rhs.substitutionCount;
-  }
-  if (lhs.consumed != rhs.consumed) {
-    return lhs.consumed > rhs.consumed;
-  }
-  if (lhs.operationCount != rhs.operationCount) {
-    return lhs.operationCount < rhs.operationCount;
-  }
-  return lhs.rawWeightedCost < rhs.rawWeightedCost;
+  return lhs.cost.primaryRankCost < rhs.cost.primaryRankCost;
 }
 
 [[nodiscard]] constexpr bool
@@ -262,9 +247,33 @@ equal_codepoint(unsigned char lhs, unsigned char rhs,
 }
 
 [[nodiscard]] bool
+input_window_has_non_identifier_codepoint(std::string_view input,
+                                          std::size_t windowBytes) noexcept {
+  const char *cursor = input.data();
+  const char *const end = cursor + std::min(input.size(), windowBytes);
+  while (cursor < end) {
+    const auto length = utf8_codepoint_length(*cursor);
+    if (length == 0 ||
+        length > static_cast<std::size_t>(end - cursor)) {
+      // Truncated / invalid UTF-8 in the inspected window: keep the same
+      // "treat as identifier-like" heuristic the byte-level predecessor
+      // applied so adversarial inputs don't lose the matcher fast-path.
+      // Invalid bytes can't be decoded into a codepoint anyway; we
+      // defer to the literal-vs-input shared-codepoint scan downstream.
+      return false;
+    }
+    if (!is_identifier_like_codepoint(decode_utf8_codepoint(cursor))) {
+      return true;
+    }
+    cursor += length;
+  }
+  return false;
+}
+
+[[nodiscard]] bool
 has_word_like_local_anchor(std::string_view literal, std::string_view input,
                            bool caseSensitive) noexcept {
-  if (!is_word_like(literal) || !is_word_like(input)) {
+  if (!is_word_like(literal)) {
     return true;
   }
 
@@ -272,6 +281,14 @@ has_word_like_local_anchor(std::string_view literal, std::string_view input,
   const auto literalWindow = std::min(literal.size(), kAnchorWindow);
   const auto inputWindow = std::min(input.size(), kAnchorWindow);
   if (literalWindow <= 1u || inputWindow <= 1u) {
+    return true;
+  }
+
+  // A multi-codepoint UTF-8 window may have continuation bytes that look
+  // word-like at the byte level but encode punctuation. Decode codepoints
+  // so we don't accidentally classify e.g. `«` (U+00AB) as an anchor
+  // letter.
+  if (input_window_has_non_identifier_codepoint(input, kAnchorWindow)) {
     return true;
   }
 
@@ -322,9 +339,6 @@ find_literal_fuzzy_candidates(std::string_view literal,
   if (equals_text(literal, input, caseSensitive)) {
     return candidates;
   }
-  if (!has_word_like_local_anchor(literal, input, caseSensitive)) {
-    return candidates;
-  }
 
   // Direct-mapped lookup. The function is called hundreds of thousands of
   // times during pathological recoveries (git-conflict markers, large fuzz
@@ -333,8 +347,9 @@ find_literal_fuzzy_candidates(std::string_view literal,
   // alternative branches. We compare by pointer identity — both literal
   // storage (grammar) and input span (text snapshot) are stable for the
   // duration of one parse, so the cache must live in the parse-scoped owner
-  // (`RecoveryContext`). When the caller does not provide a cache, we fall
-  // through and recompute.
+  // (`RecoveryContext`). It also stores locally-pruned misses, since those
+  // dominate invalid-byte adversarial inputs. When the caller does not provide
+  // a cache, we fall through and recompute.
   LiteralFuzzyCandidatesCache::Entry *slot = nullptr;
   if (cache != nullptr) {
     const auto literalHash =
@@ -353,6 +368,21 @@ find_literal_fuzzy_candidates(std::string_view literal,
         slot->caseSensitive == caseSensitive) {
       return slot->result;
     }
+  }
+  const auto store_cache_result = [&](const LiteralFuzzyCandidates &result) {
+    if (slot != nullptr) {
+      slot->literalData = literal.data();
+      slot->literalSize = literal.size();
+      slot->inputData = input.data();
+      slot->inputSize = input.size();
+      slot->caseSensitive = caseSensitive;
+      slot->result = result;
+    }
+  };
+
+  if (!has_word_like_local_anchor(literal, input, caseSensitive)) {
+    store_cache_result(candidates);
+    return candidates;
   }
 
   candidates.reserve(input.size() * 2u);
@@ -504,14 +534,7 @@ find_literal_fuzzy_candidates(std::string_view literal,
   }
 
   auto pruned = prune_dominated_candidates(candidates);
-  if (slot != nullptr) {
-    slot->literalData = literal.data();
-    slot->literalSize = literal.size();
-    slot->inputData = input.data();
-    slot->inputSize = input.size();
-    slot->caseSensitive = caseSensitive;
-    slot->result = pruned;
-  }
+  store_cache_result(pruned);
   return pruned;
 }
 
@@ -525,6 +548,68 @@ find_best_literal_fuzzy_candidate(std::string_view literal,
     return std::nullopt;
   }
   return candidates.front();
+}
+
+bool literal_has_single_edit_strict_match(std::string_view literal,
+                                          std::string_view window,
+                                          bool caseSensitive) noexcept {
+  const auto N = literal.size();
+  const auto W = window.size();
+  if (N == 0u) {
+    return false;
+  }
+  const auto try_alignment = [&](std::size_t K, int diff) noexcept {
+    if (K > W) {
+      return false;
+    }
+    std::size_t p = 0u;
+    const std::size_t pmax = std::min(N, K);
+    while (p < pmax && equal_codepoint(static_cast<unsigned char>(literal[p]),
+                                       static_cast<unsigned char>(window[p]),
+                                       caseSensitive)) {
+      ++p;
+    }
+    std::size_t s = 0u;
+    const std::size_t smax = std::min(N - p, K - p);
+    while (s < smax &&
+           equal_codepoint(
+               static_cast<unsigned char>(literal[N - 1u - s]),
+               static_cast<unsigned char>(window[K - 1u - s]),
+               caseSensitive)) {
+      ++s;
+    }
+    const std::size_t litRemain = N - p - s;
+    const std::size_t winRemain = K - p - s;
+    if (diff == 0 && litRemain == 1u && winRemain == 1u) {
+      return true; // substitution
+    }
+    if (diff == 1 && litRemain == 0u && winRemain == 1u) {
+      return true; // insertion in window
+    }
+    if (diff == -1 && litRemain == 1u && winRemain == 0u) {
+      return true; // deletion from window
+    }
+    if (diff == 0 && litRemain == 2u && winRemain == 2u && N >= 2u &&
+        equal_codepoint(static_cast<unsigned char>(literal[p]),
+                        static_cast<unsigned char>(window[p + 1u]),
+                        caseSensitive) &&
+        equal_codepoint(static_cast<unsigned char>(literal[p + 1u]),
+                        static_cast<unsigned char>(window[p]),
+                        caseSensitive)) {
+      return true; // adjacent transposition
+    }
+    return false;
+  };
+  if (try_alignment(N, 0)) {
+    return true;
+  }
+  if (W >= N + 1u && try_alignment(N + 1u, 1)) {
+    return true;
+  }
+  if (N >= 1u && W + 1u >= N && try_alignment(N - 1u, -1)) {
+    return true;
+  }
+  return false;
 }
 
 } // namespace pegium::parser::detail

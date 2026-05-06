@@ -16,6 +16,83 @@
 
 namespace pegium::parser {
 
+namespace detail {
+
+/// Snapshot of the inline edit-state fields owned by `ExpectContext`. Only
+/// `ExpectContext` keeps these as flat members (recovery's edit budget
+/// lives nested inside `RecoveryContext::recoveryState.editBudget`); this
+/// type and its capture / restore helpers therefore live in the expect
+/// context's own header.
+struct EditCheckpointState {
+  bool allowInsert = true;
+  bool allowDelete = true;
+  bool trackEditState = true;
+  bool inRecoveryPhase = true;
+  bool hadEdits = false;
+  std::uint32_t consecutiveDeletes = 0;
+  std::uint32_t editCost = 0;
+  std::uint32_t editCount = 0;
+  std::uint32_t maxConsecutiveCodepointDeletes =
+      kDefaultMaxConsecutiveCodepointDeletes;
+  std::uint32_t maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
+  std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
+};
+
+template <typename Context>
+concept FlatEditStateContext =
+    requires(const Context &ctx, Context &mutableCtx,
+             const EditCheckpointState &state) {
+      ctx.allowInsert;
+      ctx.allowDelete;
+      ctx.trackEditState;
+      ctx.inRecoveryPhase;
+      ctx.hadEdits;
+      ctx.consecutiveDeletes;
+      ctx.editCost;
+      ctx.editCount;
+      ctx.maxConsecutiveCodepointDeletes;
+      ctx.maxEditsPerAttempt;
+      ctx.maxEditCost;
+      mutableCtx.allowInsert = state.allowInsert;
+      mutableCtx.allowDelete = state.allowDelete;
+    };
+
+template <FlatEditStateContext Context>
+[[nodiscard]] inline EditCheckpointState
+capture_edit_checkpoint(const Context &ctx) noexcept {
+  return {
+      .allowInsert = ctx.allowInsert,
+      .allowDelete = ctx.allowDelete,
+      .trackEditState = ctx.trackEditState,
+      .inRecoveryPhase = ctx.inRecoveryPhase,
+      .hadEdits = ctx.hadEdits,
+      .consecutiveDeletes = ctx.consecutiveDeletes,
+      .editCost = ctx.editCost,
+      .editCount = ctx.editCount,
+      .maxConsecutiveCodepointDeletes = ctx.maxConsecutiveCodepointDeletes,
+      .maxEditsPerAttempt = ctx.maxEditsPerAttempt,
+      .maxEditCost = ctx.maxEditCost,
+  };
+}
+
+template <FlatEditStateContext Context>
+inline void restore_edit_checkpoint(Context &ctx,
+                                    const EditCheckpointState &state) noexcept {
+  ctx.allowInsert = state.allowInsert;
+  ctx.allowDelete = state.allowDelete;
+  ctx.trackEditState = state.trackEditState;
+  ctx.inRecoveryPhase = state.inRecoveryPhase;
+  ctx.hadEdits = state.hadEdits;
+  ctx.consecutiveDeletes = state.consecutiveDeletes;
+  ctx.editCost = state.editCost;
+  ctx.editCount = state.editCount;
+  ctx.maxConsecutiveCodepointDeletes = state.maxConsecutiveCodepointDeletes;
+  ctx.maxEditsPerAttempt = state.maxEditsPerAttempt;
+  ctx.maxEditCost = state.maxEditCost;
+}
+
+} // namespace detail
+
 // ExpectContext drives frontier exploration for completion and expectation.
 // Unlike ParseContext, it is not just a cursor/CST holder: it tracks frontier
 // candidates, branch blocking, and editable traversal state.
@@ -117,12 +194,8 @@ struct ExpectContext {
                                                nextAllowDelete);
   }
 
-  [[nodiscard]] EditStateGuard
-  withEditState(bool nextAllowInsert, bool nextAllowDelete,
-                bool nextTrackEditState) noexcept {
-    return detail::make_edit_state_guard(*this, nextAllowInsert,
-                                         nextAllowDelete,
-                                         nextTrackEditState);
+  [[nodiscard]] EditStateGuard withEditTrackingDisabled() noexcept {
+    return detail::make_edit_state_guard(*this, false, false, false);
   }
 
   [[nodiscard]] ScopeGuard
@@ -202,19 +275,6 @@ struct ExpectContext {
     inRecoveryPhase = enabled;
   }
 
-  constexpr void
-  setMaxConsecutiveCodepointDeletes(std::uint32_t maxDeletes) noexcept {
-    maxConsecutiveCodepointDeletes = maxDeletes;
-  }
-
-  constexpr void setMaxEditsPerAttempt(std::uint32_t maxEdits) noexcept {
-    maxEditsPerAttempt = maxEdits;
-  }
-
-  constexpr void setMaxEditCost(std::uint32_t maxCost) noexcept {
-    maxEditCost = maxCost;
-  }
-
   [[nodiscard]] constexpr bool isInRecoveryPhase() const noexcept {
     return inRecoveryPhase;
   }
@@ -229,12 +289,12 @@ struct ExpectContext {
 
   [[nodiscard]] bool isActiveRecovery(
       const grammar::AbstractElement *element) const noexcept {
-    return detail::is_active_recovery(_activeRecoveries, *this, element);
+    return _activeRecoveries.contains(cursor(), element);
   }
 
   [[nodiscard]] ActiveRecoveryGuard
   enterActiveRecovery(const grammar::AbstractElement *element) noexcept {
-    return detail::enter_active_recovery(_activeRecoveries, *this, element);
+    return ActiveRecoveryGuard(_activeRecoveries, *this, element);
   }
 
   [[nodiscard]] constexpr bool canEditAtOffset(TextOffset offset) const noexcept {

@@ -1,25 +1,13 @@
-/// Iteration boundary fact-generator (design assumption check).
-///
-/// The closed list of impossible `IterationBoundaryFacts`
-/// combinations rests on the design assumption that the recoverable
-/// probe is a superset of the strict probe for any grammar element:
-/// whenever `attempt_fast_probe` accepts at the current cursor,
-/// `probe_recoverable_at_entry` must also accept there. The two
-/// impossibilities (`first_strict_implies_first_recoverable` and
-/// `follow_strict_implies_follow_recoverable`) follow directly from
-/// this monotonicity.
+/// Probe monotonicity property: the recoverable probe is a superset
+/// of the strict probe for any grammar element. Whenever
+/// `attempt_fast_probe` accepts at the current cursor,
+/// `probe_recoverable_at_entry` must also accept there.
 ///
 /// This file exercises the implication on a small representative
 /// corpus (keyword, long keyword, terminal-rule) against a battery
-/// of inputs (matching, typo, unrelated, empty). A regression here
-/// means the impossibility list lost its foundation and must be
-/// revisited.
-///
-/// Per-element first-set monotonicity transfers directly to the
-/// follow-set fact: Group's follow probe is `attempt_fast_probe` /
-/// `probe_recoverable_at_entry` on the next element, exactly the
-/// pair tested below — so `followStrict ⇒ followRecoverable` is
-/// implied.
+/// of inputs (matching, typo, unrelated, empty). The property
+/// underwrites the recovery dispatch's right to consult the
+/// recoverable probe whenever a strict probe would have accepted.
 
 #include "RecoveryTestSupport.hpp"
 #include <pegium/core/parser/ParseAttempt.hpp>
