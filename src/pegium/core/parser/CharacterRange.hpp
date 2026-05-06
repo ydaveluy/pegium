@@ -112,7 +112,7 @@ private:
       if (!ctx.canEdit()) {
         return false;
       }
-      return detail::apply_delete_scan_terminal_candidate(
+      return detail::recover_by_terminal_delete_scan(
           ctx,
           [this](const char *scanCursor) noexcept {
             return matches(scanCursor) ? scanCursor + 1 : nullptr;
@@ -129,7 +129,7 @@ private:
       if (!ctx.canEdit()) {
         return false;
       }
-      return detail::apply_delete_scan_terminal_candidate(
+      return detail::recover_by_terminal_delete_scan(
           ctx,
           [this, &ctx](const char *scanCursor) noexcept -> const char * {
             const auto *matchedEnd =

@@ -7,8 +7,9 @@
 #include <cstdint>
 #include <limits>
 #include <pegium/core/grammar/AbstractElement.hpp>
-#include <pegium/core/parser/Parser.hpp>
+#include <pegium/core/parser/ParseDiagnosticKind.hpp>
 #include <pegium/core/parser/RecoveryConstants.hpp>
+#include <pegium/core/parser/RecoveryCost.hpp>
 #include <pegium/core/parser/Skipper.hpp>
 #include <pegium/core/utils/TextUtils.hpp>
 #include <ranges>
@@ -41,7 +42,8 @@ is_word_like_terminal(std::string_view value) noexcept {
   const char *const end = cursor + value.size();
   while (cursor < end) {
     const auto length = utf8_codepoint_length(*cursor);
-    if (length == 0 || cursor + length > end) {
+    if (length == 0 ||
+        length > static_cast<std::size_t>(end - cursor)) {
       return false;
     }
     if (!is_identifier_like_codepoint(decode_utf8_codepoint(cursor))) {
@@ -51,40 +53,6 @@ is_word_like_terminal(std::string_view value) noexcept {
   }
   return true;
 }
-struct EditCheckpointState {
-  bool allowInsert = true;
-  bool allowDelete = true;
-  bool trackEditState = true;
-  bool inRecoveryPhase = true;
-  bool hadEdits = false;
-  std::uint32_t consecutiveDeletes = 0;
-  std::uint32_t editCost = 0;
-  std::uint32_t editCount = 0;
-  std::uint32_t maxConsecutiveCodepointDeletes =
-      kDefaultMaxConsecutiveCodepointDeletes;
-  std::uint32_t maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
-  std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
-};
-
-template <typename Context>
-concept FlatEditStateContext =
-    requires(const Context &ctx, Context &mutableCtx,
-             const EditCheckpointState &state) {
-      ctx.allowInsert;
-      ctx.allowDelete;
-      ctx.trackEditState;
-      ctx.inRecoveryPhase;
-      ctx.hadEdits;
-      ctx.consecutiveDeletes;
-      ctx.editCost;
-      ctx.editCount;
-      ctx.maxConsecutiveCodepointDeletes;
-      ctx.maxEditsPerAttempt;
-      ctx.maxEditCost;
-      mutableCtx.allowInsert = state.allowInsert;
-      mutableCtx.allowDelete = state.allowDelete;
-    };
-
 /// Save a bool reference at construction, restore it at destruction.
 class ScopedBoolOverride {
 public:
@@ -105,9 +73,7 @@ private:
 
 /// RAII guard for speculative parser exploration. Captures the recovery
 /// checkpoint and the furthest-explored cursor on construction; restores
-/// both on destruction unless `commit()` was called. Replaces the manual
-/// `mark` + `furthestExploredCursor` save/restore boilerplate that
-/// previously lived inline at every speculative call site.
+/// both on destruction unless `commit()` was called.
 template <typename Context> class ProbeRestoreScope {
 public:
   explicit ProbeRestoreScope(Context &ctx) noexcept
@@ -223,60 +189,6 @@ private:
   bool _active = true;
 };
 
-template <FlatEditStateContext Context>
-[[nodiscard]] inline EditCheckpointState
-capture_edit_checkpoint(const Context &ctx) noexcept {
-  return {
-      .allowInsert = ctx.allowInsert,
-      .allowDelete = ctx.allowDelete,
-      .trackEditState = ctx.trackEditState,
-      .inRecoveryPhase = ctx.inRecoveryPhase,
-      .hadEdits = ctx.hadEdits,
-      .consecutiveDeletes = ctx.consecutiveDeletes,
-      .editCost = ctx.editCost,
-      .editCount = ctx.editCount,
-      .maxConsecutiveCodepointDeletes = ctx.maxConsecutiveCodepointDeletes,
-      .maxEditsPerAttempt = ctx.maxEditsPerAttempt,
-      .maxEditCost = ctx.maxEditCost,
-  };
-}
-
-template <FlatEditStateContext Context>
-inline void restore_edit_checkpoint(Context &ctx,
-                                    const EditCheckpointState &state) noexcept {
-  ctx.allowInsert = state.allowInsert;
-  ctx.allowDelete = state.allowDelete;
-  ctx.trackEditState = state.trackEditState;
-  ctx.inRecoveryPhase = state.inRecoveryPhase;
-  ctx.hadEdits = state.hadEdits;
-  ctx.consecutiveDeletes = state.consecutiveDeletes;
-  ctx.editCost = state.editCost;
-  ctx.editCount = state.editCount;
-  ctx.maxConsecutiveCodepointDeletes = state.maxConsecutiveCodepointDeletes;
-  ctx.maxEditsPerAttempt = state.maxEditsPerAttempt;
-  ctx.maxEditCost = state.maxEditCost;
-}
-
-[[nodiscard]] constexpr std::uint32_t
-default_edit_cost(ParseDiagnosticKind kind) noexcept {
-  using enum ParseDiagnosticKind;
-  switch (kind) {
-  case Inserted:
-    return 1;
-  case Replaced:
-    return 2;
-  case Deleted:
-    return 4;
-  case Recovered:
-    return 8;
-  case Incomplete:
-    return 16;
-  case ConversionError:
-    return 0;
-  }
-  return 16;
-}
-
 [[nodiscard]] constexpr bool can_insert(bool allowInsert,
                                         bool canEdit) noexcept {
   return allowInsert && canEdit;
@@ -314,24 +226,11 @@ next_codepoint_cursor(const char *cursor) noexcept {
              : advanceOneCodepointLossy(cursor);
 }
 
-[[nodiscard]] inline const char *
-previous_codepoint_cursor(const char *begin, const char *cursor) noexcept {
-  if (cursor <= begin) {
-    return begin;
-  }
-  const char *previous = cursor - 1;
-  while (previous > begin &&
-         (static_cast<unsigned char>(*previous) & 0xC0u) == 0x80u) {
-    --previous;
-  }
-  return previous;
-}
-
-inline void apply_insert_edit_state(std::uint32_t cost,
-                                    std::uint32_t &editCost,
-                                    std::uint32_t &editCount,
-                                    bool &hadEdits,
-                                    std::uint32_t &consecutiveDeletes) noexcept {
+/// Shared bookkeeping for non-delete edits (insert and replace). Both
+/// produce a single edit operation that ends any in-progress delete run.
+inline void apply_non_delete_edit_state(
+    std::uint32_t cost, std::uint32_t &editCost, std::uint32_t &editCount,
+    bool &hadEdits, std::uint32_t &consecutiveDeletes) noexcept {
   editCost += cost;
   ++editCount;
   hadEdits = true;
@@ -349,17 +248,6 @@ inline void apply_delete_edit_state(std::uint32_t cost,
   }
   hadEdits = true;
   ++consecutiveDeletes;
-}
-
-inline void apply_replace_edit_state(std::uint32_t cost,
-                                     std::uint32_t &editCost,
-                                     std::uint32_t &editCount,
-                                     bool &hadEdits,
-                                     std::uint32_t &consecutiveDeletes) noexcept {
-  editCost += cost;
-  ++editCount;
-  hadEdits = true;
-  consecutiveDeletes = 0;
 }
 
 struct ActiveRecoveryStack {
@@ -414,20 +302,5 @@ struct ActiveRecoveryStack {
 
   std::vector<Entry> entries;
 };
-
-template <typename Context>
-[[nodiscard]] inline bool
-is_active_recovery(const ActiveRecoveryStack &stack, const Context &ctx,
-                   const grammar::AbstractElement *element) noexcept {
-  return stack.contains(ctx.cursor(), element);
-}
-
-template <typename Context>
-[[nodiscard]] inline auto
-enter_active_recovery(ActiveRecoveryStack &stack, Context &ctx,
-                      const grammar::AbstractElement *element) noexcept {
-  return typename ActiveRecoveryStack::template Guard<Context>(stack, ctx,
-                                                               element);
-}
 
 } // namespace pegium::parser::detail

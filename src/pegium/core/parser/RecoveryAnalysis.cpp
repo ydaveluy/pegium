@@ -67,8 +67,7 @@ bool should_fallback_to_parsed_length_snapshot(
                            })) {
     return false;
   }
-  if (!snapshot.hasFailureToken ||
-      snapshot.failureTokenIndex >= snapshot.failureLeafHistory.size()) {
+  if (!snapshot.hasFailureToken) {
     return false;
   }
   const auto &failureLeaf =
@@ -95,11 +94,11 @@ FailureSnapshot FailureHistoryRecorder::snapshot(TextOffset maxCursorOffset) con
   return snapshot;
 }
 
-StrictParseResult StrictFailureEngine::runStrictParse(
+StrictParseResult run_strict_parse(
     const grammar::ParserRule &entryRule, const Skipper &skipper,
     const text::TextSnapshot &text,
     const utils::CancellationToken &cancelToken,
-    FailureHistoryRecorder *failureRecorder) const {
+    FailureHistoryRecorder *failureRecorder) {
   if (failureRecorder == nullptr) {
     return run_strict_parse_with_context(
         entryRule, skipper, text, cancelToken,
@@ -124,9 +123,8 @@ run_strict_parse_with_failure_snapshot(
     const utils::CancellationToken &cancelToken) {
   StrictFailureEngineResult result;
   FailureHistoryRecorder recorder(text.view().data());
-  const StrictFailureEngine engine;
   result.strictResult =
-      engine.runStrictParse(entryRule, skipper, text, cancelToken, &recorder);
+      run_strict_parse(entryRule, skipper, text, cancelToken, &recorder);
   const auto &summary = result.strictResult.summary;
   const auto trackedMaxCursorOffset =
       std::max(summary.maxCursorOffset, recorder.furthestOffset());

@@ -69,7 +69,7 @@ bool RecoveryContext::insertSynthetic(const grammar::AbstractElement *element) {
                            .beginOffset = cursorOffset(),
                            .endOffset = cursorOffset(),
                            .element = element});
-  detail::apply_insert_edit_state(
+  detail::apply_non_delete_edit_state(
       detail::default_edit_cost(ParseDiagnosticKind::Inserted),
       recoveryState.editBudget.editCost, recoveryState.editBudget.editCount,
       recoveryState.editBudget.hadEdits,
@@ -115,7 +115,7 @@ bool RecoveryContext::insertSyntheticGapAt(const char *position,
                            .message = message == nullptr
                                           ? std::string_view{}
                                           : std::string_view(message)});
-  detail::apply_insert_edit_state(
+  detail::apply_non_delete_edit_state(
       detail::default_edit_cost(ParseDiagnosticKind::Inserted),
       recoveryState.editBudget.editCost, recoveryState.editBudget.editCount,
       recoveryState.editBudget.hadEdits,

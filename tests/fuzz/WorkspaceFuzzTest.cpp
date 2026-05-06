@@ -495,7 +495,10 @@ FUZZ_TEST(PegiumWorkspaceFuzzTest, StressLanguageSingleDocumentPipeline)
     .WithDomains(
         fuzztest::InRange(
             0, static_cast<int>(stress_single_document_scenarios().size() - 1u)),
-        fuzztest::Arbitrary<std::string>().WithMaxSize(64))
+        // 96B → up to 32 mutation ops per program (vs 21 with the old 64B).
+        // mutate_text caps the operation count internally at 12, but a longer
+        // program also feeds more diverse opcode/location/value triples.
+        fuzztest::Arbitrary<std::string>().WithMaxSize(96))
     .WithSeeds([]() -> std::vector<std::tuple<int, std::string>> {
       std::vector<std::tuple<int, std::string>> seeds;
       const auto &scenarios = stress_single_document_scenarios();
@@ -510,7 +513,10 @@ FUZZ_TEST(PegiumWorkspaceFuzzTest, StressLanguageSingleDocumentPipeline)
     });
 
 FUZZ_TEST(PegiumWorkspaceFuzzTest, StressLanguageArbitraryDocumentBuild)
-    .WithDomains(fuzztest::Arbitrary<std::string>().WithMaxSize(4096))
+    // 8 KiB lets the fuzzer reach deeper Group/Repetition nesting and
+    // longer Pratt-tail chains than the previous 4 KiB ceiling, while
+    // staying well under the 128 KiB document cap enforced by mutate_text.
+    .WithDomains(fuzztest::Arbitrary<std::string>().WithMaxSize(8192))
     .WithSeeds([]() -> std::vector<std::tuple<std::string>> {
       std::vector<std::tuple<std::string>> seeds{
           std::tuple{std::string{}},
@@ -576,7 +582,7 @@ FUZZ_TEST(PegiumWorkspaceFuzzTest, AdversarialLanguageSingleDocumentPipeline)
     .WithDomains(
         fuzztest::InRange(
             0, static_cast<int>(adversarial_single_document_scenarios().size() - 1u)),
-        fuzztest::Arbitrary<std::string>().WithMaxSize(64))
+        fuzztest::Arbitrary<std::string>().WithMaxSize(96))
     .WithSeeds([]() -> std::vector<std::tuple<int, std::string>> {
       std::vector<std::tuple<int, std::string>> seeds;
       const auto &scenarios = adversarial_single_document_scenarios();
@@ -591,7 +597,7 @@ FUZZ_TEST(PegiumWorkspaceFuzzTest, AdversarialLanguageSingleDocumentPipeline)
     });
 
 FUZZ_TEST(PegiumWorkspaceFuzzTest, AdversarialLanguageArbitraryDocumentBuild)
-    .WithDomains(fuzztest::Arbitrary<std::string>().WithMaxSize(4096))
+    .WithDomains(fuzztest::Arbitrary<std::string>().WithMaxSize(8192))
     .WithSeeds([]() -> std::vector<std::tuple<std::string>> {
       std::vector<std::tuple<std::string>> seeds{
           std::tuple{std::string{}},
@@ -628,7 +634,7 @@ FUZZ_TEST(PegiumWorkspaceFuzzTest, AdversarialWorkspaceRelinkAndRecovery)
         fuzztest::InRange(
             0, static_cast<int>(adversarial_workspace_scenarios().size() - 1u)),
         fuzztest::InRange(0, adversarial_workspace_target_count() - 1),
-        fuzztest::Arbitrary<std::string>().WithMaxSize(64))
+        fuzztest::Arbitrary<std::string>().WithMaxSize(96))
     .WithSeeds([]() -> std::vector<std::tuple<int, int, std::string>> {
       std::vector<std::tuple<int, int, std::string>> seeds;
       const auto &scenarios = adversarial_workspace_scenarios();
@@ -643,6 +649,56 @@ FUZZ_TEST(PegiumWorkspaceFuzzTest, AdversarialWorkspaceRelinkAndRecovery)
                                static_cast<int>(targetIndex), mutation);
           }
         }
+      }
+      return seeds;
+    });
+
+// Stress an LSP-like editing burst: apply N mutation programs in sequence on
+// the same document without restoring between steps, then restore baseline
+// and assert round-trip stability. Catches state-corruption bugs that
+// single-shot mutations cannot reproduce.
+void StressLanguageIncrementalEditChain(int seedIndex,
+                                        const std::vector<std::string> &chain) {
+  const auto &scenarios = stress_single_document_scenarios();
+  ASSERT_GE(seedIndex, 0);
+  ASSERT_LT(static_cast<std::size_t>(seedIndex), scenarios.size());
+  expect_workspace_incremental_chain(
+      scenarios[static_cast<std::size_t>(seedIndex)], 0u, chain);
+}
+
+FUZZ_TEST(PegiumWorkspaceFuzzTest, StressLanguageIncrementalEditChain)
+    .WithDomains(
+        fuzztest::InRange(
+            0, static_cast<int>(stress_single_document_scenarios().size() - 1u)),
+        fuzztest::VectorOf(
+            fuzztest::Arbitrary<std::string>().WithMaxSize(48))
+            .WithMinSize(2)
+            .WithMaxSize(6))
+    .WithSeeds([]() -> std::vector<std::tuple<int, std::vector<std::string>>> {
+      // Each seed costs one full workspace round-trip per chain step
+      // (build + N mutations + restore + asserts) — keep the corpus small
+      // (~16 entries) so initial seed replay stays under ~30s. The
+      // coverage-guided fuzzer expands from there.
+      const auto &scenarios = stress_single_document_scenarios();
+      const auto mutations = mutation_programs();
+      if (scenarios.empty() || mutations.size() < 2) {
+        return {};
+      }
+      std::vector<std::tuple<int, std::vector<std::string>>> seeds;
+      seeds.reserve(16u);
+      const auto stride = std::max<std::size_t>(scenarios.size() / 8u, 1u);
+      for (std::size_t scenarioIndex = 0;
+           scenarioIndex < scenarios.size() && seeds.size() < 16u;
+           scenarioIndex += stride) {
+        const auto &mut = mutations[(scenarioIndex * 7u) % mutations.size()];
+        const auto &cascade =
+            mutations[std::min<std::size_t>(mutations.size() - 1u, 60u)];
+        // Two contrasting chain shapes: "same edit twice" and
+        // "edit + contextual cascade".
+        seeds.emplace_back(static_cast<int>(scenarioIndex),
+                           std::vector<std::string>{mut, mut});
+        seeds.emplace_back(static_cast<int>(scenarioIndex),
+                           std::vector<std::string>{mut, cascade});
       }
       return seeds;
     });

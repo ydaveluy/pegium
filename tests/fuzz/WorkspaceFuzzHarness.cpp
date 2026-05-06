@@ -2217,4 +2217,81 @@ void expect_adversarial_document_build(std::string_view text) {
   }
 }
 
+void expect_workspace_incremental_chain(
+    const WorkspaceScenarioSpec &scenario, std::size_t targetIndex,
+    const std::vector<std::string> &mutationPrograms) {
+  using Clock = std::chrono::steady_clock;
+  ASSERT_LT(targetIndex, scenario.documents.size());
+  SCOPED_TRACE(scenario.name);
+  SCOPED_TRACE("target=" + scenario.documents[targetIndex].uri);
+  SCOPED_TRACE("chain_length=" + std::to_string(mutationPrograms.size()));
+
+  // Use a dedicated runner (NOT the cached round-trip state) since we
+  // intentionally accumulate mutations across steps without restoring.
+  WorkspaceScenarioRunner runner(scenario);
+  runner.initialize();
+
+  try {
+    const auto baselineSnapshots = runner.build_initial();
+    ASSERT_EQ(baselineSnapshots.size(), scenario.documents.size());
+    trace_snapshot("baseline", baselineSnapshots[targetIndex]);
+
+    auto currentText = scenario.documents[targetIndex].text;
+    long long totalMutatedMs = 0;
+    std::size_t step = 0;
+
+    for (const auto &program : mutationPrograms) {
+      if (program.empty()) {
+        continue;
+      }
+      SCOPED_TRACE("step=" + std::to_string(step));
+      SCOPED_TRACE("step_mutation_size=" + std::to_string(program.size()));
+      SCOPED_TRACE("step_mutation_hex=" + hex_summary(program));
+
+      mutate_text(currentText, program);
+      const auto stepStart = Clock::now();
+      const auto snapshots = runner.update_document(targetIndex, currentText);
+      const auto stepElapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              Clock::now() - stepStart);
+      totalMutatedMs += stepElapsed.count();
+      ASSERT_EQ(snapshots.size(), scenario.documents.size());
+      trace_snapshot("step", snapshots[targetIndex]);
+      ++step;
+    }
+
+    // After the chain, restoring the baseline text must yield the
+    // baseline snapshot — i.e. the incremental pipeline survived the
+    // accumulated edits without state corruption.
+    const auto restoreStart = Clock::now();
+    const auto restoredSnapshots =
+        runner.update_document(targetIndex, scenario.documents[targetIndex].text);
+    const auto restoreElapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - restoreStart);
+    trace_snapshot("restored", restoredSnapshots[targetIndex]);
+    EXPECT_EQ(restoredSnapshots, baselineSnapshots);
+
+    if (fuzz_trace_enabled()) {
+      std::fprintf(stderr,
+                   "[fuzz-trace] incrementalChain scenario=%s steps=%zu "
+                   "totalMutatedMs=%lld restoreMs=%lld\n",
+                   scenario.name.c_str(), step, totalMutatedMs,
+                   static_cast<long long>(restoreElapsed.count()));
+    }
+  } catch (const std::exception &exception) {
+    FAIL() << "scenario=" << scenario.name << "\n"
+           << "target_index=" << targetIndex << "\n"
+           << "target_uri=" << scenario.documents[targetIndex].uri << "\n"
+           << "chain_length=" << mutationPrograms.size() << "\n"
+           << "what=" << exception.what();
+  } catch (...) {
+    FAIL() << "scenario=" << scenario.name << "\n"
+           << "target_index=" << targetIndex << "\n"
+           << "target_uri=" << scenario.documents[targetIndex].uri << "\n"
+           << "chain_length=" << mutationPrograms.size() << "\n"
+           << "what=non-std exception";
+  }
+}
+
 } // namespace pegium::fuzz

@@ -8,14 +8,13 @@
 
 #include <pegium/core/grammar/ParserRule.hpp>
 #include <pegium/core/parser/OrderedChoice.hpp>
+#include <pegium/core/parser/RuleOptions.hpp>
 #include <pegium/core/parser/RuleValue.hpp>
 #include <pegium/core/parser/ValueBuildContext.hpp>
 
 namespace pegium::parser::detail {
 
 template <typename> struct AcceptAnyRawValue : std::true_type {};
-
-template <typename T> struct RawValueDependentFalse : std::false_type {};
 
 template <typename Expr>
 concept HasRawValueMethodWithContext =
@@ -103,7 +102,7 @@ extract_raw_value(const Expr &expression, const CstNodeView &node,
   } else if constexpr (requires { expression.getRawValue(node); }) {
     return expression.getRawValue(node);
   } else {
-    static_assert(RawValueDependentFalse<Expr>::value,
+    static_assert(opt::detail::DependentFalse_v<Expr>,
                   "Expression must expose getRawValue(node) or "
                   "getRawValue(node, context).");
   }

@@ -324,9 +324,7 @@ TEST(ContextTest, RunStrictParseUsesPlainContextWithoutFailureRecorder) {
 
   const auto text = pegium::text::TextSnapshot::copy("a");
 
-  const detail::StrictFailureEngine strictFailureEngine;
-  const auto result =
-      strictFailureEngine.runStrictParse(entry, NoOpSkipper(), text);
+  const auto result = detail::run_strict_parse(entry, NoOpSkipper(), text);
 
   EXPECT_TRUE(result.summary.entryRuleMatched);
   EXPECT_TRUE(parseContextUsed);
@@ -343,8 +341,7 @@ TEST(ContextTest,
   const auto text = pegium::text::TextSnapshot::copy("a");
   detail::FailureHistoryRecorder recorder(text.view().data());
 
-  const detail::StrictFailureEngine strictFailureEngine;
-  const auto result = strictFailureEngine.runStrictParse(
+  const auto result = detail::run_strict_parse(
       entry, NoOpSkipper(), text, pegium::utils::default_cancel_token,
       &recorder);
 

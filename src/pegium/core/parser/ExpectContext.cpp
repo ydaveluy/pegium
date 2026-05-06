@@ -28,7 +28,7 @@ bool ExpectContext::insertSynthetic(const grammar::AbstractElement *) {
       !canAffordEdit(ParseDiagnosticKind::Inserted)) {
     return false;
   }
-  detail::apply_insert_edit_state(
+  detail::apply_non_delete_edit_state(
       detail::default_edit_cost(ParseDiagnosticKind::Inserted), editCost,
       editCount, hadEdits, consecutiveDeletes);
   return true;
@@ -45,7 +45,7 @@ bool ExpectContext::insertSyntheticGapAt(const char *position,
       !canAffordEdit(ParseDiagnosticKind::Inserted)) {
     return false;
   }
-  detail::apply_insert_edit_state(
+  detail::apply_non_delete_edit_state(
       detail::default_edit_cost(ParseDiagnosticKind::Inserted), editCost,
       editCount, hadEdits, consecutiveDeletes);
   return true;
@@ -81,7 +81,7 @@ bool ExpectContext::replaceLeaf(const char *endPtr,
       !canEdit() || !canAffordEdit(replacementCost)) {
     return false;
   }
-  detail::apply_replace_edit_state(replacementCost, editCost, editCount,
+  detail::apply_non_delete_edit_state(replacementCost, editCost, editCount,
                                    hadEdits, consecutiveDeletes);
   leaf(endPtr, element, hidden, true);
   return true;

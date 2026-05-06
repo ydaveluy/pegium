@@ -97,6 +97,38 @@ TEST(LiteralFuzzyMatcherTest,
   EXPECT_EQ(match.substitutionCount, 1u);
 }
 
+TEST(LiteralFuzzyMatcherTest,
+     RejectsInvalidUtf8WordWindowWithoutLocalPrefixAnchor) {
+  std::string input = "unsa";
+  input.push_back(static_cast<char>(0x96));
+  input += "fe";
+
+  LiteralFuzzyCandidatesCache cache;
+  const auto candidates =
+      find_literal_fuzzy_candidates("export", input, false, &cache);
+  const auto cachedCandidates =
+      find_literal_fuzzy_candidates("export", input, false, &cache);
+
+  EXPECT_TRUE(candidates.empty());
+  EXPECT_TRUE(cachedCandidates.empty());
+}
+
+TEST(LiteralFuzzyMatcherTest,
+     KeepsInvalidUtf8WordWindowWithLocalPrefixAnchor) {
+  std::string input = "unsa";
+  input.push_back(static_cast<char>(0x96));
+  input += "fe";
+
+  const auto candidate =
+      find_best_literal_fuzzy_candidate("unsafe", input, false);
+  const auto &match = requireCandidate(candidate);
+
+  EXPECT_EQ(match.consumed, 4u);
+  EXPECT_EQ(match.distance, 2u);
+  EXPECT_EQ(match.insertionCount, 2u);
+  EXPECT_EQ(match.deletionCount, 0u);
+}
+
 TEST(LiteralFuzzyMatcherTest, ExactCaseInsensitiveMatchDoesNotRequireFuzzyEdit) {
   const auto candidate =
       find_best_literal_fuzzy_candidate("module", "ModUle", false);

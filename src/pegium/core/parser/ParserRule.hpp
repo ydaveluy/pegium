@@ -168,11 +168,29 @@ private:
           !ctx.allowsCompletedWindowContinuationRecovery()) {
         return parse_impl(static_cast<TrackedParseContext &>(ctx));
       }
+      // Pathological grammar shapes (e.g. unclosed nested call expressions)
+      // can drive `evaluate_editable_recovery_candidate` into an
+      // exponentially-branching tree of speculative parses. Cap the
+      // cumulative ParserRule recovery entries within the current window
+      // and abort fast once the budget is gone — the outer recovery
+      // driver then keeps whatever candidate was already in hand instead
+      // of running for seconds. Counter is monotonic across rewinds: the
+      // cap bounds the *sum* of speculative work, not per-branch work,
+      // and the speculative path that hits it cannot be unwound without
+      // letting siblings re-exponentiate. Each `try_recovery_window`
+      // constructs a fresh `RecoveryContext`, which resets the counter
+      // for free between windows. Cap check runs before the active-set
+      // membership check so once the budget is gone every subsequent
+      // entry fails in O(1) without scanning the active recovery stack.
+      if (ctx.recoveryRuleEntries >= ctx.maxRecoveryRuleEntries) {
+        return false;
+      }
       if (ctx.isActiveRecovery(this)) {
         PEGIUM_RECOVERY_TRACE("[rule recover] recursive same-offset bail ",
                               getName(), " offset=", ctx.cursorOffset());
         return false;
       }
+      ++ctx.recoveryRuleEntries;
       auto activeRecoveryGuard = ctx.enterActiveRecovery(this);
       (void)activeRecoveryGuard;
       PEGIUM_RECOVERY_TRACE(

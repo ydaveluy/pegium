@@ -25,7 +25,6 @@
 namespace pegium::parser {
 
 template <Expression... Elements> struct Group;
-template <Expression... Elements> struct GroupWithSkipper;
 
 template <typename T = std::string>
   requires detail::SupportedRuleValueType<T>
@@ -69,94 +68,70 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
   }
 
   bool probeRecoverable(RecoveryContext &ctx) const noexcept {
-    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
-        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
-    };
     if (probeRecoverableAtEntry(ctx)) {
       return true;
     }
-    if (_literalRecoveryMetadata.has_value() &&
-        (!ctx.hasHadEdits() ||
-         detail::allows_fuzzy_replace_after_prior_edits(
-             _terminalShape))) {
-      const auto replaceCandidates = detail::collect_literal_replace_candidates(
-          ctx, ctx.cursor(), _literalRecoveryMetadata->value,
-          _literalRecoveryMetadata->caseSensitive, _terminalShape);
-      if (!replaceCandidates.empty()) {
-        return true;
-      }
-    }
-    return detail::probe_nearby_delete_scan_match(
-        ctx,
-        [this](const char *scanCursor) noexcept {
-          return terminal(scanCursor);
-        },
-        localRecoveryFacts, _terminalShape);
+    return fuzzy_candidate_match(
+               ctx, ctx.cursor(),
+               [](const detail::LiteralFuzzyCandidate &) noexcept {
+                 return true;
+               }) ||
+           delete_scan_match(ctx);
   }
 
   bool probeRecoverableAtEntry(RecoveryContext &ctx) const noexcept {
-    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
-        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
-    };
-    if (_literalRecoveryMetadata.has_value() &&
-        (!ctx.hasHadEdits() ||
-         detail::allows_fuzzy_replace_after_prior_edits(
-             _terminalShape))) {
-      const auto replaceCandidates = detail::collect_literal_replace_candidates(
-          ctx, ctx.cursor(), _literalRecoveryMetadata->value,
-          _literalRecoveryMetadata->caseSensitive, _terminalShape);
-      if (std::ranges::any_of(
-              replaceCandidates,
-              [](const detail::LiteralFuzzyCandidate &candidate) noexcept {
-                return detail::allows_entry_probe_fuzzy_candidate(candidate);
-              })) {
-        return true;
-      }
-    }
-    if (detail::allows_terminal_entry_probe(ctx, _terminalShape)) {
-      return true;
-    }
-    return detail::probe_nearby_delete_scan_match(
-        ctx,
-        [this](const char *scanCursor) noexcept {
-          return terminal(scanCursor);
-        },
-        localRecoveryFacts, _terminalShape);
+    return fuzzy_candidate_match(ctx, ctx.cursor(),
+                                 detail::allows_entry_probe_fuzzy_candidate) ||
+           detail::allows_terminal_entry_probe(ctx, _terminalShape) ||
+           delete_scan_match(ctx);
   }
 
   bool
   probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const noexcept {
-    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
-        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
-    };
     const char *const cursorStart = ctx.cursor();
     if (const char *const matchedEnd = terminal(cursorStart);
         matchedEnd != nullptr && matchedEnd > cursorStart) {
       return true;
     }
-    if (_literalRecoveryMetadata.has_value() &&
-        (!ctx.hasHadEdits() ||
-         detail::allows_fuzzy_replace_after_prior_edits(
-             _terminalShape))) {
-      const auto replaceCandidates = detail::collect_literal_replace_candidates(
-          ctx, cursorStart, _literalRecoveryMetadata->value,
-          _literalRecoveryMetadata->caseSensitive, _terminalShape);
-      if (std::ranges::any_of(
-              replaceCandidates,
-              [](const detail::LiteralFuzzyCandidate &candidate) noexcept {
-                return candidate.consumed > 0u &&
-                       detail::allows_entry_probe_fuzzy_candidate(candidate);
-              })) {
-        return true;
-      }
+    return fuzzy_candidate_match(
+               ctx, cursorStart,
+               [](const detail::LiteralFuzzyCandidate &candidate) noexcept {
+                 return candidate.consumed > 0u &&
+                        detail::allows_entry_probe_fuzzy_candidate(candidate);
+               }) ||
+           delete_scan_match(ctx);
+  }
+
+private:
+  /// Iterates literal-replace fuzzy candidates near the cursor and returns
+  /// true as soon as `predicate(candidate)` accepts one. Returns false when no
+  /// metadata is available or no candidate matches.
+  template <typename Predicate>
+  bool fuzzy_candidate_match(RecoveryContext &ctx, const char *cursorStart,
+                             Predicate &&predicate) const noexcept {
+    if (!_literalRecoveryMetadata.has_value() ||
+        (ctx.hasHadEdits() &&
+         !detail::allows_fuzzy_replace_after_prior_edits(_terminalShape))) {
+      return false;
     }
+    const auto replaceCandidates = detail::collect_literal_replace_candidates(
+        ctx, cursorStart, _literalRecoveryMetadata->value,
+        _literalRecoveryMetadata->caseSensitive, _terminalShape);
+    return std::ranges::any_of(replaceCandidates,
+                               std::forward<Predicate>(predicate));
+  }
+
+  bool delete_scan_match(RecoveryContext &ctx) const noexcept {
+    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
+        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
+    };
     return detail::probe_nearby_delete_scan_match(
         ctx,
-        [this](const char *scanCursor) noexcept {
-          return terminal(scanCursor);
-        },
+        [this](const char *scanCursor) noexcept { return terminal(scanCursor); },
         localRecoveryFacts, _terminalShape);
   }
+
+public:
 
   TerminalRule super() const { return *this; }
   inline T getRawValue(const CstNodeView &node) const {
@@ -187,7 +162,7 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
 private:
   friend struct detail::ParseAccess;
   template <Expression... Elements> friend struct Group;
-  template <Expression... Elements> friend struct GroupWithSkipper;
+  template <typename> friend struct SkipperWrapped;
 
   template <NonNullableTerminalCapableExpression Element>
   constexpr TerminalRule(std::string_view name,
@@ -207,17 +182,8 @@ private:
   bool parse_terminal_recovery_impl(
       Context &ctx,
       const detail::TerminalRecoveryFacts &terminalRecoveryFacts) const {
-    const auto effectiveRecoveryFacts = [&]() {
-      auto facts = terminalRecoveryFacts;
-      if (!facts.triviaGap.hasHiddenGap() &&
-          !facts.triviaGap.visibleSourceAfterLocalSkip) {
-        facts.triviaGap = detail::current_local_skip_trivia_gap_profile(ctx);
-      }
-      facts.allowProvisionalLowConfidenceReplace =
-          facts.allowProvisionalLowConfidenceReplace ||
-          detail::allows_provisional_fuzzy_replace_here(ctx);
-      return facts;
-    }();
+    const auto effectiveRecoveryFacts =
+        detail::effective_terminal_recovery_facts(ctx, terminalRecoveryFacts);
     const char *const cursorStart = ctx.cursor();
     const char *const matchedEnd = terminal(cursorStart);
     const auto applyRecoveredLeaf = [this, &ctx](const char *matched) {
@@ -295,8 +261,7 @@ private:
           [this, &ctx, cursorStart, choice]() {
             const char *const replaceEnd = cursorStart + choice.consumed;
             if (!detail::can_apply_recovery_match(ctx, replaceEnd) ||
-                !detail::apply_replace_leaf_recovery_edit(
-                    ctx, replaceEnd, this, choice.cost.budgetCost)) {
+                !ctx.replaceLeaf(replaceEnd, this, choice.cost.budgetCost)) {
               return false;
             }
             if constexpr (RecoveryParseModeContext<Context>) {
@@ -317,7 +282,7 @@ private:
           [this, &ctx, &effectiveRecoveryFacts, &matchRecoverableTerminal,
            &applyRecoveredLeaf]() {
             const auto &facts = effectiveRecoveryFacts;
-            return detail::apply_delete_scan_terminal_candidate(
+            return detail::recover_by_terminal_delete_scan(
                 ctx, matchRecoverableTerminal, applyRecoveredLeaf,
                 facts, _terminalShape);
           });
@@ -376,35 +341,12 @@ private:
   }
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
-    const char *const cursorStart = ctx.cursor();
-    const char *const matchedEnd = terminal(cursorStart);
-    const auto applyRecoveredLeaf = [this, &ctx](const char *matched) {
-      if constexpr (RecoveryParseModeContext<Context>) {
-        PEGIUM_RECOVERY_TRACE("[terminal rule] delete-scan match ", getName(),
-                              " offset=", ctx.cursorOffset());
-      }
-      ctx.leaf(matched, this, false, true);
-    };
-    const auto matchRecoverableTerminal =
-        [this, &ctx,
-         cursorStart](const char *scanCursor) noexcept -> const char * {
-      if constexpr (!EditableParseModeContext<Context>) {
-        (void)scanCursor;
-        return nullptr;
-      } else {
-        if (!detail::allows_extended_terminal_delete_scan_match(
-                ctx, cursorStart, scanCursor)) {
-          return nullptr;
-        }
-        const char *const matched = terminal(scanCursor);
-        return detail::can_apply_recovery_match(ctx, matched) ? matched
-                                                              : nullptr;
-      }
-    };
     if constexpr (StrictParseModeContext<Context>) {
+      const char *const cursorStart = ctx.cursor();
       PEGIUM_RECOVERY_TRACE("[terminal rule] enter ", getName(),
                             " offset=", ctx.cursorOffset());
-      if (matchedEnd != nullptr) {
+      if (const char *const matchedEnd = terminal(cursorStart);
+          matchedEnd != nullptr) {
         PEGIUM_RECOVERY_TRACE("[terminal rule] direct match ", getName(),
                               " offset=", ctx.cursorOffset());
         ctx.leaf(matchedEnd, this);

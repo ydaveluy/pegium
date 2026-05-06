@@ -158,23 +158,27 @@ public:
   [[nodiscard]] bool has(const Context &context, const Key &key) const {
     this->throwIfDisposed();
     std::scoped_lock lock(_mutex);
-    return cacheForContextLocked(context).contains(key);
+    const auto *contextCache = findContextLocked(context);
+    return contextCache != nullptr && contextCache->contains(key);
   }
 
   void set(const Context &context, Key key, Value value) {
     this->throwIfDisposed();
     std::scoped_lock lock(_mutex);
-    cacheForContextLocked(context).insert_or_assign(std::move(key),
-                                                    std::move(value));
+    emplaceContextLocked(context).insert_or_assign(std::move(key),
+                                                   std::move(value));
   }
 
   [[nodiscard]] std::optional<Value> get(const Context &context,
                                          const Key &key) const {
     this->throwIfDisposed();
     std::scoped_lock lock(_mutex);
-    auto &contextCache = cacheForContextLocked(context);
-    const auto it = contextCache.find(key);
-    if (it == contextCache.end()) {
+    const auto *contextCache = findContextLocked(context);
+    if (contextCache == nullptr) {
+      return std::nullopt;
+    }
+    const auto it = contextCache->find(key);
+    if (it == contextCache->end()) {
       return std::nullopt;
     }
     return it->second;
@@ -185,17 +189,19 @@ public:
     this->throwIfDisposed();
     {
       std::scoped_lock lock(_mutex);
-      auto &contextCache = cacheForContextLocked(context);
-      const auto it = contextCache.find(key);
-      if (it != contextCache.end()) {
-        return it->second;
+      const auto *contextCache = findContextLocked(context);
+      if (contextCache != nullptr) {
+        const auto it = contextCache->find(key);
+        if (it != contextCache->end()) {
+          return it->second;
+        }
       }
     }
 
     auto value = provider();
     {
       std::scoped_lock lock(_mutex);
-      auto &contextCache = cacheForContextLocked(context);
+      auto &contextCache = emplaceContextLocked(context);
       const auto [it, inserted] =
           contextCache.try_emplace(key, std::move(value));
       (void)inserted;
@@ -206,7 +212,8 @@ public:
   [[nodiscard]] bool erase(const Context &context, const Key &key) {
     this->throwIfDisposed();
     std::scoped_lock lock(_mutex);
-    return cacheForContextLocked(context).erase(key) > 0;
+    auto *contextCache = findContextLocked(context);
+    return contextCache != nullptr && contextCache->erase(key) > 0;
   }
 
   void clear(const Context &context) {
@@ -232,13 +239,19 @@ protected:
 private:
   using ContextMap = std::unordered_map<Key, Value, KeyHash, KeyEqual>;
 
-  ContextMap &cacheForContextLocked(const Context &context) const {
-    const auto contextKey = convert(context);
-    auto it = _cache.find(contextKey);
-    if (it == _cache.end()) {
-      it = _cache.try_emplace(contextKey).first;
-    }
-    return it->second;
+  [[nodiscard]] const ContextMap *
+  findContextLocked(const Context &context) const {
+    const auto it = _cache.find(convert(context));
+    return it == _cache.end() ? nullptr : &it->second;
+  }
+
+  [[nodiscard]] ContextMap *findContextLocked(const Context &context) {
+    const auto it = _cache.find(convert(context));
+    return it == _cache.end() ? nullptr : &it->second;
+  }
+
+  ContextMap &emplaceContextLocked(const Context &context) const {
+    return _cache.try_emplace(convert(context)).first->second;
   }
 
   mutable std::mutex _mutex;

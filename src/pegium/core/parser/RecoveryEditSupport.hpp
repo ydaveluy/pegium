@@ -2,8 +2,6 @@
 
 /// Helpers for applying recovery edits in editable parse modes.
 
-#include <cstdint>
-
 #include <pegium/core/parser/ParseAttempt.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 
@@ -22,12 +20,6 @@ can_apply_recovery_match(const Context &ctx, const char *endPtr) noexcept {
 
 template <EditableParseModeContext Context, typename Element>
 [[nodiscard]] constexpr bool
-apply_insert_synthetic_recovery_edit(Context &ctx, const Element *element) {
-  return ctx.insertSynthetic(element);
-}
-
-template <EditableParseModeContext Context, typename Element>
-[[nodiscard]] constexpr bool
 apply_insert_synthetic_gap_and_match_recovery_edit(
     Context &ctx, const char *position, const Element *element,
     const char *message = nullptr) {
@@ -40,23 +32,11 @@ apply_insert_synthetic_gap_and_match_recovery_edit(
   return true;
 }
 
-template <EditableParseModeContext Context, typename Element>
-[[nodiscard]] constexpr bool
-apply_replace_leaf_recovery_edit(Context &ctx, const char *endPtr,
-                                 const Element *element,
-                                 std::uint32_t editCost) {
-  return ctx.replaceLeaf(endPtr, element, editCost);
-}
-
 template <Expression E>
 [[nodiscard]] inline bool
 attempt_parse_without_side_effects(RecoveryContext &ctx, const E &expression) {
-  const auto checkpoint = ctx.mark();
-  const auto savedFurthestExploredCursor = ctx.furthestExploredCursor();
-  const bool matched = attempt_parse_no_edits(ctx, expression);
-  ctx.rewind(checkpoint);
-  ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
-  return matched;
+  detail::ProbeRestoreScope guard{ctx};
+  return attempt_parse_no_edits(ctx, expression);
 }
 
 } // namespace pegium::parser::detail

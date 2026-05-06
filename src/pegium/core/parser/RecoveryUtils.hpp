@@ -110,8 +110,6 @@ template <typename Context> struct DeleteRetryReplayScope {
     return overflowBudgetScope.tryEnable();
   }
 
-  void restoreExtendedDeleteScan() noexcept { overflowBudgetScope.restore(); }
-
   void commitOverflowEdits() noexcept { overflowBudgetScope.commitOverflowEdits(); }
 };
 
@@ -140,11 +138,7 @@ struct DeleteScanVisitState {
   std::uint32_t deleteCount = 0u;
 };
 
-enum class DeleteRetryVisitResult : std::uint8_t {
-  Continue,
-  Stop,
-  Accept,
-};
+using DeleteRetryVisitResult = DeleteScanVisitResult;
 
 struct DeleteRetryOptions {
   DeleteScanOptions scan{};
@@ -156,12 +150,7 @@ struct DeleteRetryOptions {
   bool stopOverflowAtStructuredVisibleSource = false;
 };
 
-struct DeleteRetryVisitState {
-  bool overflowBudget = false;
-  bool hiddenTriviaBoundary = false;
-  bool hiddenTriviaExtended = false;
-  std::uint32_t deleteCount = 0u;
-};
+using DeleteRetryVisitState = DeleteScanVisitState;
 
 template <typename ShouldRetryFn>
 [[nodiscard]] inline bool invoke_delete_retry_predicate(
@@ -170,26 +159,6 @@ template <typename ShouldRetryFn>
     return shouldRetryFn(state);
   } else {
     return shouldRetryFn();
-  }
-}
-
-template <typename RetryFn>
-[[nodiscard]] inline DeleteRetryVisitResult invoke_delete_retry_attempt(
-    RetryFn &retryFn, const DeleteRetryVisitState &state) {
-  if constexpr (requires {
-                  { retryFn(state) } -> std::same_as<DeleteRetryVisitResult>;
-                }) {
-    return retryFn(state);
-  } else if constexpr (requires {
-                         { retryFn() } -> std::same_as<DeleteRetryVisitResult>;
-                       }) {
-    return retryFn();
-  } else if constexpr (requires { retryFn(state); }) {
-    return retryFn(state) ? DeleteRetryVisitResult::Accept
-                          : DeleteRetryVisitResult::Continue;
-  } else {
-    return retryFn() ? DeleteRetryVisitResult::Accept
-                     : DeleteRetryVisitResult::Continue;
   }
 }
 
@@ -217,8 +186,8 @@ inline void invoke_delete_scan_on_match(OnMatchFn &onMatchFn,
 
 template <typename Context>
 [[nodiscard]] constexpr bool
-delete_retry_position_starts_structured_visible_source(
-    const Context &ctx, const char *position) noexcept {
+position_starts_structured_visible_source(const Context &ctx,
+                                          const char *position) noexcept {
   if (position == nullptr || position >= ctx.end) {
     return false;
   }
@@ -386,7 +355,7 @@ visit_guarded_delete_retry_positions(
         if (!invoke_delete_retry_predicate(shouldRetry, state)) {
           return DeleteRetryVisitResult::Continue;
         }
-        const auto result = invoke_delete_retry_attempt(retry, state);
+        const auto result = invoke_delete_scan_visit(retry, state);
         if (result == DeleteRetryVisitResult::Accept && state.overflowBudget) {
           retryScope.commitOverflowEdits();
         }
@@ -395,7 +364,7 @@ visit_guarded_delete_retry_positions(
   const auto try_retry_pass = [&](bool overflowBudget) {
     while (deleteCount < options.scan.maxDeletes) {
       const bool structuredVisibleSource =
-          delete_retry_position_starts_structured_visible_source(ctx,
+          position_starts_structured_visible_source(ctx,
                                                                 ctx.cursor());
       if (((overflowBudget && options.stopOverflowAtStructuredVisibleSource) ||
            options.stopAtStructuredVisibleSource) &&
@@ -422,7 +391,7 @@ visit_guarded_delete_retry_positions(
         return result;
       }
       if (options.stopAtStructuredVisibleSource &&
-          delete_retry_position_starts_structured_visible_source(ctx,
+          position_starts_structured_visible_source(ctx,
                                                                 ctx.cursor()) &&
           deleteCount != 0u) {
         return DeleteRetryVisitResult::Stop;
@@ -448,7 +417,7 @@ visit_guarded_delete_retry_positions(
               return result;
             }
             if (options.stopAtStructuredVisibleSource &&
-                delete_retry_position_starts_structured_visible_source(
+                position_starts_structured_visible_source(
                     ctx, ctx.cursor()) &&
                 deleteCount != 0u) {
               return DeleteRetryVisitResult::Stop;

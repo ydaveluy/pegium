@@ -70,11 +70,22 @@ struct ProbeAccess {
              ParseAccessAvailable<Expr, Context>)
   static bool probe(const Expr &expression, Context &ctx) {
     const auto checkpoint = ctx.mark();
-    const auto maxCursor = ctx.maxCursor();
-    const bool matched = ParseAccess::parse(expression, ctx);
-    ctx.rewind(checkpoint);
-    ctx.restoreMaxCursor(maxCursor);
-    return matched;
+    if constexpr (requires { ctx.restoreMaxCursor(ctx.maxCursor()); }) {
+      // Save & restore the max cursor across a probe so the probe leaves no
+      // observable trace on contexts that track it (TrackedParseContext,
+      // ExpectContext). The strict-only `ParseContext` does not track a
+      // separate max cursor and therefore takes the cheaper rewind-only
+      // branch.
+      const auto maxCursor = ctx.maxCursor();
+      const bool matched = ParseAccess::parse(expression, ctx);
+      ctx.rewind(checkpoint);
+      ctx.restoreMaxCursor(maxCursor);
+      return matched;
+    } else {
+      const bool matched = ParseAccess::parse(expression, ctx);
+      ctx.rewind(checkpoint);
+      return matched;
+    }
   }
 };
 
@@ -101,7 +112,7 @@ inline bool probe(const Expr &expression, Context &ctx) {
 template <ParseModeContext Context, typename Fn>
 inline decltype(auto) with_no_edits(Context &ctx, Fn &&fn) {
   if constexpr (EditableParseModeContext<Context>) {
-    auto noEditGuard = ctx.withEditState(false, false, false);
+    auto noEditGuard = ctx.withEditTrackingDisabled();
     (void)noEditGuard;
     return std::forward<Fn>(fn)();
   } else {

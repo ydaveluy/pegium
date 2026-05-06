@@ -17,9 +17,7 @@ detail::StrictParseResult
 run_strict_parse(const auto &entryRule, const Skipper &skipper,
                  const pegium::text::TextSnapshot &text,
                  const pegium::utils::CancellationToken &cancelToken = {}) {
-  const detail::StrictFailureEngine strictFailureEngine;
-  return strictFailureEngine.runStrictParse(entryRule, skipper, text,
-                                            cancelToken);
+  return detail::run_strict_parse(entryRule, skipper, text, cancelToken);
 }
 
 detail::StrictFailureEngineResult
@@ -1026,78 +1024,6 @@ TEST(RecoverySearchTest,
 // former 24-axis / 3-profile normalized key). The surviving behavior is
 // exercised by the RecoveryKey* tests above and by the end-to-end recovery
 // sample tests elsewhere.
-
-TEST(RecoverySearchTest,
-     ChoiceEntrySignalRequirementAcceptsLaterEditWithoutStrictStartSignal) {
-  const detail::EditableRecoveryCandidate candidate{
-      .matched = true,
-      .cursorOffset = 24u,
-      .postSkipCursorOffset = 24u,
-      .editCost = 1u,
-      .editCount = 1u,
-      .editSpan = 1u,
-      .firstEditOffset = 16u,
-  };
-
-  EXPECT_EQ(detail::classify_choice_recovery_entry_signal_requirement(
-                candidate, 12u, false, false),
-            detail::ChoiceRecoveryEntrySignalRequirement::Accept);
-}
-
-TEST(RecoverySearchTest,
-     ChoiceEntrySignalRequirementRejectsDeletingRewriteWithoutContinuationAndStrictStartSignal) {
-  const detail::EditableRecoveryCandidate candidate{
-      .matched = true,
-      .hasDeleteEdit = true,
-      .cursorOffset = 16u,
-      .postSkipCursorOffset = 16u,
-      .editCost = 2u,
-      .editCount = 1u,
-      .editSpan = 4u,
-      .firstEditOffset = 12u,
-  };
-
-  EXPECT_EQ(detail::classify_choice_recovery_entry_signal_requirement(
-                candidate, 12u, false, false),
-            detail::ChoiceRecoveryEntrySignalRequirement::Reject);
-}
-
-TEST(RecoverySearchTest,
-     ChoiceEntrySignalRequirementRequestsProbeForSameStartRewriteWithoutContinuation) {
-  const detail::EditableRecoveryCandidate candidate{
-      .matched = true,
-      .cursorOffset = 13u,
-      .postSkipCursorOffset = 13u,
-      .editCost = 1u,
-      .editCount = 1u,
-      .editSpan = 2u,
-      .firstEditOffset = 12u,
-  };
-
-  EXPECT_EQ(detail::classify_choice_recovery_entry_signal_requirement(
-                candidate, 12u, false, false),
-            detail::ChoiceRecoveryEntrySignalRequirement::ProbeEntryStart);
-}
-
-TEST(RecoverySearchTest,
-     ChoiceEntrySignalRequirementRequestsProbeWhenAnotherBranchAlreadyHasStrictStartSignal) {
-  const detail::EditableRecoveryCandidate candidate{
-      .matched = true,
-      .cursorOffset = 24u,
-      .postSkipCursorOffset = 24u,
-      .editCost = 1u,
-      .editCount = 1u,
-      .editSpan = 1u,
-      .firstEditOffset = 16u,
-  };
-
-  EXPECT_EQ(detail::classify_choice_recovery_entry_signal_requirement(
-                candidate, 12u, true, false),
-            detail::ChoiceRecoveryEntrySignalRequirement::ProbeEntryStart);
-  EXPECT_EQ(detail::classify_choice_recovery_entry_signal_requirement(
-                candidate, 12u, true, true),
-            detail::ChoiceRecoveryEntrySignalRequirement::Accept);
-}
 
 TEST(RecoverySearchTest, RecoveryAttemptDebugJsonTracksEditedSourceSpan) {
   detail::RecoveryAttempt attempt;
@@ -2315,6 +2241,75 @@ TEST(RecoverySearchTest,
   EXPECT_EQ(result.recoveryReport.recoveryEdits, 2u);
   EXPECT_LT(result.recoveryReport.recoveryAttemptRuns, 256u);
   ASSERT_TRUE(result.recoveryReport.lastRecoveryWindow.has_value());
+}
+
+// Regression test for the cached-facts contract footgun: a caller that
+// builds a `RecoveryAttempt` with edits but forgets to call
+// `classify_recovery_attempt` must NOT see a silently zero-edit ranking
+// key. `recovery_attempt_key` reads the edits directly so the key always
+// reflects reality, regardless of whether the cached `attempt.facts` is
+// in sync.
+TEST(RecoverySearchTest, RecoveryAttemptKeyDoesNotDependOnCachedFacts) {
+  detail::RecoveryAttempt attempt;
+  attempt.entryRuleMatched = true;
+  attempt.fullMatch = true;
+  attempt.parsedLength = 24;
+  attempt.editCost = 8;
+  attempt.status = detail::RecoveryAttemptStatus::Stable;
+  attempt.recoveryEdits.push_back({.kind = ParseDiagnosticKind::Deleted,
+                                   .offset = 12,
+                                   .beginOffset = 12,
+                                   .endOffset = 14,
+                                   .element = nullptr,
+                                   .message = {}});
+  // `attempt.facts` deliberately left default-constructed (no classify).
+
+  const auto key = detail::recovery_attempt_key(attempt);
+
+  EXPECT_TRUE(key.fullMatch);
+  EXPECT_TRUE(key.matched);
+  EXPECT_EQ(key.firstEditOffset, 12u);
+  EXPECT_EQ(key.editCost, 8u);
+  EXPECT_EQ(key.progressAfterEdits, 24u);
+}
+
+TEST(RecoverySearchTest,
+     RecoveryAttemptKeyOnEmptyEditsFallsBackToParsedLength) {
+  detail::RecoveryAttempt attempt;
+  attempt.entryRuleMatched = true;
+  attempt.fullMatch = true;
+  attempt.parsedLength = 32;
+  attempt.editCost = 0;
+  attempt.status = detail::RecoveryAttemptStatus::Stable;
+  // No recovery edits. `firstEditOffset` should fall back to parsedLength.
+
+  const auto key = detail::recovery_attempt_key(attempt);
+
+  EXPECT_TRUE(key.fullMatch);
+  EXPECT_TRUE(key.matched);
+  EXPECT_EQ(key.firstEditOffset, 32u);
+  EXPECT_EQ(key.editCost, 0u);
+  EXPECT_EQ(key.progressAfterEdits, 32u);
+}
+
+TEST(RecoverySearchTest,
+     RecoveryAttemptKeyMatchedFalseWhenStatusIsNotSelectable) {
+  detail::RecoveryAttempt attempt;
+  attempt.entryRuleMatched = true;
+  attempt.parsedLength = 16;
+  attempt.editCost = 4;
+  attempt.status = detail::RecoveryAttemptStatus::RecoveredButNotCredible;
+  attempt.recoveryEdits.push_back({.kind = ParseDiagnosticKind::Inserted,
+                                   .offset = 8,
+                                   .beginOffset = 8,
+                                   .endOffset = 8,
+                                   .element = nullptr,
+                                   .message = {}});
+
+  const auto key = detail::recovery_attempt_key(attempt);
+
+  EXPECT_FALSE(key.matched);
+  EXPECT_EQ(key.firstEditOffset, 8u);
 }
 
 } // namespace

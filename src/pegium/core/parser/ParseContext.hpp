@@ -46,8 +46,8 @@ struct ParseContext {
           utils::default_cancel_token)
       noexcept
       : begin(builder.input_begin()), end(builder.input_end()), _cursor(begin),
-        _lastVisibleCursor(begin), _maxCursor(begin), _builder(builder),
-        _skipper(&skipper), _cancelToken(cancelToken) {
+        _lastVisibleCursor(begin), _builder(builder), _skipper(&skipper),
+        _cancelToken(cancelToken) {
   }
 
   [[nodiscard]] inline Checkpoint mark() const noexcept {
@@ -69,9 +69,6 @@ struct ParseContext {
 
   [[nodiscard]] SkipperGuard
   with_skipper(const Skipper &overrideSkipper) noexcept {
-    // Invalidate the no-builder skip cache: a different skipper can map the
-    // same cursor to a different end.
-    _skipCacheBegin = nullptr;
     return SkipperGuard{*this, _skipper, overrideSkipper};
   }
 
@@ -80,15 +77,6 @@ struct ParseContext {
     _builder.enter();
 
     return _cursor;
-  }
-
-  /// Invalidate the no-builder skip-cache. Call when the underlying input is
-  /// (logically) modified relative to `begin` — e.g. recovery deletions /
-  /// insertions — so that a subsequent `skip_without_builder(begin)` re-runs
-  /// the skipper. Pure-cursor advancements do not need to invalidate, since
-  /// the cache is keyed on the precise cursor position.
-  inline void invalidate_skip_cache() const noexcept {
-    _skipCacheBegin = nullptr;
   }
 
   inline void exit(const char *checkpoint,
@@ -112,35 +100,6 @@ struct ParseContext {
   [[nodiscard]] constexpr const char *cursor() const noexcept {
     return _cursor;
   }
-  [[nodiscard]] const char *skip_without_builder(const char *begin) const noexcept {
-    // 1-entry cache: the no-builder skipper is purely a function of (begin,
-    // _skipper) and is called heavily during recovery exploration at
-    // overlapping positions. Caching the most recent (begin -> end) result
-    // avoids re-walking the same trivia run dozens of times per offset.
-    if (begin == _skipCacheBegin) {
-      return _skipCacheEnd;
-    }
-    const char *const end = _skipper->skip(begin);
-    _skipCacheBegin = begin;
-    _skipCacheEnd = end;
-    return end;
-  }
-  [[nodiscard]] constexpr const char *maxCursor() const noexcept {
-    return _maxCursor;
-  }
-
-  constexpr void restoreMaxCursor(const char *cursor) noexcept {
-    _maxCursor = cursor;
-  }
-
-  /// Monotonically raise `_maxCursor` to replay the cumulative side effect
-  /// of a memoized exploration that was skipped on cache hit.
-  constexpr void bumpMaxCursor(const char *cursor) noexcept {
-    if (cursor > _maxCursor) {
-      _maxCursor = cursor;
-    }
-  }
-
   [[nodiscard]] constexpr TextOffset cursorOffset() const noexcept {
     return static_cast<TextOffset>(_cursor - begin);
   }
@@ -149,8 +108,18 @@ struct ParseContext {
     return static_cast<TextOffset>(_lastVisibleCursor - begin);
   }
 
+  /// Strict-only `ParseContext` does not track a max cursor distinct from
+  /// the live cursor — backtracking does not produce observable failure
+  /// state on this layer. Returns the live cursor so external callers
+  /// (tests and recovery summaries that may receive either context type)
+  /// see a coherent value. The real tracking lives in
+  /// `TrackedParseContext`, which shadows this accessor.
+  [[nodiscard]] constexpr const char *maxCursor() const noexcept {
+    return _cursor;
+  }
+
   [[nodiscard]] constexpr TextOffset maxCursorOffset() const noexcept {
-    return static_cast<TextOffset>(_maxCursor - begin);
+    return static_cast<TextOffset>(_cursor - begin);
   }
 
   [[nodiscard]] constexpr const utils::CancellationToken &
@@ -158,16 +127,7 @@ struct ParseContext {
     return _cancelToken;
   }
   inline void skip() noexcept {
-    const char *const before = _cursor;
     _cursor = _skipper->skip(_cursor, _builder);
-    // The two skipper variants converge to the same end for a given begin;
-    // populate the no-builder cache so subsequent recovery probes at this
-    // position skip the underlying terminal scan.
-    _skipCacheBegin = before;
-    _skipCacheEnd = _cursor;
-    if (_cursor > _maxCursor) [[likely]] {
-      _maxCursor = _cursor;
-    }
   }
 
   inline void leaf(const char *endPtr, const grammar::AbstractElement *element,
@@ -179,9 +139,6 @@ struct ParseContext {
     _cursor = endPtr;
     if (!hidden) [[likely]] {
       _lastVisibleCursor = endPtr;
-    }
-    if (_cursor > _maxCursor) [[likely]] {
-      _maxCursor = _cursor;
     }
   }
 
@@ -196,23 +153,13 @@ struct ParseContext {
     if (!hidden) [[likely]] {
       _lastVisibleCursor = endPtr;
     }
-    if (_cursor > _maxCursor) [[likely]] {
-      _maxCursor = _cursor;
-    }
   }
   protected:
   const char *_cursor;
   const char *_lastVisibleCursor;
-  const char *_maxCursor;
   CstBuilder &_builder;
   const Skipper *_skipper;
   const utils::CancellationToken &_cancelToken;
-  // 1-entry no-builder skip cache. `mutable` so const callers can populate
-  // it without compromising the logical const-ness of `skip_without_builder`.
-  mutable const char *_skipCacheBegin = nullptr;
-  mutable const char *_skipCacheEnd = nullptr;
-
-
 };
 
 struct RecoveryContext;
@@ -256,8 +203,28 @@ struct TrackedParseContext : ParseContext {
       detail::FailureHistoryRecorder &failureRecorder,
       const utils::CancellationToken &cancelToken =
           utils::default_cancel_token) noexcept
-      : ParseContext(builder, skipper, cancelToken),
+      : ParseContext(builder, skipper, cancelToken), _maxCursor(begin),
         _failureRecorder(failureRecorder) {}
+
+  [[nodiscard]] constexpr const char *maxCursor() const noexcept {
+    return _maxCursor;
+  }
+
+  constexpr void restoreMaxCursor(const char *cursor) noexcept {
+    _maxCursor = cursor;
+  }
+
+  /// Monotonically raise `_maxCursor` to replay the cumulative side effect
+  /// of a memoized exploration that was skipped on cache hit.
+  constexpr void bumpMaxCursor(const char *cursor) noexcept {
+    if (cursor > _maxCursor) {
+      _maxCursor = cursor;
+    }
+  }
+
+  [[nodiscard]] constexpr TextOffset maxCursorOffset() const noexcept {
+    return static_cast<TextOffset>(_maxCursor - begin);
+  }
 
   [[nodiscard]] inline Checkpoint mark() const noexcept {
     return {.parseCheckpoint = ParseContext::mark(),
@@ -284,6 +251,28 @@ struct TrackedParseContext : ParseContext {
                    const grammar::AbstractElement *element,
                    bool hidden = false, bool recovered = false);
 
+  [[nodiscard]] SkipperGuard
+  with_skipper(const Skipper &overrideSkipper) noexcept {
+    // Invalidate the no-builder skip cache: a different skipper can map the
+    // same cursor to a different end.
+    _skipCacheBegin = nullptr;
+    return SkipperGuard{*this, _skipper, overrideSkipper};
+  }
+
+  [[nodiscard]] const char *skip_without_builder(const char *begin) const noexcept {
+    // 1-entry cache: the no-builder skipper is purely a function of (begin,
+    // _skipper) and is called heavily during recovery exploration at
+    // overlapping positions. Caching the most recent (begin -> end) result
+    // avoids re-walking the same trivia run dozens of times per offset.
+    if (begin == _skipCacheBegin) {
+      return _skipCacheEnd;
+    }
+    const char *const end = _skipper->skip(begin);
+    _skipCacheBegin = begin;
+    _skipCacheEnd = end;
+    return end;
+  }
+
   [[nodiscard]] constexpr bool isFailureHistoryRecordingEnabled() const noexcept {
     return _recordFailureHistory;
   }
@@ -309,7 +298,20 @@ struct TrackedParseContext : ParseContext {
   }
 
 protected:
+  /// Highest cursor position reached during parsing, including failed
+  /// alternatives that were rewound. Recovery uses this to position the
+  /// failure window. Strict-only `ParseContext` does not track it; this
+  /// state lives at the `TrackedParseContext` layer where recovery becomes
+  /// observable.
+  const char *_maxCursor;
   detail::FailureHistoryRecorder &_failureRecorder;
+  // 1-entry no-builder skip cache. `mutable` so const callers can populate
+  // it without compromising the logical const-ness of `skip_without_builder`.
+  // Strict-only `ParseContext` does not need a no-builder skipper (no recovery
+  // probes call into it), so the cache and its companion `skip_without_builder`
+  // live here.
+  mutable const char *_skipCacheBegin = nullptr;
+  mutable const char *_skipCacheEnd = nullptr;
   bool _recordFailureHistory = true;
   bool _runRecoveryBookkeeping = false;
 };
@@ -395,6 +397,16 @@ struct RecoveryContext : TrackedParseContext {
   std::uint32_t maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
   std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
   std::uint32_t maxResyncSkipBytes = 4096;
+  /// Hard cap on the cumulative number of `ParserRule` recovery entries
+  /// during a single recovery window. A pathological grammar shape (e.g.
+  /// unclosed nested call expressions) can drive `evaluate_editable_recovery_candidate`
+  /// into an exponentially-branching tree of speculative parses; counting
+  /// every entry and aborting once the cap is hit collapses that exploration
+  /// so the outer driver falls back to a less ambitious candidate. Reset to
+  /// 0 implicitly because every `try_recovery_window` creates a fresh
+  /// `RecoveryContext`.
+  std::uint32_t maxRecoveryRuleEntries = 12000;
+  std::uint32_t recoveryRuleEntries = 0;
   TextOffset editFloorOffset = 0;
   std::optional<EditWindow> editWindow;
   bool allowTopLevelPartialSuccess = false;
@@ -483,13 +495,10 @@ struct RecoveryContext : TrackedParseContext {
                      FollowProbeFn recoverableConsumesVisibleFn = nullptr,
                      const void *recoverableConsumesVisibleData = nullptr,
                      FollowProbeMode mode = FollowProbeMode::Local) noexcept
-        : ctx(&c), newFn(fn), newData(data), prevFn(c._followProbeFn),
-          prevData(c._followProbeData), newRecoverableFn(recoverableFn),
-          newRecoverableData(recoverableData),
+        : ctx(&c), prevFn(c._followProbeFn),
+          prevData(c._followProbeData),
           prevRecoverableFn(c._recoverableFollowProbeFn),
           prevRecoverableData(c._recoverableFollowProbeData),
-          newRecoverableConsumesVisibleFn(recoverableConsumesVisibleFn),
-          newRecoverableConsumesVisibleData(recoverableConsumesVisibleData),
           prevRecoverableConsumesVisibleFn(
               c._recoverableFollowConsumesVisibleProbeFn),
           prevRecoverableConsumesVisibleData(
@@ -563,16 +572,10 @@ struct RecoveryContext : TrackedParseContext {
     }
 
     RecoveryContext *ctx;
-    FollowProbeFn newFn;
-    const void *newData;
     FollowProbeFn prevFn;
     const void *prevData;
-    FollowProbeFn newRecoverableFn;
-    const void *newRecoverableData;
     FollowProbeFn prevRecoverableFn;
     const void *prevRecoverableData;
-    FollowProbeFn newRecoverableConsumesVisibleFn;
-    const void *newRecoverableConsumesVisibleData;
     FollowProbeFn prevRecoverableConsumesVisibleFn;
     const void *prevRecoverableConsumesVisibleData;
   };
@@ -613,6 +616,17 @@ struct RecoveryContext : TrackedParseContext {
     restoreMaxCursor(cursor);
   }
 
+  /// Monotonic restore: only lift the furthest-explored cursor back up to
+  /// `cursor` when the current value has fallen below it (e.g. after a
+  /// rewind). Work that legitimately progressed the frontier further is
+  /// preserved.
+  constexpr void
+  bumpFurthestExploredCursor(const char *cursor) noexcept {
+    if (cursor > maxCursor()) {
+      restoreMaxCursor(cursor);
+    }
+  }
+
   inline void refreshRecoveryPhase() noexcept {
     auto &windowReplay = recoveryState.windowReplay;
     if (!windowReplay.recoveryBookkeepingEnabled) [[likely]] {
@@ -649,6 +663,12 @@ public:
           checkpoint.editWindowReplayForwardTokenCount;
     }
     recoveryState = checkpoint.recoveryState;
+    // `recoveryRuleEntries` is intentionally NOT rewound: the cap is a
+    // per-window global budget on speculative ParserRule entries, and a
+    // rewind to a sibling branch must continue to see the total work
+    // already consumed. Otherwise sibling branches would each get fresh
+    // budget and the sum would explode exponentially on pathological
+    // grammar shapes (the very thing the cap exists to bound).
     // Speculative parses that didn't push an edit dominate the rewind path;
     // skip the resize call (and the underlying destructor loop / size-store
     // sequence) when the count is unchanged.
@@ -686,19 +706,12 @@ public:
 
   void setEditWindow(std::optional<EditWindow> window) noexcept {
     editWindow = std::move(window);
-    recoveryState.windowReplay.activeWindowEditCostBase =
-        recoveryState.editBudget.editCost;
-    recoveryState.windowReplay.activeWindowEditCountBase =
-        recoveryState.editBudget.editCount;
-    recoveryState.windowReplay.activeEditWindowCompleted = false;
-    recoveryState.windowReplay.currentForwardVisibleLeafCount = 0;
-    recoveryState.windowReplay.strictVisibleLeafCountAfterRecovery = 0;
-    recoveryState.windowReplay.completedRecoveryWindows = 0;
-    recoveryState.windowReplay.reachedRecoveryTarget = false;
-    recoveryState.windowReplay.stableAfterRecovery = false;
-    recoveryState.windowReplay.awaitingStrictStability = false;
-    recoveryState.windowReplay.inRecoveryPhase = false;
-    recoveryState.windowReplay.recoveryBookkeepingEnabled = editWindow.has_value();
+    recoveryState.windowReplay = WindowReplayState{
+        .activeWindowEditCostBase = recoveryState.editBudget.editCost,
+        .activeWindowEditCountBase = recoveryState.editBudget.editCount,
+        .inRecoveryPhase = false,
+        .recoveryBookkeepingEnabled = editWindow.has_value(),
+    };
     _recordFailureHistory = recoveryState.windowReplay.recoveryBookkeepingEnabled;
     editFloorOffset = editWindow.has_value() ? editWindow->editFloorOffset
                                              : TextOffset{0};
@@ -783,12 +796,12 @@ public:
 
   [[nodiscard]] bool isActiveRecovery(
       const grammar::AbstractElement *element) const noexcept {
-    return detail::is_active_recovery(_activeRecoveries, *this, element);
+    return _activeRecoveries.contains(cursor(), element);
   }
 
   [[nodiscard]] ActiveRecoveryGuard
   enterActiveRecovery(const grammar::AbstractElement *element) noexcept {
-    return detail::enter_active_recovery(_activeRecoveries, *this, element);
+    return ActiveRecoveryGuard(_activeRecoveries, *this, element);
   }
 
   [[nodiscard]] EditStateGuard
@@ -797,12 +810,13 @@ public:
                                                nextAllowDelete);
   }
 
-  [[nodiscard]] EditStateGuard
-  withEditState(bool nextAllowInsert, bool nextAllowDelete,
-                bool nextTrackEditState) noexcept {
-    return detail::make_edit_state_guard(*this, nextAllowInsert,
-                                         nextAllowDelete,
-                                         nextTrackEditState);
+  /// Disable insert/delete and edit-state tracking together for the scope
+  /// of the returned RAII guard. Used by recovery probes and no-edit
+  /// replay attempts that must observe the strict-parse view of the
+  /// context without committing edits or bumping any edit-budget
+  /// counters.
+  [[nodiscard]] EditStateGuard withEditTrackingDisabled() noexcept {
+    return detail::make_edit_state_guard(*this, false, false, false);
   }
 
   [[nodiscard]] constexpr bool
@@ -997,13 +1011,12 @@ public:
     // falls back to a synthetic Insert at a higher rule level which
     // leaves the typoed token unconsumed.
     //
-    // Thresholds: cost ≤ 1 (single-codepoint edit), span ≤ 16 (bounded),
-    // and the target literal must be a word (≥ 3 codepoints). The literal
-    // gate is what keeps the symbolic-literal guards in place — `>` →
-    // `=>` (literal length 2) stays gated, `re` → `req` (length 3) and
-    // `initialStat` → `initialState` (length 12) go through.
+    // Thresholds: cost ≤ 1 (single-codepoint edit), and the target literal
+    // must be a word (≥ 3 codepoints). The literal gate is what keeps the
+    // symbolic-literal guards in place — `>` → `=>` (literal length 2)
+    // stays gated, `re` → `req` (length 3) and `initialStat` →
+    // `initialState` (length 12) go through.
     constexpr std::uint32_t kSingleEditReplaceCostLimit = 1u;
-    constexpr TextOffset kSingleEditReplaceSpanCeiling = 16;
     constexpr std::size_t kWordLiteralLengthFloor = 3u;
     const TextOffset replaceSpan =
         endOffset > cursorOffset() ? endOffset - cursorOffset() : 0;
@@ -1017,8 +1030,7 @@ public:
         literalElement->getValue().size() >= kWordLiteralLengthFloor;
     const bool singleEditFuzzyKeywordReplace =
         targetsWordKeyword &&
-        replacementCost <= kSingleEditReplaceCostLimit &&
-        replaceSpan > 0 && replaceSpan <= kSingleEditReplaceSpanCeiling;
+        replacementCost <= kSingleEditReplaceCostLimit && replaceSpan > 0;
     const bool destructiveEditOutsideActiveWindow =
         recoveryState.windowReplay.inRecoveryPhase && window != nullptr &&
         cursorOffset() > window->maxCursorOffset &&
@@ -1040,7 +1052,7 @@ public:
                              .beginOffset = cursorOffset(),
                              .endOffset = endOffset,
                              .element = element});
-    detail::apply_replace_edit_state(
+    detail::apply_non_delete_edit_state(
         replacementCost, recoveryState.editBudget.editCost,
         recoveryState.editBudget.editCount,
         recoveryState.editBudget.hadEdits,
@@ -1107,6 +1119,9 @@ private:
       // c < e: cursors c < b consume the gap between the prior edit and the
       // original delete span, producing a single merged Delete@[c, e) that
       // matches the behavior of the original accepted attempt.
+      // (Permitting c < b is intentional and load-bearing for the
+      // delete-merge replay path; the strict `matching_committed_delete`
+      // predicate guards the actual replay site.)
       return offset < entry->endOffset;
     case ParseDiagnosticKind::Replaced:
       return offset >= entry->beginOffset && offset <= entry->endOffset;
@@ -1310,11 +1325,23 @@ private:
 };
 
 inline void TrackedParseContext::skip() noexcept {
+  const char *const before = _cursor;
   ParseContext::skip();
+  if (_cursor > _maxCursor) [[likely]] {
+    _maxCursor = _cursor;
+  }
   if (_recordFailureHistory) [[likely]] {
     _failureRecorder.onCursor(cursor());
   }
   if (_runRecoveryBookkeeping) [[likely]] {
+    // The two skipper variants converge to the same end for a given begin;
+    // populate the no-builder cache so subsequent recovery probes at this
+    // position skip the underlying terminal scan. Gated on
+    // `_runRecoveryBookkeeping` because `skip_without_builder()` is called
+    // exclusively from recovery code paths — the failure-only TrackedParseContext
+    // never reads this cache.
+    _skipCacheBegin = before;
+    _skipCacheEnd = _cursor;
     static_cast<RecoveryContext &>(*this).afterTrackedSkip();
   }
 }
@@ -1328,6 +1355,9 @@ inline void TrackedParseContext::leaf(
     _failureRecorder.onLeaf(cursor(), endPtr, element, hidden);
   }
   ParseContext::leaf(endPtr, element, hidden, recovered);
+  if (_cursor > _maxCursor) [[likely]] {
+    _maxCursor = _cursor;
+  }
   if (_runRecoveryBookkeeping) [[likely]] {
     static_cast<RecoveryContext &>(*this).afterTrackedLeaf(beginOffset,
                                                            endOffset, hidden);
@@ -1343,6 +1373,9 @@ inline void TrackedParseContext::leaf(
     _failureRecorder.onLeaf(beginPtr, endPtr, element, hidden);
   }
   ParseContext::leaf(beginPtr, endPtr, element, hidden, recovered);
+  if (_cursor > _maxCursor) [[likely]] {
+    _maxCursor = _cursor;
+  }
   if (_runRecoveryBookkeeping) [[likely]] {
     static_cast<RecoveryContext &>(*this).afterTrackedLeaf(beginOffset,
                                                            endOffset, hidden);

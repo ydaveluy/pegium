@@ -33,9 +33,8 @@ auto StrictRecoveryDocument(const RuleType &entryRule, std::string_view text,
                             const utils::CancellationToken &cancelToken = {}) {
   RecoveryHarnessResult<parser::detail::StrictParseResult> harness;
   const auto snapshot = text::TextSnapshot::copy(text);
-  const parser::detail::StrictFailureEngine strictFailureEngine;
-  harness.result = strictFailureEngine.runStrictParse(entryRule, skipper,
-                                                      snapshot, cancelToken);
+  harness.result = parser::detail::run_strict_parse(entryRule, skipper,
+                                                    snapshot, cancelToken);
   return harness;
 }
 
