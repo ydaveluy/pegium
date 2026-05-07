@@ -34,10 +34,11 @@ own language — Pegium will be pulled in as a `FetchContent` dependency.
 
 ### [2. Choose a Starting Point](scaffold.md)
 
-Either start from the **language template** (recommended for your own
-project — Pegium is a `FetchContent` dependency, identifiers renamed
-with one `cmake -P` command) or copy a **shipped example** (for
-contributing a language back to Pegium itself).
+Start from the
+[`pegium-language-template`](https://github.com/ydaveluy/pegium-language-template)
+GitHub template repository. Pegium is pulled in as a `FetchContent`
+dependency; the bundled `cmake -P` script renames every identifier to
+your own in one command.
 
 ## Core workflow
 

@@ -38,19 +38,20 @@ parser stack.
 
 ### Build your own language
 
-Copy the [template](template/) directory into a new folder, rename
-identifiers with one CMake script, and you have a working DSL with CLI
-+ LSP that pulls Pegium in via `FetchContent`:
+Use the
+[`pegium-language-template`](https://github.com/ydaveluy/pegium-language-template)
+GitHub template repository. Click **Use this template → Create a new
+repository**, clone the result, then:
 
 ```bash
-cp -r pegium/template my-language
 cd my-language
 cmake -P scripts/new-language.cmake -DLANGUAGE_NAME=mylang
 cmake -S . -B build && cmake --build build -j
 ./build/mylang-cli example/sample.mylang
 ```
 
-See [template/README.md](template/README.md) for the full walkthrough.
+The template ships a working "Hello world" DSL with CLI + LSP and pulls
+Pegium in via `FetchContent`. See its README for the full walkthrough.
 
 ### Try the shipped examples
 
