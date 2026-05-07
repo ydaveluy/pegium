@@ -22,16 +22,16 @@ workspace-oriented examples.
 
 The most useful reading path is usually:
 
-- `examples/domainmodel/src/core/DomainModelModule.cpp` for service composition
-- `examples/domainmodel/include/domainmodel/ast.hpp` for declarations built on
+- `examples/domainmodel/src/domainmodel/core/Module.cpp` for service composition
+- `examples/domainmodel/src/domainmodel/ast.hpp` for declarations built on
   `pegium::NamedAstNode`
-- `examples/domainmodel/src/core/references/QualifiedNameProvider.cpp` for
+- `examples/domainmodel/src/domainmodel/core/references/QualifiedNameProvider.cpp` for
   qualified-name construction
-- `examples/domainmodel/src/core/references/DomainModelScopeComputation.cpp` for
+- `examples/domainmodel/src/domainmodel/core/references/DomainModelScopeComputation.cpp` for
   qualified exports and local symbols
-- `examples/domainmodel/src/lsp/DomainModelRenameProvider.cpp` for rename
+- `examples/domainmodel/src/domainmodel/lsp/DomainModelRenameProvider.cpp` for rename
   behavior
-- `examples/domainmodel/src/lsp/DomainModelFormatter.cpp` for block-oriented
+- `examples/domainmodel/src/domainmodel/lsp/DomainModelFormatter.cpp` for block-oriented
   formatting
 
 ## Why start here

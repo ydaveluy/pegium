@@ -68,15 +68,14 @@ reports that the document changed or was deleted.
 
 ## Where Pegium already uses caches
 
-Two core services are good reference points:
+A good reference point is `pegium::workspace::DefaultIndexManager`, which uses
+a `ContextCache` for typed export views derived from the workspace index.
 
-- `pegium::references::DefaultScopeProvider` uses a `DocumentCache` to memoize
-  local scope levels built from `document.localSymbols`
-- `pegium::workspace::DefaultIndexManager` uses a `ContextCache` for typed
-  export views derived from the workspace index
-
-Those are good models to follow: cache derived structures that are expensive to
-rebuild, but keep the source of truth elsewhere.
+That is the model to follow: cache derived structures that are expensive to
+rebuild, but keep the source of truth elsewhere. Note that
+`pegium::references::DefaultScopeProvider` deliberately does *not* cache
+anything — local scope levels are precomputed and bucketed by container at
+scope-computation time, so each lookup is already a direct index access.
 
 ## Automatic invalidation
 

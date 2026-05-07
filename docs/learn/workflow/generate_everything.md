@@ -22,9 +22,7 @@ auto services =
 services->parser =
     std::make_unique<const domainmodel::parser::DomainModelParser>(*services);
 services->lsp.renameProvider =
-    std::make_unique<lsp::DomainModelRenameProvider>(
-        *services, *sharedServices.workspace.indexManager,
-        *sharedServices.workspace.documents, qualifiedNameProvider);
+    std::make_unique<lsp::DomainModelRenameProvider>(*services);
 services->lsp.formatter =
     std::make_unique<lsp::DomainModelFormatter>(*services);
 ```

@@ -26,20 +26,19 @@ That means:
 
 ## A living example
 
-Look at `examples/requirements/src/core/RequirementsModule.cpp`.
+Look at `examples/requirements/src/requirements/core/Module.cpp`.
 
 The example builds one service factory for requirements files and another one
 for test files:
 
 ```cpp
-std::unique_ptr<RequirementsLangServices>
-create_requirements_language_services(
-    const pegium::SharedCoreServices &sharedServices,
-    std::string languageId) {
-  auto services = std::make_unique<RequirementsLangServices>(sharedServices);
+std::unique_ptr<RequirementsCoreServices>
+createRequirementsServices(const pegium::SharedCoreServices &sharedServices,
+                           std::string languageId) {
+  auto services = std::make_unique<RequirementsCoreServices>(sharedServices);
   services->languageMetaData.languageId = std::move(languageId);
   pegium::installDefaultCoreServices(*services);
-  detail::configure_requirements_core_services(*services);
+  installRequirementsCoreModule(*services);
   return services;
 }
 ```
@@ -48,7 +47,7 @@ The second factory follows the same pattern but swaps parser, extensions,
 and validator for the `tests-lang` language.
 
 The LSP-specific formatters live separately in
-`examples/requirements/src/lsp/RequirementsModule.cpp`, where the same core
+`examples/requirements/src/requirements/lsp/Module.cpp`, where the same core
 setup is reused and the formatter is added on top.
 
 ## Registration
@@ -57,13 +56,11 @@ Once each language has its own core service object, register all of them in the
 shared registry:
 
 ```cpp
-bool register_language_services(
-    pegium::SharedCoreServices &sharedServices) {
+bool registerRequirementsServices(pegium::SharedCoreServices &sharedServices) {
+  auto services = createRequirementsAndTestsServices(sharedServices);
   sharedServices.serviceRegistry->registerServices(
-      create_requirements_language_services(sharedServices,
-                                            "requirements-lang"));
-  sharedServices.serviceRegistry->registerServices(
-      create_tests_language_services(sharedServices, "tests-lang"));
+      std::move(services.requirements));
+  sharedServices.serviceRegistry->registerServices(std::move(services.tests));
   return true;
 }
 ```

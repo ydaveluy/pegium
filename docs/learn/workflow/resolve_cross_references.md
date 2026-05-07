@@ -62,9 +62,10 @@ The `domainmodel` example overrides scope computation to export qualified names
 for nested types:
 
 ```cpp
-services->references.scopeComputation =
-    std::make_unique<references::DomainModelScopeComputation>(
-        *services, qualifiedNameProvider);
+services.qualifiedNameProvider =
+    std::make_shared<const references::QualifiedNameProvider>();
+services.references.scopeComputation =
+    std::make_unique<references::DomainModelScopeComputation>(services);
 ```
 
 That customization makes names such as `blog.User` visible in the model while

@@ -36,8 +36,8 @@ instead of once per reference during completion or linking.
 
 ## Step 1: define how names are joined
 
-`examples/domainmodel/src/core/references/QualifiedNameProvider.cpp` keeps the rule
-small and explicit:
+`examples/domainmodel/src/domainmodel/core/references/QualifiedNameProvider.cpp`
+keeps the rule small and explicit:
 
 ```cpp
 std::string QualifiedNameProvider::getQualifiedName(std::string_view qualifier,
@@ -49,29 +49,29 @@ std::string QualifiedNameProvider::getQualifiedName(std::string_view qualifier,
 }
 ```
 
-That helper is also used recursively for nested packages.
+A second overload walks up the package chain so a nested type gets its full
+dotted name in one call:
+
+```cpp
+std::string QualifiedNameProvider::getQualifiedName(
+    const ast::PackageDeclaration &qualifier, std::string_view name) const;
+```
 
 ## Step 2: export global symbols under qualified names
 
-`DomainModelScopeComputation::collectExportedSymbols(...)` walks the model,
-tracks the current qualifier, and publishes types under their fully qualified
-name:
+`DomainModelScopeComputation::collectExportedSymbols(...)` walks every type in
+the document and prefixes the local name with the enclosing package chain
+before publishing it:
 
 ```cpp
 if (const auto *package =
-        dynamic_cast<const PackageDeclaration *>(element.get())) {
-  const auto nestedQualifier =
-      _qualifiedNameProvider != nullptr
-          ? _qualifiedNameProvider->getQualifiedName(qualifier, package->name)
-          : package->name;
-  collectExportedSymbols(package->elements, nestedQualifier, document, symbols,
-                         cancelToken);
-  continue;
+        dynamic_cast<const PackageDeclaration *>(type->getContainer());
+    package != nullptr && qualifiedNameProvider != nullptr) {
+  info.name = qualifiedNameProvider->getQualifiedName(*package, info.name);
 }
 ```
 
-Later, when a type description is created, the exported name becomes something
-like `foo.bar.Customer`.
+The exported name then becomes something like `foo.bar.Customer`.
 
 ## Step 3: keep local names usable inside containers
 

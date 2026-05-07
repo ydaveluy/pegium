@@ -19,10 +19,10 @@ This usually ends up as a small class plus one registry setup point.
 The `domainmodel` example uses the following registration pattern:
 
 ```cpp
-void registerValidationChecks(
-    domainmodel::DomainModelServices &services) {
+template <typename TServices>
+void registerValidationChecks(TServices &services) {
   auto &registry = *services.validation.validationRegistry;
-  auto &validator = *services.domainModel.validation.domainModelValidator;
+  auto &validator = *services.validator;
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
            &DomainModelValidator::checkEntityNameStartsWithCapital>(validator),
@@ -31,12 +31,16 @@ void registerValidationChecks(
 }
 ```
 
+The template lets the same registration helper run on either the core or the
+LSP service container — both inherit `validation.validationRegistry` and
+expose the language's validator via `services.validator`.
+
 One validator method then attaches a diagnostic directly to the relevant
 property:
 
 ```cpp
 void DomainModelValidator::checkEntityNameStartsWithCapital(
-    const Entity &entity,
+    const ast::Entity &entity,
     const pegium::validation::ValidationAcceptor &accept) const {
   if (entity.name.empty()) {
     return;
@@ -46,7 +50,7 @@ void DomainModelValidator::checkEntityNameStartsWithCapital(
     return;
   }
   accept.warning(entity, "Type name should start with a capital.")
-      .property<&Entity::name>();
+      .property<&ast::Entity::name>();
 }
 ```
 
