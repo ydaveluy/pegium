@@ -27,12 +27,23 @@ mix_policy(const RecoveryPolicyFingerprint &policy) noexcept {
   h ^= static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(
            policy.recoverableFollowConsumesVisibleProbeData)) *
        0xC2B2AE3D27D4EB2FULL;
+  // Every fingerprint axis that participates in the defaulted `operator==`
+  // also participates in the hash. Skipping any axis here merely degrades
+  // hit rate (collisions are filtered by the equality check), but keeping
+  // hash and equality in lock-step makes adding a new axis a one-line edit
+  // instead of a future-debugging session.
   h ^= static_cast<std::uint64_t>(policy.remainingEditBudget) *
        0xC2B2AE3D27D4EB4FULL;
   h ^= static_cast<std::uint64_t>(policy.consecutiveDeletes) *
        0x94D049BB133111EBULL;
   h ^= static_cast<std::uint64_t>(policy.editFloorOffset) *
        0x85EBCA77C2B2AE63ULL;
+  h ^= static_cast<std::uint64_t>(policy.committedRecoveryEditIndex) *
+       0xA29F0F39DD9E12C5ULL;
+  h ^= static_cast<std::uint64_t>(policy.remainingEditCount) *
+       0x4F2162926E40C299ULL;
+  h ^= static_cast<std::uint64_t>(policy.remainingConsecutiveDeletes) *
+       0x6E8E7A2F8B1B5C1DULL;
   const auto bools =
       (static_cast<std::uint32_t>(policy.allowInsert) << 0) |
       (static_cast<std::uint32_t>(policy.allowDelete) << 1) |
@@ -43,7 +54,9 @@ mix_policy(const RecoveryPolicyFingerprint &policy) noexcept {
       (static_cast<std::uint32_t>(policy.inRecoveryPhase) << 5) |
       (static_cast<std::uint32_t>(policy.hadEdits) << 6) |
       (static_cast<std::uint32_t>(policy.insideEditWindow) << 7) |
-      (static_cast<std::uint32_t>(policy.completedWindowContinuation) << 8);
+      (static_cast<std::uint32_t>(policy.completedWindowContinuation) << 8) |
+      (static_cast<std::uint32_t>(policy.frontierBlocked) << 9) |
+      (static_cast<std::uint32_t>(policy.trackEditState) << 10);
   h ^= static_cast<std::uint64_t>(bools) * 0xD1B54A32D192ED03ULL;
   return h;
 }
