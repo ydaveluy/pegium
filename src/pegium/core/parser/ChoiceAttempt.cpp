@@ -1,6 +1,5 @@
 #include <pegium/core/parser/ChoiceAttempt.hpp>
 
-#include <limits>
 #include <new>
 #include <type_traits>
 
@@ -89,38 +88,19 @@ mix_policy(const RecoveryPolicyFingerprint &policy) noexcept {
 } // namespace
 
 ChoiceRecoverCache::ChoiceRecoverCache() {
-  // Allocate uninitialised storage and only initialise the generation
-  // field of each entry. Keys and values are not constructed; tryGet
-  // rejects every slot whose generation != _currentGeneration before
-  // reading any other field, so the uninit key/value bytes are never
-  // observed in production. store() overwrites both before raising
-  // the generation, fully constructing the entry. Saves ~1.4 MB of
-  // memset per cache construction (~12% of total Ir on recovery-heavy
-  // workloads in callgrind).
+  // Allocate uninitialised storage and only initialise the `valid` flag
+  // of each entry. Keys and values are not constructed; tryGet rejects
+  // every slot whose `valid` is false before reading any other field,
+  // so the uninit key/value bytes are never observed in production.
+  // store() overwrites both before raising `valid`, fully constructing
+  // the entry. Saves ~1.4 MB of memset per cache construction (~12% of
+  // total Ir on recovery-heavy workloads in callgrind).
   static_assert(std::is_trivially_destructible_v<Entry>);
   void *const raw = ::operator new(sizeof(std::array<Entry, kCapacity>));
   _entries.reset(static_cast<std::array<Entry, kCapacity> *>(raw));
   for (auto &entry : *_entries) {
-    entry.generation = 0;
+    entry.valid = false;
   }
-}
-
-void ChoiceRecoverCache::reset() noexcept {
-  // Bump the generation instead of walking 8192 entries. Stale entries
-  // are filtered by the generation check in `tryGet`. On the rare
-  // wraparound (every 2^32 resets), do one real walk to clear all
-  // generations back to 0 so the next bump (1) is unambiguous.
-  if (_currentGeneration == std::numeric_limits<std::uint32_t>::max())
-      [[unlikely]] {
-    for (auto &entry : *_entries) {
-      entry.generation = 0;
-    }
-    _currentGeneration = 1;
-  } else {
-    ++_currentGeneration;
-  }
-  _hits = 0;
-  _misses = 0;
 }
 
 const ChoiceAttempt *
@@ -131,7 +111,7 @@ ChoiceRecoverCache::tryGet(const ChoiceRecoverCacheKey &key) noexcept {
   }
   const auto index = slot(key);
   const auto &entry = (*_entries)[index];
-  if (entry.generation != _currentGeneration || !keys_equal(entry.key, key)) {
+  if (!entry.valid || !keys_equal(entry.key, key)) {
     ++_misses;
     return nullptr;
   }
@@ -145,7 +125,7 @@ void ChoiceRecoverCache::store(const ChoiceRecoverCacheKey &key,
   auto &entry = (*_entries)[index];
   entry.key = key;
   entry.value = value;
-  entry.generation = _currentGeneration;
+  entry.valid = true;
 }
 
 } // namespace pegium::parser::detail
