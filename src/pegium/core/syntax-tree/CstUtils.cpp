@@ -51,7 +51,7 @@ bool literal_matches_keyword(const grammar::Literal &literal,
     return expected == keyword;
   }
   for (std::size_t index = 0; index < expected.size(); ++index) {
-    if (parser::tolower(expected[index]) != parser::tolower(keyword[index])) {
+    if (utils::tolower(expected[index]) != utils::tolower(keyword[index])) {
       return false;
     }
   }
@@ -64,7 +64,7 @@ bool text_matches_keyword(std::string_view text,
     return false;
   }
   for (std::size_t index = 0; index < text.size(); ++index) {
-    if (parser::tolower(text[index]) != parser::tolower(keyword[index])) {
+    if (utils::tolower(text[index]) != utils::tolower(keyword[index])) {
       return false;
     }
   }

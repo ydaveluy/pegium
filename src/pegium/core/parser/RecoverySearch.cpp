@@ -729,7 +729,7 @@ try_prefix_delete_retry_entry_rule(RecoveryContext &ctx,
         ctx.skipAfterDelete = previousSkipAfterDelete;
         return false;
       },
-      {.disableDeleteRetry = false, .extendThroughHiddenTrivia = false});
+      {.extendThroughHiddenTrivia = false});
 }
 
 } // namespace
@@ -807,7 +807,6 @@ execute_recovery_parse(const grammar::ParserRule &entryRule,
           spec.window.forwardTokenCount, options.recoveryStabilityTokenCount)});
   parseCtx.trackEditState = true;
   parseCtx.recoveryState.windowReplay.inRecoveryPhase = false;
-  parseCtx.allowTopLevelPartialSuccess = true;
   parseCtx.maxConsecutiveCodepointDeletes =
       options.maxConsecutiveCodepointDeletes;
   parseCtx.stabilityTokenCount = options.recoveryStabilityTokenCount;

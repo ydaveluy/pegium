@@ -468,15 +468,6 @@ TEST(RecoveryTest,
   candidate.cost.primaryRankCost = 10u;
   EXPECT_FALSE(
       detail::allows_literal_fuzzy_candidate(candidate, profile, {}, true));
-
-  candidate.cost.primaryRankCost = 8u;
-  const detail::TerminalRecoveryFacts provisionalFacts{
-      .allowProvisionalLowConfidenceReplace = true,
-  };
-  EXPECT_FALSE(
-      detail::allows_literal_fuzzy_candidate(candidate, profile, {}, true));
-  EXPECT_TRUE(detail::allows_literal_fuzzy_candidate(
-      candidate, profile, provisionalFacts, true));
 }
 
 TEST(

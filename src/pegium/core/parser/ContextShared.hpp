@@ -30,7 +30,7 @@ namespace pegium::parser::detail {
 ///     grammar's own terminal charsets.
 [[nodiscard]] constexpr bool
 is_identifier_like_codepoint(std::uint32_t codepoint) noexcept {
-  return codepoint >= 0x80 || isWord(static_cast<char>(codepoint));
+  return codepoint >= 0x80 || utils::isWord(static_cast<char>(codepoint));
 }
 
 [[nodiscard]] constexpr bool
@@ -41,18 +41,37 @@ is_word_like_terminal(std::string_view value) noexcept {
   const char *cursor = value.data();
   const char *const end = cursor + value.size();
   while (cursor < end) {
-    const auto length = utf8_codepoint_length(*cursor);
+    const auto length = utils::utf8_codepoint_length(*cursor);
     if (length == 0 ||
         length > static_cast<std::size_t>(end - cursor)) {
       return false;
     }
-    if (!is_identifier_like_codepoint(decode_utf8_codepoint(cursor))) {
+    if (!is_identifier_like_codepoint(utils::decode_utf8_codepoint(cursor))) {
       return false;
     }
     cursor += length;
   }
   return true;
 }
+/// Increment a counter at construction (already done by the caller),
+/// decrement it at destruction. Used to maintain a recursion-depth
+/// counter on the recovery context with exception-safe scoping.
+template <typename Counter> class ScopedDecrementOnExit {
+public:
+  explicit ScopedDecrementOnExit(Counter &slot) noexcept : _slot(slot) {}
+  ScopedDecrementOnExit(const ScopedDecrementOnExit &) = delete;
+  ScopedDecrementOnExit &operator=(const ScopedDecrementOnExit &) = delete;
+  ScopedDecrementOnExit(ScopedDecrementOnExit &&) = delete;
+  ScopedDecrementOnExit &operator=(ScopedDecrementOnExit &&) = delete;
+  ~ScopedDecrementOnExit() noexcept { --_slot; }
+
+private:
+  Counter &_slot;
+};
+
+template <typename Counter>
+ScopedDecrementOnExit(Counter &) -> ScopedDecrementOnExit<Counter>;
+
 /// Save a bool reference at construction, restore it at destruction.
 class ScopedBoolOverride {
 public:
@@ -223,7 +242,7 @@ can_afford_edit(std::uint32_t editCount, std::uint32_t editCost,
 next_codepoint_cursor(const char *cursor) noexcept {
   return static_cast<unsigned char>(*cursor) < 0x80
              ? cursor + 1
-             : advanceOneCodepointLossy(cursor);
+             : utils::advanceOneCodepointLossy(cursor);
 }
 
 /// Shared bookkeeping for non-delete edits (insert and replace). Both

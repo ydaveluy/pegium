@@ -18,15 +18,6 @@ inline void enable_budget_overflow_edits_for_attempt(Context &ctx) noexcept {
   }
 }
 
-template <typename Context>
-[[nodiscard]] constexpr bool
-allows_extended_delete_scan(const Context &ctx) noexcept {
-  if constexpr (requires { ctx.allowExtendedDeleteScan; }) {
-    return ctx.allowExtendedDeleteScan;
-  } else {
-    return true;
-  }
-}
 
 template <typename Context> struct ExtendedDeleteScanBudgetScope {
   Context &ctx;
@@ -48,7 +39,7 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
   ~ExtendedDeleteScanBudgetScope() noexcept { restore(); }
 
   [[nodiscard]] bool tryEnable() noexcept {
-    if (enabled || !allows_extended_delete_scan(ctx)) {
+    if (enabled) {
       return false;
     }
     ctx.maxConsecutiveCodepointDeletes = std::numeric_limits<std::uint32_t>::max();
@@ -79,19 +70,12 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
 
 template <typename Context> struct DeleteRetryReplayScope {
   Context &ctx;
-  bool savedAllowDeleteRetry;
   bool savedSkipAfterDelete;
-  bool disableDeleteRetry;
   ExtendedDeleteScanBudgetScope<Context> overflowBudgetScope;
 
-  explicit DeleteRetryReplayScope(Context &ctx,
-                                  bool disableDeleteRetry = true) noexcept
-      : ctx(ctx), savedAllowDeleteRetry(ctx.allowDeleteRetry),
-        savedSkipAfterDelete(ctx.skipAfterDelete),
-        disableDeleteRetry(disableDeleteRetry), overflowBudgetScope(ctx) {
-    if (disableDeleteRetry) {
-      ctx.allowDeleteRetry = false;
-    }
+  explicit DeleteRetryReplayScope(Context &ctx) noexcept
+      : ctx(ctx), savedSkipAfterDelete(ctx.skipAfterDelete),
+        overflowBudgetScope(ctx) {
     ctx.skipAfterDelete = false;
   }
 
@@ -101,9 +85,6 @@ template <typename Context> struct DeleteRetryReplayScope {
 
   ~DeleteRetryReplayScope() noexcept {
     ctx.skipAfterDelete = savedSkipAfterDelete;
-    if (disableDeleteRetry) {
-      ctx.allowDeleteRetry = savedAllowDeleteRetry;
-    }
   }
 
   [[nodiscard]] bool tryEnableExtendedDeleteScan() noexcept {
@@ -142,7 +123,6 @@ using DeleteRetryVisitResult = DeleteScanVisitResult;
 
 struct DeleteRetryOptions {
   DeleteScanOptions scan{};
-  bool disableDeleteRetry = true;
   bool extendThroughHiddenTrivia = true;
   bool stopAtHiddenTriviaBoundary = false;
   bool visitAfterHiddenTriviaExtension = true;
@@ -196,7 +176,15 @@ position_starts_structured_visible_source(const Context &ctx,
       return false;
     }
   }
-  return is_identifier_like_codepoint(decode_utf8_codepoint(position));
+  // Bounds-check the UTF-8 read so a lead byte at `end - 1` doesn't
+  // pull `decode_utf8_codepoint` past the buffer. Truncated multi-byte
+  // sequences are treated as non-identifier-like.
+  const auto length = utils::utf8_codepoint_length(*position);
+  if (length == 0 ||
+      length > static_cast<std::size_t>(ctx.end - position)) {
+    return false;
+  }
+  return is_identifier_like_codepoint(utils::decode_utf8_codepoint(position));
 }
 
 template <typename VisitFn>
@@ -346,7 +334,7 @@ visit_guarded_delete_retry_positions(
   }
 
   const auto recoveryCheckpoint = ctx.mark();
-  DeleteRetryReplayScope retryScope{ctx, options.disableDeleteRetry};
+  DeleteRetryReplayScope retryScope{ctx};
   auto &&shouldRetry = shouldRetryFn;
   auto &&retry = retryFn;
   std::uint32_t deleteCount = 0u;

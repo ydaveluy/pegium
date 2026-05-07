@@ -935,12 +935,7 @@ private:
             return observation;
           }
         }
-        {
-          detail::ScopedBoolOverride extendedDeleteGuard{
-              ctx.allowExtendedDeleteScan, false};
-          (void)extendedDeleteGuard;
-          observation.matchedPrimary = parse(model->primary, ctx);
-        }
+        observation.matchedPrimary = parse(model->primary, ctx);
         observation.advancedPrimary = ctx.cursor() != observation.rhsStart;
         observation.postMatchCursorOffset = ctx.cursorOffset();
         if (!observation.matchedPrimary || !observation.advancedPrimary) {
@@ -1136,9 +1131,6 @@ private:
         if (candidate.rhsPrimaryObservedWithoutEdits) {
           matchedPrimary = parser::attempt_parse_no_edits(ctx, model->primary);
         } else {
-          detail::ScopedBoolOverride extendedDeleteGuard{
-              ctx.allowExtendedDeleteScan, false};
-          (void)extendedDeleteGuard;
           matchedPrimary = parse(model->primary, ctx);
         }
         if (!matchedPrimary || ctx.cursor() == rhsStart) {

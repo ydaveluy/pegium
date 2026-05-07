@@ -23,7 +23,7 @@ template <auto range>
 struct CharacterRange final : grammar::CharacterRange,
                               CompletionTerminalMatcher {
   static constexpr std::array<bool, 256> lookup =
-      createCharacterRange({range.data(), range.size()});
+      utils::createCharacterRange({range.data(), range.size()});
   static_assert(!lookup[0],
                 "CharacterRange cannot include '\\0'.");
   static constexpr bool nullable = false;
@@ -63,28 +63,28 @@ struct CharacterRange final : grammar::CharacterRange,
       } else {
         if (hasRangeStart) {
           if (codepoint - rangeStart == 1u)
-            os << escape_char(static_cast<char>(rangeStart));
+            os << utils::escape_char(static_cast<char>(rangeStart));
           else if (codepoint - rangeStart == 2u)
-            os << escape_char(static_cast<char>(rangeStart))
-               << escape_char(static_cast<char>(rangeStart + 1));
+            os << utils::escape_char(static_cast<char>(rangeStart))
+               << utils::escape_char(static_cast<char>(rangeStart + 1));
           else
-            os << escape_char(static_cast<char>(rangeStart))
+            os << utils::escape_char(static_cast<char>(rangeStart))
                << '-'
-               << escape_char(static_cast<char>(codepoint - 1));
+               << utils::escape_char(static_cast<char>(codepoint - 1));
           hasRangeStart = false;
         }
       }
     }
     if (hasRangeStart) {
       if (255u - rangeStart == 0u)
-        os << escape_char(static_cast<char>(rangeStart));
+        os << utils::escape_char(static_cast<char>(rangeStart));
       else if (255u - rangeStart == 1u)
-        os << escape_char(static_cast<char>(rangeStart))
-           << escape_char(static_cast<char>(rangeStart + 1));
+        os << utils::escape_char(static_cast<char>(rangeStart))
+           << utils::escape_char(static_cast<char>(rangeStart + 1));
       else
-        os << escape_char(static_cast<char>(rangeStart))
+        os << utils::escape_char(static_cast<char>(rangeStart))
            << '-'
-           << escape_char(static_cast<char>(255));
+           << utils::escape_char(static_cast<char>(255));
     }
     os << ']';
   }

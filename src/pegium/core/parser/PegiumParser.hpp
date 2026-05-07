@@ -30,11 +30,11 @@ namespace pegium::parser {
 static constexpr AnyCharacter dot;
 
 /// Create a CharacterRange
-template <char_array_builder builder> consteval auto operator""_cr() {
+template <utils::char_array_builder builder> consteval auto operator""_cr() {
   static_assert(!builder.value.empty(), "A CharacterRange cannot be empty.");
 
   if constexpr (builder.value[0] == '^') {
-    constexpr auto without_caret = array_substr<1>(builder.value);
+    constexpr auto without_caret = utils::array_substr<1>(builder.value);
     return !CharacterRange<without_caret>{} + dot;
   } else {
     return CharacterRange<builder.value>{};
@@ -42,7 +42,7 @@ template <char_array_builder builder> consteval auto operator""_cr() {
 }
 
 /// Create a Keyword
-template <char_array_builder builder> consteval auto operator""_kw() {
+template <utils::char_array_builder builder> consteval auto operator""_kw() {
   static_assert(!builder.value.empty(), "A keyword cannot be empty.");
   return Literal<builder.value>{};
 }
