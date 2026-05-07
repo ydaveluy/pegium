@@ -8,7 +8,8 @@ script that renames every identifier to your own.
 
 ## What the template ships
 
-A working DSL for a tiny grammar inspired by Langium's HelloWorld:
+A working DSL for a tiny grammar that declares persons and greets
+them by name:
 
 ```text
 person John
