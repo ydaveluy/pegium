@@ -410,6 +410,22 @@ TEST(PegiumWorkspaceRegressionTest, AdversarialCoverageIncrementalRoundTrip) {
   expect_workspace_round_trip(*it, 0u, std::string{});
 }
 
+// Dynamic-fuzz regression: the mutation `\x00\x00\x00` (delete the first
+// byte) exposed a deep recovery descent on the adversarial coverage
+// scenario, exceeding the 128 KiB stack budget the FuzzTest engine
+// applies. Running here under regular ASan (no stack watch) catches any
+// remaining heap/UB regression while the recovery depth is exercised.
+TEST(PegiumWorkspaceRegressionTest,
+     AdversarialCoverageDeleteFirstByteRoundTripStaysStable) {
+  const auto &scenarios = adversarial_single_document_scenarios();
+  const auto it = std::ranges::find_if(
+      scenarios, [](const WorkspaceScenarioSpec &scenario) {
+        return scenario.name == "adversarial/coverage.adv";
+      });
+  ASSERT_NE(it, scenarios.end());
+  expect_workspace_round_trip(*it, 0u, byte_string({0x00, 0x00, 0x00}));
+}
+
 TEST(PegiumWorkspaceRegressionTest, AdversarialWorkspaceRelinkRoundTrip) {
   const auto &scenarios = adversarial_workspace_scenarios();
   const auto it = std::ranges::find_if(

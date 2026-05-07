@@ -84,10 +84,6 @@ struct TerminalRecoveryFacts {
   /// the surrounding sequence has established that another sibling owns the
   /// current cursor.
   bool localRecoveryBlocked = false;
-  /// Allows a low-confidence fuzzy replacement to be enumerated at a
-  /// structurally protected site. The caller must validate the enclosing
-  /// candidate afterwards; terminal ranking alone must stay conservative.
-  bool allowProvisionalLowConfidenceReplace = false;
 };
 
 template <typename Context>
@@ -118,19 +114,12 @@ current_local_skip_trivia_gap_profile(const Context &ctx) noexcept {
 }
 
 template <typename Context>
-[[nodiscard]] constexpr bool
-allows_provisional_fuzzy_replace_here(const Context &ctx) noexcept;
-
-template <typename Context>
 [[nodiscard]] TerminalRecoveryFacts effective_terminal_recovery_facts(
     const Context &ctx, TerminalRecoveryFacts facts) noexcept {
   if (!facts.triviaGap.hasHiddenGap() &&
       !facts.triviaGap.visibleSourceAfterLocalSkip) {
     facts.triviaGap = current_local_skip_trivia_gap_profile(ctx);
   }
-  facts.allowProvisionalLowConfidenceReplace =
-      facts.allowProvisionalLowConfidenceReplace ||
-      allows_provisional_fuzzy_replace_here(ctx);
   return facts;
 }
 
@@ -181,7 +170,22 @@ cursor_starts_structured_visible_source(const Context &ctx) noexcept {
   if (!cursor_starts_visible_source(ctx)) {
     return false;
   }
-  return is_identifier_like_codepoint(decode_utf8_codepoint(ctx.cursor()));
+  // Bounds-check the multi-byte UTF-8 read: `decode_utf8_codepoint`
+  // reads up to 4 bytes from `cursor`, and a lead byte sitting at
+  // `end - 1` would have it read past the buffer. Pegium's text
+  // buffers carry a `\0` sentinel inside the size, but we can't
+  // depend on the runtime arena layout (ASan flagged this on a
+  // truncated multi-byte tail in adversarial fuzz input). When the
+  // codepoint extends past `end`, treat the cursor as not on a
+  // structured visible-source codepoint — same conservative answer
+  // as the lead-byte pre-check elsewhere in the recovery path.
+  const auto *const cursor = ctx.cursor();
+  const auto length = utils::utf8_codepoint_length(*cursor);
+  if (length == 0 ||
+      length > static_cast<std::size_t>(ctx.end - cursor)) {
+    return false;
+  }
+  return is_identifier_like_codepoint(utils::decode_utf8_codepoint(cursor));
 }
 
 template <typename Context>
@@ -232,12 +236,6 @@ allows_compact_local_gap_terminal_recovery(const Context &ctx) noexcept {
   return std::min<std::uint32_t>(5u, shape.canonicalTextLength + 3u);
 }
 
-[[nodiscard]] constexpr std::uint32_t
-literal_provisional_fuzzy_primary_rank_limit(
-    const TerminalShape &shape) noexcept {
-  return shape.canonicalTextLength + 3u;
-}
-
 [[nodiscard]] constexpr bool
 allows_fuzzy_replace_after_prior_edits(const TerminalShape &shape) noexcept {
   return shape.allowsReplace();
@@ -278,34 +276,13 @@ allows_fuzzy_replace_after_prior_edits(const TerminalShape &shape) noexcept {
   return false;
 }
 
-template <typename Context>
-[[nodiscard]] constexpr bool
-allows_provisional_fuzzy_replace_here(const Context &ctx) noexcept {
-  if constexpr (requires {
-                  ctx.allowProvisionalFuzzyReplace;
-                  ctx.provisionalFuzzyReplaceAnchorOffset;
-                  ctx.cursorOffset();
-                }) {
-    return ctx.allowProvisionalFuzzyReplace &&
-           ctx.cursorOffset() == ctx.provisionalFuzzyReplaceAnchorOffset;
-  } else {
-    return false;
-  }
-}
-
 [[nodiscard]] constexpr bool allows_literal_fuzzy_candidate(
     const LiteralFuzzyCandidate &candidate, const TerminalShape &shape,
     const TerminalRecoveryFacts &facts,
     bool cursorStartsStructuredVisibleSource) noexcept {
   TerminalLegalityFacts legality;
-  const bool withinPrimaryRankLimit =
-      candidate.cost.primaryRankCost <= literal_fuzzy_primary_rank_limit(shape);
-  const bool withinProvisionalRankLimit =
-      facts.allowProvisionalLowConfidenceReplace &&
-      candidate.cost.primaryRankCost <=
-          literal_provisional_fuzzy_primary_rank_limit(shape);
   legality.budgetAllowsReplace =
-      withinPrimaryRankLimit || withinProvisionalRankLimit;
+      candidate.cost.primaryRankCost <= literal_fuzzy_primary_rank_limit(shape);
   if (!is_terminal_replace_legal(shape, legality)) {
     return false;
   }
@@ -423,9 +400,16 @@ template <EditableParseModeContext Context>
     return filteredCandidates;
   }
 
-  const auto candidates = find_literal_fuzzy_candidates(
-      literalValue, inputView, caseSensitive,
-      literal_fuzzy_candidates_cache_for(ctx));
+  // Recovery contexts always carry a cache; the `_view` overload returns a
+  // non-owning span pointing into the cache slot, so the dominant cache-hit
+  // path skips the per-call `LiteralFuzzyCandidates` copy that the by-value
+  // overload would otherwise force.
+  auto *const cache = literal_fuzzy_candidates_cache_for(ctx);
+  const std::span<const LiteralFuzzyCandidate> candidates =
+      cache != nullptr
+          ? find_literal_fuzzy_candidates_view(literalValue, inputView,
+                                               caseSensitive, *cache)
+          : std::span<const LiteralFuzzyCandidate>{};
   const bool cursorStartsStructuredVisibleSource =
       cursor_starts_structured_visible_source(ctx);
   filteredCandidates.reserve(candidates.size());
@@ -450,12 +434,6 @@ allows_extended_terminal_delete_scan_match(const Context &ctx,
         static_cast<std::size_t>(ctx.maxConsecutiveCodepointDeletes) + 1u;
     if (deletedCount <= localLimit) {
       return true;
-    }
-
-    if constexpr (requires { ctx.allowExtendedDeleteScan; }) {
-      if (!ctx.allowExtendedDeleteScan) {
-        return false;
-      }
     }
 
     if (!position_starts_structured_visible_source(ctx, scanStart)) {

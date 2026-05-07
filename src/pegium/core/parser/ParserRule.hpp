@@ -160,6 +160,7 @@ private:
         return false;
       }
       ctx.exit(nodeStartCheckpoint, this);
+      utils::throw_if_cancelled(ctx.cancellationToken());
       PEGIUM_RECOVERY_TRACE("[rule rule] ok ", getName(),
                             " offset=", ctx.cursorOffset());
       return true;
@@ -190,6 +191,20 @@ private:
                               getName(), " offset=", ctx.cursorOffset());
         return false;
       }
+      // Stack-depth cap. Adversarial inputs can drive the recovery
+      // descent into deep grammar nesting (e.g. recursive container
+      // types in adversarial graph fuzz seeds); ASan / sancov inflate
+      // each recovery frame so the FuzzTest 128 KiB budget trips on
+      // ~30 levels even though the parse is otherwise bounded. Cap
+      // depth at ParserRule entry — strict and fast paths above are
+      // unaffected.
+      if (ctx.recoveryRuleDepth >= RecoveryContext::kMaxRecoveryRuleDepth) {
+        return false;
+      }
+      ++ctx.recoveryRuleDepth;
+      detail::ScopedDecrementOnExit recoveryRuleDepthGuard{
+          ctx.recoveryRuleDepth};
+      (void)recoveryRuleDepthGuard;
       ++ctx.recoveryRuleEntries;
       auto activeRecoveryGuard = ctx.enterActiveRecovery(this);
       (void)activeRecoveryGuard;
@@ -207,7 +222,7 @@ private:
       }
       if (!matched) {
         bool canCommitPartialTopLevelRecovery = false;
-        if (ctx.allowTopLevelPartialSuccess && ctx.activeRecoveryDepth() == 1 &&
+        if (ctx.activeRecoveryDepth() == 1 &&
             ctx.hasHadEdits() && !ctx.hasPendingCommittedRecoveryEdits()) {
           TextOffset lastEditOffset = 0;
           for (const auto &edit : ctx.snapshotRecoveryEdits()) {
@@ -235,6 +250,7 @@ private:
                             " offset=", ctx.cursorOffset(),
                             " hadEdits=", ctx.hasHadEdits());
       ctx.exit(nodeStartCheckpoint, this);
+      utils::throw_if_cancelled(ctx.cancellationToken());
       return true;
     } else {
       if (ctx.isActiveRecovery(this)) {
@@ -257,6 +273,9 @@ private:
         return false;
       }
       ctx.exit(nodeStartCheckpoint, this);
+      // ExpectContext::exit already invokes `throw_if_cancelled`; this
+      // branch (grammar analysis path) is not on the hot strict path so
+      // we don't bother throttling it.
       return true;
     }
   }

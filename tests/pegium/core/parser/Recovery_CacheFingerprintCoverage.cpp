@@ -47,13 +47,9 @@ RecoveryPolicyFingerprint reference_fingerprint() noexcept {
   fp.editFloorOffset = 42;
   fp.allowInsert = true;
   fp.allowDelete = true;
-  fp.allowDeleteRetry = true;
-  fp.allowExtendedDeleteScan = true;
   fp.skipAfterDelete = true;
   fp.allowDestructiveWindowContinuation = true;
   fp.allowLeadingTerminalInsertScope = true;
-  fp.allowProvisionalFuzzyReplace = true;
-  fp.provisionalFuzzyReplaceAnchorOffset = 64;
   fp.inRecoveryPhase = true;
   fp.hadEdits = true;
   fp.insideEditWindow = true;
@@ -93,12 +89,6 @@ const std::array kAxisMutators = {
                 [](auto &fp) { fp.allowInsert = !fp.allowInsert; }},
     AxisMutator{"allowDelete",
                 [](auto &fp) { fp.allowDelete = !fp.allowDelete; }},
-    AxisMutator{"allowDeleteRetry",
-                [](auto &fp) { fp.allowDeleteRetry = !fp.allowDeleteRetry; }},
-    AxisMutator{"allowExtendedDeleteScan",
-                [](auto &fp) {
-                  fp.allowExtendedDeleteScan = !fp.allowExtendedDeleteScan;
-                }},
     AxisMutator{"skipAfterDelete",
                 [](auto &fp) { fp.skipAfterDelete = !fp.skipAfterDelete; }},
     AxisMutator{"allowDestructiveWindowContinuation",
@@ -110,15 +100,6 @@ const std::array kAxisMutators = {
                 [](auto &fp) {
                   fp.allowLeadingTerminalInsertScope =
                       !fp.allowLeadingTerminalInsertScope;
-                }},
-    AxisMutator{"allowProvisionalFuzzyReplace",
-                [](auto &fp) {
-                  fp.allowProvisionalFuzzyReplace =
-                      !fp.allowProvisionalFuzzyReplace;
-                }},
-    AxisMutator{"provisionalFuzzyReplaceAnchorOffset",
-                [](auto &fp) {
-                  fp.provisionalFuzzyReplaceAnchorOffset += 1;
                 }},
     AxisMutator{"inRecoveryPhase",
                 [](auto &fp) { fp.inRecoveryPhase = !fp.inRecoveryPhase; }},

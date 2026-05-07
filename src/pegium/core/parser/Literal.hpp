@@ -282,7 +282,7 @@ private:
               prefixMatches = false;
               break;
             }
-          } else if (tolower(lhs) != rhs) {
+          } else if (utils::tolower(lhs) != rhs) {
             prefixMatches = false;
             break;
           }
@@ -519,7 +519,7 @@ public:
           return nullptr;
         }
       } else {
-        if (tolower(begin[charIndex]) != literal[charIndex]) {
+        if (utils::tolower(begin[charIndex]) != literal[charIndex]) {
           return nullptr;
         }
       }
@@ -563,20 +563,20 @@ private:
       return false;
     } else {
       return end != nullptr && end < ctx.end &&
-             detail::is_identifier_like_codepoint(decode_utf8_codepoint(end));
+             detail::is_identifier_like_codepoint(utils::decode_utf8_codepoint(end));
     }
   }
 
   static constexpr auto toLower() {
     decltype(literal) newLiteral;
     std::ranges::transform(literal, newLiteral.begin(),
-                           [](char c) { return tolower(c); });
+                           [](char c) { return utils::tolower(c); });
     return newLiteral;
   }
 
   static constexpr bool isCaseSensitive(auto lit) {
     return std::ranges::none_of(
-        lit, [](char c) { return isLetter(c); });
+        lit, [](char c) { return utils::isLetter(c); });
   }
 };
 

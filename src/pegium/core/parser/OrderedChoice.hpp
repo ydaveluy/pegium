@@ -49,15 +49,10 @@ make_recovery_policy_fingerprint(const RecoveryContext &ctx) noexcept {
   fp.editFloorOffset = ctx.editFloorOffset;
   fp.allowInsert = ctx.allowInsert;
   fp.allowDelete = ctx.allowDelete;
-  fp.allowDeleteRetry = ctx.allowDeleteRetry;
-  fp.allowExtendedDeleteScan = ctx.allowExtendedDeleteScan;
   fp.skipAfterDelete = ctx.skipAfterDelete;
   fp.allowDestructiveWindowContinuation =
       ctx.allowDestructiveWindowContinuation;
   fp.allowLeadingTerminalInsertScope = ctx.allowLeadingTerminalInsertScope;
-  fp.allowProvisionalFuzzyReplace = ctx.allowProvisionalFuzzyReplace;
-  fp.provisionalFuzzyReplaceAnchorOffset =
-      ctx.provisionalFuzzyReplaceAnchorOffset;
   fp.inRecoveryPhase = ctx.isInRecoveryPhase();
   fp.hadEdits = ctx.recoveryState.editBudget.hadEdits;
   fp.insideEditWindow = ctx.editWindow.has_value();
@@ -433,34 +428,6 @@ private:
     }
   }
 
-  struct ProvisionalFuzzyReplaceScope {
-    RecoveryContext &ctx;
-    bool savedAllowProvisionalFuzzyReplace;
-    TextOffset savedProvisionalFuzzyReplaceAnchorOffset;
-
-    ProvisionalFuzzyReplaceScope(RecoveryContext &ctx,
-                                 TextOffset anchorOffset) noexcept
-        : ctx(ctx),
-          savedAllowProvisionalFuzzyReplace(
-              ctx.allowProvisionalFuzzyReplace),
-          savedProvisionalFuzzyReplaceAnchorOffset(
-              ctx.provisionalFuzzyReplaceAnchorOffset) {
-      ctx.allowProvisionalFuzzyReplace = true;
-      ctx.provisionalFuzzyReplaceAnchorOffset = anchorOffset;
-    }
-
-    ProvisionalFuzzyReplaceScope(const ProvisionalFuzzyReplaceScope &) = delete;
-    ProvisionalFuzzyReplaceScope &
-    operator=(const ProvisionalFuzzyReplaceScope &) = delete;
-
-    ~ProvisionalFuzzyReplaceScope() noexcept {
-      ctx.allowProvisionalFuzzyReplace =
-          savedAllowProvisionalFuzzyReplace;
-      ctx.provisionalFuzzyReplaceAnchorOffset =
-          savedProvisionalFuzzyReplaceAnchorOffset;
-    }
-  };
-
 public:
   std::tuple<Elements...> choices;
 
@@ -595,14 +562,12 @@ private:
        const auto noEditAttempt =
            evaluate_branch_no_edit_choice_attempt<Is>(ctx, entryCheckpoint);
        consider_choice_attempt(bestAttempt, noEditAttempt);
-       const auto editableCandidate = [&]() {
-         ProvisionalFuzzyReplaceScope fuzzyScope{ctx, parseStartOffset};
-         return detail::evaluate_editable_recovery_candidate(
-             ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
-             [this, &ctx]() {
-               return attempt_parse_editable(ctx, std::get<Is>(choices));
-             });
-       }();
+       (void)parseStartOffset;
+       const auto editableCandidate = detail::evaluate_editable_recovery_candidate(
+           ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
+           [this, &ctx]() {
+             return attempt_parse_editable(ctx, std::get<Is>(choices));
+           });
        consider_choice_attempt(
            bestAttempt,
            ChoiceAttempt{

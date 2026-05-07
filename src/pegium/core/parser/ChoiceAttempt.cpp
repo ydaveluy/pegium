@@ -33,22 +33,17 @@ mix_policy(const RecoveryPolicyFingerprint &policy) noexcept {
        0x94D049BB133111EBULL;
   h ^= static_cast<std::uint64_t>(policy.editFloorOffset) *
        0x85EBCA77C2B2AE63ULL;
-  h ^= static_cast<std::uint64_t>(policy.provisionalFuzzyReplaceAnchorOffset) *
-       0x27D4EB2F165667C5ULL;
   const auto bools =
       (static_cast<std::uint32_t>(policy.allowInsert) << 0) |
       (static_cast<std::uint32_t>(policy.allowDelete) << 1) |
-      (static_cast<std::uint32_t>(policy.allowDeleteRetry) << 2) |
-      (static_cast<std::uint32_t>(policy.allowExtendedDeleteScan) << 3) |
-      (static_cast<std::uint32_t>(policy.skipAfterDelete) << 4) |
+      (static_cast<std::uint32_t>(policy.skipAfterDelete) << 2) |
       (static_cast<std::uint32_t>(policy.allowDestructiveWindowContinuation)
-       << 5) |
-      (static_cast<std::uint32_t>(policy.allowLeadingTerminalInsertScope) << 6) |
-      (static_cast<std::uint32_t>(policy.allowProvisionalFuzzyReplace) << 7) |
-      (static_cast<std::uint32_t>(policy.inRecoveryPhase) << 8) |
-      (static_cast<std::uint32_t>(policy.hadEdits) << 9) |
-      (static_cast<std::uint32_t>(policy.insideEditWindow) << 10) |
-      (static_cast<std::uint32_t>(policy.completedWindowContinuation) << 11);
+       << 3) |
+      (static_cast<std::uint32_t>(policy.allowLeadingTerminalInsertScope) << 4) |
+      (static_cast<std::uint32_t>(policy.inRecoveryPhase) << 5) |
+      (static_cast<std::uint32_t>(policy.hadEdits) << 6) |
+      (static_cast<std::uint32_t>(policy.insideEditWindow) << 7) |
+      (static_cast<std::uint32_t>(policy.completedWindowContinuation) << 8);
   h ^= static_cast<std::uint64_t>(bools) * 0xD1B54A32D192ED03ULL;
   return h;
 }

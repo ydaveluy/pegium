@@ -23,7 +23,7 @@ struct AnyCharacter final : grammar::AnyCharacter {
   }
 
   constexpr const char *terminal(const char *begin) const noexcept {
-    return consume_utf8_codepoint_if_complete(begin);
+    return utils::consume_utf8_codepoint_if_complete(begin);
   }
   constexpr const char *terminal(const std::string &text) const noexcept {
     return terminal(text.c_str());

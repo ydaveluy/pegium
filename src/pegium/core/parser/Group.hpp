@@ -1552,15 +1552,8 @@ private:
                     ? ctx.withEditPermissions(ctx.allowInsert, false)
                     : ctx.withEditPermissions(ctx.allowInsert, ctx.allowDelete);
             (void)editGuard;
-            const bool previousAllowDeleteRetry = ctx.allowDeleteRetry;
-            if (singleInsertedElementWithCleanTail) {
-              ctx.allowDeleteRetry = false;
-            }
-            const bool matched =
-                this->template parse_current_sequence_element<I>(ctx, {}) &&
-                this->template parse_elements<RecoveryContext, I + 1>(ctx);
-            ctx.allowDeleteRetry = previousAllowDeleteRetry;
-            return matched;
+            return this->template parse_current_sequence_element<I>(ctx, {}) &&
+                   this->template parse_elements<RecoveryContext, I + 1>(ctx);
           });
       const bool selectInsertReplay =
           !parseCandidate.matched ||

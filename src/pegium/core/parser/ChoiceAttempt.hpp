@@ -77,13 +77,9 @@ struct RecoveryPolicyFingerprint {
   TextOffset editFloorOffset = 0;
   bool allowInsert = false;
   bool allowDelete = false;
-  bool allowDeleteRetry = false;
-  bool allowExtendedDeleteScan = false;
   bool skipAfterDelete = false;
   bool allowDestructiveWindowContinuation = false;
   bool allowLeadingTerminalInsertScope = false;
-  bool allowProvisionalFuzzyReplace = false;
-  TextOffset provisionalFuzzyReplaceAnchorOffset = 0;
   bool inRecoveryPhase = false;
   bool hadEdits = false;
   bool insideEditWindow = false;

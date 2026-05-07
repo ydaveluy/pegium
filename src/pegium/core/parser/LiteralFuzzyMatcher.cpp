@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
+#include <new>
 #include <vector>
 
 #include <pegium/core/parser/ContextShared.hpp>
@@ -232,7 +234,7 @@ prune_dominated_candidates(const LiteralFuzzyCandidates &candidates) {
 normalize_char(unsigned char value, bool caseSensitive) noexcept {
   return caseSensitive ? value
                        : static_cast<unsigned char>(
-                             pegium::parser::tolower(static_cast<char>(value)));
+                             pegium::utils::tolower(static_cast<char>(value)));
 }
 
 [[nodiscard]] constexpr bool
@@ -252,7 +254,7 @@ input_window_has_non_identifier_codepoint(std::string_view input,
   const char *cursor = input.data();
   const char *const end = cursor + std::min(input.size(), windowBytes);
   while (cursor < end) {
-    const auto length = utf8_codepoint_length(*cursor);
+    const auto length = utils::utf8_codepoint_length(*cursor);
     if (length == 0 ||
         length > static_cast<std::size_t>(end - cursor)) {
       // Truncated / invalid UTF-8 in the inspected window: keep the same
@@ -262,7 +264,7 @@ input_window_has_non_identifier_codepoint(std::string_view input,
       // defer to the literal-vs-input shared-codepoint scan downstream.
       return false;
     }
-    if (!is_identifier_like_codepoint(decode_utf8_codepoint(cursor))) {
+    if (!is_identifier_like_codepoint(utils::decode_utf8_codepoint(cursor))) {
       return true;
     }
     cursor += length;
@@ -328,63 +330,38 @@ has_word_like_local_anchor(std::string_view literal, std::string_view input,
 
 } // namespace
 
-LiteralFuzzyCandidates
-find_literal_fuzzy_candidates(std::string_view literal,
-                              std::string_view input, bool caseSensitive,
-                              LiteralFuzzyCandidatesCache *cache) noexcept {
+LiteralFuzzyCandidatesCache::LiteralFuzzyCandidatesCache() {
+  // Allocate raw uninitialised storage and only zero the generation field
+  // of every entry. Other fields are read only after the generation check
+  // confirms the slot is live, so leaving them uninitialised is safe and
+  // saves the per-construction memset of every Entry (memset of the full
+  // ~256 KiB array dominated the cost of growing the slot count to 4096
+  // before this trick).
+  void *const raw = ::operator new(sizeof(std::array<Entry, kSlotCount>));
+  _entries.reset(static_cast<std::array<Entry, kSlotCount> *>(raw));
+  for (auto &entry : *_entries) {
+    entry.generation = 0;
+  }
+}
+
+LiteralFuzzyCandidatesCache::~LiteralFuzzyCandidatesCache() noexcept {
+  // Walk live entries and free their owned result data. Entries with
+  // `generation == 0` were never written: their `resultData` pointer is
+  // uninitialised garbage and must not be dereferenced.
+  for (auto &entry : *_entries) {
+    if (entry.generation != 0) {
+      ::operator delete(entry.resultData);
+    }
+  }
+}
+
+namespace {
+
+[[nodiscard]] LiteralFuzzyCandidates
+compute_pruned_literal_fuzzy_candidates(std::string_view literal,
+                                        std::string_view input,
+                                        bool caseSensitive) noexcept {
   LiteralFuzzyCandidates candidates;
-  if (literal.empty() || input.empty()) {
-    return candidates;
-  }
-  if (equals_text(literal, input, caseSensitive)) {
-    return candidates;
-  }
-
-  // Direct-mapped lookup. The function is called hundreds of thousands of
-  // times during pathological recoveries (git-conflict markers, large fuzz
-  // sweeps) with substantial input-window repetition: backtracking re-
-  // evaluates the same (literal, source-window) tuple as the parser explores
-  // alternative branches. We compare by pointer identity — both literal
-  // storage (grammar) and input span (text snapshot) are stable for the
-  // duration of one parse, so the cache must live in the parse-scoped owner
-  // (`RecoveryContext`). It also stores locally-pruned misses, since those
-  // dominate invalid-byte adversarial inputs. When the caller does not provide
-  // a cache, we fall through and recompute.
-  LiteralFuzzyCandidatesCache::Entry *slot = nullptr;
-  if (cache != nullptr) {
-    const auto literalHash =
-        reinterpret_cast<std::uintptr_t>(literal.data()) ^
-        (literal.size() * 0x9E3779B97F4A7C15ULL);
-    const auto inputHash =
-        reinterpret_cast<std::uintptr_t>(input.data()) ^
-        (input.size() * 0xBF58476D1CE4E5B9ULL);
-    const auto slotIdx =
-        (literalHash ^ inputHash ^ (caseSensitive ? 0xDEADBEEFULL : 0u)) %
-        LiteralFuzzyCandidatesCache::kSlotCount;
-    slot = &cache->slots[slotIdx];
-    if (slot->literalData == literal.data() &&
-        slot->literalSize == literal.size() &&
-        slot->inputData == input.data() && slot->inputSize == input.size() &&
-        slot->caseSensitive == caseSensitive) {
-      return slot->result;
-    }
-  }
-  const auto store_cache_result = [&](const LiteralFuzzyCandidates &result) {
-    if (slot != nullptr) {
-      slot->literalData = literal.data();
-      slot->literalSize = literal.size();
-      slot->inputData = input.data();
-      slot->inputSize = input.size();
-      slot->caseSensitive = caseSensitive;
-      slot->result = result;
-    }
-  };
-
-  if (!has_word_like_local_anchor(literal, input, caseSensitive)) {
-    store_cache_result(candidates);
-    return candidates;
-  }
-
   candidates.reserve(input.size() * 2u);
   const auto rows = literal.size() + 1u;
   const auto cols = input.size() + 1u;
@@ -533,9 +510,104 @@ find_literal_fuzzy_candidates(std::string_view literal,
     collect_candidate(state.noSubstitution, DpLane::NoSubstitution);
   }
 
-  auto pruned = prune_dominated_candidates(candidates);
-  store_cache_result(pruned);
-  return pruned;
+  return prune_dominated_candidates(candidates);
+}
+
+[[nodiscard]] std::size_t
+fuzzy_cache_slot_index(std::string_view literal, std::string_view input,
+                       bool caseSensitive) noexcept {
+  const auto literalHash =
+      reinterpret_cast<std::uintptr_t>(literal.data()) ^
+      (literal.size() * 0x9E3779B97F4A7C15ULL);
+  const auto inputHash =
+      reinterpret_cast<std::uintptr_t>(input.data()) ^
+      (input.size() * 0xBF58476D1CE4E5B9ULL);
+  return (literalHash ^ inputHash ^
+          (caseSensitive ? 0xDEADBEEFULL : 0u)) &
+         (LiteralFuzzyCandidatesCache::kSlotCount - 1);
+}
+
+void store_pruned_into_slot(LiteralFuzzyCandidatesCache::Entry &slot,
+                            std::string_view literal,
+                            std::string_view input, bool caseSensitive,
+                            const LiteralFuzzyCandidates &pruned) noexcept {
+  // Free any previous owner of this slot (collision eviction).
+  if (slot.generation != 0) {
+    ::operator delete(slot.resultData);
+  }
+  slot.literalData = literal.data();
+  slot.literalSize = literal.size();
+  slot.inputData = input.data();
+  slot.inputSize = input.size();
+  slot.caseSensitive = caseSensitive;
+  if (pruned.empty()) {
+    slot.resultData = nullptr;
+    slot.resultSize = 0;
+  } else {
+    const auto bytes = pruned.size() * sizeof(LiteralFuzzyCandidate);
+    slot.resultData =
+        static_cast<LiteralFuzzyCandidate *>(::operator new(bytes));
+    // LiteralFuzzyCandidate is trivially copyable; raw byte copy is safe.
+    std::memcpy(slot.resultData, pruned.data(), bytes);
+    slot.resultSize = static_cast<std::uint32_t>(pruned.size());
+  }
+  slot.generation = 1; // mark live
+}
+
+} // namespace
+
+LiteralFuzzyCandidates
+find_literal_fuzzy_candidates(std::string_view literal,
+                              std::string_view input, bool caseSensitive,
+                              LiteralFuzzyCandidatesCache *cache) noexcept {
+  if (cache != nullptr) {
+    const auto view = find_literal_fuzzy_candidates_view(
+        literal, input, caseSensitive, *cache);
+    return LiteralFuzzyCandidates(view.begin(), view.end());
+  }
+
+  if (literal.empty() || input.empty()) {
+    return {};
+  }
+  if (equals_text(literal, input, caseSensitive)) {
+    return {};
+  }
+  if (!has_word_like_local_anchor(literal, input, caseSensitive)) {
+    return {};
+  }
+  return compute_pruned_literal_fuzzy_candidates(literal, input, caseSensitive);
+}
+
+std::span<const LiteralFuzzyCandidate>
+find_literal_fuzzy_candidates_view(std::string_view literal,
+                                   std::string_view input,
+                                   bool caseSensitive,
+                                   LiteralFuzzyCandidatesCache &cache) noexcept {
+  if (literal.empty() || input.empty()) {
+    return {};
+  }
+
+  // Cache lookup must run before `equals_text` / `has_word_like_local_anchor`
+  // so the dominant cache-hit path skips both per-call O(N) scans.
+  auto &slot = *cache.slotAt(fuzzy_cache_slot_index(literal, input, caseSensitive));
+  if (slot.generation != 0 && slot.literalData == literal.data() &&
+      slot.literalSize == literal.size() &&
+      slot.inputData == input.data() && slot.inputSize == input.size() &&
+      slot.caseSensitive == caseSensitive) {
+    return {slot.resultData, slot.resultSize};
+  }
+
+  // Miss: compute (locally-pruned misses are also cached so adversarial
+  // inputs that bail at the anchor / equality check don't keep paying that
+  // cost each time the parser revisits them).
+  LiteralFuzzyCandidates pruned;
+  if (!equals_text(literal, input, caseSensitive) &&
+      has_word_like_local_anchor(literal, input, caseSensitive)) {
+    pruned = compute_pruned_literal_fuzzy_candidates(literal, input,
+                                                     caseSensitive);
+  }
+  store_pruned_into_slot(slot, literal, input, caseSensitive, pruned);
+  return {slot.resultData, slot.resultSize};
 }
 
 std::optional<LiteralFuzzyCandidate>

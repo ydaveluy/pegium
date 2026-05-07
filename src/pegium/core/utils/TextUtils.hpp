@@ -222,21 +222,3 @@ constexpr char tolower(char c) {
 std::string escape_char(char c);
 
 } // namespace pegium::utils
-
-// Backward-compat: expose the same names under `pegium::parser` so the
-// many parser-side call sites that use unqualified or `parser::`-qualified
-// references keep compiling without churn.
-namespace pegium::parser {
-using utils::advanceOneCodepointLossy;
-using utils::array_substr;
-using utils::char_array_builder;
-using utils::consume_utf8_codepoint_if_complete;
-using utils::createCharacterRange;
-using utils::decode_utf8_codepoint;
-using utils::escape_char;
-using utils::isLetter;
-using utils::isWord;
-using utils::range_array_builder;
-using utils::tolower;
-using utils::utf8_codepoint_length;
-} // namespace pegium::parser

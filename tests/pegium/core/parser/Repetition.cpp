@@ -462,7 +462,6 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   RecoveryContext statePartialCtx{statePartialBuilder, skipper,
                                   statePartialRecorder};
   statePartialCtx.trackEditState = true;
-  statePartialCtx.allowTopLevelPartialSuccess = true;
   statePartialCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
@@ -482,7 +481,6 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   RecoveryContext stateLatePartialCtx{stateLatePartialBuilder, skipper,
                                       stateLatePartialRecorder};
   stateLatePartialCtx.trackEditState = true;
-  stateLatePartialCtx.allowTopLevelPartialSuccess = true;
   stateLatePartialCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 11,
       .editFloorOffset = 11,
@@ -503,7 +501,6 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   RecoveryContext stateDefaultBudgetCtx{stateDefaultBudgetBuilder, skipper,
                                         stateDefaultBudgetRecorder};
   stateDefaultBudgetCtx.trackEditState = true;
-  stateDefaultBudgetCtx.allowTopLevelPartialSuccess = true;
   stateDefaultBudgetCtx.maxConsecutiveCodepointDeletes = 8;
   stateDefaultBudgetCtx.maxEditsPerAttempt = 10;
   stateDefaultBudgetCtx.maxEditCost = 64;

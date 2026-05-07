@@ -443,7 +443,6 @@ private:
     bool allowInsert = false;
     bool allowDelete = false;
     bool allowDestructiveWindowContinuation = false;
-    bool allowExtendedDeleteScan = false;
   };
 
   using IterationPlanList = std::array<IterationReplayPlan, 4>;
@@ -649,8 +648,7 @@ private:
           return detail::DeleteScanVisitResult::Continue;
         },
         {.scan = {.maxDeletes = maxDeletes,
-                  .allowOverflow = !is_optional &&
-                                   detail::allows_extended_delete_scan(ctx)}});
+                  .allowOverflow = !is_optional}});
     return consumesVisible;
   }
 
@@ -1042,7 +1040,7 @@ private:
             }
             return matched || cleanedTrailingVisibleGarbage;
           },
-          {.scan = {.allowOverflow = plan.allowExtendedDeleteScan},
+          {.scan = {.allowOverflow = true},
            .stopOverflowAtStructuredVisibleSource = true});
     }
     }
@@ -1348,8 +1346,7 @@ private:
             .allowDelete = ctx.allowDelete,
             .allowDestructiveWindowContinuation =
                 retryContinuesStartedIteration && ctx.hasHadEdits() &&
-                parseStartAtIterationEntryBoundary,
-            .allowExtendedDeleteScan = detail::allows_extended_delete_scan(ctx)},
+                parseStartAtIterationEntryBoundary},
         IterationReplayPlan{
             .kind = IterationReplayKind::InsertRetry,
             .legal = insertRetryLegal,
@@ -1404,7 +1401,6 @@ private:
       const RecoveryContext::Checkpoint &iterationCheckpoint,
       const RecoveryContext::Checkpoint &parseCheckpoint,
       const char *parseStart, const char *parseStartFurthestExploredCursor,
-      TextOffset parseStartOffset,
       const char *&furthestExploredCursor,
       std::size_t recoveryEditCountBefore,
       bool skipBetweenIterations) const {
@@ -1459,9 +1455,8 @@ private:
       const auto &insertPlan = plans[insertPlanIndex];
       auto insertAttempt = evaluate_retry_iteration_attempt(
           ctx, insertPlan, iterationCheckpoint, parseCheckpoint, parseStart,
-          parseStartFurthestExploredCursor, parseStartOffset,
-          furthestExploredCursor, recoveryEditCountBefore,
-          skipBetweenIterations);
+          parseStartFurthestExploredCursor, furthestExploredCursor,
+          recoveryEditCountBefore, skipBetweenIterations);
       consider_iteration_attempt(selection, insertAttempt, insertPlan);
       preEvaluatedPlanIndex = insertPlanIndex;
     }
@@ -1481,9 +1476,8 @@ private:
       }
       auto retryAttempt = evaluate_retry_iteration_attempt(
           ctx, plan, iterationCheckpoint, parseCheckpoint, parseStart,
-          parseStartFurthestExploredCursor, parseStartOffset,
-          furthestExploredCursor, recoveryEditCountBefore,
-          skipBetweenIterations);
+          parseStartFurthestExploredCursor, furthestExploredCursor,
+          recoveryEditCountBefore, skipBetweenIterations);
       consider_iteration_attempt(selection, retryAttempt, plan);
     }
 

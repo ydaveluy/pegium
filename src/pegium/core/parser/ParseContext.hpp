@@ -84,7 +84,11 @@ struct ParseContext {
     PEGIUM_STEP_TRACE_INC(detail::StepCounter::ParseContextExit);
     _builder.exit(static_cast<TextOffset>(checkpoint - begin),
                   lastVisibleCursorOffset(), element);
-    utils::throw_if_cancelled(_cancelToken);
+    // Cancellation is checked at parser-rule granularity (ParserRule
+    // calls `throw_if_cancelled(cancelToken())` after each successful
+    // rule exit), not on every Group/Repetition/Choice/Assignment
+    // exit — the inner exits are too hot for a memory-load + branch on
+    // every call (about 1.6% of strict-path Ir on the bench).
   }
 
   [[nodiscard]] inline NodeCount node_count() const noexcept {
@@ -387,8 +391,6 @@ struct RecoveryContext : TrackedParseContext {
 
   bool allowInsert = true;
   bool allowDelete = true;
-  bool allowExtendedDeleteScan = true;
-  bool allowDeleteRetry = true;
   bool skipAfterDelete = true;
   bool trackEditState = true;
   std::uint32_t maxConsecutiveCodepointDeletes =
@@ -407,11 +409,19 @@ struct RecoveryContext : TrackedParseContext {
   /// `RecoveryContext`.
   std::uint32_t maxRecoveryRuleEntries = 12000;
   std::uint32_t recoveryRuleEntries = 0;
+
+  // Hard cap on `ParserRule` recovery recursion depth. Adversarial inputs
+  // can produce deeply-nested grammar instantiations (e.g. a graph language
+  // with `Map { entry: Map { entry: Map { ... } } }`) where every level
+  // adds ~5 stack frames in ASan/sancov-instrumented builds; without a
+  // cap, the FuzzTest watchdog (128 KiB stack budget) trips on otherwise-
+  // benign inputs. 24 levels keeps the worst observed adversarial fuzz
+  // input under ~93 KiB of stack while still covering realistic
+  // hand-written programs (the strict path is uncapped).
+  static constexpr std::uint16_t kMaxRecoveryRuleDepth = 24;
+  std::uint16_t recoveryRuleDepth = 0;
   TextOffset editFloorOffset = 0;
   std::optional<EditWindow> editWindow;
-  bool allowTopLevelPartialSuccess = false;
-  bool allowProvisionalFuzzyReplace = false;
-  TextOffset provisionalFuzzyReplaceAnchorOffset = 0;
   std::vector<RecoveryEdit> recoveryEdits;
   std::vector<RecoveryEdit> committedRecoveryEdits;
   std::uint32_t committedRecoveryEditIndex = 0;
