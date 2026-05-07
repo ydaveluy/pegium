@@ -1,5 +1,0 @@
-build/
-build-*/
-.cache/
-.vscode/settings.json
-*.log
