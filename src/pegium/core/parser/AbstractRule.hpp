@@ -13,14 +13,16 @@ template <typename GrammarRule, bool Nullable = false>
 struct AbstractRule : GrammarRule {
   static constexpr bool nullable = Nullable;
 
+  // Rule body's nullability must match the rule's declared kind.
+  // The SFINAE constraint is what makes `requires { Rule{...} }` probes
+  // (used by the compile-time guard tests) report `false` for a mismatched
+  // body, exactly as they did before NullableRule existed.
+  // Hint to users hitting the resulting "no matching constructor" error:
+  // use NullableRule<T> for a nullable body, Rule<T> for a non-nullable one.
   template <Expression Element>
+    requires(std::remove_cvref_t<Element>::nullable == Nullable)
   AbstractRule(std::string_view name, Element &&element)
       : _name(name) {
-    static_assert(
-        std::remove_cvref_t<Element>::nullable == Nullable,
-        "Rule body's nullability must match the rule's declared kind. "
-        "Use NullableRule<T> for a nullable body, Rule<T> for a "
-        "non-nullable body.");
     _wrapper.set(std::forward<Element>(element));
   }
 
@@ -32,10 +34,8 @@ struct AbstractRule : GrammarRule {
   ~AbstractRule() override = default;
 
   template <Expression Element>
+    requires(std::remove_cvref_t<Element>::nullable == Nullable)
   AbstractRule &operator=(Element &&element) {
-    static_assert(
-        std::remove_cvref_t<Element>::nullable == Nullable,
-        "Rule body's nullability must match the rule's declared kind.");
     _wrapper.set(std::forward<Element>(element));
     return *this;
   }
