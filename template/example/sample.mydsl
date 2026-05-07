@@ -1,8 +1,0 @@
-// Default sample for the Pegium language template.
-// Edit this file to exercise your grammar.
-
-person John
-person Jane
-
-Hello John!
-Hello Jane!
