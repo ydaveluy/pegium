@@ -133,8 +133,6 @@ public:
 
   ChoiceRecoverCache();
 
-  void reset() noexcept;
-
   /// Toggles the cache off without dropping its storage. When disabled,
   /// `tryGet` always returns `nullptr` and the caller is forced to recompute
   /// every attempt. Stores still succeed (they are harmless) so re-enabling
@@ -154,20 +152,15 @@ public:
   [[nodiscard]] std::uint64_t misses() const noexcept { return _misses; }
 
 private:
-  // Generation-counter eviction: each entry stores the generation at which
-  // it was written. `reset()` increments `_currentGeneration`; tryGet
-  // accepts only entries whose generation matches the current one.
-  // Avoids walking 8192 cells every reset (O(1) instead of O(N)).
   struct Entry {
     ChoiceRecoverCacheKey key{};
     ChoiceAttempt value{};
-    std::uint32_t generation = 0;
+    bool valid = false;
   };
 
   std::unique_ptr<std::array<Entry, kCapacity>> _entries;
   std::uint64_t _hits = 0;
   std::uint64_t _misses = 0;
-  std::uint32_t _currentGeneration = 1;
   bool _disabled = false;
 };
 
