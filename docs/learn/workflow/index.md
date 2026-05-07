@@ -28,13 +28,16 @@ This workflow breaks down into three parts:
 
 ### [1. Build the Repository](install.md)
 
-Build Pegium itself, confirm the examples compile, and make sure the test suite
-is available locally.
+Optional: clone Pegium and build it once to confirm the framework runs
+on your machine. Skip this step entirely if you only want to build your
+own language — Pegium will be pulled in as a `FetchContent` dependency.
 
 ### [2. Choose a Starting Point](scaffold.md)
 
-Pick the example whose structure is closest to your future language instead of
-starting from an empty directory.
+Either start from the **language template** (recommended for your own
+project — Pegium is a `FetchContent` dependency, identifiers renamed
+with one `cmake -P` command) or copy a **shipped example** (for
+contributing a language back to Pegium itself).
 
 ## Core workflow
 
