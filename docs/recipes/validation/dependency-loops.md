@@ -39,8 +39,8 @@ definitions and may itself be called from many places.
 
 ## A living example
 
-In `examples/arithmetics/src/core/validation/ArithmeticsValidator.cpp`, recursion is
-checked in `checkFunctionRecursion(...)`.
+In `examples/arithmetics/src/arithmetics/core/validation/ArithmeticsValidator.cpp`,
+recursion is checked in `checkFunctionRecursion(...)`.
 
 The validator first registers a model-level check:
 

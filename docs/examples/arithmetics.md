@@ -23,11 +23,11 @@ Code client.
 
 If you want to understand the example quickly, start with:
 
-- `examples/arithmetics/src/core/ArithmeticsModule.cpp` for service wiring
-- `examples/arithmetics/src/core/Language.cpp` for the grammar and AST shaping
-- `examples/arithmetics/src/core/validation/ArithmeticsValidator.cpp` for semantic
+- `examples/arithmetics/src/arithmetics/core/Module.cpp` for service wiring
+- `examples/arithmetics/src/arithmetics/core/Language.cpp` for the grammar and AST shaping
+- `examples/arithmetics/src/arithmetics/core/validation/ArithmeticsValidator.cpp` for semantic
   checks
-- `examples/arithmetics/src/lsp/ArithmeticsFormatter.cpp` for formatter rules
+- `examples/arithmetics/src/arithmetics/lsp/ArithmeticsFormatter.cpp` for formatter rules
 
 ## Why start here
 

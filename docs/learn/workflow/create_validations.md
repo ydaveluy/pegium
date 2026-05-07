@@ -26,19 +26,23 @@ Validation answers different questions:
 The `statemachine` example registers validator methods like this:
 
 ```cpp
-const StatemachineValidator validator;
-registry.registerChecks(
-    {pegium::validation::ValidationRegistry::makeValidationCheck<
-         &StatemachineValidator::checkStateNameStartsWithCapital>(validator),
-     pegium::validation::ValidationRegistry::makeValidationCheck<
-         &StatemachineValidator::checkUniqueNames>(validator)});
+template <typename TServices>
+void registerValidationChecks(TServices &services) {
+  auto &registry = *services.validation.validationRegistry;
+  auto &validator = *services.validator;
+  registry.registerChecks(
+      {pegium::validation::ValidationRegistry::makeValidationCheck<
+           &StatemachineValidator::checkStateNameStartsWithCapital>(validator),
+       pegium::validation::ValidationRegistry::makeValidationCheck<
+           &StatemachineValidator::checkUniqueStatesAndEvents>(validator)});
+}
 ```
 
 One of the checks then emits a property-focused warning:
 
 ```cpp
 void StatemachineValidator::checkStateNameStartsWithCapital(
-    const State &state,
+    const ast::State &state,
     const pegium::validation::ValidationAcceptor &accept) const {
   if (state.name.empty()) {
     return;
@@ -46,7 +50,7 @@ void StatemachineValidator::checkStateNameStartsWithCapital(
   const auto first = state.name.front();
   if (std::toupper(static_cast<unsigned char>(first)) != first) {
     accept.warning(state, "State name should start with a capital letter.")
-        .property<&State::name>();
+        .property<&ast::State::name>();
   }
 }
 ```
