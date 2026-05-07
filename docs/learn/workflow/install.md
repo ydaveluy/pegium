@@ -1,7 +1,17 @@
 # 1. Build the Repository
 
-Before designing your own language, make sure Pegium itself builds on your
-machine and that you can run at least one shipped example.
+There are two reasons to clone and build Pegium itself:
+
+1. **You want to verify the framework runs on your machine** before you
+   commit to using it. Run one of the shipped examples end-to-end to
+   confirm.
+2. **You want to contribute to Pegium itself** — fix a bug, add a
+   feature, ship a new example.
+
+If your goal is to **build your own language**, you do not need to
+clone Pegium at all. Skip to
+[2. Choose a Starting Point](scaffold.md) and start from the language
+template — Pegium gets pulled in as a `FetchContent` dependency.
 
 ## What you need
 
@@ -69,7 +79,10 @@ For CMake consumers, Pegium exposes these target aliases:
 - `pegium::lsp` for the LSP-enabled aggregate library
 - `pegium::cli` for the standalone CLI support layer built on top of `pegium::core`
 
-Pegium is also meant to be consumed as a subproject via `FetchContent`:
+Pegium is meant to be consumed as a subproject via `FetchContent`. The
+[language template](scaffold.md) already wires this up; the snippet
+below is the underlying machinery in case you need to integrate Pegium
+into an existing CMake project:
 
 ```cmake
 include(FetchContent)

@@ -36,6 +36,24 @@ parser stack.
 
 ## Get Started
 
+### Build your own language
+
+Copy the [template](template/) directory into a new folder, rename
+identifiers with one CMake script, and you have a working DSL with CLI
++ LSP that pulls Pegium in via `FetchContent`:
+
+```bash
+cp -r pegium/template my-language
+cd my-language
+cmake -P scripts/new-language.cmake -DLANGUAGE_NAME=mylang
+cmake -S . -B build && cmake --build build -j
+./build/mylang-cli example/sample.mylang
+```
+
+See [template/README.md](template/README.md) for the full walkthrough.
+
+### Try the shipped examples
+
 Open the repository root in VS Code, go to `Run and Debug`, pick one of
 `Run Arithmetics Extension`, `Run DomainModel Extension`,
 `Run Requirements Extension`, or `Run Statemachine Extension`, then press
