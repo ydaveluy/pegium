@@ -1,5 +1,10 @@
 # Validation
 
+This is the subsystem walkthrough. For the recipe-style task pages, see
+[Recipes — Custom Validator](../recipes/custom-validator.md) for the
+class layout and [Recipes — Dependency Loops](../recipes/validation/dependency-loops.md)
+for whole-document graph checks.
+
 Validation is driven by `pegium::validation::ValidationRegistry`.
 
 Validation is where you express semantic rules that go beyond syntax.

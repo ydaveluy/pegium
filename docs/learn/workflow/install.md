@@ -6,15 +6,32 @@ machine and that you can run at least one shipped example.
 ## What you need
 
 - a C++20-capable compiler
-- CMake
+- CMake 3.14 or later
 - Ninja or another generator supported by your setup
 - Node.js only if you want to run the VS Code clients shipped in the examples
 
 ## Build the repository
 
+Clone the repository and build it:
+
 ```bash
+git clone https://github.com/ydaveluy/pegium.git
+cd pegium
 cmake -S . -B build
-cmake --build build -j32
+cmake --build build -j
+```
+
+A successful build produces:
+
+- the framework libraries under `build/src/pegium/`
+- one CLI and one LSP binary per shipped example under
+  `build/examples/<language>/`
+
+Try one of the example CLIs to confirm everything works end-to-end:
+
+```bash
+./build/examples/arithmetics/pegium-example-arithmetics-cli \
+  eval examples/arithmetics/example/example.calc
 ```
 
 If you also want to validate the test suite:

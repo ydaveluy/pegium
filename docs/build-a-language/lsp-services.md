@@ -1,5 +1,10 @@
 # LSP Services
 
+This is the subsystem walkthrough. For task-oriented overrides see
+[Recipes — Custom LSP Features](../recipes/custom-lsp-features.md), and
+for the completion-specific extension points see the
+[Completion Provider reference](../reference/completion-provider.md).
+
 Pegium exposes editor features through `pegium::Services`.
 
 The main idea is simple: one language service container owns both the semantic

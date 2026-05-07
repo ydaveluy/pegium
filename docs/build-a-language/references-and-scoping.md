@@ -1,5 +1,10 @@
 # References and Scoping
 
+This is the subsystem walkthrough. Once you know which lever to pull, the
+hands-on recipes live at
+[Recipes — Qualified Names](../recipes/scoping/qualified-names.md) and
+[Recipes — Custom Scope Provider](../recipes/custom-scope-provider.md).
+
 References are what turn a parsed tree into a usable language model. They let a
 written name point to a real declaration, possibly in another file.
 
