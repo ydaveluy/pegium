@@ -28,20 +28,48 @@ tooling wiring already in place.
 - use [statemachine](../../examples/statemachine.md) for validation-heavy
   modeling DSLs
 
-## What to keep first
+If you are not sure, copy `arithmetics`. It exercises every layer (parser,
+AST, validation, formatting, CLI, LSP) in the smallest amount of code.
 
-When you copy an example, keep the following pieces intact for the first
-iteration:
+## Concrete steps to adapt an example
+
+The example layout uses a per-language namespace folder, so renaming is
+mechanical. Suppose your language is named `mylang`:
+
+1. Copy the example folder, for instance
+   `examples/arithmetics` → `examples/mylang`.
+2. Rename the inner namespace folder
+   `examples/mylang/src/arithmetics/` → `examples/mylang/src/mylang/`.
+3. In `examples/mylang/CMakeLists.txt`, replace every occurrence of
+   `arithmetics` with `mylang` (target names, install paths,
+   `add_subdirectory(...)`, include directories).
+4. In every C++ source under the new tree, replace:
+   - the namespace `arithmetics::...` with `mylang::...`
+   - includes `<arithmetics/...>` with `<mylang/...>`
+   - the parser class name `ArithmeticsParser` with `MylangParser`
+   - the file extension `.calc` (in `Module.cpp`) with your own
+5. Add the new example folder to the top-level `examples/CMakeLists.txt`.
+6. Rebuild: `cmake --build build -j`.
+
+At this point you should have a binary like
+`build/examples/mylang/pegium-example-mylang-cli` that still parses the
+arithmetics grammar but lives entirely under your own names. From there you
+edit the grammar and AST types to make the language your own.
+
+## What to keep for the first iteration
+
+While you adapt the example, leave these pieces alone until the language is
+parsing again:
 
 - the overall project layout
-- the service bootstrap
-- the CLI and LSP entrypoints
+- the service bootstrap (`Module.cpp`, `Services.hpp`)
+- the CLI and LSP entrypoints (`cli_main.cpp`, `lsp_main.cpp`)
 - the test structure
 
-Then rename the parser, AST types, namespaces, and file associations to match
-your language.
+Once your renamed copy still builds and runs, you can start replacing the
+grammar, AST, and services step by step.
 
 ## Recommended next step
 
-Once you have chosen a starting point, continue with
+Once you have a renamed copy that still builds, continue with
 [Write the Grammar](write_grammar.md).

@@ -1,5 +1,11 @@
 # Formatting
 
+This is the subsystem walkthrough for the formatter. If you only need a
+short task-oriented checklist, jump to
+[Recipes — Formatting](../recipes/custom-formatter.md). For the full API
+surface (every selector, every action), see the
+[Formatter DSL reference](../reference/formatter-dsl.md).
+
 Formatting is implemented by deriving from `pegium::AbstractFormatter`.
 
 The formatter lives in `services->lsp.formatter` and works on top of the CST.
