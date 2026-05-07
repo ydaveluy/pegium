@@ -562,8 +562,22 @@ private:
       (void)end;
       return false;
     } else {
-      return end != nullptr && end < ctx.end &&
-             detail::is_identifier_like_codepoint(utils::decode_utf8_codepoint(end));
+      // `decode_utf8_codepoint` reads up to 4 bytes from `end`; the
+      // `end < ctx.end` guard only covers the lead byte. Truncated
+      // multi-byte tails sitting in the last 1-3 bytes of the buffer
+      // would otherwise pull the decode past `ctx.end` (ASan
+      // heap-buffer-overflow on adversarial fuzz inputs, mirroring the
+      // hardening already applied in TerminalRecoverySupport.hpp).
+      if (end == nullptr || end >= ctx.end) {
+        return false;
+      }
+      const auto length = utils::utf8_codepoint_length(*end);
+      if (length == 0 ||
+          length > static_cast<std::size_t>(ctx.end - end)) {
+        return false;
+      }
+      return detail::is_identifier_like_codepoint(
+          utils::decode_utf8_codepoint(end));
     }
   }
 
