@@ -112,14 +112,14 @@ public:
       const utils::CancellationToken &cancelToken = {}) const override;
 
 private:
-  template <typename ValueType> struct RuleTypeSelector {
+  template <typename ValueType, bool Nullable> struct RuleTypeSelector {
     static_assert(sizeof(ValueType) == 0, "Unsupported type for Rule");
   };
 
-  template <typename ValueType>
+  template <typename ValueType, bool Nullable>
     requires(!std::derived_from<ValueType, AstNode>)
-  struct RuleTypeSelector<ValueType> {
-    using type = DataTypeRule<ValueType>;
+  struct RuleTypeSelector<ValueType, Nullable> {
+    using type = DataTypeRule<ValueType, Nullable>;
   };
 
   // Pegium currently builds parser-produced AST nodes as mutable shells and
@@ -127,10 +127,10 @@ private:
   // can simplify hierarchy discovery generically, AST-producing rules and
   // reflection bootstrap intentionally share the same default-constructible
   // constraint.
-  template <typename ValueType>
+  template <typename ValueType, bool Nullable>
     requires DefaultConstructibleAstNode<ValueType>
-  struct RuleTypeSelector<ValueType> {
-    using type = ParserRule<ValueType>;
+  struct RuleTypeSelector<ValueType, Nullable> {
+    using type = ParserRule<ValueType, Nullable>;
   };
 
 protected:
@@ -139,8 +139,12 @@ protected:
 
   template <typename ValueType = std::string_view>
   using Terminal = TerminalRule<ValueType>;
+  // Default rule: body must be non-nullable. Use `NullableRule<T>` when the
+  // body is nullable (e.g. an entry rule of the form `many(...)`).
   template <typename ValueType = std::string>
-  using Rule = typename RuleTypeSelector<ValueType>::type;
+  using Rule = typename RuleTypeSelector<ValueType, false>::type;
+  template <typename ValueType = std::string>
+  using NullableRule = typename RuleTypeSelector<ValueType, true>::type;
   // Infix AST nodes are created through the same shell-and-assign model as
   // regular parser rules, so they intentionally share the same constraint.
   template <typename T, auto Left, auto Op, auto Right>

@@ -62,15 +62,13 @@ protected:
       "Greeting",
       "Hello"_kw + assign<&ast::Greeting::person>(ID) + "!"_kw};
 
-  // Model: (Person | Greeting)+ ;
-  // Pegium rule bodies must be non-nullable. The Langium HelloWorld used
-  // `(...)*` which matches the empty file too; here we use `some(...)`
-  // (one-or-more) so the grammar requires at least one declaration.
+  // Model: (Person | Greeting)* ;
   // The two rules feed the same polymorphic vector, so a single `append`
-  // takes the ordered choice directly.
-  Rule<ast::Model> ModelRule{
+  // takes the ordered choice directly. The body is nullable (`many` matches
+  // zero occurrences), so the rule must be declared as a `NullableRule`.
+  NullableRule<ast::Model> ModelRule{
       "Model",
-      some(append<&ast::Model::elements>(PersonRule | GreetingRule))};
+      many(append<&ast::Model::elements>(PersonRule | GreetingRule))};
 
 #pragma clang diagnostic pop
 };
