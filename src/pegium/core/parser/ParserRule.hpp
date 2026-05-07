@@ -22,16 +22,20 @@
 
 namespace pegium::parser {
 
-template <typename T>
+template <typename T, bool Nullable = false>
   requires DefaultConstructibleAstNode<T>
-struct ParserRule final : AbstractRule<grammar::ParserRule>,
+struct ParserRule final : AbstractRule<grammar::ParserRule, Nullable>,
                           CompletionSkipperProvider {
   using type = T;
-  using BaseRule = AbstractRule<grammar::ParserRule>;
+  using BaseRule = AbstractRule<grammar::ParserRule, Nullable>;
   static constexpr bool isFailureSafe = false;
   using BaseRule::BaseRule;
+  // The base is dependent (Nullable is a template parameter), so unqualified
+  // member lookup does not see protected members from it. Re-export the few
+  // we touch in this header.
+  using BaseRule::_wrapper;
 
-  template <NonNullableExpression Element, typename... Options>
+  template <Expression Element, typename... Options>
     requires(sizeof...(Options) > 0)
   constexpr ParserRule(std::string_view name, Element &&element,
                        Options &&...options)
@@ -303,7 +307,8 @@ namespace detail {
 
 template <typename T> struct IsParserRule : std::false_type {};
 
-template <typename T> struct IsParserRule<ParserRule<T>> : std::true_type {};
+template <typename T, bool Nullable>
+struct IsParserRule<ParserRule<T, Nullable>> : std::true_type {};
 
 } // namespace detail
 

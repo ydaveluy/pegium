@@ -17,17 +17,20 @@
 #include <string_view>
 namespace pegium::parser {
 
-template <typename T = std::string>
+template <typename T = std::string, bool Nullable = false>
   requires(!std::derived_from<T, AstNode>) && detail::SupportedRuleValueType<T>
-struct DataTypeRule final : AbstractRule<grammar::DataTypeRule>,
+struct DataTypeRule final : AbstractRule<grammar::DataTypeRule, Nullable>,
                             CompletionSkipperProvider {
   using type = T;
   using value_variant = grammar::RuleValue;
-  using BaseRule = AbstractRule<grammar::DataTypeRule>;
+  using BaseRule = AbstractRule<grammar::DataTypeRule, Nullable>;
   static constexpr bool isFailureSafe = false;
   using BaseRule::BaseRule;
+  // Base is dependent on `Nullable`; re-export the protected members we
+  // touch in this header.
+  using BaseRule::_wrapper;
 
-  template <NonNullableExpression Element, typename... Options>
+  template <Expression Element, typename... Options>
     requires(sizeof...(Options) > 0)
   constexpr DataTypeRule(std::string_view name, Element &&element,
                          Options &&...options)

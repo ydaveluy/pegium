@@ -8,14 +8,19 @@
 
 namespace pegium::parser {
 
-template <typename GrammarRule>
+template <typename GrammarRule, bool Nullable = false>
   requires std::derived_from<GrammarRule, grammar::AbstractRule>
 struct AbstractRule : GrammarRule {
-  static constexpr bool nullable = false;
+  static constexpr bool nullable = Nullable;
 
-  template <NonNullableExpression Element>
+  template <Expression Element>
   AbstractRule(std::string_view name, Element &&element)
       : _name(name) {
+    static_assert(
+        std::remove_cvref_t<Element>::nullable == Nullable,
+        "Rule body's nullability must match the rule's declared kind. "
+        "Use NullableRule<T> for a nullable body, Rule<T> for a "
+        "non-nullable body.");
     _wrapper.set(std::forward<Element>(element));
   }
 
@@ -26,8 +31,11 @@ struct AbstractRule : GrammarRule {
 
   ~AbstractRule() override = default;
 
-  template <NonNullableExpression Element>
+  template <Expression Element>
   AbstractRule &operator=(Element &&element) {
+    static_assert(
+        std::remove_cvref_t<Element>::nullable == Nullable,
+        "Rule body's nullability must match the rule's declared kind.");
     _wrapper.set(std::forward<Element>(element));
     return *this;
   }
