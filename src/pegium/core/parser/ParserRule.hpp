@@ -36,7 +36,8 @@ struct ParserRule final : AbstractRule<grammar::ParserRule, Nullable>,
   using BaseRule::_wrapper;
 
   template <Expression Element, typename... Options>
-    requires(sizeof...(Options) > 0)
+    requires(sizeof...(Options) > 0) &&
+            (std::remove_cvref_t<Element>::nullable == Nullable)
   constexpr ParserRule(std::string_view name, Element &&element,
                        Options &&...options)
       : BaseRule(name, std::forward<Element>(element)) {
