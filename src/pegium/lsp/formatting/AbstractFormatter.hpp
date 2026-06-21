@@ -326,8 +326,8 @@ public:
     if (_node == nullptr || !_node->hasCstNode()) {
       return FormattingRegion({}, _collector);
     }
-    const auto nodes = findHiddenNodes(ruleName);
-    if (index < nodes.size()) {
+    if (const auto nodes = findHiddenNodes(ruleName);
+        index < nodes.size()) {
       return FormattingRegion({nodes[index]}, _collector);
     }
     return FormattingRegion({}, _collector);

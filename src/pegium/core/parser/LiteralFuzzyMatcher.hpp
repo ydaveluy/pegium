@@ -3,6 +3,7 @@
 /// Fuzzy literal matching utilities used during recovery.
 
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -76,7 +77,7 @@ public:
   /// the generation-counter trick below, scaling to 4096 carries no
   /// per-Entry zero-init cost.
   static constexpr std::size_t kSlotCount = 4096;
-  static_assert((kSlotCount & (kSlotCount - 1)) == 0,
+  static_assert(std::has_single_bit(kSlotCount),
                 "kSlotCount must be a power of two for masked indexing.");
 
   LiteralFuzzyCandidatesCache();

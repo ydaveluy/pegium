@@ -97,8 +97,8 @@ ensure_document_loaded(pegium::SharedServices &sharedServices,
   auto created =
       sharedServices.workspace.documents->getOrCreateDocument(uri, cancelToken);
   workspace::BuildOptions options;
-  const auto &languageId = created->textDocument().languageId();
-  if (!languageId.empty()) {
+  if (const auto &languageId = created->textDocument().languageId();
+      !languageId.empty()) {
     if (const auto validation =
             sharedServices.workspace.configurationProvider->getConfiguration(
                 languageId, "validation");

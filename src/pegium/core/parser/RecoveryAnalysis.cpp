@@ -304,8 +304,8 @@ classify_leading_visible_entry(const grammar::AbstractElement &element,
       if (child == nullptr) {
         continue;
       }
-      const auto childKind = classify_leading_visible_entry(*child, childDepth);
-      if (childKind != LeadingVisibleEntryKind::None) {
+      if (const auto childKind = classify_leading_visible_entry(*child, childDepth);
+          childKind != LeadingVisibleEntryKind::None) {
         return childKind;
       }
       if (!child->isNullable()) {

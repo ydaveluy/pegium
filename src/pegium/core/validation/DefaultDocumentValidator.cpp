@@ -620,7 +620,7 @@ void DefaultDocumentValidator::processLinkingErrors(
     }
 
     TextOffset begin = 0;
-    TextOffset end = static_cast<TextOffset>(refText.size());
+    auto end = static_cast<TextOffset>(refText.size());
     if (const auto refNode = reference.getRefNode(); refNode.valid()) {
       begin = refNode.getBegin();
       end = refNode.getEnd();

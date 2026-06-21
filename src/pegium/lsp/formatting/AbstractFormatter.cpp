@@ -324,8 +324,8 @@ find_fitting_move(const ::lsp::Range &range, const FormattingAction &formatting)
                                             TextOffset begin, TextOffset end,
                                             std::int32_t spaces,
                                             const FormattingActionOptions &options) {
-  auto range = to_lsp_range(document, begin, end);
-  if (range.start.line == range.end.line) {
+  if (auto range = to_lsp_range(document, begin, end);
+      range.start.line == range.end.line) {
     const auto existingSpaces =
         static_cast<std::int32_t>(range.end.character) -
         static_cast<std::int32_t>(range.start.character);
@@ -615,9 +615,9 @@ void collect_cst_edits(
         requestedRange, edits);
   }
 
-  const auto appendIt =
-      formattings.find(FormattingKey{node.id(), FormattingMode::Append});
-  if (appendIt != formattings.end()) {
+  if (const auto appendIt =
+          formattings.find(FormattingKey{node.id(), FormattingMode::Append});
+      appendIt != formattings.end()) {
     if (const auto next = find_next_leaf(node); next.has_value()) {
       append_filtered_edits(context.document,
                             create_text_edits(node, *next, appendIt->second, context),

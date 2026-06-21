@@ -89,7 +89,7 @@ TextDocument::TextDocument(TextDocument &&other) noexcept
       _version(other._version), _snapshot(std::move(other._snapshot)),
       _impl(std::move(other._impl)) {}
 
-TextDocument &TextDocument::operator=(TextDocument &&other) {
+TextDocument &TextDocument::operator=(TextDocument &&other) noexcept {
   if (this == &other) {
     return *this;
   }

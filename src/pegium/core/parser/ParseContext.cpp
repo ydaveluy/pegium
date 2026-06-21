@@ -34,8 +34,8 @@ void RecoveryContext::refreshRecoveryPhaseSlow() noexcept {
     if (windowReplay.activeEditWindowCompleted) {
       return;
     }
-    const auto recoveryBeginOffset = pendingRecoveryWindowBeginOffset();
-    if (hasPendingCommittedRecoveryEdits() ||
+    if (const auto recoveryBeginOffset = pendingRecoveryWindowBeginOffset();
+        hasPendingCommittedRecoveryEdits() ||
         cursorOffset() < recoveryBeginOffset) {
       return;
     }
@@ -145,8 +145,8 @@ bool RecoveryContext::deleteOneCodepoint() noexcept {
     return false;
   }
   auto *mergedDeleteEdit = pendingHiddenTriviaDeleteEdit();
-  const auto *window = currentEditWindow();
-  if (!canDelete() ||
+  if (const auto *window = currentEditWindow();
+      !canDelete() ||
       destructiveEditOutsideActiveWindow(
           window, recoveryState.editBudget.consecutiveDeletes == 0u) ||
       !canAffordEdit(ParseDiagnosticKind::Deleted)) {
@@ -213,8 +213,8 @@ bool RecoveryContext::extendLastDeleteThroughHiddenTrivia() noexcept {
     return false;
   }
   clearPendingDeleteHiddenTriviaBridge();
-  auto &lastEdit = recoveryEdits.back();
-  if (lastEdit.kind != ParseDiagnosticKind::Deleted ||
+  if (auto &lastEdit = recoveryEdits.back();
+      lastEdit.kind != ParseDiagnosticKind::Deleted ||
       lastEdit.endOffset != cursorOffset()) {
     return false;
   }

@@ -119,8 +119,8 @@ template <std::size_t I = 0, typename OrderedChoiceExpr, typename Visitor>
                     std::remove_cvref_t<decltype(orderedChoice.choices)>>) {
     return false;
   } else {
-    const auto &choice = std::get<I>(orderedChoice.choices);
-    if (std::addressof(choice) == selectedGrammarElement) {
+    if (const auto &choice = std::get<I>(orderedChoice.choices);
+        std::addressof(choice) == selectedGrammarElement) {
       visitor(extract_raw_value(choice, selectedNode, context));
       return true;
     }

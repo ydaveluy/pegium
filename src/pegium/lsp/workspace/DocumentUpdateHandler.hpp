@@ -28,7 +28,7 @@ public:
   /// anything the handler's async work captures (such as the LSP message
   /// handler the diagnostics listeners publish into). Idempotent; the default
   /// implementation does nothing.
-  virtual void quiesce() {}
+  virtual void quiesce() { /* default: no async work to drain */ }
 
   /// Returns whether the handler expects `didSave` notifications.
   [[nodiscard]] virtual bool supportsDidSaveDocument() const noexcept {

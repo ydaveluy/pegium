@@ -235,7 +235,9 @@ struct InitAccess {
 
   template <typename Expr>
     requires(!HasInitImpl<Expr>)
-  static void init(const Expr &, AstReflectionInitContext &) {}
+  static void init(const Expr &, AstReflectionInitContext &) {
+    /* no init step: this expression type has no init_impl */
+  }
 };
 
 } // namespace detail

@@ -741,8 +741,8 @@ private:
         // context with both flags pinned to false.
         auto editGuard = ctx.withEditPermissions(false, false);
         (void)editGuard;
-        const bool matched = parser::attempt_parse_editable(ctx, op);
-        if (matched) {
+        if (const bool matched = parser::attempt_parse_editable(ctx, op);
+            matched) {
           nextMinPrecedence =
               detail::infix_next_min_precedence<decltype(op)>(precedence);
           return true;
@@ -1064,13 +1064,18 @@ private:
                                  std::int32_t minPrecedence) {
         detail::ScopedBoolOverride skipPolicy{ctx.skipAfterDelete, false};
         bool stopTail = false;
-        const bool recovered =
-            has_operator_fast_probe(model, ctx, minPrecedence) &&
-            scan_stray_operator_run(
-                model, ctx, minPrecedence, [&](const char *matchedCursor) {
-                  stopTail =
-                      ctx.skip_without_builder(matchedCursor) > matchedCursor;
-                });
+        bool recovered = false;
+        // Short-circuit is load-bearing: the side-effectful stray-operator scan
+        // must run only when the cheap fast probe succeeds. Expressed as an
+        // explicit `if` (rather than `probe && scan(...)`) so the side effect is
+        // not buried in the right-hand operand of `&&`.
+        if (has_operator_fast_probe(model, ctx, minPrecedence)) {
+          recovered = scan_stray_operator_run(
+              model, ctx, minPrecedence, [&](const char *matchedCursor) {
+                stopTail =
+                    ctx.skip_without_builder(matchedCursor) > matchedCursor;
+              });
+        }
         return {.matched = recovered, .stopTail = recovered && stopTail};
       }
 
@@ -1212,11 +1217,11 @@ private:
               return ctx.cursor() != ctx.end &&
                      !parser::attempt_fast_probe(ctx, model->primary);
             },
-            [&](const char *, std::uint32_t deletedCount) -> const char * {
+            [&](const char *, std::uint32_t deletedCount) {
               ctx.skip();
               return deletedCount == deleteCount ? ctx.cursor() : nullptr;
             },
-            [](const char *) {},
+            [](const char *) { /* no per-step progress action */ },
             {.maxDeletes = deleteCount, .allowOverflow = false});
       }
 

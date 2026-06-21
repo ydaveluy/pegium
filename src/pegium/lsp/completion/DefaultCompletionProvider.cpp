@@ -164,7 +164,7 @@ DefaultCompletionProvider::getCompletion(
                               replaceEndOffset, token.text, prefix, node,
                               reference, feature};
     completionFor(context, [&accept, &context](CompletionValue value) {
-      accept(context, std::move(value));
+      accept(context, value);
     });
     if (!continueCompletion(context)) {
       break;
@@ -184,7 +184,7 @@ DefaultCompletionProvider::getCompletion(
                               token.text,        prefix,     node,
                               reference,         referenceFeature};
     completionFor(context, [&accept, &context](CompletionValue value) {
-      accept(context, std::move(value));
+      accept(context, value);
     });
   }
 
@@ -197,7 +197,7 @@ DefaultCompletionProvider::getCompletion(
                                 {},          {},     node,   reference,
                                 feature};
       completionFor(context, [&accept, &context](CompletionValue value) {
-        accept(context, std::move(value));
+        accept(context, value);
       });
       if (!continueCompletion(context)) {
         break;

@@ -71,7 +71,7 @@ private:
           _description = resolved.description;
           publishState(ReferenceState::Resolved);
         },
-        [] {});
+        [] { /* unresolved: nothing to publish */ });
   }
 
   mutable const T *_target = nullptr;

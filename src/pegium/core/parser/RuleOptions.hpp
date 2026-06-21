@@ -34,7 +34,7 @@ template <typename T> struct ConversionResult {
   template <typename... Args>
   constexpr explicit ConversionResult(std::in_place_t, Args &&...args) noexcept(
       std::is_nothrow_constructible_v<T, Args &&...>)
-      : _value(std::in_place, std::forward<Args>(args)...), _error{} {}
+      : _value(std::in_place, std::forward<Args>(args)...) {}
 
   constexpr explicit ConversionResult(ConversionErrorTag,
                                       std::string_view error) noexcept

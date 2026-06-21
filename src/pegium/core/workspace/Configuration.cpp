@@ -80,7 +80,9 @@ StaticConfigurationProvider::StaticConfigurationProvider(
     const WorkspaceConfiguration &configuration)
     : _configuration{configuration} {}
 
-void StaticConfigurationProvider::initialize(const InitializeParams &) {}
+void StaticConfigurationProvider::initialize(const InitializeParams &) {
+  /* static configuration: nothing to initialize */
+}
 
 std::future<void>
 StaticConfigurationProvider::initialized(const InitializedParams &) {
@@ -93,7 +95,9 @@ StaticConfigurationProvider::initialized(const InitializedParams &) {
 bool StaticConfigurationProvider::isReady() const noexcept { return _ready; }
 
 void StaticConfigurationProvider::updateConfiguration(
-    const ConfigurationChangeParams &) {}
+    const ConfigurationChangeParams &) {
+  /* static configuration is immutable: ignore updates */
+}
 
 std::optional<pegium::JsonValue>
 StaticConfigurationProvider::getConfiguration(std::string_view,

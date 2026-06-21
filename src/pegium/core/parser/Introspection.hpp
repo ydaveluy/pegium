@@ -39,8 +39,8 @@ struct MemberNameExtractor {
 
   static consteval std::string_view value() noexcept {
     std::string_view func_name = function_name<MemberPointer>();
-    const auto marker_pos = func_name.rfind(REF_STRUCT::end_marker);
-    if (marker_pos != std::string_view::npos) {
+    if (const auto marker_pos = func_name.rfind(REF_STRUCT::end_marker);
+        marker_pos != std::string_view::npos) {
       func_name = func_name.substr(0, marker_pos);
     }
 
@@ -62,13 +62,13 @@ template <auto MemberPointer>
 inline constexpr std::string_view member_name_v = member_name<MemberPointer>();
 
 constexpr std::string_view simplifyTypeName(std::string_view typeName) noexcept {
-  constexpr std::string_view classPrefix = "class ";
-  if (typeName.rfind(classPrefix, 0) == 0) {
+  if (constexpr std::string_view classPrefix = "class ";
+      typeName.rfind(classPrefix, 0) == 0) {
     typeName.remove_prefix(classPrefix.size());
   }
 
-  constexpr std::string_view structPrefix = "struct ";
-  if (typeName.rfind(structPrefix, 0) == 0) {
+  if (constexpr std::string_view structPrefix = "struct ";
+      typeName.rfind(structPrefix, 0) == 0) {
     typeName.remove_prefix(structPrefix.size());
   }
 

@@ -189,8 +189,7 @@ static_assert(kFirstEditPenaltyStep ==
 /// (uint32) product cannot overflow for any realistic budget.
 [[nodiscard]] constexpr std::uint32_t
 faithfulness(const RecoveryKey &key) noexcept {
-  return key.editCost +
-         static_cast<std::uint32_t>(kFirstEditPenaltyStep) * key.editCount;
+  return key.editCost + kFirstEditPenaltyStep * key.editCount;
 }
 
 /// `firstEditOffset` penalised by edit cost: the score that axis 3

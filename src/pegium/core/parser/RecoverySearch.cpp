@@ -100,14 +100,19 @@ void trace_recovery_attempt(const RecoveryAttempt &attempt,
 // behind the macro avoids building JsonValue payloads (and pulling
 // `RecoveryDebug.cpp`'s formatter into the hot path) when tracing is off,
 // which is the case for release and the standard test build.
-inline void trace_recovery_json(const char *, const pegium::JsonValue &) noexcept {}
-inline void trace_strict_summary(const StrictParseSummary &) noexcept {}
-inline void trace_failure_snapshot(const FailureSnapshot &) noexcept {}
+inline void trace_recovery_json(const char *,
+                                const pegium::JsonValue &) noexcept { /* tracing disabled */
+}
+inline void trace_strict_summary(const StrictParseSummary &) noexcept { /* tracing disabled */
+}
+inline void trace_failure_snapshot(const FailureSnapshot &) noexcept { /* tracing disabled */
+}
 inline void trace_recovery_window(std::uint32_t, std::uint32_t,
                                   const RecoveryWindow &,
-                                  std::size_t) noexcept {}
+                                  std::size_t) noexcept { /* tracing disabled */ }
 inline void trace_recovery_attempt(const RecoveryAttempt &,
-                                   const RecoveryAttemptSpec &) noexcept {}
+                                   const RecoveryAttemptSpec &) noexcept { /* tracing disabled */
+}
 #endif
 
 struct RecoveryWindowPrefixContract {
@@ -476,7 +481,7 @@ matches_out_of_window_fuzzy_fold_signature(
   // Returns true when it replaced the primary (for a per-probe "win" counter).
   const auto runProbeAndKeepIfBetter =
       [&](const ParseOptions &probeOptions,
-          const RecoveryAttemptSpec &probeSpec) -> bool {
+          const RecoveryAttemptSpec &probeSpec) {
     PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
     auto attempt = execute_recovery_parse(entryRule, skipper, probeOptions, text,
                                           probeSpec, cancelToken, cachePool);

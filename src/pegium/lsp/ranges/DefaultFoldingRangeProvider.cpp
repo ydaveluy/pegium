@@ -53,9 +53,9 @@ DefaultFoldingRangeProvider::getFoldingRanges(
 
     auto endLine = end.line;
     auto endCharacter = end.character;
-    const char lastCharacter =
-        range.end > 0 && range.end <= text.size() ? text[range.end - 1] : '\0';
-    if (!includeLastFoldingLine(range.kind, lastCharacter)) {
+    if (const char lastCharacter =
+            range.end > 0 && range.end <= text.size() ? text[range.end - 1] : '\0';
+        !includeLastFoldingLine(range.kind, lastCharacter)) {
       // Keep the closing line visible by ending the range at the end of the
       // previous line.
       const auto lineStart = textDocument.offsetAt(

@@ -83,7 +83,9 @@ DefaultCodeActionProvider::getCodeActions(
 
 void DefaultCodeActionProvider::appendCodeActions(
     const workspace::Document &, const ::lsp::CodeActionParams &,
-    CodeActionResult &, const utils::CancellationToken &) const {}
+    CodeActionResult &, const utils::CancellationToken &) const {
+  /* default: contributes no extra code actions */
+}
 
 std::optional<std::vector<DefaultCodeActionProvider::DefaultCodeActionEdit>>
 DefaultCodeActionProvider::extractDefaultCodeActions(

@@ -16,6 +16,7 @@
 /// of sync with the policy it memoizes.
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <memory>
 
@@ -132,7 +133,7 @@ public:
   // allocated so that RecoveryContext instances stay small on the recursion
   // stack.
   static constexpr std::size_t kCapacity = 8192;
-  static_assert((kCapacity & (kCapacity - 1)) == 0,
+  static_assert(std::has_single_bit(kCapacity),
                 "ChoiceRecoverCache capacity must be a power of two.");
 
   ChoiceRecoverCache();
