@@ -34,10 +34,6 @@ std::string AbstractReference::getErrorMessage() const {
     message += " named '" + _refText + "'.";
     return message;
   }
-  case ErrorIncompatibleType:
-    return "Incompatible reference target type: resolved node cannot be cast "
-           "to the expected reference type for '" +
-           _refText + "'.";
   case ErrorCycle: {
     std::string feature(getFeature());
     if (feature.empty()) {

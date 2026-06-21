@@ -1,4 +1,4 @@
-#include <pegium/core/syntax-tree/DefaultAstReflection.hpp>
+#include <pegium/core/syntax-tree/AstReflection.hpp>
 
 #include <typeindex>
 #include <vector>
@@ -20,46 +20,14 @@ namespace {
   return std::type_index(typeid(AstNode));
 }
 
-[[nodiscard]] const TypeIndexSet &empty_type_set() noexcept {
-  static const TypeIndexSet empty;
-  return empty;
-}
-
 } // namespace
 
-const TypeIndexSet &DefaultAstReflection::getAllTypes() const {
-  return _types;
+bool AstReflection::isInstance(const AstNode &node,
+                               std::type_index type) const noexcept {
+  return isSubtype(std::type_index(typeid(node)), type);
 }
 
-bool DefaultAstReflection::isInstance(const AstNode &node,
-                                      std::type_index type) const {
-  const auto actualType = std::type_index(typeid(node));
-  return isSubtype(actualType, type);
-}
-
-bool DefaultAstReflection::isSubtype(std::type_index subtype,
-                                     std::type_index supertype) const {
-  // `type_index::operator==` falls back to `strcmp` on libstdc++; comparing
-  // the `name()` pointers is correct within a single DSO and one instruction.
-  if (utils::FastTypeIndexEqual{}(subtype, supertype)) {
-    return true;
-  }
-  if (const auto it = _supertypesByType.find(subtype);
-      it != _supertypesByType.end()) {
-    return it->second.contains(supertype);
-  }
-  return false;
-}
-
-const TypeIndexSet &
-DefaultAstReflection::getAllSubTypes(std::type_index type) const {
-  if (type == invalid_type() || !_types.contains(type)) {
-    return empty_type_set();
-  }
-  return _subtypesByType.at(type);
-}
-
-void DefaultAstReflection::registerType(std::type_index type) {
+void AstReflection::registerType(std::type_index type) {
   if (type == invalid_type()) {
     return;
   }
@@ -70,8 +38,8 @@ void DefaultAstReflection::registerType(std::type_index type) {
   registerSubtype(type, ast_node_type());
 }
 
-void DefaultAstReflection::registerSubtype(std::type_index subtype,
-                                           std::type_index supertype) {
+void AstReflection::registerSubtype(std::type_index subtype,
+                                    std::type_index supertype) {
   if (subtype == invalid_type() || supertype == invalid_type() ||
       subtype == supertype) {
     registerTypeInternal(subtype);
@@ -104,7 +72,7 @@ void DefaultAstReflection::registerSubtype(std::type_index subtype,
   }
 }
 
-void DefaultAstReflection::registerTypeInternal(std::type_index type) {
+void AstReflection::registerTypeInternal(std::type_index type) {
   if (!is_valid_type(type)) {
     return;
   }

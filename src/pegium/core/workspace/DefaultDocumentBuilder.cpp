@@ -86,7 +86,8 @@ DefaultDocumentBuilder::updateBuildOptions() const noexcept {
 
 void DefaultDocumentBuilder::build(
     std::span<const std::shared_ptr<Document>> documents,
-    const BuildOptions &options, utils::CancellationToken cancelToken) const {
+    const BuildOptions &options, utils::CancellationToken cancelToken,
+    const std::function<void()> &downgradeLock) const {
   auto &documentStore = *shared.workspace.documents;
   for (const auto &document : documents) {
     const auto documentId = ensure_document_id(documentStore, *document);
@@ -132,13 +133,14 @@ void DefaultDocumentBuilder::build(
   }
 
   emitUpdate(changedDocumentIds, {});
-  buildDocuments(documents, options, cancelToken);
+  buildDocuments(documents, options, cancelToken, downgradeLock);
 }
 
 void DefaultDocumentBuilder::update(
     std::span<const DocumentId> changedDocumentIds,
     std::span<const DocumentId> deletedDocumentIds,
-    utils::CancellationToken cancelToken) const {
+    utils::CancellationToken cancelToken,
+    const std::function<void()> &downgradeLock) const {
   auto &documentStore = *shared.workspace.documents;
   utils::throw_if_cancelled(cancelToken);
   {
@@ -185,7 +187,16 @@ void DefaultDocumentBuilder::update(
       if (uri.empty()) {
         continue;
       }
-      changedDocument = documentStore.getOrCreateDocument(uri, cancelToken);
+      try {
+        changedDocument = documentStore.getOrCreateDocument(uri, cancelToken);
+      } catch (const utils::OperationCancelled &) {
+        throw;
+      } catch (...) {
+        // A changed document that cannot be materialized (e.g. unreadable on a
+        // file-watch change) must not abort the rebuild of every other edited
+        // document; skip it — a later change event will retry.
+        continue;
+      }
     }
     resetToState(*changedDocument, DocumentState::Changed);
   }
@@ -228,7 +239,8 @@ void DefaultDocumentBuilder::update(
   }
   documentsToBuild = sortDocuments(std::move(documentsToBuild));
 
-  buildDocuments(documentsToBuild, _updateBuildOptions, cancelToken);
+  buildDocuments(documentsToBuild, _updateBuildOptions, cancelToken,
+                 downgradeLock);
 }
 
 BuildOptions
@@ -330,7 +342,7 @@ bool DefaultDocumentBuilder::hasTextDocument(
   assert(document != nullptr);
   assert(!document->uri.empty());
   return textDocumentProvider != nullptr &&
-         textDocumentProvider->get(document->uri) != nullptr;
+         textDocumentProvider->getNormalized(document->uri) != nullptr;
 }
 
 void DefaultDocumentBuilder::emitUpdate(
@@ -338,27 +350,26 @@ void DefaultDocumentBuilder::emitUpdate(
     std::span<const DocumentId> deletedDocumentIds) const {
   const auto listeners = snapshotListeners(_updateListeners);
   for (const auto &entry : listeners) {
-    entry.listener(changedDocumentIds, deletedDocumentIds);
+    try {
+      entry.listener(changedDocumentIds, deletedDocumentIds);
+    } catch (const utils::OperationCancelled &) {
+      throw;
+    } catch (...) {
+      // An update listener (e.g. a cache invalidation) must not abort the
+      // update or escape into the caller; isolate its failure.
+    }
   }
 }
 
 std::vector<std::shared_ptr<Document>> DefaultDocumentBuilder::sortDocuments(
     std::vector<std::shared_ptr<Document>> documents) const {
-  std::size_t left = 0;
-  std::size_t right = documents.empty() ? 0 : documents.size() - 1;
-
-  while (left < right) {
-    while (left < documents.size() && hasTextDocument(documents[left])) {
-      ++left;
-    }
-    while (right > 0 && !hasTextDocument(documents[right])) {
-      --right;
-    }
-    if (left < right) {
-      std::swap(documents[left], documents[right]);
-    }
-  }
-
+  // Move documents that have an open text document to the front. Unstable —
+  // the relative order within each group is not preserved, exactly as the
+  // previous hand-rolled two-pointer partition did.
+  std::partition(documents.begin(), documents.end(),
+                 [this](const std::shared_ptr<Document> &document) {
+                   return hasTextDocument(document);
+                 });
   return documents;
 }
 
@@ -394,7 +405,14 @@ void DefaultDocumentBuilder::notifyBuildPhase(
       snapshotListeners(_buildPhaseListeners[listener_index(targetState)]);
   for (const auto &entry : listeners) {
     utils::throw_if_cancelled(cancelToken);
-    entry.listener(documents, cancelToken);
+    try {
+      entry.listener(documents, cancelToken);
+    } catch (const utils::OperationCancelled &) {
+      throw;
+    } catch (...) {
+      // A build-phase listener (e.g. a cache invalidation) must not abort the
+      // build or escape into build()/update(); isolate its failure.
+    }
   }
 }
 
@@ -438,62 +456,73 @@ void DefaultDocumentBuilder::publishWorkspaceState(
   _stateCv.notify_all();
 }
 
+void DefaultDocumentBuilder::advance(const std::shared_ptr<Document> &document,
+                                     DocumentState targetState,
+                                     utils::CancellationToken /*cancelToken*/) const {
+  // Only records the document's state; phase listeners are notified separately,
+  // serially and in document order, once the phase has drained (runMergedPhase).
+  document->state = targetState;
+}
+
 void DefaultDocumentBuilder::buildDocuments(
     std::span<const std::shared_ptr<Document>> documents,
-    const BuildOptions &options, utils::CancellationToken cancelToken) const {
+    const BuildOptions &options, utils::CancellationToken cancelToken,
+    const std::function<void()> &downgradeLock) const {
   prepareBuild(documents, options);
 
   std::vector<std::shared_ptr<Document>> documentsToBuild(documents.begin(),
                                                           documents.end());
 
-  runCancelable(
-      documentsToBuild, DocumentState::Parsed, cancelToken,
-      [this](Document &document, const utils::CancellationToken &phaseToken) {
-        shared.workspace.documentFactory->update(document,
-                                                             phaseToken);
+  // Phase A: parse + index this document's exported content. Both are
+  // per-document local; each document advances through Parsed then
+  // IndexedContent on the same worker, notifying its phase listeners inline.
+  runMergedPhase(
+      documentsToBuild, DocumentState::IndexedContent,
+      {DocumentState::Parsed, DocumentState::IndexedContent}, cancelToken,
+      [this](const std::shared_ptr<Document> &document, DocumentState entry,
+             const utils::CancellationToken &phaseToken) {
+        if (entry < DocumentState::Parsed) {
+          shared.workspace.documentFactory->update(*document, phaseToken);
+          advance(document, DocumentState::Parsed, phaseToken);
+        }
+        if (entry < DocumentState::IndexedContent) {
+          shared.workspace.indexManager->updateContent(*document, phaseToken);
+          advance(document, DocumentState::IndexedContent, phaseToken);
+        }
       });
 
-  runCancelable(
-      documentsToBuild, DocumentState::IndexedContent, cancelToken,
-      [this](Document &document, const utils::CancellationToken &phaseToken) {
-        shared.workspace.indexManager->updateContent(document,
-                                                                 phaseToken);
-      });
+  // Barrier between Phase A and Phase B is mandatory: linking resolves
+  // cross-document references against the global content index, which is only
+  // complete once every document has finished Phase A.
 
-  runCancelable(
-      documentsToBuild, DocumentState::ComputedScopes, cancelToken,
-      [this](Document &document, const utils::CancellationToken &phaseToken) {
-        const auto scopeComputation =
-            shared.serviceRegistry
-                ->getServices(document.uri)
-                .references.scopeComputation.get();
-        document.localSymbols =
-            scopeComputation->collectLocalSymbols(document, phaseToken);
-      });
-
-  std::vector<std::shared_ptr<Document>> toBeLinked;
-  toBeLinked.reserve(documentsToBuild.size());
-  for (const auto &document : documentsToBuild) {
-    if (shouldLink(*document)) {
-      toBeLinked.push_back(document);
-    }
-  }
-
-  runCancelable(
-      toBeLinked, DocumentState::Linked, cancelToken,
-      [this](Document &document, const utils::CancellationToken &phaseToken) {
-        const auto linker =
-            shared.serviceRegistry
-                ->getServices(document.uri)
-                .references.linker.get();
-        linker->link(document, phaseToken);
-      });
-
-  runCancelable(
-      toBeLinked, DocumentState::IndexedReferences, cancelToken,
-      [this](Document &document, const utils::CancellationToken &phaseToken) {
-        shared.workspace.indexManager->updateReferences(
-            document, phaseToken);
+  // Phase B: compute local scopes for every document, then link and index this
+  // document's references — but only for documents that should be linked.
+  // Local-scope computation runs for all documents regardless of eager linking.
+  runMergedPhase(
+      documentsToBuild, DocumentState::IndexedReferences,
+      {DocumentState::ComputedScopes, DocumentState::Linked,
+       DocumentState::IndexedReferences},
+      cancelToken,
+      [this](const std::shared_ptr<Document> &document, DocumentState entry,
+             const utils::CancellationToken &phaseToken) {
+        const auto &services = shared.serviceRegistry->getServices(document->uri);
+        if (entry < DocumentState::ComputedScopes) {
+          document->localSymbols =
+              services.references.scopeComputation->collectLocalSymbols(
+                  *document, phaseToken);
+          advance(document, DocumentState::ComputedScopes, phaseToken);
+        }
+        if (shouldLink(*document)) {
+          if (entry < DocumentState::Linked) {
+            services.references.linker->link(*document, phaseToken);
+            advance(document, DocumentState::Linked, phaseToken);
+          }
+          if (entry < DocumentState::IndexedReferences) {
+            shared.workspace.indexManager->updateReferences(*document,
+                                                            phaseToken);
+            advance(document, DocumentState::IndexedReferences, phaseToken);
+          }
+        }
       });
 
   std::vector<std::shared_ptr<Document>> toBeValidated;
@@ -506,11 +535,24 @@ void DefaultDocumentBuilder::buildDocuments(
     }
   }
 
-  runCancelable(
-      toBeValidated, DocumentState::Validated, cancelToken,
-      [this](Document &document, const utils::CancellationToken &phaseToken) {
-        validate(document, phaseToken);
-        markAsCompleted(document);
+  // The document model is now fully linked. Release the exclusive lock (if the
+  // caller supplied a downgrade) so reads can proceed while validation runs —
+  // validation only reads the linked model and writes diagnostics.
+  if (downgradeLock) {
+    downgradeLock();
+  }
+
+  // Phase C: validate. Reads the linked model and writes only diagnostics.
+  runMergedPhase(
+      toBeValidated, DocumentState::Validated, {DocumentState::Validated},
+      cancelToken,
+      [this](const std::shared_ptr<Document> &document, DocumentState entry,
+             const utils::CancellationToken &phaseToken) {
+        if (entry < DocumentState::Validated) {
+          validate(*document, phaseToken);
+          markAsCompleted(*document);
+          advance(document, DocumentState::Validated, phaseToken);
+        }
       });
 }
 
@@ -550,7 +592,13 @@ void DefaultDocumentBuilder::validate(
 
   std::scoped_lock lock(_stateMutex);
   auto &state = _buildStateByDocumentId[document.id];
-  state.result.emplace();
+  // Keep the cumulative validation-check history across incremental builds:
+  // findMissingValidationCategories relies on it to avoid re-running (and
+  // re-appending diagnostics for) categories already validated. Resetting it
+  // here would make a later build re-validate earlier categories.
+  if (!state.result.has_value()) {
+    state.result.emplace();
+  }
   auto &validationChecks = state.result->validationChecks;
   for (const auto &category : validationOptions.categories) {
     if (std::ranges::find(validationChecks, category) ==
@@ -637,33 +685,43 @@ DocumentId DefaultDocumentBuilder::awaitDocumentState(
   }
   utils::throw_if_cancelled(cancelToken);
 
-  std::mutex waitMutex;
-  std::condition_variable waitCv;
-  bool completed = false;
-  std::exception_ptr waitError;
+  // The wait state is shared with the onDocumentPhase listener registered below.
+  // That listener can be invoked by a build thread off a *snapshot copy* of the
+  // listener list taken before this function returns: notifyDocumentPhase
+  // snapshots the listeners under the lock, then invokes them outside it, so
+  // unregistering the listener (when `listener` is destroyed on return) does not
+  // synchronize with an invocation already in flight. Hold the wait state on the
+  // heap and capture it by value into every continuation, so a late listener
+  // invocation operates on still-alive state instead of a destroyed stack frame.
+  struct WaitState {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool completed = false;
+    std::exception_ptr error;
+  };
+  const auto waitState = std::make_shared<WaitState>();
 
-  const auto finish = [&](std::exception_ptr error = nullptr) {
-    std::scoped_lock lock(waitMutex);
-    if (completed) {
+  const auto finish = [waitState](std::exception_ptr error = nullptr) {
+    std::scoped_lock lock(waitState->mutex);
+    if (waitState->completed) {
       return;
     }
-    completed = true;
-    waitError = std::move(error);
-    waitCv.notify_all();
+    waitState->completed = true;
+    waitState->error = std::move(error);
+    waitState->cv.notify_all();
   };
 
   auto listener = onDocumentPhase(
-      state, [documentId, &finish](const std::shared_ptr<Document> &document,
-                                   utils::CancellationToken) {
+      state, [documentId, finish](const std::shared_ptr<Document> &document,
+                                  utils::CancellationToken) {
         if (document->id == documentId) {
           finish();
         }
       });
   (void)listener;
-  auto onCancelled = [&finish]() {
+  std::stop_callback cancelCallback(cancelToken, [finish]() {
     finish(std::make_exception_ptr(utils::OperationCancelled()));
-  };
-  std::stop_callback cancelCallback(cancelToken, onCancelled);
+  });
   (void)cancelCallback;
 
   std::exception_ptr recheckError;
@@ -671,10 +729,10 @@ DocumentId DefaultDocumentBuilder::awaitDocumentState(
     finish(recheckError);
   }
 
-  std::unique_lock lock(waitMutex);
-  waitCv.wait(lock, [&completed] { return completed; });
-  if (waitError != nullptr) {
-    std::rethrow_exception(waitError);
+  std::unique_lock lock(waitState->mutex);
+  waitState->cv.wait(lock, [&waitState] { return waitState->completed; });
+  if (waitState->error != nullptr) {
+    std::rethrow_exception(waitState->error);
   }
   return documentId;
 }

@@ -1,8 +1,6 @@
 #include <pegium/core/services/DefaultServiceRegistry.hpp>
 
-#include <algorithm>
 #include <filesystem>
-#include <stdexcept>
 #include <string>
 
 #include <pegium/core/observability/ObservabilitySink.hpp>
@@ -108,33 +106,21 @@ DefaultServiceRegistry::getServices(std::string_view uri) const {
     return *services;
   }
 
+  // findServicesLocked already queried the file-name and extension maps under
+  // the same held lock with identical inputs and missed; only the extension is
+  // still needed to build the error message below.
   const auto path = utils::file_uri_to_path(normalizedUri);
-  if (const auto fileName = path.has_value()
-                                ? std::filesystem::path(*path).filename().string()
-                                : std::filesystem::path(std::string(normalizedUri))
-                                      .filename()
-                                      .string();
-      !fileName.empty()) {
-    if (const auto *services = lookupByFileName(fileName)) {
-      return *services;
-    }
-  }
-
   const auto extension = path.has_value()
                              ? std::filesystem::path(*path).extension().string()
                              : std::filesystem::path(std::string(normalizedUri))
                                    .extension()
                                    .string();
-  if (const auto *services = lookupByExtension(extension)) {
-    return *services;
-  }
-
   throw utils::ServiceRegistryError(
       language_error_message(extension, languageId));
 }
 
 const CoreServices *
-DefaultServiceRegistry::findServices(std::string_view uri) const noexcept {
+DefaultServiceRegistry::findServices(std::string_view uri) const {
   std::scoped_lock lock(_mutex);
   if (_servicesByLanguageId.empty()) {
     return nullptr;
@@ -158,7 +144,7 @@ const CoreServices *DefaultServiceRegistry::findServicesLocked(
     std::string_view normalizedUri, std::string *languageId) const {
   if (const auto provider = shared.workspace.textDocuments;
       provider != nullptr) {
-    if (auto textDocument = provider->get(normalizedUri);
+    if (auto textDocument = provider->getNormalized(normalizedUri);
         textDocument != nullptr && !textDocument->languageId().empty()) {
       if (languageId != nullptr) {
         *languageId = textDocument->languageId();

@@ -5,7 +5,7 @@
 
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/parser/AstReflectionBootstrap.hpp>
-#include <pegium/core/syntax-tree/DefaultAstReflection.hpp>
+#include <pegium/core/syntax-tree/AstReflection.hpp>
 
 namespace pegium {
 namespace {
@@ -61,8 +61,8 @@ protected:
   Rule<BaseType> BaseRule{"Base", MidRule};
 };
 
-TEST(DefaultAstReflectionTest, MatchesExactAndTransitiveSubtypes) {
-  DefaultAstReflection reflection;
+TEST(AstReflectionTest, MatchesExactAndTransitiveSubtypes) {
+  AstReflection reflection;
   TransitiveReflectionParser parser;
   bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
                          reflection);
@@ -77,8 +77,8 @@ TEST(DefaultAstReflectionTest, MatchesExactAndTransitiveSubtypes) {
                                     std::type_index(typeid(LeafType))));
 }
 
-TEST(DefaultAstReflectionTest, RegisteredTypesAreExposedWithoutSubtypes) {
-  DefaultAstReflection reflection;
+TEST(AstReflectionTest, RegisteredTypesAreExposedWithoutSubtypes) {
+  AstReflection reflection;
   KnownTypeReflectionParser parser;
   bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
                          reflection);
@@ -90,8 +90,8 @@ TEST(DefaultAstReflectionTest, RegisteredTypesAreExposedWithoutSubtypes) {
                                     std::type_index(typeid(BaseType))));
 }
 
-TEST(DefaultAstReflectionTest, ReturnsAllSubTypesIncludingExactType) {
-  DefaultAstReflection reflection;
+TEST(AstReflectionTest, ReturnsAllSubTypesIncludingExactType) {
+  AstReflection reflection;
   TransitiveReflectionParser parser;
   bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
                          reflection);
@@ -106,8 +106,8 @@ TEST(DefaultAstReflectionTest, ReturnsAllSubTypesIncludingExactType) {
             subtypes.end());
 }
 
-TEST(DefaultAstReflectionTest, ReturnsStableEmptySetForUnknownSubtypeQuery) {
-  DefaultAstReflection reflection;
+TEST(AstReflectionTest, ReturnsStableEmptySetForUnknownSubtypeQuery) {
+  AstReflection reflection;
 
   const auto &subtypes =
       reflection.getAllSubTypes(std::type_index(typeid(LeafType)));
@@ -117,8 +117,8 @@ TEST(DefaultAstReflectionTest, ReturnsStableEmptySetForUnknownSubtypeQuery) {
             &reflection.getAllSubTypes(std::type_index(typeid(LeafType))));
 }
 
-TEST(DefaultAstReflectionTest, ChecksRuntimeInstancesByReflectedType) {
-  DefaultAstReflection reflection;
+TEST(AstReflectionTest, ChecksRuntimeInstancesByReflectedType) {
+  AstReflection reflection;
   TransitiveReflectionParser parser;
   bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
                          reflection);
@@ -134,8 +134,8 @@ TEST(DefaultAstReflectionTest, ChecksRuntimeInstancesByReflectedType) {
   EXPECT_FALSE(reflection.isInstance(base, std::type_index(typeid(LeafType))));
 }
 
-TEST(DefaultAstReflectionTest, TreatsAstNodeAsImplicitRootSupertype) {
-  DefaultAstReflection reflection;
+TEST(AstReflectionTest, TreatsAstNodeAsImplicitRootSupertype) {
+  AstReflection reflection;
   TransitiveReflectionParser parser;
   bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
                          reflection);
@@ -160,8 +160,8 @@ TEST(DefaultAstReflectionTest, TreatsAstNodeAsImplicitRootSupertype) {
             subtypes.end());
 }
 
-TEST(DefaultAstReflectionTest, PropagatesTransitiveSubtypeOnLaterRegistration) {
-  DefaultAstReflection reflection;
+TEST(AstReflectionTest, PropagatesTransitiveSubtypeOnLaterRegistration) {
+  AstReflection reflection;
   LaterRegistrationLeafParser leafParser;
   LaterRegistrationBaseParser baseParser;
   bootstrapAstReflection(static_cast<const Parser &>(leafParser).getEntryRule(),

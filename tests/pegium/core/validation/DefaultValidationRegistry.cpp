@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -16,7 +17,7 @@
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/Diagnostic.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
-#include <pegium/core/syntax-tree/DefaultAstReflection.hpp>
+#include <pegium/core/syntax-tree/AstReflection.hpp>
 #include <pegium/core/validation/DefaultValidationRegistry.hpp>
 #include <pegium/core/validation/DiagnosticRanges.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
@@ -90,7 +91,7 @@ protected:
 struct RegistryTestServices {
   RegistryTestServices() : core(shared) {
     shared.observabilitySink = observabilitySink;
-    shared.astReflection = std::make_unique<pegium::DefaultAstReflection>();
+    shared.astReflection = std::make_unique<pegium::AstReflection>();
   }
 
   std::shared_ptr<test::RecordingObservabilitySink> observabilitySink =
@@ -106,51 +107,139 @@ void run_checks(const ValidationRegistry &registry, const AstNode &node,
   registry.runChecks(node, acceptor, categories, cancelToken);
 }
 
-TEST(DefaultValidationRegistryTest, FiltersChecksByTypeAndCategory) {
-  RegistryTestServices context;
-  DefaultValidationRegistry registry(context.core);
-  ValidationNodeABootstrapParser parser;
-  bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
-                         *context.shared.astReflection);
+// Folds the run/dispatch family: every test here registers typed
+// registerCheck<T>(counterLambda, category) checks and asserts per-counter call
+// totals after a sequence of runChecks(node, acceptor, categories) calls.
+// Folded originals (one row each):
+//   - FiltersChecksByTypeAndCategory
+//   - LateRegistrationsArePickedUpOnNextRun
+//   - RunChecksKeepsTypeSpecificMatchesAcrossAlternatingNodes
+//   - PreparedChecksWithDifferentCategoriesStayIndependent
+//   - UnknownCategoriesExecuteNothing
+TEST(DefaultValidationRegistryTest, TypeAndCategoryDispatch) {
+  enum class NodeKind { A, B };
 
-  std::size_t nodeAFastCalls = 0;
-  std::size_t nodeBFastCalls = 0;
-  std::size_t astSlowCalls = 0;
+  // A single scenario step: either register a new typed check bound to a named
+  // counter, or run a node under given categories and snapshot expected totals.
+  struct Step {
+    bool isRun = false;
+    // register fields
+    NodeKind regKind = NodeKind::A;
+    bool regAst = false; // register a base-AstNode check instead of NodeKind
+    std::string counter;
+    std::string category;
+    // run fields
+    NodeKind runKind = NodeKind::A;
+    std::vector<std::string> runCategories;
+    std::vector<std::pair<std::string, std::size_t>> expected;
+  };
 
-  registry.registerCheck<ValidationNodeA>(
-      [&nodeAFastCalls](const ValidationNodeA &, const ValidationAcceptor &) {
-        ++nodeAFastCalls;
-      },
-      "fast");
-  registry.registerCheck<ValidationNodeB>(
-      [&nodeBFastCalls](const ValidationNodeB &, const ValidationAcceptor &) {
-        ++nodeBFastCalls;
-      },
-      "fast");
-  registry.registerCheck<pegium::AstNode>(
-      [&astSlowCalls](const pegium::AstNode &, const ValidationAcceptor &) {
-        ++astSlowCalls;
-      },
-      "slow");
+  auto reg = [](NodeKind kind, std::string counter, std::string category) {
+    return Step{.isRun = false,
+                .regKind = kind,
+                .counter = std::move(counter),
+                .category = std::move(category)};
+  };
+  auto regAst = [](std::string counter, std::string category) {
+    return Step{.isRun = false,
+                .regAst = true,
+                .counter = std::move(counter),
+                .category = std::move(category)};
+  };
+  auto run = [](NodeKind kind, std::vector<std::string> categories,
+                std::vector<std::pair<std::string, std::size_t>> expected) {
+    return Step{.isRun = true,
+                .runKind = kind,
+                .runCategories = std::move(categories),
+                .expected = std::move(expected)};
+  };
 
-  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+  struct Scenario {
+    const char *label;
+    bool needsBootstrap;
+    std::vector<Step> steps;
+  };
 
+  const std::vector<Scenario> scenarios{
+      {"FiltersChecksByTypeAndCategory",
+       /*needsBootstrap=*/true,
+       {reg(NodeKind::A, "a", "fast"), reg(NodeKind::B, "b", "fast"),
+        regAst("astSlow", "slow"),
+        run(NodeKind::A, {"fast"},
+            {{"a", 1u}, {"b", 0u}, {"astSlow", 0u}}),
+        run(NodeKind::A, {},
+            {{"a", 2u}, {"b", 0u}, {"astSlow", 1u}})}},
+      {"LateRegistrationsArePickedUpOnNextRun",
+       /*needsBootstrap=*/false,
+       {reg(NodeKind::A, "existing", "fast"),
+        run(NodeKind::A, {}, {{"existing", 1u}, {"late", 0u}}),
+        reg(NodeKind::A, "late", "fast"),
+        run(NodeKind::A, {}, {{"existing", 2u}, {"late", 1u}})}},
+      {"RunChecksKeepsTypeSpecificMatchesAcrossAlternatingNodes",
+       /*needsBootstrap=*/false,
+       {reg(NodeKind::A, "a", "fast"), reg(NodeKind::B, "b", "fast"),
+        run(NodeKind::A, {}, {}), run(NodeKind::B, {}, {}),
+        run(NodeKind::A, {}, {{"a", 2u}, {"b", 1u}})}},
+      {"PreparedChecksWithDifferentCategoriesStayIndependent",
+       /*needsBootstrap=*/false,
+       {reg(NodeKind::A, "fast", "fast"), reg(NodeKind::A, "slow", "slow"),
+        run(NodeKind::A, {"fast"}, {}),
+        run(NodeKind::A, {"slow"}, {{"fast", 1u}, {"slow", 1u}})}},
+      {"UnknownCategoriesExecuteNothing",
+       /*needsBootstrap=*/false,
+       {reg(NodeKind::A, "calls", "fast"),
+        run(NodeKind::A, {"unknown"}, {{"calls", 0u}})}},
+  };
 
-  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
-  ValidationNodeA nodeA;
+  for (const auto &scenario : scenarios) {
+    SCOPED_TRACE(scenario.label);
+    RegistryTestServices context;
+    DefaultValidationRegistry registry(context.core);
+    if (scenario.needsBootstrap) {
+      ValidationNodeABootstrapParser parser;
+      bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
+                             *context.shared.astReflection);
+    }
 
-  const std::vector<std::string> fastCategories{"fast"};
-  registry.runChecks(nodeA, noopAcceptor, fastCategories, {});
+    auto counters = std::make_shared<std::map<std::string, std::size_t>>();
+    auto noopAcceptorCb = [](pegium::Diagnostic) {};
+    const ValidationAcceptor noopAcceptor{
+        ValidationAcceptor::Callback(noopAcceptorCb)};
+    ValidationNodeA nodeA;
+    ValidationNodeB nodeB;
 
-  EXPECT_EQ(nodeAFastCalls, 1u);
-  EXPECT_EQ(nodeBFastCalls, 0u);
-  EXPECT_EQ(astSlowCalls, 0u);
+    for (const auto &step : scenario.steps) {
+      if (!step.isRun) {
+        const std::string name = step.counter;
+        if (step.regAst) {
+          registry.registerCheck<pegium::AstNode>(
+              [counters, name](const pegium::AstNode &,
+                               const ValidationAcceptor &) { ++(*counters)[name]; },
+              step.category);
+        } else if (step.regKind == NodeKind::A) {
+          registry.registerCheck<ValidationNodeA>(
+              [counters, name](const ValidationNodeA &,
+                               const ValidationAcceptor &) { ++(*counters)[name]; },
+              step.category);
+        } else {
+          registry.registerCheck<ValidationNodeB>(
+              [counters, name](const ValidationNodeB &,
+                               const ValidationAcceptor &) { ++(*counters)[name]; },
+              step.category);
+        }
+        continue;
+      }
 
-  registry.runChecks(nodeA, noopAcceptor, {}, {});
-
-  EXPECT_EQ(nodeAFastCalls, 2u);
-  EXPECT_EQ(nodeBFastCalls, 0u);
-  EXPECT_EQ(astSlowCalls, 1u);
+      const pegium::AstNode &node =
+          step.runKind == NodeKind::A ? static_cast<pegium::AstNode &>(nodeA)
+                                      : static_cast<pegium::AstNode &>(nodeB);
+      registry.runChecks(node, noopAcceptor, step.runCategories, {});
+      for (const auto &[name, value] : step.expected) {
+        SCOPED_TRACE(name);
+        EXPECT_EQ((*counters)[name], value);
+      }
+    }
+  }
 }
 
 TEST(DefaultValidationRegistryTest, RejectsBuiltInCustomCategory) {
@@ -162,38 +251,6 @@ TEST(DefaultValidationRegistryTest, RejectsBuiltInCustomCategory) {
           [](const ValidationNodeA &, const ValidationAcceptor &) {},
           std::string(kBuiltInValidationCategory)),
       std::invalid_argument);
-}
-
-TEST(DefaultValidationRegistryTest, LateRegistrationsArePickedUpOnNextRun) {
-  RegistryTestServices context;
-  DefaultValidationRegistry registry(context.core);
-
-  std::size_t existingCalls = 0;
-  std::size_t lateCalls = 0;
-  registry.registerCheck<ValidationNodeA>(
-      [&existingCalls](const ValidationNodeA &, const ValidationAcceptor &) {
-        ++existingCalls;
-      },
-      "fast");
-
-  auto noopAcceptorCb = [](pegium::Diagnostic) {};
-  const ValidationAcceptor noopAcceptor{
-      ValidationAcceptor::Callback(noopAcceptorCb)};
-  ValidationNodeA nodeA;
-
-  registry.runChecks(nodeA, noopAcceptor, {}, {});
-  EXPECT_EQ(existingCalls, 1u);
-  EXPECT_EQ(lateCalls, 0u);
-
-  registry.registerCheck<ValidationNodeA>(
-      [&lateCalls](const ValidationNodeA &, const ValidationAcceptor &) {
-        ++lateCalls;
-      },
-      "fast");
-
-  registry.runChecks(nodeA, noopAcceptor, {}, {});
-  EXPECT_EQ(existingCalls, 2u);
-  EXPECT_EQ(lateCalls, 1u);
 }
 
 TEST(DefaultValidationRegistryTest,
@@ -362,10 +419,14 @@ TEST(DefaultValidationRegistryTest,
   DefaultValidationRegistry registry(context.core);
   auto calls = std::make_unique<std::size_t>(0);
   auto *callCounter = calls.get();
+  // The registry binds the validator by pointer (non-owning), so a move-only,
+  // non-copyable validator works without being copied. It must outlive the
+  // registry's checks, which it does here.
+  const MoveOnlyValidator validator(std::move(calls));
 
   registry.registerChecks(
       {ValidationRegistry::makeValidationCheck<&MoveOnlyValidator::checkNodeA>(
-          MoveOnlyValidator(std::move(calls)))},
+          validator)},
       "fast");
 
   auto noopAcceptorCb = [](pegium::Diagnostic) {};
@@ -379,34 +440,104 @@ TEST(DefaultValidationRegistryTest,
   EXPECT_EQ(*callCounter, 1u);
 }
 
-TEST(DefaultValidationRegistryTest, ValidationCheckExceptionsBecomeDiagnostics) {
-  RegistryTestServices context;
-  DefaultValidationRegistry registry(context.core);
-  registry.registerCheck<ValidationNodeA>(
-      [](const ValidationNodeA &, const ValidationAcceptor &) {
-        throw std::runtime_error("boom");
-      });
+// Folds the "throwing stage becomes a diagnostic + observation" family: a
+// throwing callable is registered for a stage, the stage is triggered, and the
+// resulting single diagnostic message plus the recorded observation
+// (code + message substring) are asserted.
+// Folded originals (one row each):
+//   - ValidationCheckExceptionsBecomeDiagnostics
+//   - PreparationExceptionsBecomeDiagnostics
+//   - FinalizationExceptionsBecomeDiagnosticsAndObservations
+TEST(DefaultValidationRegistryTest, ThrowingStagesBecomeDiagnostics) {
+  struct Scenario {
+    const char *label;
+    const char *thrown;
+    const char *diagnosticSubstr;
+    const char *observationSubstr;
+    observability::ObservationCode code;
+    bool expectErrorSeverity;
+    // Registers the throwing callable for the stage, then triggers it once.
+    void (*registerAndTrigger)(DefaultValidationRegistry &, const char *thrown,
+                               const ValidationAcceptor &);
+  };
 
-  std::vector<std::string> messages;
-  auto acceptorCb = 
-      [&messages](pegium::Diagnostic diagnostic) {
+  const std::vector<Scenario> scenarios{
+      {"ValidationCheckExceptionsBecomeDiagnostics", "boom",
+       "An error occurred during validation: boom", "boom",
+       observability::ObservationCode::ValidationCheckThrew,
+       /*expectErrorSeverity=*/true,
+       [](DefaultValidationRegistry &registry, const char *thrown,
+          const ValidationAcceptor &acceptor) {
+         registry.registerCheck<ValidationNodeA>(
+             [thrown](const ValidationNodeA &, const ValidationAcceptor &) {
+               throw std::runtime_error(thrown);
+             });
+         ValidationNodeA node;
+         registry.runChecks(node, acceptor, {}, {});
+       }},
+      {"PreparationExceptionsBecomeDiagnostics", "setup failed",
+       "An error occurred during set-up of the validation: setup failed",
+       "setup failed",
+       observability::ObservationCode::ValidationPreparationThrew,
+       /*expectErrorSeverity=*/true,
+       [](DefaultValidationRegistry &registry, const char *thrown,
+          const ValidationAcceptor &acceptor) {
+         registry.registerBeforeDocument(
+             [thrown](const pegium::AstNode &, const ValidationAcceptor &,
+                      std::span<const std::string>,
+                      const utils::CancellationToken &) {
+               throw std::runtime_error(thrown);
+             });
+         ValidationNodeA root;
+         registry.checksBefore().front()(root, acceptor, {}, {});
+       }},
+      {"FinalizationExceptionsBecomeDiagnosticsAndObservations",
+       "tear-down failed",
+       "An error occurred during tear-down of the validation: tear-down failed",
+       "tear-down failed",
+       observability::ObservationCode::ValidationFinalizationThrew,
+       /*expectErrorSeverity=*/false,
+       [](DefaultValidationRegistry &registry, const char *thrown,
+          const ValidationAcceptor &acceptor) {
+         registry.registerAfterDocument(
+             [thrown](const pegium::AstNode &, const ValidationAcceptor &,
+                      std::span<const std::string>,
+                      const utils::CancellationToken &) {
+               throw std::runtime_error(thrown);
+             });
+         ValidationNodeA root;
+         registry.checksAfter().front()(root, acceptor, {}, {});
+       }},
+  };
+
+  for (const auto &scenario : scenarios) {
+    SCOPED_TRACE(scenario.label);
+    RegistryTestServices context;
+    DefaultValidationRegistry registry(context.core);
+
+    std::vector<std::string> messages;
+    const bool expectErrorSeverity = scenario.expectErrorSeverity;
+    auto acceptorCb = [&messages,
+                       expectErrorSeverity](pegium::Diagnostic diagnostic) {
+      if (expectErrorSeverity) {
         EXPECT_EQ(diagnostic.severity, pegium::DiagnosticSeverity::Error);
-        messages.push_back(std::move(diagnostic.message));      };
+      }
+      messages.push_back(std::move(diagnostic.message));
+    };
+    const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
 
-  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
+    scenario.registerAndTrigger(registry, scenario.thrown, acceptor);
 
-  ValidationNodeA node;
-  run_checks(registry, node, {}, acceptor);
-
-  ASSERT_EQ(messages.size(), 1u);
-  EXPECT_NE(messages.front().find("An error occurred during validation: boom"),
-            std::string::npos);
-  ASSERT_TRUE(context.observabilitySink->waitForCount(1));
-  const auto observation = context.observabilitySink->lastObservation();
-  ASSERT_TRUE(observation.has_value());
-  EXPECT_EQ(observation->code,
-            observability::ObservationCode::ValidationCheckThrew);
-  EXPECT_NE(observation->message.find("boom"), std::string::npos);
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_NE(messages.front().find(scenario.diagnosticSubstr),
+              std::string::npos);
+    ASSERT_TRUE(context.observabilitySink->waitForCount(1));
+    const auto observation = context.observabilitySink->lastObservation();
+    ASSERT_TRUE(observation.has_value());
+    EXPECT_EQ(observation->code, scenario.code);
+    EXPECT_NE(observation->message.find(scenario.observationSubstr),
+              std::string::npos);
+  }
 }
 
 TEST(DefaultValidationRegistryTest,
@@ -450,95 +581,6 @@ TEST(DefaultValidationRegistryTest,
             std::string::npos);
 }
 
-TEST(DefaultValidationRegistryTest,
-     RunChecksKeepsTypeSpecificMatchesAcrossAlternatingNodes) {
-  RegistryTestServices context;
-  DefaultValidationRegistry registry(context.core);
-  std::size_t nodeACalls = 0;
-  std::size_t nodeBCalls = 0;
-
-  registry.registerCheck<ValidationNodeA>(
-      [&nodeACalls](const ValidationNodeA &, const ValidationAcceptor &) {
-        ++nodeACalls;
-      },
-      "fast");
-  registry.registerCheck<ValidationNodeB>(
-      [&nodeBCalls](const ValidationNodeB &, const ValidationAcceptor &) {
-        ++nodeBCalls;
-      },
-      "fast");
-
-  auto noopAcceptorCb = [](pegium::Diagnostic) {};
-
-
-  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
-  ValidationNodeA nodeA;
-  ValidationNodeB nodeB;
-
-  run_checks(registry, nodeA, {}, noopAcceptor);
-  run_checks(registry, nodeB, {}, noopAcceptor);
-  run_checks(registry, nodeA, {}, noopAcceptor);
-
-  EXPECT_EQ(nodeACalls, 2u);
-  EXPECT_EQ(nodeBCalls, 1u);
-}
-
-TEST(DefaultValidationRegistryTest,
-     PreparedChecksWithDifferentCategoriesStayIndependent) {
-  RegistryTestServices context;
-  DefaultValidationRegistry registry(context.core);
-  std::size_t fastCalls = 0;
-  std::size_t slowCalls = 0;
-
-  registry.registerCheck<ValidationNodeA>(
-      [&fastCalls](const ValidationNodeA &, const ValidationAcceptor &) {
-        ++fastCalls;
-      },
-      "fast");
-  registry.registerCheck<ValidationNodeA>(
-      [&slowCalls](const ValidationNodeA &, const ValidationAcceptor &) {
-        ++slowCalls;
-      },
-      "slow");
-
-  const std::vector<std::string> fastCategories{"fast"};
-  const std::vector<std::string> slowCategories{"slow"};
-
-  auto noopAcceptorCb = [](pegium::Diagnostic) {};
-
-
-  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
-  ValidationNodeA nodeA;
-  registry.runChecks(nodeA, noopAcceptor, fastCategories, {});
-  registry.runChecks(nodeA, noopAcceptor, slowCategories, {});
-
-  EXPECT_EQ(fastCalls, 1u);
-  EXPECT_EQ(slowCalls, 1u);
-}
-
-TEST(DefaultValidationRegistryTest, UnknownCategoriesExecuteNothing) {
-  RegistryTestServices context;
-  DefaultValidationRegistry registry(context.core);
-  std::size_t calls = 0;
-
-  registry.registerCheck<ValidationNodeA>(
-      [&calls](const ValidationNodeA &, const ValidationAcceptor &) {
-        ++calls;
-      },
-      "fast");
-
-  const std::vector<std::string> unknownCategories{"unknown"};
-
-  auto noopAcceptorCb = [](pegium::Diagnostic) {};
-
-
-  const ValidationAcceptor noopAcceptor{ValidationAcceptor::Callback(noopAcceptorCb)};
-  ValidationNodeA nodeA;
-  registry.runChecks(nodeA, noopAcceptor, unknownCategories, {});
-
-  EXPECT_EQ(calls, 0u);
-}
-
 TEST(DefaultValidationRegistryTest, ChecksExecuteInRegistrationOrder) {
   RegistryTestServices context;
   DefaultValidationRegistry registry(context.core);
@@ -577,73 +619,6 @@ TEST(DefaultValidationRegistryTest, ChecksExecuteInRegistrationOrder) {
                    }));
 }
 
-
-TEST(DefaultValidationRegistryTest,
-     PreparationExceptionsBecomeDiagnostics) {
-  RegistryTestServices context;
-  DefaultValidationRegistry registry(context.core);
-  registry.registerBeforeDocument(
-      [](const pegium::AstNode &, const ValidationAcceptor &,
-         std::span<const std::string>, const utils::CancellationToken &) {
-        throw std::runtime_error("setup failed");
-      });
-
-  std::vector<std::string> messages;
-  auto acceptorCb = 
-      [&messages](pegium::Diagnostic diagnostic) {
-        EXPECT_EQ(diagnostic.severity, pegium::DiagnosticSeverity::Error);
-        messages.push_back(std::move(diagnostic.message));      };
-
-  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
-
-  ValidationNodeA root;
-  registry.checksBefore().front()(root, acceptor, {}, {});
-
-  ASSERT_EQ(messages.size(), 1u);
-  EXPECT_NE(
-      messages.front().find(
-          "An error occurred during set-up of the validation: setup failed"),
-      std::string::npos);
-  ASSERT_TRUE(context.observabilitySink->waitForCount(1));
-  const auto observation = context.observabilitySink->lastObservation();
-  ASSERT_TRUE(observation.has_value());
-  EXPECT_EQ(observation->code,
-            observability::ObservationCode::ValidationPreparationThrew);
-  EXPECT_NE(observation->message.find("setup failed"), std::string::npos);
-}
-
-TEST(DefaultValidationRegistryTest,
-     FinalizationExceptionsBecomeDiagnosticsAndObservations) {
-  RegistryTestServices context;
-  DefaultValidationRegistry registry(context.core);
-  registry.registerAfterDocument(
-      [](const pegium::AstNode &, const ValidationAcceptor &,
-         std::span<const std::string>, const utils::CancellationToken &) {
-        throw std::runtime_error("tear-down failed");
-      });
-
-  std::vector<std::string> messages;
-  auto acceptorCb = 
-      [&messages](pegium::Diagnostic diagnostic) {
-        messages.push_back(std::move(diagnostic.message));      };
-
-  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
-
-  ValidationNodeA root;
-  registry.checksAfter().front()(root, acceptor, {}, {});
-
-  ASSERT_EQ(messages.size(), 1u);
-  EXPECT_NE(
-      messages.front().find(
-          "An error occurred during tear-down of the validation: tear-down failed"),
-      std::string::npos);
-  ASSERT_TRUE(context.observabilitySink->waitForCount(1));
-  const auto observation = context.observabilitySink->lastObservation();
-  ASSERT_TRUE(observation.has_value());
-  EXPECT_EQ(observation->code,
-            observability::ObservationCode::ValidationFinalizationThrew);
-  EXPECT_NE(observation->message.find("tear-down failed"), std::string::npos);
-}
 
 TEST(DefaultValidationRegistryTest, BaseTypeChecksApplyToDerivedNodes) {
   RegistryTestServices context;

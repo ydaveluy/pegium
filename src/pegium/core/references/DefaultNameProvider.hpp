@@ -12,14 +12,6 @@ public:
   /// `NamedAstNode::name` when available, otherwise extracts the value of
   /// the `name` assignment via the grammar's `FeatureValue`.
   [[nodiscard]] AstNodeName nameOf(const AstNode &node) const override;
-
-  /// Override of `NameProvider::getName` that skips the CST walk for
-  /// `NamedAstNode` instances. Indexing/scope-computation that need both
-  /// the name AND its CST source should call `nameOf` instead; this fast
-  /// path matters for the (hot) qualified-name resolution loop in scope
-  /// providers, which only reads the name.
-  [[nodiscard]] std::optional<std::string>
-  getName(const AstNode &node) const override;
 };
 
 } // namespace pegium::references

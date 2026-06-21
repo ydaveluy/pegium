@@ -65,6 +65,33 @@ TEST(CstUtilsTest, FindNodeAtOffsetKeepsLeftBoundaryPreference) {
   EXPECT_EQ(atBoundary->getText(), "a");
 }
 
+TEST(CstUtilsTest, FindDeclarationNodeAtOffsetHandlesNonAsciiIdentifierStart) {
+  DummyElement literal{grammar::ElementKind::Literal};
+  DummyElement group{grammar::ElementKind::Group};
+
+  // "x édef": an "x" leaf, an ignored-whitespace gap at [1,2) (no CST node),
+  // then an identifier whose first codepoint ("é") is a two-byte UTF-8
+  // sequence. The declaration-node lookup must not mistake that lead byte for
+  // a non-identifier character and step back into the preceding token.
+  auto harness = test::makeCstBuilderHarness("x \xC3\xA9"
+                                             "def");
+  auto &builder = harness.builder;
+
+  builder.enter();
+  builder.leaf(0, 1, &literal); // "x"
+  builder.leaf(2, 7, &literal); // "édef"
+  builder.exit(0, 7, &group);
+
+  const auto *root = builder.getRootCstNode();
+  ASSERT_NE(root, nullptr);
+
+  // Cursor at the start of "édef" (offset 2, on the lead byte of "é").
+  const auto declaration = find_declaration_node_at_offset(*root, 2);
+  ASSERT_TRUE(declaration.has_value());
+  EXPECT_EQ(declaration->getText(), "\xC3\xA9"
+                                    "def");
+}
+
 TEST(CstUtilsTest, GetInteriorNodesDescendsIntoSharedContainer) {
   DummyElement literal{grammar::ElementKind::Literal};
   DummyElement group{grammar::ElementKind::Group};

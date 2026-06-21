@@ -12,20 +12,6 @@
 
 namespace pegium::references {
 
-std::optional<std::string>
-DefaultNameProvider::getName(const AstNode &node) const {
-  // Fast path: `NamedAstNode` exposes the name directly — no CST walk.
-  if (const auto *namedNode = dynamic_cast<const NamedAstNode *>(&node);
-      namedNode != nullptr) {
-    if (namedNode->name.empty()) {
-      return std::nullopt;
-    }
-    return namedNode->name;
-  }
-  // Fallback (rare): non-NamedAstNode — defer to the full lookup.
-  return NameProvider::getName(node);
-}
-
 AstNodeName DefaultNameProvider::nameOf(const AstNode &node) const {
   // The CST source is always reported when present, independently of the
   // name validity: `getNameNode()` callers (LSP rename/highlight) need the

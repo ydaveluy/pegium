@@ -18,7 +18,9 @@ namespace pegium::utils {
 [[nodiscard]] bool equals_uri(std::string_view left, std::string_view right);
 /// Returns whether `child` is located under `parent` in URI space.
 [[nodiscard]] bool contains_uri(std::string_view parent, std::string_view child);
-/// Returns the relative URI from `from` to `to` when both share a parent hierarchy.
+/// Returns the path of `to` expressed relative to `from` (may contain '..'
+/// segments); falls back to the normalized absolute URI of `to` when either
+/// argument is not a file URI.
 [[nodiscard]] std::string relative_uri(std::string_view from, std::string_view to);
 
 } // namespace pegium::utils

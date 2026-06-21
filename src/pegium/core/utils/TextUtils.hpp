@@ -115,6 +115,23 @@ constexpr std::size_t utf8_codepoint_length(char leadByte) noexcept {
   return utf8_codepoint_length_table[static_cast<unsigned char>(leadByte)];
 }
 
+/// Counts the number of UTF-8 codepoints in `text`. Lossy-tolerant: a
+/// truncated/invalid lead byte (length 0, or a multibyte length that runs past
+/// the end) is counted as a single codepoint and advances one byte, matching
+/// the recovery matcher's `decode_text` so byte<->codepoint accounting stays
+/// consistent across the fuzzy path. For pure-ASCII text this returns
+/// `text.size()`.
+constexpr std::size_t utf8_codepoint_count(std::string_view text) noexcept {
+  std::size_t count = 0u;
+  std::size_t index = 0u;
+  while (index < text.size()) {
+    const auto length = utf8_codepoint_length(text[index]);
+    index += (length == 0u || length > text.size() - index) ? 1u : length;
+    ++count;
+  }
+  return count;
+}
+
 /// Decodes the UTF-8 codepoint starting at `cursor` and returns its
 /// Unicode value. ASCII (1 byte) is returned as the byte itself.
 /// Multi-byte sequences are decoded; malformed input returns the lead
@@ -152,6 +169,46 @@ decode_utf8_codepoint(const char *cursor) noexcept {
   default:
     return lead;
   }
+}
+
+/// True iff `codepoint` is part of an identifier-like token. Accepts ASCII
+/// word characters (letters, digits, underscore) and any non-ASCII codepoint
+/// (>= 0x80). This is a heuristic that covers letters of every script
+/// (Latin-extended, Cyrillic, CJK, Arabic, ...) without embedding the Unicode
+/// XID tables; false positives on Unicode punctuation are acceptable.
+[[nodiscard]] constexpr bool
+is_identifier_like_codepoint(std::uint32_t codepoint) noexcept {
+  return codepoint >= 0x80 || isWord(static_cast<char>(codepoint));
+}
+
+/// True iff `[p, end)` begins with a complete, identifier-like UTF-8 codepoint.
+/// A null/at-end pointer or a truncated multi-byte tail reads as non-identifier.
+[[nodiscard]] constexpr bool
+is_identifier_like_codepoint_at(const char *p, const char *end) noexcept {
+  if (p == nullptr || p >= end) {
+    return false;
+  }
+  const auto length = utf8_codepoint_length(*p);
+  if (length == 0 || length > static_cast<std::size_t>(end - p)) {
+    return false;
+  }
+  return is_identifier_like_codepoint(decode_utf8_codepoint(p));
+}
+
+/// Returns the byte index at which the codepoint preceding `pos` starts, by
+/// stepping back over UTF-8 continuation bytes (`0b10xxxxxx`). Returns 0 at the
+/// start of the text.
+[[nodiscard]] constexpr std::size_t
+previous_codepoint_start(std::string_view text, std::size_t pos) noexcept {
+  if (pos == 0) {
+    return 0;
+  }
+  std::size_t index = pos - 1;
+  while (index > 0 &&
+         (static_cast<unsigned char>(text[index]) & 0xC0U) == 0x80U) {
+    --index;
+  }
+  return index;
 }
 
 constexpr const char *

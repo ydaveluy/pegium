@@ -89,6 +89,7 @@ jobs:
   sanitizers:
     runs-on: ubuntu-latest
     env:
+      TSAN_OPTIONS: halt_on_error=1
       UBSAN_OPTIONS: print_stacktrace=1
     strategy:
       fail-fast: false
@@ -97,9 +98,15 @@ jobs:
           - name: asan
             cxx: clang++
             flags: -DPEGIUM_ENABLE_ASAN=ON
+            test_regex: PegiumCoreParserFocusedSanitizer|PegiumLspSemanticTokenSanitizer
+          - name: tsan
+            cxx: clang++
+            flags: -DPEGIUM_ENABLE_TSAN=ON
+            test_regex: DefaultWorkspaceLockTest|TaskSchedulerTest|UtilsTest\.(DisposableAndEventEmitterSupportSubscriptionLifecycle|EventEmitterPreservesRegistrationOrder|EventEmitterSupportsConcurrentSubscriptionAndEmit)|DefaultDocumentUpdateHandlerTest\.(DidChangeContentPropagatesWorkspaceLockCancellationToBuilderUpdate|DidChangeContentWaitsForWorkspaceManagerReadyBeforeUpdating)
           - name: ubsan
             cxx: clang++
             flags: -DPEGIUM_ENABLE_UBSAN=ON
+            test_regex: PegiumCoreParserFocusedSanitizer|PegiumLspSemanticTokenSanitizer
     steps:
       - uses: actions/checkout@v6
       - name: Configure
@@ -115,4 +122,4 @@ jobs:
       - name: Build
         run: cmake --build build --config Debug -j4 --target PegiumCoreUnitTest PegiumLspUnitTest
       - name: Run sanitizer-focused tests
-        run: ctest --test-dir build -R 'PegiumCoreParserFocusedSanitizer|PegiumLspSemanticTokenSanitizer' --output-on-failure
+        run: ctest --test-dir build -R '${{ matrix.test_regex }}' --output-on-failure

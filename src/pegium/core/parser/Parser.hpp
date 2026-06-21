@@ -111,9 +111,10 @@ struct ParseOptions {
   /// selectable when they keep a stable prefix before the first edit.
   std::uint32_t maxRecoveryEditCost = 256;
 
-  /// Hard global safety valve on total recovery attempt runs (budgeted and
-  /// validation-only). Prevents pathological inputs or fuzzer cases from
-  /// driving unbounded recovery work.
+  /// Hard global safety valve on the total counted recovery attempt runs
+  /// (post-hoc pruning probes are uncounted). Prevents pathological inputs or
+  /// fuzzer cases from driving unbounded recovery work. The effective cap is
+  /// `min(maxRecoveryAttempts, maxTotalRecoveryAttemptRuns)`.
   std::uint32_t maxTotalRecoveryAttemptRuns = 1024;
 
   /// Hard cap on the cumulative number of `ParserRule` recovery entries
@@ -127,14 +128,20 @@ struct ParseOptions {
 
   /// Number of strict visible leaves that must parse after a recovery edit
   /// before the edit is considered stable.
-  std::uint32_t recoveryStabilityTokenCount = 2;
+  std::uint32_t recoveryStabilityTokenCount =
+      kDefaultRecoveryStabilityTokenCount;
 
-  /// Maximum bytes a `Repetition` may skip when no normal recovery plan can
-  /// bridge the current iteration. Acts as the last-resort panic-mode budget:
-  /// the iteration scans forward up to this many codepoints looking for a
-  /// clean restart of its element, emitting one fused `Delete` on success.
-  /// Set to `0` to disable the panic-mode candidate entirely.
-  std::uint32_t maxResyncSkipBytes = 4096;
+  /// Maximum number of codepoints a `Repetition` may skip when no normal
+  /// recovery plan can bridge the current iteration. Acts as the last-resort
+  /// panic-mode budget: the iteration scans forward up to this many codepoints
+  /// looking for a clean restart of its element, emitting one fused `Delete`
+  /// on success. Set to `0` to disable the panic-mode candidate entirely.
+  std::uint32_t maxResyncSkipCodepoints = kDefaultMaxResyncSkipCodepoints;
+
+  // NB: the internal probe-perturbation axes (forbid the out-of-window fuzzy
+  // fold / the whole-keyword fuzzy Replace) are deliberately NOT here — they are
+  // not user options. They live on the internal `RecoveryAttemptSpec::probeAxes`
+  // and are set only by the sibling probes in `try_recovery_window`.
 
   /// Enables recovery-aware parsing and expectation tracing after strict failure.
   bool recoveryEnabled = true;

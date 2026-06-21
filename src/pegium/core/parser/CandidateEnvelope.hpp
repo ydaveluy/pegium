@@ -9,55 +9,34 @@
 ///   - `key`        — the existing `RecoveryKey` ranking tuple. The
 ///                    final preference order remains lexicographic on
 ///                    this key.
-///   - `contract`   — what the candidate observes about its position;
-///                    closed enums, no preference.
-///   - `evidence`   — explanatory residue: facts observed, named
-///                    reasons, offsets, costs. NEVER consulted by
-///                    decision rules; this is non-negotiable.
-///   - `origin`     — where the candidate came from; one closed enum
-///                    value per producing site.
-///
-/// `CandidateOrigin` is where the candidate came from, not why it is
-/// admissible. It does not participate in ranking.
+///   - `replayPrefix`— what the candidate observes about its replay
+///                    position; a closed enum, no preference.
 ///
 /// Strict-path discipline: this header is recovery-side. It must
 /// never be constructed on the strict-only nominal path.
 
 #include <cstdint>
-#include <optional>
 #include <type_traits>
 
 #include <pegium/core/parser/ContextShared.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
-#include <pegium/core/parser/RecoveryContract.hpp>
 #include <pegium/core/utils/TextUtils.hpp>
 
 namespace pegium::parser::detail {
 
-/// Where the candidate was produced. Read by the family-redundancy
-/// predicates which require `next.origin == current.origin` to forbid
-/// cross-combinator dominance comparisons.
-enum class CandidateOrigin : std::uint8_t {
-  /// Unset / candidate not yet attributed to a producer. Admission
-  /// rejects unattributed candidates.
-  Unspecified,
-  /// Produced by an `OrderedChoice` branch.
-  OrderedChoiceBranch,
-  /// Produced by a `Repetition` iteration.
-  RepetitionIteration,
-};
-
-/// The candidate envelope. Three axes:
+/// The candidate envelope. Two axes:
 ///   - `key`: ranking. Read by `is_better_recovery_key`.
-///   - `contract`: closed-enum structural observations. Read by the
+///   - `replayPrefix`: closed-enum structural observation. Read by the
 ///     family-redundancy predicates.
-///   - `origin`: where the candidate was produced. Used by the
-///     family-redundancy predicates to forbid cross-combinator
-///     comparisons (`next.origin == current.origin`).
+///
+/// There is no `origin` axis: the family-redundancy predicates compare
+/// candidates WITHIN one combinator's enumeration (parent/child dominance must
+/// not cross), and every call site (consider_choice_attempt /
+/// consider_iteration_attempt) already builds both envelopes from the same
+/// producer — so the rule is structural at the call sites, not a runtime field.
 struct CandidateEnvelope {
   RecoveryKey key{};
-  RecoveryContract contract;
-  CandidateOrigin origin = CandidateOrigin::Unspecified;
+  ReplayPrefixClass replayPrefix = ReplayPrefixClass::Empty;
 };
 
 static_assert(std::is_trivially_copyable_v<CandidateEnvelope>,
@@ -65,16 +44,12 @@ static_assert(std::is_trivially_copyable_v<CandidateEnvelope>,
               "moved cheaply through the pipeline (admission, dominance, "
               "ranking) without allocations.");
 
-/// Maps an existing `EditableRecoveryCandidate` to the envelope.
-[[nodiscard]] CandidateEnvelope to_candidate_envelope(
-    const EditableRecoveryCandidate &candidate,
-    CandidateOrigin origin = CandidateOrigin::Unspecified) noexcept;
-
-/// Maps an existing `StructuralProgressRecoveryCandidate` (the
-/// `Repetition` candidate type) to the envelope.
-[[nodiscard]] CandidateEnvelope to_candidate_envelope(
-    const StructuralProgressRecoveryCandidate &candidate,
-    CandidateOrigin origin = CandidateOrigin::RepetitionIteration) noexcept;
+/// Maps an existing `EditableRecoveryCandidate` to the envelope. Both
+/// `OrderedChoice`/`Group` and `Repetition` candidates now share this single
+/// carrier; the producer-chosen `keyProgressOffset` already encodes the
+/// per-combinator progress convention the ranking key reads.
+[[nodiscard]] CandidateEnvelope
+to_candidate_envelope(const EditableRecoveryCandidate &candidate) noexcept;
 
 // -----------------------------------------------------------------------------
 // Family-redundancy predicates (free functions)
@@ -83,38 +58,42 @@ static_assert(std::is_trivially_copyable_v<CandidateEnvelope>,
 // Dominance must not cross parent/child: these predicates compare two
 // candidates within a single combinator's enumeration. A candidate
 // produced by a parent scope must never be filtered by a candidate
-// produced by a child scope (and vice-versa). The predicates encode
-// this rule by rejecting any pair whose `CandidateOrigin` values
-// differ — candidates from different combinators (or from explicitly
-// non-comparable origins) cannot dominate each other through these
-// per-anchor redundancy filters.
+// produced by a child scope (and vice-versa). That rule is enforced
+// STRUCTURALLY at the call sites — `consider_choice_attempt` and
+// `consider_iteration_attempt` only ever pass two candidates from the same
+// producer — so there is no runtime origin axis to check here.
 //
 // The predicates are NOT replay-equivalence dominance: the two
 // candidates carry different scripts. They are structural preferences
 // inside a same-anchor extension family, applied as redundancy
 // filters before the central `RecoveryKey` ranking sees the pair.
 
-/// Shared admission shape for the extension-dominance predicates.
-/// True iff both candidates share the same origin and anchor
-/// (`firstEditOffset`), `next` carries
-/// `ReplayPrefixClass::ExtendedCommittedPrefix`, `current` carries
-/// any non-empty replay prefix, `next` strictly progresses further
-/// at no-worse cost. Per-predicate ratio/continuation guards are
-/// layered on top of this baseline.
-[[nodiscard]] bool
-is_extending_anchor_pair(const CandidateEnvelope &next,
-                         const CandidateEnvelope &current) noexcept;
 
-/// `extension_outranks_anchor_base`: `next` outranks `current` when
-/// `next` carries `ReplayPrefixClass::ExtendedCommittedPrefix` over
-/// the same anchor (`firstEditOffset`) at strictly higher cost AND
-/// strictly further progress, with `current` carrying any non-empty
-/// committed prefix at the same anchor. Used by `OrderedChoice` to
-/// remove redundant base attempts when an extending attempt is
-/// available at the same anchor.
+/// Selects which guard activates the cost/progress ratio test inside
+/// `extension_dominates`. The two extension-dominance call sites share the
+/// `is_extending_anchor_pair` + `progressGap >= costGap` body and differ ONLY in
+/// when that ratio test applies.
+enum class ExtensionDominanceGuard : std::uint8_t {
+  /// `OrderedChoice`: apply the ratio test only once `current` has progressed
+  /// strictly past its own anchor (`progressAfterEdits > firstEditOffset`).
+  WhenCurrentProgressedPastAnchor,
+  /// `Repetition` (destructive family): apply the ratio test only when `current`
+  /// itself already carries an `ExtendedCommittedPrefix` replay prefix.
+  WhenCurrentIsExtended,
+};
+
+/// `extension_dominates`: `next` outranks `current` when `next` carries
+/// `ReplayPrefixClass::ExtendedCommittedPrefix` over the same anchor
+/// (`firstEditOffset`) at no-worse cost and strictly further progress (see
+/// `is_extending_anchor_pair`), with the selected `guard` deciding when the
+/// `progressGap >= costGap` ratio test gates acceptance vs. accepting outright.
+/// Unifies the former `extension_outranks_anchor_base`
+/// (`WhenCurrentProgressedPastAnchor`) and `destructive_extension_outranks_anchor_base`
+/// (`WhenCurrentIsExtended`).
 [[nodiscard]] bool
-extension_outranks_anchor_base(const CandidateEnvelope &next,
-                               const CandidateEnvelope &current) noexcept;
+extension_dominates(const CandidateEnvelope &next,
+                    const CandidateEnvelope &current,
+                    ExtensionDominanceGuard guard) noexcept;
 
 /// `boundary_repair_outranks_no_edit_iteration`: `candidate`
 /// outranks `committed` when `candidate` carries a non-empty
@@ -125,18 +104,5 @@ extension_outranks_anchor_base(const CandidateEnvelope &next,
     const CandidateEnvelope &candidate,
     const CandidateEnvelope &committed) noexcept;
 
-/// `destructive_extension_outranks_anchor_base`: `next` outranks
-/// `current` when both attempt destructive edits anchored at the
-/// same `firstEditOffset`, `next` carries
-/// `ReplayPrefixClass::ExtendedCommittedPrefix` (its replay
-/// prefix carries destructive edits — Deleted or Replaced — that
-/// strictly extend the committed-prefix family), `current` shares
-/// a non-empty prefix at the same anchor, and `next` progresses
-/// strictly further at strictly higher cost. Mirror of
-/// `extension_outranks_anchor_base` for the destructive-edit family
-/// used by `Repetition`.
-[[nodiscard]] bool destructive_extension_outranks_anchor_base(
-    const CandidateEnvelope &next,
-    const CandidateEnvelope &current) noexcept;
 
 } // namespace pegium::parser::detail

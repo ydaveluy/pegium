@@ -18,7 +18,6 @@
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
-#include <pegium/core/parser/RecoveryEditSupport.hpp>
 #include <pegium/core/parser/RecoveryTrace.hpp>
 #include <pegium/core/parser/SkipperBuilder.hpp>
 #include <pegium/core/parser/SkipperWrapped.hpp>
@@ -162,29 +161,6 @@ public:
            element.getKind() == ElementKind::TerminalRule;
   }
 
-  /// Per-call upper bound on temporary recovery candidates evaluated
-  /// inside one dispatch site (one element index `I`) of
-  /// `parse_elements`. At a single dispatch site the recovery flow
-  /// considers, in mutually-exclusive paths:
-  ///
-  ///   - `select_missing_element_insert_replay` evaluates 2 candidates
-  ///     internally (the synthetic insert + the actual parse).
-  ///   - `select_current_failure_sequence_attempt` evaluates up to 4
-  ///     candidates (2 terminal current-failure + 1 reparse-without-
-  ///     delete + 1 skip-nullable).
-  ///   - `recover_after_tail_parse_failure` evaluates one in-place
-  ///     `RepairTail` attempt plus up to 2 fallback candidates
-  ///     (reparse-without-delete + skip-nullable).
-  ///
-  /// The dispatch enters at most one of these per site, so the bound
-  /// per site is `max(2, 4, 3) = 4`. The bound is the per-site
-  /// figure: the recursive call `parse_elements<I+1>` opens a new
-  /// runtime counter session, so cumulative growth across elements
-  /// is bounded site-by-site rather than amortized into a single
-  /// ceiling. Independent of arity and input length.
-  static constexpr std::size_t kMaxRecoveryCandidatesPerCall = 4U;
-
-public:
   friend struct detail::ParseAccess;
   friend struct detail::ProbeAccess;
   friend struct detail::FastProbeAccess;
@@ -245,8 +221,7 @@ private:
   bool parse_elements_recovery(Context &ctx,
                                 const char *cursorBeforeSkip,
                                 bool previousNullableSiblingConsumedVisible) const {
-    if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows() &&
-        !ctx.allowsCompletedWindowContinuationRecovery()) {
+    if (ctx.recoveryDescentInactive()) {
       // Track lastVisibleCursorOffset across the strict parse so we can
       // forward `currentNullableConsumedVisible` to element I+1: if element
       // I+1's recovery later consults `previous_nullable_sibling_owns_cursor`,
@@ -301,11 +276,7 @@ private:
       if (this->template parse_competing_nullable_current_repair<I>(
               ctx, terminalRecoveryState.facts)) {
         const bool currentCommittedProgress =
-            ctx.cursor() != checkpoint.parseCheckpoint.parseCheckpoint.cursor ||
-            ctx.currentEditCount() !=
-                checkpoint.recoveryState.editBudget.editCount ||
-            ctx.currentEditCost() !=
-                checkpoint.recoveryState.editBudget.editCost;
+            ctx.committedProgressSince(checkpoint);
         if (currentCommittedProgress) {
           const bool currentNullableConsumedVisible =
               this->template nullable_current_consumed_visible_since<I>(
@@ -334,23 +305,17 @@ private:
                                               terminalRecoveryState.facts)) {
         return recover_after_current_parse_failure<Context, I>(
             ctx, checkpoint, terminalRecoveryState,
-            nullableCurrentLooksStarted,
-            previousNullableSiblingOwnsCursor);
+            nullableCurrentLooksStarted);
       }
     } else if (!parse_current_sequence_element<I>(
                     ctx, terminalRecoveryState.facts)) {
       return recover_after_current_parse_failure<Context, I>(
           ctx, checkpoint, terminalRecoveryState,
-          nullableCurrentLooksStarted,
-          previousNullableSiblingOwnsCursor);
+          nullableCurrentLooksStarted);
     }
     const auto checkpointAfterCurrent = ctx.mark();
     const bool currentCommittedProgress =
-        ctx.cursor() != checkpoint.parseCheckpoint.parseCheckpoint.cursor ||
-        ctx.currentEditCount() !=
-            checkpoint.recoveryState.editBudget.editCount ||
-        ctx.currentEditCost() !=
-            checkpoint.recoveryState.editBudget.editCost;
+        ctx.committedProgressSince(checkpoint);
     const bool currentNullableConsumedVisible =
         this->template nullable_current_consumed_visible_since<I>(
             ctx, checkpoint);
@@ -402,7 +367,6 @@ private:
     bool reparseCurrentWithoutDelete = false;
     bool skipNullable = false;
     bool preferTailEntryInsert = false;
-    bool allowDeleteRecovery = false;
     bool allowNullableTailStop = false;
   };
 
@@ -423,7 +387,6 @@ private:
     bool strictSuffixStartsAtCurrentCursor = false;
     bool recoverableSuffixStartsAtCurrentCursor = false;
     bool currentOffsetWithinRecoveryWindow = false;
-    bool previousNullableSiblingOwnsCursor = false;
   };
 
   struct SequenceSuffixEntryFacts {
@@ -574,24 +537,18 @@ private:
           probe_recoverable_at_entry_consumes_visible(current, ctx)) {
         return true;
       }
-      if (ctx.allowsScopedLeadingTerminalInsertRecovery() &&
-          element_is_terminal_like_for_missing_insert(current) &&
-          allows_synthetic_terminal_insert(ctx, current) &&
-          detail::cursor_starts_visible_source(ctx)) {
-        const bool suffixConsumesVisible =
-            this->template suffix_starts_without_edits<I + 1>(ctx) ||
-            (I + 1 == sizeof...(Elements) &&
-             outerRecoverableConsumesVisible != nullptr &&
-             outerRecoverableConsumesVisible(
-                 ctx, outerRecoverableConsumesVisibleData));
-        if (suffixConsumesVisible) {
-          return true;
-        }
-      }
-      if (allowSyntheticLeadingTerminalContinuation &&
+      // Synthetic-leading-terminal insert probe. The continuation variant
+      // additionally allows a sequence-literal insert; allows_synthetic_terminal_insert
+      // with allowSequenceLiteralInsert=false is the strict subset, so the two
+      // former blocks (scoped+strict-insert / continuation+literal-insert)
+      // collapse to one guarded by the gate flag + the matching insert mode.
+      if ((allowSyntheticLeadingTerminalContinuation ||
+           ctx.allowsScopedLeadingTerminalInsertRecovery()) &&
           element_is_terminal_like_for_missing_insert(current) &&
           allows_synthetic_terminal_insert(
-              ctx, current, /*allowSequenceLiteralInsert=*/true) &&
+              ctx, current,
+              /*allowSequenceLiteralInsert=*/
+              allowSyntheticLeadingTerminalContinuation) &&
           detail::cursor_starts_visible_source(ctx)) {
         const bool suffixConsumesVisible =
             this->template suffix_starts_without_edits<I + 1>(ctx) ||
@@ -704,9 +661,7 @@ private:
 
   template <std::size_t I>
   [[nodiscard]] SequenceFacts
-  build_sequence_facts(
-      RecoveryContext &ctx,
-      bool previousNullableSiblingOwnsCursor = false) const {
+  build_sequence_facts(RecoveryContext &ctx) const {
     const auto suffixEntryFacts =
         this->template analyze_suffix_entry_facts<I + 1>(ctx);
     return {
@@ -719,7 +674,6 @@ private:
             ctx.hasPendingRecoveryWindows() &&
             (ctx.cursorOffset() <= ctx.pendingRecoveryWindowMaxCursorOffset() ||
              ctx.isInRecoveryPhase()),
-        .previousNullableSiblingOwnsCursor = previousNullableSiblingOwnsCursor,
     };
   }
 
@@ -728,19 +682,15 @@ private:
       const RecoveryContext &ctx, const Checkpoint &checkpoint,
       const char *cursorBeforeSkip,
       bool previousNullableSiblingOwnsCursor) const {
-    constexpr bool suffixFullyNullable = suffix_after_is_fully_nullable<I + 1>();
+    const bool hasVisiblePrefixCursor =
+        cursorBeforeSkip != nullptr &&
+        (cursorBeforeSkip > ctx.begin ||
+         ctx.lastVisibleCursorOffset() >=
+             static_cast<TextOffset>(cursorBeforeSkip - ctx.begin));
     const bool hasCommittedVisiblePrefixBeforeCurrent =
-        (cursorBeforeSkip != nullptr &&
-         (cursorBeforeSkip > ctx.begin ||
-          ctx.lastVisibleCursorOffset() >=
-              static_cast<TextOffset>(cursorBeforeSkip - ctx.begin))) ||
-        ctx.lastVisibleCursorOffset() > 0u;
+        hasVisiblePrefixCursor || ctx.lastVisibleCursorOffset() > 0u;
     const bool hasRecoveredPrefixBeforeCurrent =
-        (cursorBeforeSkip != nullptr &&
-         (cursorBeforeSkip > ctx.begin ||
-          ctx.lastVisibleCursorOffset() >=
-              static_cast<TextOffset>(cursorBeforeSkip - ctx.begin))) ||
-        checkpoint.recoveryState.editBudget.hadEdits;
+        hasVisiblePrefixCursor || checkpoint.recoveryState.editBudget.hadEdits;
     const char *const lastVisibleCursor = ctx.begin + ctx.lastVisibleCursorOffset();
     const char *triviaGapBegin = nullptr;
     if (cursorBeforeSkip != nullptr && ctx.cursor() > cursorBeforeSkip) {
@@ -791,8 +741,13 @@ private:
     // recursive tail would make a last child pass through to the previous
     // sibling's local follow instead of the enclosing follow.
     if constexpr (I + 1 == sizeof...(Elements)) {
-      auto followGuard = ctx.withPassThroughOuterFollowProbe();
-      (void)followGuard;
+      // Last element: install NO local follow. The previous siblings' follow
+      // guards are RAII-scoped per element and already torn down, so the live
+      // probe is the enclosing scope's follow — exactly the semantic follow the
+      // last element must see. (A pass-through guard used to forward to this
+      // same outer probe; installing nothing is observationally identical on
+      // probe results and avoids fingerprinting a transient guard stack
+      // address into the choice-recover cache.)
       return std::forward<Fn>(fn)();
     } else {
       constexpr auto strictProbeFn =
@@ -923,8 +878,7 @@ private:
       return false;
     } else {
       const auto &current = std::get<I>(elements);
-      auto noFollowGuard = ctx.withFollowProbe(nullptr, nullptr, nullptr,
-                                               nullptr, nullptr, nullptr);
+      auto noFollowGuard = ctx.withNoFollowProbe();
       (void)noFollowGuard;
       if constexpr (requires {
                       current.parse_terminal_recovery_impl(ctx, facts);
@@ -951,8 +905,7 @@ private:
       }
       detail::ProbeRestoreScope guard{ctx};
       const auto &current = std::get<I>(elements);
-      auto noFollowGuard = ctx.withFollowProbe(nullptr, nullptr, nullptr,
-                                               nullptr, nullptr, nullptr);
+      auto noFollowGuard = ctx.withNoFollowProbe();
       (void)noFollowGuard;
       return probe_recoverable_at_entry_consumes_visible(current, ctx);
     }
@@ -979,11 +932,14 @@ private:
     const auto parseTail = [this, &ctx]() {
       return this->template parse_elements<Context, I + 1>(ctx);
     };
-    if (!preferTailEntryInsert) {
+    const auto skipOrParseCurrentThenTail = [&]() {
       return this->template nullable_element_allows_recovery_skip<I>()
                  ? parseTail()
                  : (this->template parse_current_sequence_element<I>(ctx, {}) &&
                     parseTail());
+    };
+    if (!preferTailEntryInsert) {
+      return skipOrParseCurrentThenTail();
     }
     auto noDeleteGuard = ctx.withEditPermissions(ctx.allowInsert, false);
     (void)noDeleteGuard;
@@ -993,18 +949,12 @@ private:
         (tailFirstRequired->getKind() == ElementKind::Literal ||
          tailFirstRequired->getKind() == ElementKind::TerminalRule);
     if (!tailStartsWithTerminal) {
-      return this->template nullable_element_allows_recovery_skip<I>()
-                 ? parseTail()
-                 : (this->template parse_current_sequence_element<I>(ctx, {}) &&
-                    parseTail());
+      return skipOrParseCurrentThenTail();
     }
     detail::ScopedBoolOverride leadingInsertGuard{
         ctx.allowLeadingTerminalInsertScope, true};
     (void)leadingInsertGuard;
-    return this->template nullable_element_allows_recovery_skip<I>()
-               ? parseTail()
-               : (this->template parse_current_sequence_element<I>(ctx, {}) &&
-                  parseTail());
+    return skipOrParseCurrentThenTail();
   }
 
   template <RecoveryParseModeContext Context, std::size_t I,
@@ -1051,37 +1001,26 @@ private:
   }
 
   template <RecoveryParseModeContext Context, std::size_t I>
+  // Shared by the current-failure and tail-failure paths. A tail plan never
+  // sets insertCurrentTerminal and passes allowDeleteRecovery=false; the
+  // current-failure path passes allowDeleteRecovery=true.
   bool replay_current_failure_sequence_attempt(
-      Context &ctx, const TerminalRecoveryState &terminalRecoveryState,
-      const SequenceRecoveryReplayPlan &plan) const {
+      Context &ctx, const detail::TerminalRecoveryFacts &facts,
+      const SequenceRecoveryReplayPlan &plan, bool allowDeleteRecovery) const {
     if (!plan.valid) {
       return false;
     }
     if (plan.insertCurrentTerminal) {
-      return replay_terminal_current_failure_attempt<I>(ctx, plan);
+      return replay_insert_current_terminal_attempt<I>(
+          ctx,
+          {.deleteCount = plan.currentTerminalDeleteRunCount,
+           .endsAfterHiddenTriviaExtension =
+               plan.currentTerminalDeleteRunEndsAfterHiddenTriviaExtension},
+          plan.allowNullableTailStop);
     }
     if (plan.reparseCurrentWithoutDelete) {
       return replay_current_without_delete_attempt<Context, I>(
-          ctx, terminalRecoveryState.facts, plan.allowDeleteRecovery);
-    }
-    if (plan.skipNullable) {
-      return replay_skip_nullable_attempt<Context, I>(
-          ctx, plan.preferTailEntryInsert);
-    }
-    return false;
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I>
-  bool replay_tail_failure_sequence_attempt(
-      Context &ctx,
-      const detail::TerminalRecoveryFacts &terminalRecoveryFacts,
-      const SequenceRecoveryReplayPlan &plan) const {
-    if (!plan.valid) {
-      return false;
-    }
-    if (plan.reparseCurrentWithoutDelete) {
-      return replay_current_without_delete_attempt<Context, I>(
-          ctx, terminalRecoveryFacts, plan.allowDeleteRecovery);
+          ctx, facts, allowDeleteRecovery);
     }
     if (plan.skipNullable) {
       return replay_skip_nullable_attempt<Context, I>(
@@ -1093,7 +1032,7 @@ private:
   [[nodiscard]] static bool terminal_allows_nullable_tail_stop(
       const TerminalRecoveryState &state,
       const SequenceFacts &sequenceFacts) noexcept {
-    return state.facts.triviaGap.hasHiddenGap() ||
+    return state.facts.triviaGap.hasHiddenGap ||
            sequenceFacts.suffixFullyNullable;
   }
 
@@ -1128,9 +1067,9 @@ private:
           currentSiteWithinRecoveryWindow) ||
          (state.hasRecoveredPrefixBeforeCurrent &&
           sequenceFacts.suffixFullyNullable &&
-          (state.facts.triviaGap.hasHiddenGap() || cursorStartsVisibleSource ||
+          (state.facts.triviaGap.hasHiddenGap || cursorStartsVisibleSource ||
            ctx.cursor() >= ctx.end))) &&
-        (state.facts.triviaGap.hasHiddenGap() || !hasLocalSequenceEdits);
+        (state.facts.triviaGap.hasHiddenGap || !hasLocalSequenceEdits);
     const bool scopedLeadingContinuationInsertAllowed =
         I == 0u && ctx.allowsScopedLeadingTerminalInsertRecovery() &&
         !ctx.allowDelete && sequenceFacts.currentOffsetWithinRecoveryWindow &&
@@ -1148,8 +1087,7 @@ private:
         (I != 0u || (!ctx.allowDelete &&
                      ctx.allowsScopedLeadingTerminalInsertRecovery()));
     const bool currentTerminalInsertionAllowed =
-        currentAllowsSyntheticInsert &&
-        !sequenceFacts.previousNullableSiblingOwnsCursor;
+        currentAllowsSyntheticInsert && !state.facts.localRecoveryBlocked;
     return {
         currentTerminalInsertionAllowed &&
             (recoveredPrefixImmediateInsertAllowed ||
@@ -1244,16 +1182,19 @@ private:
 
   template <RecoveryParseModeContext Context, std::size_t I,
             typename Checkpoint>
+  // Shared by the current-failure and tail-failure paths. The tail path passes
+  // allowInsert*=false (no terminal attempts), allowCurrentWithoutDeleteAttempt
+  // =true (unconditional reparse) and allowDeleteRecovery=false.
   SequenceRecoveryReplayPlan select_current_failure_sequence_attempt(
       Context &ctx, const Checkpoint &checkpoint,
-      const TerminalRecoveryState &terminalRecoveryState,
+      const detail::TerminalRecoveryFacts &facts,
       bool allowInsertCurrentTerminal,
       bool allowInsertCurrentAfterDeleteRun,
       bool allowCurrentWithoutDeleteAttempt,
       bool allowSkipNullableAttempt,
       bool preferTailEntryInsert,
-      bool allowTerminalNullableTailStop) const {
-    const auto &current = std::get<I>(elements);
+      bool allowTerminalNullableTailStop,
+      bool allowDeleteRecovery) const {
     SequenceRecoveryReplayPlan bestPlan{};
     detail::EditableRecoveryCandidate bestCandidate{};
     if (allowInsertCurrentTerminal || allowInsertCurrentAfterDeleteRun) {
@@ -1269,11 +1210,9 @@ private:
         consider_sequence_recovery_candidate(
             bestPlan, bestCandidate,
             {.valid = true,
-             .reparseCurrentWithoutDelete = true,
-             .allowDeleteRecovery = true},
+             .reparseCurrentWithoutDelete = true},
             evaluate_current_without_delete_attempt<Context, I>(
-                ctx, checkpoint, terminalRecoveryState.facts,
-                /*allowDeleteRecovery=*/true));
+                ctx, checkpoint, facts, allowDeleteRecovery));
       }
       if (allowSkipNullableAttempt) {
         ctx.rewind(checkpoint);
@@ -1294,11 +1233,9 @@ private:
   bool recover_after_current_parse_failure(
       Context &ctx, const Checkpoint &checkpoint,
       const TerminalRecoveryState &terminalRecoveryState,
-      bool nullableCurrentLooksStarted,
-      bool previousNullableSiblingOwnsCursor) const {
+      bool nullableCurrentLooksStarted) const {
     const auto &current = std::get<I>(elements);
-    const auto sequenceFacts =
-        build_sequence_facts<I>(ctx, previousNullableSiblingOwnsCursor);
+    const auto sequenceFacts = build_sequence_facts<I>(ctx);
     const auto [allowInsertCurrentTerminal, allowInsertCurrentAfterDeleteRun] =
         this->template build_current_failure_terminal_legality<I>(
             ctx, checkpoint, terminalRecoveryState, sequenceFacts);
@@ -1335,45 +1272,15 @@ private:
     }
     const auto bestPlan =
         this->template select_current_failure_sequence_attempt<Context, I>(
-            ctx, checkpoint, terminalRecoveryState,
+            ctx, checkpoint, terminalRecoveryState.facts,
             allowInsertCurrentTerminal,
             allowInsertCurrentAfterDeleteRun,
             allowCurrentWithoutDeleteAttempt,
             allowSkipNullableAttempt, preferTailEntryInsert,
-            allowTerminalNullableTailStop);
+            allowTerminalNullableTailStop, /*allowDeleteRecovery=*/true);
     ctx.rewind(checkpoint);
     return replay_current_failure_sequence_attempt<Context, I>(
-        ctx, terminalRecoveryState, bestPlan);
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I,
-            typename Checkpoint>
-  SequenceRecoveryReplayPlan select_tail_failure_sequence_attempt(
-      Context &ctx, const Checkpoint &checkpoint,
-      const detail::TerminalRecoveryFacts &terminalRecoveryFacts,
-      bool preferTailEntryInsert,
-      bool allowSkipNullableAttempt) const {
-    SequenceRecoveryReplayPlan bestPlan{};
-    detail::EditableRecoveryCandidate bestCandidate{};
-    ctx.rewind(checkpoint);
-    this->consider_sequence_recovery_candidate(
-        bestPlan, bestCandidate,
-        {.valid = true,
-         .reparseCurrentWithoutDelete = true},
-        evaluate_current_without_delete_attempt<Context, I>(
-            ctx, checkpoint, terminalRecoveryFacts,
-            /*allowDeleteRecovery=*/false));
-    if (allowSkipNullableAttempt) {
-      ctx.rewind(checkpoint);
-      this->consider_sequence_recovery_candidate(
-          bestPlan, bestCandidate,
-          {.valid = true,
-           .skipNullable = true,
-           .preferTailEntryInsert = preferTailEntryInsert},
-          evaluate_skip_nullable_attempt<Context, I>(
-              ctx, checkpoint, preferTailEntryInsert));
-    }
-    return bestPlan;
+        ctx, terminalRecoveryState.facts, bestPlan, /*allowDeleteRecovery=*/true);
   }
 
   template <RecoveryParseModeContext Context, std::size_t I,
@@ -1392,21 +1299,28 @@ private:
       }
       ctx.rewind(checkpointAfterCurrent);
       const auto sequenceFacts = build_sequence_facts<I>(ctx);
-      const bool preferTailEntryInsert =
+      const bool recoverableSuffix =
           sequenceFacts.recoverableSuffixStartsAtCurrentCursor;
+      // The tail path is the current-failure path minus terminal attempts, with
+      // an unconditional reparse and allowDeleteRecovery=false.
       const auto bestPlan =
-          this->template select_tail_failure_sequence_attempt<Context, I>(
+          this->template select_current_failure_sequence_attempt<Context, I>(
               ctx, checkpoint, terminalRecoveryFacts,
-              preferTailEntryInsert,
-              /*allowSkipNullableAttempt=*/
-              sequenceFacts.recoverableSuffixStartsAtCurrentCursor);
+              /*allowInsertCurrentTerminal=*/false,
+              /*allowInsertCurrentAfterDeleteRun=*/false,
+              /*allowCurrentWithoutDeleteAttempt=*/true,
+              /*allowSkipNullableAttempt=*/recoverableSuffix,
+              /*preferTailEntryInsert=*/recoverableSuffix,
+              /*allowTerminalNullableTailStop=*/false,
+              /*allowDeleteRecovery=*/false);
       if (!bestPlan.valid) {
         ctx.rewind(checkpointAfterCurrent);
         return false;
       }
       ctx.rewind(checkpoint);
-      if (replay_tail_failure_sequence_attempt<Context, I>(
-              ctx, terminalRecoveryFacts, bestPlan)) {
+      if (replay_current_failure_sequence_attempt<Context, I>(
+              ctx, terminalRecoveryFacts, bestPlan,
+              /*allowDeleteRecovery=*/false)) {
         return true;
       }
       ctx.rewind(checkpointAfterCurrent);
@@ -1518,9 +1432,9 @@ private:
       const bool currentMatchesStrict =
           detail::attempt_parse_without_side_effects(ctx, current);
       if (currentMatchesStrict) {
-        if constexpr (I + 1 == sizeof...(Elements)) {
-          return false;
-        }
+        // When `current` is the last element, analyze_suffix_entry_facts<count>
+        // returns {} (strictStartsAtCurrentCursor=false), so this also covers
+        // the "nothing follows" case without a separate guard.
         const auto suffixEntryFacts =
             this->template analyze_suffix_entry_facts<I + 1>(ctx);
         if (!suffixEntryFacts.strictStartsAtCurrentCursor) {
@@ -1764,24 +1678,6 @@ private:
                     ctx, *deleteRun, allowNullableTailStop);
               }));
     }
-  }
-
-  template <std::size_t I>
-  bool replay_terminal_current_failure_attempt(
-      RecoveryContext &ctx,
-      const SequenceRecoveryReplayPlan &plan) const {
-    if (!plan.valid) {
-      return false;
-    }
-    if (plan.insertCurrentTerminal) {
-      return this->template replay_insert_current_terminal_attempt<I>(
-          ctx,
-          {.deleteCount = plan.currentTerminalDeleteRunCount,
-           .endsAfterHiddenTriviaExtension =
-               plan.currentTerminalDeleteRunEndsAfterHiddenTriviaExtension},
-          plan.allowNullableTailStop);
-    }
-    return false;
   }
 
   template <std::size_t I>

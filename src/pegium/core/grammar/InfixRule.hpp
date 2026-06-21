@@ -3,17 +3,9 @@
 /// Grammar contracts for precedence-aware infix parsing.
 
 #include <cstddef>
-#include <functional>
-#include <memory>
-#include <vector>
 #include <pegium/core/grammar/AbstractRule.hpp>
-#include <pegium/core/grammar/RuleValue.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
-
-namespace pegium {
-struct ReferenceHandle;
-}
 
 namespace pegium::parser {
 struct ValueBuildContext;
@@ -33,7 +25,6 @@ struct InfixOperator : AbstractElement {
 
   virtual const AbstractElement *getOperator() const noexcept = 0;
 
-  virtual RuleValue getValue(const CstNodeView &node) const = 0;
   constexpr ~InfixOperator() noexcept override = default;
   void print(std::ostream &os) const override;
 };

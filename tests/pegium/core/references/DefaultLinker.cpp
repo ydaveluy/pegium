@@ -449,20 +449,23 @@ TEST(DefaultLinkerTest,
   const ReferenceInfo info{refFixture.referrer, "a", assignment};
 
   const auto candidate = linker->getCandidate(info);
-  ASSERT_TRUE(std::holds_alternative<workspace::AstNodeDescription>(candidate));
-  EXPECT_EQ(std::get<workspace::AstNodeDescription>(candidate).name, "a");
+  ASSERT_TRUE(
+      std::holds_alternative<const workspace::AstNodeDescription *>(candidate));
+  EXPECT_EQ(std::get<const workspace::AstNodeDescription *>(candidate)->name,
+            "a");
 
   const auto candidates = linker->getCandidates(info);
-  ASSERT_TRUE(
-      std::holds_alternative<std::vector<workspace::AstNodeDescription>>(
-          candidates));
+  ASSERT_TRUE(std::holds_alternative<
+              std::vector<const workspace::AstNodeDescription *>>(candidates));
   ASSERT_EQ(
-      std::get<std::vector<workspace::AstNodeDescription>>(candidates).size(),
+      std::get<std::vector<const workspace::AstNodeDescription *>>(candidates)
+          .size(),
       1u);
-  EXPECT_EQ(std::get<std::vector<workspace::AstNodeDescription>>(candidates)
-                .front()
-                .name,
-            "a");
+  EXPECT_EQ(
+      std::get<std::vector<const workspace::AstNodeDescription *>>(candidates)
+          .front()
+          ->name,
+      "a");
 }
 
 TEST(DefaultLinkerTest, UnresolvedCandidateMessageIncludesReferenceType) {
@@ -520,11 +523,11 @@ TEST(DefaultLinkerTest, GetCandidatesDeduplicatesDescriptionsByNodeKey) {
   const ReferenceInfo info{refFixture.referrer, "a", assignment};
 
   const auto candidates = linker->getCandidates(info);
-  ASSERT_TRUE(
-      std::holds_alternative<std::vector<workspace::AstNodeDescription>>(
-          candidates));
+  ASSERT_TRUE(std::holds_alternative<
+              std::vector<const workspace::AstNodeDescription *>>(candidates));
   EXPECT_EQ(
-      std::get<std::vector<workspace::AstNodeDescription>>(candidates).size(),
+      std::get<std::vector<const workspace::AstNodeDescription *>>(candidates)
+          .size(),
       1u);
 }
 

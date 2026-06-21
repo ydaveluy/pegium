@@ -20,21 +20,6 @@ std::pair<TextOffset, TextOffset> range_of(const CstNodeView &node) noexcept {
 }
 
 std::pair<TextOffset, TextOffset>
-range_for_feature(const AstNode &node, std::string_view feature) noexcept {
-  if (!node.hasCstNode()) {
-    return {0u, 0u};
-  }
-  const auto cstNode = node.getCstNode();
-
-  if (auto featureNode = find_node_for_feature(cstNode, feature);
-      featureNode.has_value()) {
-    return range_of(*featureNode);
-  }
-
-  return {cstNode.getBegin(), cstNode.getEnd()};
-}
-
-std::pair<TextOffset, TextOffset>
 range_for_feature(const AstNode &node, std::string_view feature,
                   std::size_t index) noexcept {
   if (!node.hasCstNode()) {
@@ -42,29 +27,9 @@ range_for_feature(const AstNode &node, std::string_view feature,
   }
   const auto cstNode = node.getCstNode();
 
-  const auto matches = find_nodes_for_feature(cstNode, feature);
-  if (index < matches.size()) {
-    return range_of(matches[index]);
-  }
-
-  return {cstNode.getBegin(), cstNode.getEnd()};
-}
-
-std::pair<TextOffset, TextOffset>
-range_for_name_like(const AstNode &node, std::string_view name) noexcept {
-  if (!node.hasCstNode()) {
-    return {0u, 0u};
-  }
-  const auto cstNode = node.getCstNode();
-
-  if (auto featureNode = find_node_for_feature(cstNode, "name");
+  if (auto featureNode = find_node_for_feature(cstNode, feature, index);
       featureNode.has_value()) {
     return range_of(*featureNode);
-  }
-
-  if (auto nameNode = find_name_like_node(cstNode, name);
-      nameNode.has_value()) {
-    return range_of(*nameNode);
   }
 
   return {cstNode.getBegin(), cstNode.getEnd()};

@@ -157,6 +157,27 @@ TEST(RecoveryTest, GenericLiteralFuzzyRecoveryRepairsSingleEditOsaShapes) {
   }
 }
 
+TEST(RecoveryTest, NonAsciiKeywordFuzzyRecoveryRepairsSingleCodepointTypo) {
+  // End-to-end codepoint-granular fuzzy repair: an accented keyword "modèle"
+  // (6 codepoints / 7 bytes) typed "modele" is a single codepoint substitution
+  // (è -> e). The codepoint DP scores it as one Replace edit and the recovered
+  // span covers the whole 6-byte input (one diagnostic), not a byte-split
+  // sub+insert pair.
+  const auto skipper = SkipperBuilder().build();
+  DataTypeRule<std::string> rule{"Rule", "mod\xC3\xA8le"_kw};
+  const auto result = parseDataType(rule, "modele", skipper);
+
+  ASSERT_TRUE(result.value);
+  EXPECT_TRUE(result.fullMatch);
+  EXPECT_EQ(result.parsedLength, 6u);
+  ASSERT_EQ(result.parseDiagnostics.size(), 1u)
+      << dump_parse_diagnostics(result.parseDiagnostics);
+  EXPECT_EQ(result.parseDiagnostics.front().kind,
+            ParseDiagnosticKind::Replaced);
+  EXPECT_EQ(result.parseDiagnostics.front().beginOffset, 0u);
+  EXPECT_EQ(result.parseDiagnostics.front().endOffset, 6u);
+}
+
 TEST(RecoveryTest, AnyCharacterRecoveryDoesNotInventMissingCharacter) {
   DataTypeRule<std::string_view> rule{"Rule", dot};
   const auto result = parseDataType(rule, "", SkipperBuilder().build());
@@ -349,6 +370,49 @@ TEST(RecoveryTest,
   EXPECT_EQ(parsedModule->name, "basicMath");
 }
 
+TEST(RecoveryTest, KeywordGluedToShortNameKeepsKeywordAndContinues) {
+  // `Moduleb` = keyword `module` glued to a short name `b`. The whole-word
+  // fuzzy Replace (`Moduleb` -> `module`, distance 1) is cheap and would swallow
+  // the name, then delete the trailing statement. The keep-keyword split-Insert
+  // (insert a separator at 6, name `b`) is strictly more faithful and lets the
+  // `def a: 5;` statement parse. The forbid-Replace sibling probe must pick it.
+  const auto whitespace = some(s);
+  const auto skipper = SkipperBuilder().ignore(whitespace).build();
+
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  TerminalRule<int> number{"NUMBER", some(d)};
+  ParserRule<RecoveryDefinition> definition{
+      "Definition", "def"_kw.i() + assign<&RecoveryDefinition::name>(id) +
+                        ":"_kw + assign<&RecoveryDefinition::value>(number) +
+                        ";"_kw};
+  ParserRule<pegium::AstNode> statement{"Statement", definition};
+  ParserRule<RecoveryModule> module{
+      "Module", "module"_kw.i() + assign<&RecoveryModule::name>(id) +
+                    many(append<&RecoveryModule::statements>(statement))};
+
+  const auto result = parseRule(module, "Moduleb\n\ndef a: 5;", skipper);
+  const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+
+  ASSERT_TRUE(result.value) << parseDump;
+  EXPECT_TRUE(result.fullMatch) << parseDump;
+
+  // Exactly one edit: insert the missing separator after the keyword.
+  ASSERT_EQ(result.parseDiagnostics.size(), 1u) << parseDump;
+  EXPECT_EQ(result.parseDiagnostics[0].kind, ParseDiagnosticKind::Inserted)
+      << parseDump;
+  EXPECT_EQ(result.parseDiagnostics[0].offset, 6u) << parseDump;
+  EXPECT_FALSE(std::ranges::any_of(
+      result.parseDiagnostics, [](const ParseDiagnostic &diagnostic) {
+        return diagnostic.kind == ParseDiagnosticKind::Replaced ||
+               diagnostic.kind == ParseDiagnosticKind::Deleted;
+      })) << parseDump;
+
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
+  ASSERT_NE(parsedModule, nullptr) << parseDump;
+  EXPECT_EQ(parsedModule->name, "b") << parseDump;
+  EXPECT_EQ(parsedModule->statements.size(), 1u) << parseDump;
+}
+
 TEST(RecoveryTest, MissingKeywordCodepointCanRecoverLiteralAndContinue) {
   const auto whitespace = some(s);
   const auto skipper = SkipperBuilder().ignore(whitespace).build();
@@ -379,7 +443,7 @@ TEST(RecoveryTest, MissingKeywordCodepointCanRecoverLiteralAndContinue) {
   EXPECT_EQ(parsedModule->name, "basicMath");
 }
 
-TEST(RecoveryTest, MissingKeywordSuffixCanRecoverLiteralAndContinue) {
+TEST(RecoveryTest, KeywordLiteralFuzzyRepairContinues) {
   const auto whitespace = some(s);
   const auto skipper = SkipperBuilder().ignore(whitespace).build();
 
@@ -387,18 +451,32 @@ TEST(RecoveryTest, MissingKeywordSuffixCanRecoverLiteralAndContinue) {
   ParserRule<RecoveryModule> module{
       "Module", "module"_kw + assign<&RecoveryModule::name>(id)};
 
-  const auto result = parseRule(module, "Mod basicMath", skipper);
+  struct Case {
+    const char *name;
+    std::string_view input;
+  };
+  static const Case cases[] = {
+      {"MissingKeywordSuffix", "Mod basicMath"},
+      {"ExtraKeywordCodepoint", "modulee basicMath"},
+      {"TransposedKeywordCodepoints", "modlue basicMath"},
+  };
 
-  ASSERT_TRUE(result.value);
-  EXPECT_TRUE(result.fullMatch);
-  EXPECT_TRUE(std::ranges::any_of(
-      result.parseDiagnostics, [](const ParseDiagnostic &diagnostic) {
-        return diagnostic.kind == ParseDiagnosticKind::Replaced;
-      }));
+  for (const auto &c : cases) {
+    SCOPED_TRACE(c.name);
 
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
-  ASSERT_NE(parsedModule, nullptr);
-  EXPECT_EQ(parsedModule->name, "basicMath");
+    const auto result = parseRule(module, c.input, skipper);
+
+    ASSERT_TRUE(result.value);
+    EXPECT_TRUE(result.fullMatch);
+    EXPECT_TRUE(std::ranges::any_of(
+        result.parseDiagnostics, [](const ParseDiagnostic &diagnostic) {
+          return diagnostic.kind == ParseDiagnosticKind::Replaced;
+        }));
+
+    auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
+    ASSERT_NE(parsedModule, nullptr);
+    EXPECT_EQ(parsedModule->name, "basicMath");
+  }
 }
 
 TEST(RecoveryTest, HiddenGapWordLikeLiteralCanUseIdentifierLikeFuzzyRepair) {
@@ -443,15 +521,18 @@ TEST(RecoveryTest,
 TEST(RecoveryTest,
      WordLikeLiteralFuzzyAdmissibilityUsesSharedLexicalAndTriviaFacts) {
   const auto profile = detail::classify_literal_recovery_profile("module");
+  // ASCII fixture: consumedCodepoints == consumed (one byte per codepoint).
+  // The half-length floor reads consumedCodepoints, so set both in lockstep.
   detail::LiteralFuzzyCandidate candidate{
       .consumed = 6u,
+      .consumedCodepoints = 6u,
       .distance = 2u,
       .operationCount = 2u,
-      .cost = detail::make_recovery_cost(2u, 4u, 4u),
+      .cost = detail::make_recovery_cost(2u, 4u),
       .substitutionCount = 1u,
   };
   const detail::TerminalRecoveryFacts hiddenGapFacts{
-      .triviaGap = {.hiddenCodepointSpan = 1u,
+      .triviaGap = {.hasHiddenGap = true,
                     .visibleSourceAfterLocalSkip = false},
       .previousElementIsTerminalish = false,
   };
@@ -478,7 +559,7 @@ TEST(
       .consumed = 2u,
       .distance = 1u,
       .operationCount = 1u,
-      .cost = detail::make_recovery_cost(1u, 1u, 1u),
+      .cost = detail::make_recovery_cost(1u, 1u),
       .substitutionCount = 0u,
   };
 
@@ -501,6 +582,34 @@ TEST(
 }
 
 TEST(RecoveryTest,
+     LongLiteralFuzzyAdmissibilityRequiresHalfConsumption) {
+  // Pins the half-consumption guard: a low-consumption fuzzy match like
+  // `re` -> `environment` survives the cost ceiling (length normalization keeps
+  // its primaryRankCost at the limit) but consumes only 2 of 11 codepoints, so
+  // it must be rejected; raising consumption to >= len/2 admits the same shape.
+  // Only `consumed` differs between the two checks, so this isolates the floor.
+  const auto profile = detail::classify_literal_recovery_profile("environment");
+  // 11 codepoints -> rank limit min(5, 11+3) = 5; half-length floor = 5.
+  // ASCII fixture: consumedCodepoints == consumed; the floor reads
+  // consumedCodepoints, so move them in lockstep across the two checks.
+  detail::LiteralFuzzyCandidate candidate{
+      .consumed = 2u,
+      .consumedCodepoints = 2u,
+      .distance = 9u,
+      .operationCount = 9u,
+      .cost = detail::make_recovery_cost(9u, 5u),
+      .substitutionCount = 0u,
+  };
+  EXPECT_FALSE(
+      detail::allows_literal_fuzzy_candidate(candidate, profile, {}, true));
+
+  candidate.consumed = 5u;
+  candidate.consumedCodepoints = 5u;
+  EXPECT_TRUE(
+      detail::allows_literal_fuzzy_candidate(candidate, profile, {}, true));
+}
+
+TEST(RecoveryTest,
      OperatorLikeTerminalAllowsNearbyDeleteScanAfterCompactHiddenGap) {
   auto skipper = SkipperBuilder().build();
   const auto matchArrow = [](const char *scanCursor) noexcept {
@@ -514,7 +623,7 @@ TEST(RecoveryTest,
   RecoveryContext hiddenGapCtx{hiddenGapBuilder, skipper, hiddenGapRecorder};
   hiddenGapCtx.skip();
   const detail::TerminalRecoveryFacts facts{
-      .triviaGap = {.hiddenCodepointSpan = 3u,
+      .triviaGap = {.hasHiddenGap = true,
                     .visibleSourceAfterLocalSkip = false},
       .previousElementIsTerminalish = false,
   };
@@ -537,7 +646,7 @@ TEST(RecoveryTest,
   RecoveryContext hiddenGapCtx{hiddenGapBuilder, skipper, hiddenGapRecorder};
   hiddenGapCtx.skip();
   const detail::TerminalRecoveryFacts facts{
-      .triviaGap = {.hiddenCodepointSpan = 1u,
+      .triviaGap = {.hasHiddenGap = true,
                     .visibleSourceAfterLocalSkip = false},
       .previousElementIsTerminalish = false,
   };
@@ -568,34 +677,12 @@ TEST(RecoveryTest,
   RecoveryContext restrictedCtx{restrictedBuilder, skipper, restrictedRecorder};
   restrictedCtx.skip();
   const detail::TerminalRecoveryFacts facts{
-      .triviaGap = {.hiddenCodepointSpan = 0u,
+      .triviaGap = {.hasHiddenGap = false,
                     .visibleSourceAfterLocalSkip = false},
       .previousElementIsTerminalish = true,
   };
   EXPECT_FALSE(
       detail::probe_nearby_delete_scan_match(restrictedCtx, matchArrow, facts));
-}
-
-TEST(RecoveryTest, ExtraKeywordCodepointCanRecoverLiteralAndContinue) {
-  const auto whitespace = some(s);
-  const auto skipper = SkipperBuilder().ignore(whitespace).build();
-
-  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
-  ParserRule<RecoveryModule> module{
-      "Module", "module"_kw + assign<&RecoveryModule::name>(id)};
-
-  const auto result = parseRule(module, "modulee basicMath", skipper);
-
-  ASSERT_TRUE(result.value);
-  EXPECT_TRUE(result.fullMatch);
-  EXPECT_TRUE(std::ranges::any_of(
-      result.parseDiagnostics, [](const ParseDiagnostic &diagnostic) {
-        return diagnostic.kind == ParseDiagnosticKind::Replaced;
-      }));
-
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
-  ASSERT_NE(parsedModule, nullptr);
-  EXPECT_EQ(parsedModule->name, "basicMath");
 }
 
 TEST(RecoveryTest, SymbolicLiteralOnlyAllowsSingleNonSubstitutiveFuzzyRepair) {
@@ -615,28 +702,6 @@ TEST(RecoveryTest, SymbolicLiteralOnlyAllowsSingleNonSubstitutiveFuzzyRepair) {
   ASSERT_FALSE(substitutedCharacter.parseDiagnostics.empty());
   EXPECT_EQ(substitutedCharacter.parseDiagnostics.front().kind,
             ParseDiagnosticKind::Incomplete);
-}
-
-TEST(RecoveryTest, TransposedKeywordCodepointsCanRecoverLiteralAndContinue) {
-  const auto whitespace = some(s);
-  const auto skipper = SkipperBuilder().ignore(whitespace).build();
-
-  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
-  ParserRule<RecoveryModule> module{
-      "Module", "module"_kw + assign<&RecoveryModule::name>(id)};
-
-  const auto result = parseRule(module, "modlue basicMath", skipper);
-
-  ASSERT_TRUE(result.value);
-  EXPECT_TRUE(result.fullMatch);
-  EXPECT_TRUE(std::ranges::any_of(
-      result.parseDiagnostics, [](const ParseDiagnostic &diagnostic) {
-        return diagnostic.kind == ParseDiagnosticKind::Replaced;
-      }));
-
-  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
-  ASSERT_NE(parsedModule, nullptr);
-  EXPECT_EQ(parsedModule->name, "basicMath");
 }
 
 TEST(RecoveryTest,

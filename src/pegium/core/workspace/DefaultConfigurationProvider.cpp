@@ -19,7 +19,7 @@ void DefaultConfigurationProvider::initialize(const InitializeParams &params) {
 std::future<void>
 DefaultConfigurationProvider::initialized(const InitializedParams &params) {
   if (!_workspaceConfigurationSupported) {
-    _ready = true;
+    _ready.store(true, std::memory_order_release);
     std::promise<void> promise;
     promise.set_value();
     return promise.get_future();
@@ -65,11 +65,13 @@ DefaultConfigurationProvider::initialized(const InitializedParams &params) {
       }
     }
 
-    _ready = true;
+    _ready.store(true, std::memory_order_release);
   });
 }
 
-bool DefaultConfigurationProvider::isReady() const noexcept { return _ready; }
+bool DefaultConfigurationProvider::isReady() const noexcept {
+  return _ready.load(std::memory_order_acquire);
+}
 
 void DefaultConfigurationProvider::updateConfiguration(
     const ConfigurationChangeParams &params) {

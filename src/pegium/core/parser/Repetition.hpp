@@ -18,7 +18,6 @@
 #include <pegium/core/parser/EditableRecoverySupport.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/ExpectFrontier.hpp>
-#include <pegium/core/parser/IterationBoundaryDecision.hpp>
 #include <pegium/core/parser/ParseAttempt.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
@@ -45,10 +44,6 @@ struct Repetition : grammar::Repetition {
   static_assert(!(min == 0 && max == 0),
                 "A Repetition cannot have both min and max set to 0.");
 
-  /// Upper bound on recovery candidates evaluated per iteration cycle.
-  /// Mirrors the static `IterationPlanList` size; bumping one without
-  /// the other will silently drop attempts.
-  static constexpr std::size_t kMaxRecoveryCandidatesPerCall = 4U;
 
   explicit constexpr Repetition(Element &&element)
     requires(!std::is_lvalue_reference_v<Element>)
@@ -182,9 +177,23 @@ private:
     }
   }
 
+  /// Recovery-mode entry point, dispatched at compile time on the repetition
+  /// shape (after the descent-inactive guard falls back to the strict path):
+  ///   - is_optional (`Repetition<0,1>`): strict no-edit attempt first; on
+  ///     failure rewind, then a fast attempt gated by `has_entry_recovery_signal`
+  ///     (no signal and not started => skip the option), then one recovery
+  ///     iteration, then skip-if the suffix stays recoverable without it.
+  ///   - is_star (`Repetition<0,N>`): `parse_zero_min_repetition_recovery`.
+  ///   - is_plus (`Repetition<1,N>`): one mandatory recovery iteration, then a
+  ///     skip-between loop until an iteration fails (a blocked frontier either
+  ///     stops cleanly after window progress or fails the rule).
+  ///   - is_fixed (`min == max`): exactly `min` strict parses, no recovery.
+  ///   - general (`min..max`): `min` mandatory strict parses, then the zero-min
+  ///     recovery (if `min == 0`) or the plus-style skip-between loop up to max.
+  /// The per-iteration plan choice lives in `try_recovery_iteration` ->
+  /// `enumerate_iteration_plans`.
   bool parse_recovery_impl(RecoveryContext &ctx) const {
-    if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows() &&
-        !ctx.allowsCompletedWindowContinuationRecovery()) {
+    if (ctx.recoveryDescentInactive()) {
       TrackedParseContext &strictCtx = ctx;
       return parse_strict_impl(strictCtx);
     }
@@ -192,14 +201,14 @@ private:
     if constexpr (is_optional) {
       const auto checkpoint = ctx.mark();
       const char *const savedFurthestExploredCursor =
-          ctx.furthestExploredCursor();
+          ctx.maxCursor();
       const auto noEditObservation = observe_no_edit_parse(ctx, _element);
       if (noEditObservation.matched) {
         return finalize_optional_strict_success(ctx, checkpoint,
                                                 savedFurthestExploredCursor);
       }
       ctx.rewind(checkpoint);
-      ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+      ctx.restoreMaxCursor(savedFurthestExploredCursor);
       PEGIUM_STEP_TRACE_INC(detail::StepCounter::RepetitionFastAttempts);
       const bool startedWithoutEdits = noEditObservation.startedWithoutEdits;
       PEGIUM_STEP_TRACE_INC(
@@ -212,7 +221,7 @@ private:
         return true;
       }
       ctx.rewind(checkpoint);
-      ctx.bumpFurthestExploredCursor(savedFurthestExploredCursor);
+      ctx.bumpMaxCursor(savedFurthestExploredCursor);
       const bool suffixRecoverableWithoutOptional =
           is_locally_recoverable_after_iteration_skip(ctx);
       // A speculative entry-recovery signal alone must not force an optional
@@ -411,22 +420,15 @@ private:
     DeleteRetry,
   };
 
-  enum class IterationRecoveryStrength : std::uint8_t {
-    Strong,
-    Weak,
-  };
-
   struct IterationAttempt {
-    IterationReplayKind kind = IterationReplayKind::NoInsert;
-    /// Replay reads this candidate's mutable state (`cursorOffset`,
-    /// `continuesAfterFirstEdit`) and the dispatch's non-decision
-    /// sites consult it. Decision-relevant projections live on
-    /// `envelope`.
-    detail::StructuralProgressRecoveryCandidate candidate{};
-    /// Closed-vocabulary view consumed by admission,
-    /// family-redundancy and ranking. Built from `candidate` via
-    /// `to_candidate_envelope` at every construction site.
-    detail::CandidateEnvelope envelope{};
+    // NB: the replay kind is authoritatively carried by the IterationReplayPlan
+    // (winningPlan / plan), so it is intentionally not mirrored here.
+    /// Replay reads this candidate's progress fields. Repetition uses the shared
+    /// `EditableRecoveryCandidate` carrier with `keyProgressOffset` set to the
+    /// RAW iteration cursor (Invariant 2). The decision-relevant
+    /// `CandidateEnvelope` view (key, family-redundancy filters) is projected on
+    /// demand in `consider_iteration_attempt` rather than mirrored here.
+    detail::EditableRecoveryCandidate candidate{};
   };
 
   struct IterationObservation {
@@ -447,56 +449,35 @@ private:
 
   using IterationPlanList = std::array<IterationReplayPlan, 4>;
 
+  /// Who owns the next visible token at an iteration boundary (see
+  /// `decide_iteration_plans`): `Local` = the repeated element may recover;
+  /// `Parent` = the parent FOLLOW recovers + consumes visible at the same
+  /// cursor, so a weak/synthetic local start must defer (BOTH retry flags are
+  /// then forced false LAST).
+  enum class BoundaryOwnership : std::uint8_t { Local, Parent };
+
+  /// Layer-1 facts observed at an iteration boundary
+  /// (`observe_iteration_signals`) and consumed by `decide_iteration_plans`.
+  /// `stopCleanly` short-circuits the whole enumeration; when it is set the
+  /// boundary-ownership probes are NOT run and `boundaryOwnership` stays
+  /// `Local`.
+  struct IterationSignals {
+    bool stopCleanly = false;
+    bool noInsertCandidateLegal = false;
+    bool firstZeroMinIteration = false;
+    bool retryContinuesStartedIteration = false;
+    bool noInsertProgressed = false;
+    bool iterationStarted = false;
+    bool speculativeSyntheticSingleLeafRetryAfterRecoveredIteration = false;
+    BoundaryOwnership boundaryOwnership = BoundaryOwnership::Local;
+  };
+
   struct IterationSelectionResult {
     IterationAttempt bestAttempt{};
     IterationReplayPlan winningPlan{
         .kind = IterationReplayKind::NoInsert,
     };
   };
-
-  /// Per-anchor family-redundancy filter (NOT replay-equivalence
-  /// dominance): a no-edit iteration attempt is outranked by a
-  /// candidate whose edits start exactly at the no-edit attempt's
-  /// boundary, progress strictly further, and continue cleanly after
-  /// the edit.
-  ///
-  /// The two attempts carry DIFFERENT scripts. Applied as a redundancy
-  /// filter before the central `is_better_recovery_key` ranking; that
-  /// ranking remains the only ordering authority for candidates that
-  /// survive the filter. `candidate` must be non-`Empty` (it carries
-  /// the extension), `committed` must be `Empty` (it is the no-edit
-  /// reference).
-  [[nodiscard]] static bool boundary_repair_outranks_no_edit_iteration(
-      const IterationAttempt &candidate,
-      const IterationAttempt &committed) noexcept {
-    // Delegates to the free function in `CandidateEnvelope.hpp`. The
-    // free function carries the `candidate.origin == committed.origin`
-    // parent/child guard: dominance must not cross parent/child.
-    return detail::boundary_repair_outranks_no_edit_iteration(
-        candidate.envelope, committed.envelope);
-  }
-
-  /// Per-anchor family-redundancy filter (NOT replay-equivalence
-  /// dominance, NOT a ranking comparator): `next` outranks `current`
-  /// when both anchor at the same first-edit offset, `next` is
-  /// classified `ExtendedCommittedPrefix` (its replay prefix extends
-  /// the committed-prefix family with destructive edits), `current`
-  /// shares a non-`Empty` prefix at the same anchor, and `next`
-  /// progresses strictly further at strictly higher cost.
-  ///
-  /// Applied as a redundancy filter before the central
-  /// `is_better_structural_progress_recovery_candidate` ranking,
-  /// mirroring `OrderedChoice::extension_outranks_anchor_base`.
-  [[nodiscard]] static bool
-  destructive_extension_outranks_anchor_base(
-      const IterationAttempt &next,
-      const IterationAttempt &current) noexcept {
-    // Delegates to the free function in `CandidateEnvelope.hpp`. The
-    // free function carries the `next.origin == current.origin`
-    // parent/child guard: dominance must not cross parent/child.
-    return detail::destructive_extension_outranks_anchor_base(
-        next.envelope, current.envelope);
-  }
 
   /// Selects the better iteration attempt. Shape:
   /// `admission -> family-redundancy -> ranking`, mirroring
@@ -510,32 +491,45 @@ private:
   static void consider_iteration_attempt(IterationSelectionResult &selection,
                                          const IterationAttempt &candidate,
                                          const IterationReplayPlan &plan) {
-    if (!candidate.envelope.key.matched) {
+    if (!candidate.candidate.matched) {
       return;
     }
-    if (selection.bestAttempt.envelope.key.matched) {
-      if (destructive_extension_outranks_anchor_base(candidate,
-                                                    selection.bestAttempt)) {
-        selection.bestAttempt = candidate;
-        selection.winningPlan = plan;
-        return;
-      }
-      if (destructive_extension_outranks_anchor_base(selection.bestAttempt,
-                                                    candidate)) {
-        return;
-      }
-      if (boundary_repair_outranks_no_edit_iteration(
-              candidate, selection.bestAttempt)) {
-        selection.bestAttempt = candidate;
-        selection.winningPlan = plan;
-        return;
-      }
-    }
-    if (!selection.bestAttempt.envelope.key.matched ||
-        detail::is_better_recovery_key(candidate.envelope.key,
-                                        selection.bestAttempt.envelope.key)) {
+    const auto take = [&]() {
       selection.bestAttempt = candidate;
       selection.winningPlan = plan;
+    };
+    if (!selection.bestAttempt.candidate.matched) {
+      take();
+      return;
+    }
+    // The decision-relevant `CandidateEnvelope` is a pure projection of the
+    // Project both sides here (both come from THIS Repetition's iteration
+    // enumeration) instead of storing a mirror on every IterationAttempt. The
+    // family-redundancy free functions only ever compare candidates from one
+    // producer, so there is no cross-combinator origin axis to carry.
+    const auto candidateEnvelope =
+        detail::to_candidate_envelope(candidate.candidate);
+    const auto bestEnvelope =
+        detail::to_candidate_envelope(selection.bestAttempt.candidate);
+    if (detail::extension_dominates(
+            candidateEnvelope, bestEnvelope,
+            detail::ExtensionDominanceGuard::WhenCurrentIsExtended)) {
+      take();
+      return;
+    }
+    if (detail::extension_dominates(
+            bestEnvelope, candidateEnvelope,
+            detail::ExtensionDominanceGuard::WhenCurrentIsExtended)) {
+      return;
+    }
+    if (detail::boundary_repair_outranks_no_edit_iteration(candidateEnvelope,
+                                                           bestEnvelope)) {
+      take();
+      return;
+    }
+    if (detail::is_better_recovery_key(candidateEnvelope.key,
+                                       bestEnvelope.key)) {
+      take();
     }
   }
 
@@ -566,13 +560,13 @@ private:
     return singleIndex;
   }
 
-  [[nodiscard]] detail::StructuralProgressRecoveryCandidate
+  [[nodiscard]] detail::EditableRecoveryCandidate
   capture_iteration_candidate(
       RecoveryContext &ctx,
       const RecoveryContext::Checkpoint &iterationCheckpoint,
       std::size_t recoveryEditCountBefore) const {
-    bool continuesAfterFirstEdit = true;
     TextOffset firstEditOffset = std::numeric_limits<TextOffset>::max();
+    TextOffset lastEditEndOffset = 0;
     const bool hadEdits = ctx.recoveryEditCount() > recoveryEditCountBefore;
     bool hasDestructiveEdit = false;
     if (hadEdits) {
@@ -580,51 +574,51 @@ private:
           ctx.recoveryEditsView(), recoveryEditCountBefore);
       firstEditOffset = editSummary.firstEditBeginOffset;
       hasDestructiveEdit = editSummary.hasDestructiveEdit;
-      continuesAfterFirstEdit =
-          detail::post_skip_cursor_offset(ctx) > editSummary.maxEndOffset;
+      lastEditEndOffset = editSummary.maxEndOffset;
     }
-    return detail::StructuralProgressRecoveryCandidate{
+    // Repetition ranks on the RAW iteration cursor (Invariant 2): keyProgressOffset
+    // is the raw cursor, while postSkipCursorOffset / lastEditEndOffset feed the
+    // shared `continues_after_first_edit` continuation test.
+    return detail::EditableRecoveryCandidate{
         .matched = true,
-        .cursorOffset = ctx.cursorOffset(),
-        .editCost = ctx.editCostDelta(iterationCheckpoint),
-        .hadEdits = hadEdits,
         .hasDestructiveEdit = hasDestructiveEdit,
-        .continuesAfterFirstEdit = continuesAfterFirstEdit,
+        .postSkipCursorOffset = detail::post_skip_cursor_offset(ctx),
+        .keyProgressOffset = ctx.cursorOffset(),
+        .editCost = ctx.editCostDelta(iterationCheckpoint),
+        .editCount = static_cast<std::uint32_t>(ctx.recoveryEditCount() -
+                                                recoveryEditCountBefore),
+        .lastEditEndOffset = lastEditEndOffset,
         .firstEditOffset = firstEditOffset,
-        .replayPrefix = detail::classify_structural_replay_prefix(
+        .replayPrefix = detail::classify_replay_prefix(
             hadEdits, hasDestructiveEdit),
     };
   }
 
-  [[nodiscard]] static constexpr IterationRecoveryStrength
-  classify_iteration_attempt_strength(const IterationAttempt &attempt,
-                                      TextOffset parseStartOffset) noexcept {
+  [[nodiscard]] static bool
+  iteration_retry_is_weak(const IterationAttempt &attempt,
+                          TextOffset parseStartOffset) noexcept {
     // Weak retries are boundary fabrications: the first edit happens at the
     // iteration entry and no visible continuation proves ownership. If the
     // first edit is later than the iteration entry, the element already
     // consumed source before repairing its tail (for example a missing close
     // delimiter at EOF), so it is a real started iteration and may outlive the
-    // active window.
-    if (!attempt.candidate.matched || !attempt.candidate.hadEdits ||
-        attempt.candidate.continuesAfterFirstEdit ||
-        attempt.candidate.firstEditOffset > parseStartOffset) {
-      return IterationRecoveryStrength::Strong;
-    }
-    return IterationRecoveryStrength::Weak;
+    // active window. The `editCount != 0` guard short-circuits before
+    // `continues_after_first_edit` (which is only meaningful once an edit
+    // exists).
+    return attempt.candidate.matched && attempt.candidate.editCount != 0u &&
+           !detail::continues_after_first_edit(attempt.candidate) &&
+           attempt.candidate.firstEditOffset <= parseStartOffset;
   }
 
   [[nodiscard]] static bool
   has_visible_remainder_after_current_cursor(const RecoveryContext &ctx) {
-    if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
-      return ctx.skip_without_builder(ctx.cursor()) < ctx.end;
-    }
-    return ctx.cursor() < ctx.end;
+    return ctx.skip_without_builder(ctx.cursor()) < ctx.end;
   }
 
   [[nodiscard]] bool
   probe_resync_entry_consumes_visible(RecoveryContext &ctx) const {
     const auto maxDeletes = is_optional ? ctx.maxConsecutiveCodepointDeletes
-                                        : ctx.maxResyncSkipBytes;
+                                        : ctx.maxResyncSkipCodepoints;
     if (!ctx.allowDelete || maxDeletes == 0u || ctx.cursor() >= ctx.end) {
       return false;
     }
@@ -912,32 +906,32 @@ private:
                                         const RecoveryContext::Checkpoint &checkpoint,
     const char *savedFurthestExploredCursor) const {
     if (!has_visible_remainder_after_current_cursor(ctx)) {
-      ctx.bumpFurthestExploredCursor(savedFurthestExploredCursor);
+      ctx.bumpMaxCursor(savedFurthestExploredCursor);
       return true;
     }
 
     const auto strictCursorOffset = ctx.cursorOffset();
     const auto strictExploredOffset =
-        std::max(strictCursorOffset, ctx.furthestExploredOffset());
+        std::max(strictCursorOffset, ctx.maxCursorOffset());
     const auto strictPostSkipOffset = detail::post_skip_cursor_offset(ctx);
     const bool strictFrontierIsRecoveryRelevant =
         ctx.canEditAtOffset(strictPostSkipOffset) ||
         (ctx.hasPendingRecoveryWindows() &&
-         strictPostSkipOffset >= ctx.pendingRecoveryWindowActivationOffset() &&
+         strictPostSkipOffset >= ctx.pendingRecoveryWindowBeginOffset() &&
          strictPostSkipOffset <= ctx.pendingRecoveryWindowMaxCursorOffset());
     if (!strictFrontierIsRecoveryRelevant) {
-      ctx.bumpFurthestExploredCursor(savedFurthestExploredCursor);
+      ctx.bumpMaxCursor(savedFurthestExploredCursor);
       return true;
     }
 
     ctx.rewind(checkpoint);
-    ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+    ctx.restoreMaxCursor(savedFurthestExploredCursor);
     const auto baseEditCost = ctx.currentEditCost();
     const auto baseRecoveryEditCount = ctx.recoveryEditCount();
     if (baseRecoveryEditCount != 0u &&
         strictExploredOffset == strictCursorOffset) {
       const bool matchedStrictly = attempt_parse_no_edits(ctx, _element);
-      ctx.bumpFurthestExploredCursor(savedFurthestExploredCursor);
+      ctx.bumpMaxCursor(savedFurthestExploredCursor);
       return matchedStrictly;
     }
     // A strictly matched optional already established a local boundary. Only
@@ -960,7 +954,7 @@ private:
     }
 
     const bool matchedStrictly = attempt_parse_no_edits(ctx, _element);
-    ctx.bumpFurthestExploredCursor(savedFurthestExploredCursor);
+    ctx.bumpMaxCursor(savedFurthestExploredCursor);
     return matchedStrictly;
   }
 
@@ -969,7 +963,7 @@ private:
       const RecoveryContext &ctx) noexcept {
     return ctx.frontierBlocked() && ctx.hasHadEdits() &&
            ctx.hasPendingRecoveryWindows() &&
-           ctx.furthestExploredOffset() >=
+           ctx.maxCursorOffset() >=
                ctx.pendingRecoveryWindowMaxCursorOffset();
   }
 
@@ -1113,12 +1107,10 @@ private:
       const char *parseStart, TextOffset parseStartOffset) const {
     const auto visibleLeafCountBefore = ctx.failureHistorySize();
     const auto recoveryEditCountBefore = ctx.recoveryEditCount();
-    IterationAttempt noInsertAttempt{.kind = IterationReplayKind::NoInsert};
+    IterationAttempt noInsertAttempt{};
     if (attempt_parse_no_edits(ctx, _element) && ctx.cursor() != parseStart) {
       noInsertAttempt.candidate = capture_iteration_candidate(
           ctx, iterationCheckpoint, recoveryEditCountBefore);
-      noInsertAttempt.envelope = detail::to_candidate_envelope(
-          noInsertAttempt.candidate, detail::CandidateOrigin::RepetitionIteration);
     }
     IterationObservation observation{
         .noInsertAttempt = noInsertAttempt,
@@ -1136,62 +1128,86 @@ private:
     return observation;
   }
 
+  /// Enumerates the iteration replay plans in two layers: observe the boundary
+  /// facts (`observe_iteration_signals`), then decide the ordered legality
+  /// verdicts (`decide_iteration_plans`). The clean stop short-circuits to no
+  /// plans between the two.
+  ///
+  /// The `entryRecoveryConsumesVisible` probe is owned HERE so its memoized
+  /// result is shared by both layers and fires at most once, only when a
+  /// verdict actually needs it. The probe deliberately leaks `_maxCursor` (no
+  /// ProbeRestoreScope) — the caller reads `ctx.maxCursor()` for furthest-error
+  /// offsets — so WHEN it fires is observable: it must never become eager.
   [[nodiscard]] IterationPlanList enumerate_iteration_plans(
       RecoveryContext &ctx, bool skipBetweenIterations,
-      const IterationObservation &observation,
-      TextOffset parseStartOffset,
+      const IterationObservation &observation, TextOffset parseStartOffset,
       std::size_t recoveryEditCountBefore,
-      bool parseStartAtIterationEntryBoundary,
-      bool firstStrictAccepts) const {
-    // Compute the closed `IterationBoundaryDecision` from facts that
-    // reflect FULL strict acceptance, not just the fast probe at the
-    // entry. `firstStrict` means the iteration body accepts strictly
-    // at the cursor without any edit; the right signal is
-    // `noInsertAttempt.candidate.matched && !hadEdits`, which is
-    // computed by `observe_iteration`. Using `attempt_fast_probe`
-    // alone over-fires `firstStrict` (a fast probe of a multi-token
-    // body returns true on first-token match, which does not imply
-    // a full strict parse).
-    //
-    const auto &noEditCandidate = observation.noInsertAttempt.candidate;
-    bool entryRecoverySignalKnown = false;
-    bool entryRecoverySignal = false;
-    const auto hasEntryRecoverySignal = [&]() {
-      if (!entryRecoverySignalKnown) {
-        entryRecoverySignal = has_entry_recovery_signal(ctx);
-        entryRecoverySignalKnown = true;
-      }
-      return entryRecoverySignal;
-    };
-    const detail::IterationBoundaryFacts boundaryFacts{
-        .startedStrictly = observation.iterationStarted,
-        .firstStrict = noEditCandidate.matched,
-        .followStrict = ctx.probeFollowAcceptsHere(),
-        .committedPrefixImposes = ctx.hasPendingCommittedRecoveryEdits(),
-    };
-    const auto boundaryDecision =
-        detail::decide_iteration_boundary(boundaryFacts);
-
-    bool noInsertCandidateLegal =
-        observation.noInsertAttempt.candidate.matched &&
-        observation.noInsertProgressed;
-    const bool firstZeroMinIteration = min == 0 && !skipBetweenIterations;
-    const bool retryContinuesStartedIteration =
-        observation.noInsertProgressed || observation.iterationStarted;
-    bool entryRecoveryConsumesVisibleSignalKnown = false;
-    bool entryRecoveryConsumesVisibleSignal = false;
-    const auto hasEntryRecoveryConsumesVisibleSignal = [&]() {
-      if (!entryRecoveryConsumesVisibleSignalKnown) {
+      bool parseStartAtIterationEntryBoundary, bool firstStrictAccepts) const {
+    std::optional<bool> entryRecoveryConsumesVisibleCache;
+    const auto entryRecoveryConsumesVisible = [&]() {
+      if (!entryRecoveryConsumesVisibleCache.has_value()) {
         detail::ScopedBoolOverride leadingInsertProbeGuard{
             ctx.allowLeadingTerminalInsertScope,
             ctx.allowLeadingTerminalInsertScope || !is_optional};
         (void)leadingInsertProbeGuard;
-        entryRecoveryConsumesVisibleSignal =
+        entryRecoveryConsumesVisibleCache =
             probe_recoverable_at_entry_consumes_visible(_element, ctx);
-        entryRecoveryConsumesVisibleSignalKnown = true;
       }
-      return entryRecoveryConsumesVisibleSignal;
+      return *entryRecoveryConsumesVisibleCache;
     };
+    const IterationSignals sig = observe_iteration_signals(
+        ctx, skipBetweenIterations, observation, parseStartOffset,
+        recoveryEditCountBefore, parseStartAtIterationEntryBoundary,
+        firstStrictAccepts, entryRecoveryConsumesVisible);
+    if (sig.stopCleanly) {
+      return {};
+    }
+    return decide_iteration_plans(ctx, sig, skipBetweenIterations,
+                                  parseStartAtIterationEntryBoundary,
+                                  entryRecoveryConsumesVisible);
+  }
+
+  /// Layer-1 of iteration-plan enumeration: observe the boundary facts.
+  ///
+  /// Most `IterationSignals` fields are eager scalars; the probe-triggering
+  /// ones fire their (memoized) probes here via `&&` short-circuit, in the same
+  /// order the monolithic enumerator used:
+  ///   - `speculative...` may fire `entryRecoveryConsumesVisible`;
+  ///   - the two boundary-ownership predicates may fire
+  ///     `probeRecoverableFollowConsumesVisibleHere` and the un-memoized
+  ///     `evaluate_editable_recovery_candidate` boundary probe.
+  ///
+  /// LOAD-BEARING: on the clean stop we return BEFORE the boundary-ownership
+  /// predicates, so their probes do not fire then (exactly as the old early
+  /// `return {}` did) and `boundaryOwnership` stays `Local`.
+  template <class EntryRecoveryConsumesVisible>
+  [[nodiscard]] IterationSignals observe_iteration_signals(
+      RecoveryContext &ctx, bool skipBetweenIterations,
+      const IterationObservation &observation, TextOffset parseStartOffset,
+      std::size_t recoveryEditCountBefore,
+      bool parseStartAtIterationEntryBoundary, bool firstStrictAccepts,
+      EntryRecoveryConsumesVisible &&entryRecoveryConsumesVisible) const {
+    IterationSignals sig;
+    // The only boundary outcome the candidate enumeration consumes is the
+    // clean stop: no local edit candidate, control returns to the parent.
+    // It holds exactly when the body does not accept strictly at the cursor
+    // (`firstStrict` is `noEditCandidate.matched`, reflecting FULL strict
+    // acceptance — not the entry fast probe, which over-fires on a
+    // multi-token body), the parent follow accepts strictly, and no
+    // committed prefix forces the iteration to keep going.
+    const auto &noEditCandidate = observation.noInsertAttempt.candidate;
+    const bool followStrict = ctx.probeFollowAcceptsHere();
+    const bool committedPrefixImposes = ctx.hasPendingCommittedRecoveryEdits();
+    sig.stopCleanly =
+        !noEditCandidate.matched && followStrict && !committedPrefixImposes;
+
+    sig.noInsertCandidateLegal = observation.noInsertAttempt.candidate.matched &&
+                                 observation.noInsertProgressed;
+    sig.firstZeroMinIteration = min == 0 && !skipBetweenIterations;
+    sig.retryContinuesStartedIteration =
+        observation.noInsertProgressed || observation.iterationStarted;
+    sig.noInsertProgressed = observation.noInsertProgressed;
+    sig.iterationStarted = observation.iterationStarted;
     const auto hasEntryRecoveryRepairsBoundarySignal = [&]() {
       const auto probeCheckpoint = ctx.mark();
       detail::ScopedBoolOverride leadingInsertProbeGuard{
@@ -1210,14 +1226,14 @@ private:
              candidate.firstEditOffset == parseStartOffset &&
              candidate.postSkipCursorOffset > parseStartOffset;
     };
-    const bool speculativeSyntheticSingleLeafRetryAfterRecoveredIteration =
+    sig.speculativeSyntheticSingleLeafRetryAfterRecoveredIteration =
         skipBetweenIterations &&
         parseStartAtIterationEntryBoundary &&
         ctx.hasHadEdits() &&
         !observation.startedWithoutEdits &&
         !observation.noInsertProgressed &&
         observation.noInsertProbe.exploredSingleVisibleLeafOrLess() &&
-        !hasEntryRecoveryConsumesVisibleSignal();
+        !entryRecoveryConsumesVisible();
     // If the iteration started without prior edits, the enclosing Group's next
     // element already accepts the current cursor, and the NoInsert probe did
     // not progress, let iteration terminate cleanly instead of speculating
@@ -1231,18 +1247,18 @@ private:
     const bool localRecoveryBeginsWithLexicalChainTail =
         !firstStrictAccepts && shape.hasInsertableTerminal &&
         shape.hasSyntheticTerminalThenLexicalTail;
-    bool parentFollowRecoverableConsumesVisibleKnown = false;
-    bool parentFollowRecoverableConsumesVisibleValue = false;
+    // Lazy + memoized (no ScopedBoolOverride here — do not add one); fires only
+    // when a boundary-ownership predicate reaches it.
+    std::optional<bool> parentFollowRecoverableConsumesVisibleCache;
     const auto parentFollowRecoverableConsumesVisible = [&]() {
-      if (!parentFollowRecoverableConsumesVisibleKnown) {
-        parentFollowRecoverableConsumesVisibleValue =
+      if (!parentFollowRecoverableConsumesVisibleCache.has_value()) {
+        parentFollowRecoverableConsumesVisibleCache =
             ctx.probeRecoverableFollowConsumesVisibleHere();
-        parentFollowRecoverableConsumesVisibleKnown = true;
       }
-      return parentFollowRecoverableConsumesVisibleValue;
+      return *parentFollowRecoverableConsumesVisibleCache;
     };
-    if (boundaryDecision == detail::IterationBoundaryDecision::StopCleanly) {
-      return {};
+    if (sig.stopCleanly) {
+      return sig;
     }
     // A broad repeated element can consume one visible leaf and then fabricate
     // the rest of its shape, hiding a recoverable parent boundary. This remains
@@ -1257,7 +1273,7 @@ private:
     const bool recoverableParentBoundaryOwnsWeakStartedRetry =
         atLocalIterationBoundary && !shape.hasRequiredLiteralAnchor &&
         observation.startedWithoutEdits && !observation.noInsertProgressed &&
-        !boundaryFacts.followStrict && !boundaryFacts.committedPrefixImposes &&
+        !followStrict && !committedPrefixImposes &&
         parentFollowRecoverableConsumesVisible() &&
         !hasEntryRecoveryRepairsBoundarySignal();
     // Same ownership rule for a fresh first iteration whose local recovery
@@ -1268,13 +1284,62 @@ private:
         !ctx.hasHadEdits() && !observation.startedWithoutEdits &&
         !observation.noInsertProgressed &&
         localRecoveryBeginsWithLexicalChainTail &&
-        !boundaryFacts.followStrict && !boundaryFacts.committedPrefixImposes &&
+        !followStrict && !committedPrefixImposes &&
         parentFollowRecoverableConsumesVisible();
+    // Who owns the next visible token at this boundary. Reads the two
+    // already-evaluated predicates above — no probe re-fires.
+    sig.boundaryOwnership =
+        (recoverableParentBoundaryOwnsWeakStartedRetry ||
+         recoverableParentBoundaryOwnsFreshLexicalChainTail)
+            ? BoundaryOwnership::Parent
+            : BoundaryOwnership::Local;
+    return sig;
+  }
 
+  /// Layer-2 of iteration-plan enumeration: turn the observed signals into the
+  /// four ordered replay plans, each marked `.legal`;
+  /// `consider_iteration_attempt` does the central ranking (plan ORDER encodes
+  /// the considered precedence, mirroring `OrderedChoice`).
+  ///
+  /// VERDICT SLOTS (precedence order):
+  ///   [0] NoInsert                        — body matched strictly AND progressed.
+  ///   [1] InsertRetry                     — synthesize the leading element, retry.
+  ///   [2] DeleteRetry                     — delete noise, retry the started item.
+  ///   [3] boundary-preserving InsertRetry — copy of [1] with allowDelete=false,
+  ///       active only when [1].legal && [1].allowDelete && entry boundary.
+  ///
+  /// LEGALITY IS NOT AN `iff` PER PLAN — it is an ORDERED patch sequence whose
+  /// final value depends on patch order (read top-to-bottom):
+  ///   deleteRetryLegal: false
+  ///     -> if(!noInsertCandidateLegal && !speculative)
+  ///          iterationStarted || (skip && !hadEdits && probe_locally_recoverable)
+  ///     -> if recoverableFirstZeroMinAfterPriorRecovery: true
+  ///     -> if ownership==Parent: forced false.
+  ///   insertRetryLegal: (noInsertCandidateLegal && allowInsert)
+  ///     -> if false: = deleteRetryLegal
+  ///     -> if speculative: forced false
+  ///     -> three re-enable patches (firstZeroMin entry-signal; locally-
+  ///        recoverable-after-skip; in-window entry-consumes-visible), each
+  ///        guarded by !insertRetryLegal (so their probes fire only when needed)
+  ///     -> if ownership==Parent: forced false.
+  ///
+  /// LOAD-BEARING INVARIANT (lets the two-point speculative application collapse
+  /// to one force-false): firstZeroMinIteration requires !skipBetweenIterations
+  /// while `speculative` requires skipBetweenIterations -> mutually exclusive.
+  ///
+  /// LAZY PROBES (`entryRecoveryConsumesVisible`, memoized via the orchestrator;
+  /// `probe_locally_recoverable`, `has_entry_recovery_signal`,
+  /// `is_locally_recoverable_after_iteration_skip`) fire ONLY on the patch that
+  /// needs them, behind their `&&` short-circuit — they MUST stay lazy.
+  template <class EntryRecoveryConsumesVisible>
+  [[nodiscard]] IterationPlanList decide_iteration_plans(
+      RecoveryContext &ctx, const IterationSignals &sig,
+      bool skipBetweenIterations, bool parseStartAtIterationEntryBoundary,
+      EntryRecoveryConsumesVisible &&entryRecoveryConsumesVisible) const {
     bool deleteRetryLegal = false;
-    if (!noInsertCandidateLegal &&
-        !speculativeSyntheticSingleLeafRetryAfterRecoveredIteration) {
-      deleteRetryLegal = observation.iterationStarted ||
+    if (!sig.noInsertCandidateLegal &&
+        !sig.speculativeSyntheticSingleLeafRetryAfterRecoveredIteration) {
+      deleteRetryLegal = sig.iterationStarted ||
                          (skipBetweenIterations && !ctx.hasHadEdits() &&
                           probe_locally_recoverable(_element, ctx));
     }
@@ -1284,36 +1349,33 @@ private:
     // admissible only when the entry probe proves visible consumption; pure
     // synthetic first items still stop cleanly.
     const bool recoverableFirstZeroMinAfterPriorRecovery =
-        firstZeroMinIteration && ctx.hasHadEdits() &&
-        !noInsertCandidateLegal && !observation.noInsertProgressed &&
-        hasEntryRecoveryConsumesVisibleSignal();
+        sig.firstZeroMinIteration && ctx.hasHadEdits() &&
+        !sig.noInsertCandidateLegal && !sig.noInsertProgressed &&
+        entryRecoveryConsumesVisible();
     if (!deleteRetryLegal && recoverableFirstZeroMinAfterPriorRecovery) {
       deleteRetryLegal = true;
     }
-    bool insertRetryLegal =
-        noInsertCandidateLegal && ctx.allowInsert;
+    bool insertRetryLegal = sig.noInsertCandidateLegal && ctx.allowInsert;
     if (!insertRetryLegal) {
       insertRetryLegal = deleteRetryLegal;
     }
-    if (speculativeSyntheticSingleLeafRetryAfterRecoveredIteration) {
+    if (sig.speculativeSyntheticSingleLeafRetryAfterRecoveredIteration) {
       insertRetryLegal = false;
     }
-    if (!insertRetryLegal && firstZeroMinIteration && !noInsertCandidateLegal &&
-        !ctx.hasHadEdits()) {
-      insertRetryLegal = hasEntryRecoverySignal();
+    if (!insertRetryLegal && sig.firstZeroMinIteration &&
+        !sig.noInsertCandidateLegal && !ctx.hasHadEdits()) {
+      insertRetryLegal = has_entry_recovery_signal(ctx);
     }
-    if (!insertRetryLegal && !noInsertCandidateLegal && ctx.allowInsert &&
+    if (!insertRetryLegal && !sig.noInsertCandidateLegal && ctx.allowInsert &&
         !ctx.hasHadEdits()) {
       insertRetryLegal = is_locally_recoverable_after_iteration_skip(ctx);
     }
     if (!insertRetryLegal && skipBetweenIterations &&
         parseStartAtIterationEntryBoundary && ctx.hasHadEdits() &&
-        !observation.noInsertProgressed &&
-        hasEntryRecoveryConsumesVisibleSignal()) {
+        !sig.noInsertProgressed && entryRecoveryConsumesVisible()) {
       insertRetryLegal = true;
     }
-    if (recoverableParentBoundaryOwnsWeakStartedRetry ||
-        recoverableParentBoundaryOwnsFreshLexicalChainTail) {
+    if (sig.boundaryOwnership == BoundaryOwnership::Parent) {
       // The repeated element only proved a weak or synthetic local start while
       // the parent's follow can recover at the same boundary. Keep ownership
       // with the parent; later local fallback paths must not reopen retry
@@ -1335,64 +1397,48 @@ private:
     // started the option's body, the cleanest recovery is almost always
     // to skip — the surrounding rule will resync via its own recovery.
     //
+    // Plan order encodes the considered precedence directly (the central
+    // ranking still breaks ties): NoInsert, then InsertRetry, then
+    // DeleteRetry, then the boundary-preserving insert. This reproduces the
+    // order the former pre-evaluation pass imposed (insert before delete when
+    // both are legal) without a separate scan.
+    const bool destructiveWindowContinuation =
+        ctx.hasHadEdits() && parseStartAtIterationEntryBoundary &&
+        sig.retryContinuesStartedIteration;
     IterationPlanList plans{
         IterationReplayPlan{
             .kind = IterationReplayKind::NoInsert,
-            .legal = noInsertCandidateLegal,
+            .legal = sig.noInsertCandidateLegal,
         },
-        IterationReplayPlan{
-            .kind = IterationReplayKind::DeleteRetry,
-            .legal = deleteRetryLegal,
-            .allowDelete = ctx.allowDelete,
-            .allowDestructiveWindowContinuation =
-                retryContinuesStartedIteration && ctx.hasHadEdits() &&
-                parseStartAtIterationEntryBoundary},
         IterationReplayPlan{
             .kind = IterationReplayKind::InsertRetry,
             .legal = insertRetryLegal,
             .allowInsert = true,
-            .allowDelete = retryContinuesStartedIteration && ctx.allowDelete,
-            .allowDestructiveWindowContinuation =
-                ctx.hasHadEdits() && parseStartAtIterationEntryBoundary &&
-                retryContinuesStartedIteration},
+            .allowDelete = sig.retryContinuesStartedIteration && ctx.allowDelete,
+            .allowDestructiveWindowContinuation = destructiveWindowContinuation},
+        IterationReplayPlan{
+            .kind = IterationReplayKind::DeleteRetry,
+            .legal = deleteRetryLegal,
+            .allowDelete = ctx.allowDelete,
+            .allowDestructiveWindowContinuation = destructiveWindowContinuation},
         IterationReplayPlan{
             .kind = IterationReplayKind::InsertRetry,
         }};
-    auto &insertRetryPlan = plans[2];
+    auto &insertRetryPlan = plans[1];
     auto &boundaryPreservingInsertRetryPlan = plans[3];
     if (insertRetryPlan.legal && insertRetryPlan.allowDelete &&
         parseStartAtIterationEntryBoundary) {
       boundaryPreservingInsertRetryPlan = insertRetryPlan;
       boundaryPreservingInsertRetryPlan.allowDelete = false;
     }
-    // Boundary-decision gates: a closed `IterationBoundaryDecision`
-    // value can disqualify entire plan families before the central
-    // ranking sees them. The decision is the explicit authority on
-    // which families are reachable, applied uniformly here.
-    //
-    //   `StopCleanly`: parent strict follow accepts and committed
-    //   prefix does not impose; retry plans would reach past that
-    //   boundary, which the precedence forbids.
-    //
-    //   `RejectToParentFollow`: parent strict follow forbids a
-    //   local repair AND committed prefix forbids a clean stop;
-    //   the iteration produces nothing locally and defers to the
-    //   parent.
-    //
-    // `ContinueStrict` is intentionally NOT used as a gate here: a
-    // no-edit success at this iteration step does not imply that outer
-    // recovery has nothing left to repair downstream, and
-    // `IterationBoundaryFacts` does not carry a "tail-needs-repair"
-    // signal that would distinguish the safe-to-gate case.
-    //
-    // `RepairStartedIteration` lets the per-plan `legal` flags drive
-    // the choice — it describes a state where retries CAN be legitimate.
-    //
-    // `Resync` is gated only when the iteration is OUTSIDE an active
-    // recovery window: inside an active window, the dispatch's
-    // entry-recovery-signal fallback heuristics produce legitimate
-    // retries the closed precedence value alone cannot distinguish
-    // from speculative ones.
+    // The clean-stop boundary (parent strict follow accepts and the
+    // committed prefix does not impose) already returned no plans above.
+    // The remaining boundary cases let the per-plan `legal` flags drive
+    // the choice, except that `Resync` is gated only when the iteration is
+    // OUTSIDE an active recovery window: inside an active window, the
+    // dispatch's entry-recovery-signal fallback heuristics produce
+    // legitimate retries a coarse boundary signal cannot distinguish from
+    // speculative ones.
     return plans;
   }
 
@@ -1404,21 +1450,19 @@ private:
       const char *&furthestExploredCursor,
       std::size_t recoveryEditCountBefore,
       bool skipBetweenIterations) const {
-    IterationAttempt attempt{.kind = plan.kind};
+    IterationAttempt attempt{};
     const bool valid =
         replay_iteration(ctx, plan, parseStart,
                          skipBetweenIterations || min == 0);
-    if (ctx.furthestExploredCursor() > furthestExploredCursor) {
-      furthestExploredCursor = ctx.furthestExploredCursor();
+    if (ctx.maxCursor() > furthestExploredCursor) {
+      furthestExploredCursor = ctx.maxCursor();
     }
     if (valid) {
       attempt.candidate = capture_iteration_candidate(
           ctx, iterationCheckpoint, recoveryEditCountBefore);
-      attempt.envelope = detail::to_candidate_envelope(
-          attempt.candidate, detail::CandidateOrigin::RepetitionIteration);
     }
     ctx.rewind(parseCheckpoint);
-    ctx.restoreFurthestExploredCursor(parseStartFurthestExploredCursor);
+    ctx.restoreMaxCursor(parseStartFurthestExploredCursor);
     return attempt;
   }
 
@@ -1428,44 +1472,14 @@ private:
       const RecoveryContext::Checkpoint &iterationCheckpoint,
       const RecoveryContext::Checkpoint &parseCheckpoint,
       const char *parseStart, const char *parseStartFurthestExploredCursor,
-      TextOffset parseStartOffset,
       const char *&furthestExploredCursor,
       std::size_t recoveryEditCountBefore,
       bool skipBetweenIterations) const {
     IterationSelectionResult selection;
-    std::optional<std::size_t> preEvaluatedPlanIndex;
-    bool hasLegalDeleteRetry = false;
-    std::optional<std::size_t> firstLegalInsertRetryIndex;
-    if (!plans.front().legal) {
-      for (std::size_t i = 0; i < plans.size(); ++i) {
-        const auto &plan = plans[i];
-        if (!plan.legal) {
-          continue;
-        }
-        if (plan.kind == IterationReplayKind::DeleteRetry) {
-          hasLegalDeleteRetry = true;
-        } else if (plan.kind == IterationReplayKind::InsertRetry &&
-                   !firstLegalInsertRetryIndex.has_value()) {
-          firstLegalInsertRetryIndex = i;
-        }
-      }
-    }
-    if (hasLegalDeleteRetry && firstLegalInsertRetryIndex.has_value()) {
-      const auto insertPlanIndex = *firstLegalInsertRetryIndex;
-      const auto &insertPlan = plans[insertPlanIndex];
-      auto insertAttempt = evaluate_retry_iteration_attempt(
-          ctx, insertPlan, iterationCheckpoint, parseCheckpoint, parseStart,
-          parseStartFurthestExploredCursor, furthestExploredCursor,
-          recoveryEditCountBefore, skipBetweenIterations);
-      consider_iteration_attempt(selection, insertAttempt, insertPlan);
-      preEvaluatedPlanIndex = insertPlanIndex;
-    }
-
+    // Plans are enumerated in considered-precedence order, so a single pass
+    // evaluates each legal plan once; the central ranking breaks ties.
     for (std::size_t i = 0; i < plans.size(); ++i) {
       const auto &plan = plans[i];
-      if (preEvaluatedPlanIndex.has_value() && *preEvaluatedPlanIndex == i) {
-        continue;
-      }
       if (!plan.legal) {
         continue;
       }
@@ -1487,7 +1501,7 @@ private:
   /// Last-resort panic-mode resync skip.
   ///
   /// Scans forward from the failing cursor up to
-  /// `ctx.maxResyncSkipBytes` codepoints looking for the first position
+  /// `ctx.maxResyncSkipCodepoints` codepoints looking for the first position
   /// where `_element` strictly starts and consumes at least one codepoint.
   /// The skipped range is emitted as a contiguous `Delete` edit run and
   /// the iteration is treated as matched at the resync point.
@@ -1496,13 +1510,21 @@ private:
   /// candidate's `editCost` naturally makes a cheaper local candidate
   /// dominate under the shared `RecoveryKey` comparator, so this path
   /// never steals from admissible lower-cost recoveries.
-  [[nodiscard]] bool try_resync_skip_iteration(
-      RecoveryContext &ctx, const char *parseStart,
-      TextOffset parseStartOffset) const {
-    if (!ctx.allowDelete || ctx.maxResyncSkipBytes == 0u) {
-      return false;
-    }
-    if (ctx.cursor() != parseStart || ctx.cursor() >= ctx.end) {
+  /// Last-resort panic-mode resync skip. Pass 1 deletes noise until the
+  /// iteration element itself re-parses cleanly (no destructive edit) from a
+  /// fresh start. When `allowParentFollowFallback` is set, pass 2 (after
+  /// rewinding to the entry) instead deletes until the parent follow accepts
+  /// (or an implicit EOF follow). Both passes share one entry guard, one
+  /// extended-delete-scan budget (the budget overrides config fields, not
+  /// checkpoint state, so the inter-pass rewind leaves it enabled), and one
+  /// restore epilogue.
+  [[nodiscard]] bool try_resync_skip(RecoveryContext &ctx,
+                                     const char *parseStart,
+                                     TextOffset parseStartOffset,
+                                     bool allowParentFollowFallback) const {
+    if (!ctx.allowDelete || ctx.maxResyncSkipCodepoints == 0u ||
+        ctx.cursor() != parseStart || ctx.cursor() >= ctx.end ||
+        ctx.probeFollowAcceptsHere()) {
       return false;
     }
     // Do not reinterpret bytes inside a committed-prefix replay: the driver
@@ -1511,12 +1533,8 @@ private:
         parseStartOffset < ctx.committedRecoveryResumeFloor) {
       return false;
     }
-    if (ctx.probeFollowAcceptsHere()) {
-      return false;
-    }
     const auto recoveryCheckpoint = ctx.mark();
-    const char *const savedFurthestExploredCursor =
-        ctx.furthestExploredCursor();
+    const char *const savedFurthestExploredCursor = ctx.maxCursor();
     detail::ScopedBoolOverride destructiveContinuationGuard{
         ctx.allowDestructiveWindowContinuation,
         ctx.allowDestructiveWindowContinuation || ctx.hasHadEdits()};
@@ -1525,7 +1543,8 @@ private:
     if (!budgetScope.tryEnable()) {
       return false;
     }
-    const std::uint32_t codepointBudget = ctx.maxResyncSkipBytes;
+    const std::uint32_t codepointBudget = ctx.maxResyncSkipCodepoints;
+
     std::uint32_t deleted = 0u;
     while (deleted < codepointBudget && ctx.cursor() < ctx.end) {
       if (ctx.probeFollowAcceptsHere()) {
@@ -1560,79 +1579,44 @@ private:
       }
       ctx.rewind(parseCheckpoint);
     }
-    ctx.rewind(recoveryCheckpoint);
-    ctx.bumpFurthestExploredCursor(savedFurthestExploredCursor);
-    return false;
-  }
 
-  [[nodiscard]] bool try_resync_skip_to_parent_follow(
-      RecoveryContext &ctx, const char *parseStart,
-      TextOffset parseStartOffset) const {
-    if (!ctx.allowDelete || ctx.maxResyncSkipBytes == 0u ||
-        ctx.cursor() != parseStart || ctx.cursor() >= ctx.end ||
-        ctx.probeFollowAcceptsHere()) {
-      return false;
-    }
-    if (ctx.hasPendingCommittedRecoveryEdits() &&
-        parseStartOffset < ctx.committedRecoveryResumeFloor) {
-      return false;
-    }
-    const auto recoveryCheckpoint = ctx.mark();
-    const char *const savedFurthestExploredCursor =
-        ctx.furthestExploredCursor();
-    detail::ScopedBoolOverride destructiveContinuationGuard{
-        ctx.allowDestructiveWindowContinuation,
-        ctx.allowDestructiveWindowContinuation || ctx.hasHadEdits()};
-    (void)destructiveContinuationGuard;
-    detail::ExtendedDeleteScanBudgetScope<RecoveryContext> budgetScope{ctx};
-    if (!budgetScope.tryEnable()) {
-      return false;
-    }
-    const std::uint32_t codepointBudget = ctx.maxResyncSkipBytes;
-    std::uint32_t deleted = 0u;
-    while (deleted < codepointBudget && ctx.cursor() < ctx.end) {
-      if (!ctx.deleteOneCodepoint()) {
-        break;
-      }
-      ++deleted;
-      const bool reachedImplicitEofFollow =
-          ctx.cursor() == ctx.end && ctx._followProbeFn == nullptr &&
-          ctx._recoverableFollowProbeFn == nullptr;
-      if (ctx.probeFollowAcceptsHere() || reachedImplicitEofFollow) {
-        budgetScope.commitOverflowEdits();
-        return true;
+    if (allowParentFollowFallback) {
+      // Reset to the iteration entry so the parent-follow scan starts clean.
+      ctx.rewind(recoveryCheckpoint);
+      deleted = 0u;
+      while (deleted < codepointBudget && ctx.cursor() < ctx.end) {
+        if (!ctx.deleteOneCodepoint()) {
+          break;
+        }
+        ++deleted;
+        const bool reachedImplicitEofFollow =
+            ctx.cursor() == ctx.end && ctx._followProbeFn == nullptr &&
+            ctx._recoverableFollowProbeFn == nullptr;
+        if (ctx.probeFollowAcceptsHere() || reachedImplicitEofFollow) {
+          budgetScope.commitOverflowEdits();
+          return true;
+        }
       }
     }
-    ctx.rewind(recoveryCheckpoint);
-    ctx.bumpFurthestExploredCursor(savedFurthestExploredCursor);
-    return false;
-  }
 
-  std::size_t continue_zero_min_recovery_run(
-      RecoveryContext &ctx, std::size_t matchedCount,
-      std::size_t maxIterationCount) const {
-    while (matchedCount < maxIterationCount) {
-      if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/true)) {
-        break;
-      }
-      ++matchedCount;
-    }
-    return matchedCount;
+    ctx.rewind(recoveryCheckpoint);
+    ctx.bumpMaxCursor(savedFurthestExploredCursor);
+    return false;
   }
 
   bool parse_zero_min_repetition_recovery(RecoveryContext &ctx,
                                           std::size_t maxIterationCount) const {
     const auto checkpoint = ctx.mark();
     const char *const savedFurthestExploredCursor =
-        ctx.furthestExploredCursor();
+        ctx.maxCursor();
     if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/false)) {
       if (ctx.frontierBlocked()) {
         ctx.rewind(checkpoint);
-        ctx.bumpFurthestExploredCursor(savedFurthestExploredCursor);
+        ctx.bumpMaxCursor(savedFurthestExploredCursor);
         return false;
       }
       ctx.rewind(checkpoint);
-      ctx.bumpFurthestExploredCursor(savedFurthestExploredCursor);
+      ctx.bumpMaxCursor(savedFurthestExploredCursor);
       // Zero-min repetitions may stop cleanly when a speculative entry repair
       // does not turn into a real first iteration.
       PEGIUM_STEP_TRACE_INC(detail::StepCounter::RepetitionFastAttempts);
@@ -1643,8 +1627,11 @@ private:
                                 : detail::StepCounter::RepetitionFastFailures);
       return !startedWithoutEdits;
     }
-    if (maxIterationCount > 1u) {
-      (void)continue_zero_min_recovery_run(ctx, 1u, maxIterationCount);
+    for (std::size_t matchedCount = 1u; matchedCount < maxIterationCount;
+         ++matchedCount) {
+      if (!try_recovery_iteration(ctx, /*skipBetweenIterations=*/true)) {
+        break;
+      }
     }
     if (ctx.frontierBlocked()) {
       if (blocked_frontier_stops_cleanly_after_window_progress(ctx)) {
@@ -1666,7 +1653,7 @@ private:
     const auto parseCheckpoint = ctx.mark();
     const char *const parseStart = ctx.cursor();
     const char *const parseStartFurthestExploredCursor =
-        ctx.furthestExploredCursor();
+        ctx.maxCursor();
     const TextOffset parseStartOffset = ctx.cursorOffset();
     const bool parseStartAtIterationEntryBoundary =
         detail::post_skip_cursor_offset(ctx) == parseStartOffset;
@@ -1688,13 +1675,21 @@ private:
         parseStartAtIterationEntryBoundary, firstStrictAccepts);
     const bool hasLegalRetryPlan =
         has_legal_iteration_retry_plan(iterationPlans);
-    const char *furthestExploredCursor = ctx.furthestExploredCursor();
+    const char *furthestExploredCursor = ctx.maxCursor();
+    // `furthestExploredCursor` is mutated by reference inside
+    // `select_iteration_attempt`, so the bail lambda captures by reference to
+    // observe the latest value at each call site.
+    const auto bailToIterationEntry = [&] {
+      ctx.rewind(iterationCheckpoint);
+      ctx.bumpMaxCursor(furthestExploredCursor);
+      return false;
+    };
     if (!iterationPlans.front().legal) {
       const auto singleRetryIndex =
           single_legal_iteration_retry_plan_index(iterationPlans);
       if (singleRetryIndex.has_value()) {
         ctx.rewind(parseCheckpoint);
-        ctx.restoreFurthestExploredCursor(parseStartFurthestExploredCursor);
+        ctx.restoreMaxCursor(parseStartFurthestExploredCursor);
         const auto &singlePlan = iterationPlans[*singleRetryIndex];
         if (replay_iteration(
                 ctx, singlePlan, parseStart, skipBetweenIterations || min == 0)) {
@@ -1703,64 +1698,50 @@ private:
       }
     }
     ctx.rewind(parseCheckpoint);
-    ctx.restoreFurthestExploredCursor(parseStartFurthestExploredCursor);
-    if (!observation.noInsertProgressed &&
-        !hasLegalRetryPlan) {
-      if (shapeFacts().hasInsertableTerminal &&
-          (ctx.probeFollowAcceptsHere() || ctx.probeRecoverableFollowHere())) {
-        ctx.rewind(iterationCheckpoint);
-        ctx.bumpFurthestExploredCursor(furthestExploredCursor);
-        return false;
-      }
-      if (try_resync_skip_iteration(ctx, parseStart, parseStartOffset)) {
-        return true;
-      }
-      if ((skipBetweenIterations || min == 0u) &&
-          try_resync_skip_to_parent_follow(ctx, parseStart, parseStartOffset)) {
-        return true;
-      }
-      ctx.rewind(iterationCheckpoint);
-      ctx.bumpFurthestExploredCursor(furthestExploredCursor);
-      return false;
+    ctx.restoreMaxCursor(parseStartFurthestExploredCursor);
+    // No legal local attempt: the no-edit branch did not progress and no
+    // retry plan is admissible, so select_iteration_attempt would evaluate
+    // nothing and return an unmatched best. Skip it and fall through to the
+    // shared resync fallback below. The insertable-terminal deferral applies
+    // ONLY on this path — defer to the parent follow rather than resync-skip;
+    // it must not leak into the matched-but-failed-selection path.
+    const bool noLegalLocalAttempt =
+        !observation.noInsertProgressed && !hasLegalRetryPlan;
+    if (noLegalLocalAttempt && shapeFacts().hasInsertableTerminal &&
+        (ctx.probeFollowAcceptsHere() || ctx.probeRecoverableFollowHere())) {
+      return bailToIterationEntry();
     }
-    const auto selection = select_iteration_attempt(
-        ctx, iterationPlans, observation, iterationCheckpoint, parseCheckpoint,
-        parseStart, parseStartFurthestExploredCursor, parseStartOffset,
-        furthestExploredCursor, recoveryEditCountBefore,
-        skipBetweenIterations);
+    const IterationSelectionResult selection =
+        noLegalLocalAttempt
+            ? IterationSelectionResult{}
+            : select_iteration_attempt(
+                  ctx, iterationPlans, observation, iterationCheckpoint,
+                  parseCheckpoint, parseStart, parseStartFurthestExploredCursor,
+                  furthestExploredCursor, recoveryEditCountBefore,
+                  skipBetweenIterations);
     if (!selection.bestAttempt.candidate.matched) {
-      if (try_resync_skip_iteration(ctx, parseStart, parseStartOffset)) {
+      if (try_resync_skip(
+              ctx, parseStart, parseStartOffset,
+              /*allowParentFollowFallback=*/skipBetweenIterations || min == 0u)) {
         return true;
       }
-      if ((skipBetweenIterations || min == 0u) &&
-          try_resync_skip_to_parent_follow(ctx, parseStart, parseStartOffset)) {
-        return true;
-      }
-      ctx.rewind(iterationCheckpoint);
-      ctx.bumpFurthestExploredCursor(furthestExploredCursor);
-      return false;
+      return bailToIterationEntry();
     }
-    const auto bestStrength = classify_iteration_attempt_strength(
-        selection.bestAttempt, parseStartOffset);
     const bool weakRetryEscapesActiveWindow =
         skipBetweenIterations && recoveryEditCountBefore > 0u &&
-        bestStrength == IterationRecoveryStrength::Weak;
+        iteration_retry_is_weak(selection.bestAttempt, parseStartOffset);
     if (weakRetryEscapesActiveWindow) {
-      ctx.rewind(iterationCheckpoint);
-      ctx.bumpFurthestExploredCursor(furthestExploredCursor);
-      return false;
+      return bailToIterationEntry();
     }
     // Rebuild only the winning branch from the shared parse checkpoint instead
     // of keeping success checkpoints alive across competing recovery parses.
     ctx.rewind(parseCheckpoint);
-    ctx.restoreFurthestExploredCursor(parseStartFurthestExploredCursor);
+    ctx.restoreMaxCursor(parseStartFurthestExploredCursor);
     const bool replayed =
         replay_iteration(ctx, selection.winningPlan, parseStart,
                          skipBetweenIterations || min == 0);
     if (!replayed) {
-      ctx.rewind(iterationCheckpoint);
-      ctx.bumpFurthestExploredCursor(furthestExploredCursor);
-      return false;
+      return bailToIterationEntry();
     }
     return replayed;
   }

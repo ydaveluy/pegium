@@ -24,6 +24,19 @@ if(NOT TARGET lsp::lsp)
     endif()
 endif()
 
+# Header-only work-stealing task scheduler backing pegium::execution.
+if(NOT TARGET Taskflow)
+    set(TF_BUILD_TESTS OFF CACHE BOOL "")
+    set(TF_BUILD_EXAMPLES OFF CACHE BOOL "")
+    set(TF_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    FetchContent_Declare(
+        taskflow
+        GIT_REPOSITORY https://github.com/taskflow/taskflow.git
+        GIT_TAG        v4.0.0
+    )
+    FetchContent_MakeAvailable(taskflow)
+endif()
+
 add_subdirectory(core)
 add_subdirectory(converters)
 add_subdirectory(lsp)

@@ -76,58 +76,6 @@ struct SkipperContext<std::tuple<Hidden...>, std::tuple<Ignored...>> final {
     return skip(text.c_str());
   }
 
-  [[nodiscard]] SkipTraceResult
-  trace_skip(const char *inputBegin,
-             std::span<HiddenLeafTraceEntry> traceEntries) const noexcept {
-    const char *scanCursor = inputBegin;
-    std::uint32_t hiddenLeafCount = 0;
-
-    while (true) {
-      if constexpr (sizeof...(Ignored) > 0) {
-        while (const char *const matchEnd = parse_any_ignored(scanCursor)) {
-          scanCursor = matchEnd;
-        }
-      }
-
-      if constexpr (sizeof...(Hidden) == 0) {
-        return {
-            .end = scanCursor,
-            .hiddenLeafCount = hiddenLeafCount,
-        };
-      }
-
-      bool overflowed = false;
-      const char *const hiddenMatchEnd = parse_any_hidden(
-          scanCursor, [&traceEntries, &hiddenLeafCount, &overflowed,
-                       inputBegin, scanCursor](const auto &element,
-                                               const char *matchEnd) {
-            if (hiddenLeafCount >= traceEntries.size()) {
-              overflowed = true;
-              return;
-            }
-            traceEntries[hiddenLeafCount++] = {
-                .beginOffset = static_cast<TextOffset>(scanCursor - inputBegin),
-                .endOffset = static_cast<TextOffset>(matchEnd - inputBegin),
-                .element = std::addressof(element),
-            };
-          });
-      if (hiddenMatchEnd == nullptr) {
-        return {
-            .end = scanCursor,
-            .hiddenLeafCount = hiddenLeafCount,
-        };
-      }
-      if (overflowed) {
-        return {
-            .end = hiddenMatchEnd,
-            .hiddenLeafCount = hiddenLeafCount,
-            .overflowed = true,
-        };
-      }
-      scanCursor = hiddenMatchEnd;
-    }
-  }
-
   [[nodiscard]] explicit(false) operator Skipper() const noexcept {
     return Skipper::from(*this);
   }

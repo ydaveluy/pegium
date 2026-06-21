@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <deque>
 #include <limits>
@@ -91,6 +92,14 @@ struct NodeKey {
   DocumentId documentId = InvalidDocumentId;
   SymbolId symbolId = InvalidSymbolId;
 
+  /// Builds the key identifying the node behind a resolved description.
+  [[nodiscard]] static NodeKey of(const AstNodeDescription &description) {
+    assert(description.documentId != InvalidDocumentId);
+    assert(description.symbolId != InvalidSymbolId);
+    return NodeKey{.documentId = description.documentId,
+                   .symbolId = description.symbolId};
+  }
+
   [[nodiscard]] bool empty() const noexcept {
     return documentId == InvalidDocumentId || symbolId == InvalidSymbolId;
   }
@@ -180,11 +189,15 @@ struct ResolvedAstNodeDescription {
   const AstNodeDescription *description = nullptr;
 };
 
-/// Result of resolving one symbol description.
-using AstNodeDescriptionOrError = std::variant<AstNodeDescription, LinkingError>;
-/// Result of resolving multiple symbol descriptions.
+/// Result of looking up one scope candidate. The description is a non-owning,
+/// pointer-stable handle into the index (same lifetime as
+/// `ResolvedAstNodeDescription::description`), so the resolution path can reuse
+/// it directly instead of copying.
+using AstNodeDescriptionOrError =
+    std::variant<const AstNodeDescription *, LinkingError>;
+/// Result of looking up every visible scope candidate (pointer-stable).
 using AstNodeDescriptionsOrError =
-    std::variant<std::vector<AstNodeDescription>, LinkingError>;
+    std::variant<std::vector<const AstNodeDescription *>, LinkingError>;
 /// Result of resolving one symbol description to a live AST node.
 using ResolvedAstNodeDescriptionOrError =
     std::variant<ResolvedAstNodeDescription, LinkingError>;

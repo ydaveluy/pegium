@@ -31,11 +31,12 @@ public:
   [[nodiscard]] virtual const CoreServices &
   getServices(std::string_view uri) const = 0;
 
-  /// Resolves the services for a document URI without throwing.
+  /// Resolves the services for a document URI.
   ///
-  /// Returns `nullptr` when no registered language matches `uri`.
+  /// Returns `nullptr` when no registered language matches `uri`. May throw on
+  /// resource-exhaustion / filesystem failure while normalizing the URI.
   [[nodiscard]] virtual const CoreServices *
-  findServices(std::string_view uri) const noexcept = 0;
+  findServices(std::string_view uri) const = 0;
   [[nodiscard]] virtual std::vector<const CoreServices *> all() const = 0;
 };
 

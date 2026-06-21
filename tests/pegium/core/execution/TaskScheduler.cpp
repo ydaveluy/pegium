@@ -4,6 +4,7 @@
 #include <atomic>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 #include <pegium/core/execution/TaskScheduler.hpp>
 
@@ -22,58 +23,60 @@ TEST(TaskSchedulerTest, ParallelForRunsSingleItemInline) {
   EXPECT_EQ(observedThread, currentThread);
 }
 
-TEST(TaskSchedulerTest, SuggestedTaskCountHonorsMinimumChunkSize) {
-  TaskScheduler scheduler(3);
+TEST(TaskSchedulerTest, ParallelForRunsInlineWithoutWorkers) {
+  TaskScheduler scheduler(0);
+  std::atomic<long> sum{0};
+  std::vector<int> values(100);
+  for (int i = 0; i < 100; ++i) {
+    values[i] = i;
+  }
 
-  EXPECT_EQ(scheduler.suggestedTaskCount(0, 8), 0u);
-  EXPECT_EQ(scheduler.suggestedTaskCount(1, 8), 1u);
-  EXPECT_EQ(scheduler.suggestedTaskCount(7, 8), 1u);
-  EXPECT_EQ(scheduler.suggestedTaskCount(8, 8), 1u);
-  EXPECT_EQ(scheduler.suggestedTaskCount(9, 8), 2u);
-  EXPECT_EQ(scheduler.suggestedTaskCount(80, 8), 10u);
-}
-
-TEST(TaskSchedulerTest, ScopeWaitsForNestedTasks) {
-  TaskScheduler scheduler(2);
-  std::atomic<int> sum = 0;
-
-  scheduler.scope({}, [&](TaskScheduler::Scope &scope) {
-    scope.spawn([&](TaskScheduler::Scope &childScope) {
-      childScope.scope([&](TaskScheduler::Scope &nestedScope) {
-        nestedScope.parallelFor(std::array<int, 4>{1, 2, 3, 4},
-                                [&](int value) {
-                                  sum.fetch_add(value, std::memory_order_relaxed);
-                                });
-      });
-    });
+  scheduler.parallelFor({}, values, [&](int value) {
+    sum.fetch_add(value, std::memory_order_relaxed);
   });
 
-  EXPECT_EQ(sum.load(std::memory_order_relaxed), 10);
+  EXPECT_EQ(sum.load(std::memory_order_relaxed), 4950);
 }
 
-TEST(TaskSchedulerTest, ParallelForTasksCanSpawnNestedTasks) {
-  TaskScheduler scheduler(2);
-  std::atomic<int> sum = 0;
+TEST(TaskSchedulerTest, ParallelForProcessesEveryItemExactlyOnce) {
+  // Stresses the work distribution: with many items and many workers, every
+  // index must be visited exactly once across repeated runs.
+  TaskScheduler scheduler(8);
+  constexpr int kCount = 50000;
+  std::vector<std::atomic<int>> visits(kCount);
+  for (auto &v : visits) {
+    v.store(0, std::memory_order_relaxed);
+  }
+  std::vector<int> values(kCount);
+  for (int i = 0; i < kCount; ++i) {
+    values[i] = i;
+  }
 
-  scheduler.parallelFor({}, std::array<int, 4>{1, 2, 3, 4},
-                        [&](TaskScheduler::Scope &scope, int value) {
-                          scope.spawn([&sum, value] {
-                            sum.fetch_add(value, std::memory_order_relaxed);
-                          });
-                        });
+  for (int repeat = 0; repeat < 20; ++repeat) {
+    scheduler.parallelFor({}, values, [&](int value) {
+      visits[value].fetch_add(1, std::memory_order_relaxed);
+    });
+  }
 
-  EXPECT_EQ(sum.load(std::memory_order_relaxed), 10);
+  for (int i = 0; i < kCount; ++i) {
+    ASSERT_EQ(visits[i].load(std::memory_order_relaxed), 20) << "index " << i;
+  }
 }
 
-TEST(TaskSchedulerTest, JoinPropagatesTaskExceptions) {
-  TaskScheduler scheduler(2);
+TEST(TaskSchedulerTest, ParallelForPropagatesTaskExceptions) {
+  TaskScheduler scheduler(4);
+  std::vector<int> values(1000);
+  for (int i = 0; i < 1000; ++i) {
+    values[i] = i;
+  }
 
   EXPECT_THROW(
-      scheduler.scope({}, [&](TaskScheduler::Scope &scope) {
-        scope.spawn([] {
-          throw std::runtime_error("boom");
-        });
-      }),
+      scheduler.parallelFor({}, values,
+                            [](int value) {
+                              if (value == 500) {
+                                throw std::runtime_error("boom");
+                              }
+                            }),
       std::runtime_error);
 }
 

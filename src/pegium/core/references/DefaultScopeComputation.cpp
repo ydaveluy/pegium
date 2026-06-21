@@ -58,16 +58,21 @@ void DefaultScopeComputation::collectLocalSymbolsForNode(
   }
 }
 
+std::optional<workspace::AstNodeDescription>
+DefaultScopeComputation::make_description(
+    const AstNode &node, const workspace::Document &document) const {
+  auto info = services.references.nameProvider->nameOf(node);
+  if (info.empty()) {
+    return std::nullopt;
+  }
+  return services.workspace.astNodeDescriptionProvider->createDescription(
+      node, document, std::move(info));
+}
+
 void DefaultScopeComputation::addExportedSymbol(
     const AstNode &node, std::vector<workspace::AstNodeDescription> &exports,
     const workspace::Document &document) const {
-  auto info = services.references.nameProvider->nameOf(node);
-  if (info.empty()) {
-    return;
-  }
-  if (auto description =
-          services.workspace.astNodeDescriptionProvider->createDescription(
-              node, document, std::move(info));
+  if (auto description = make_description(node, document);
       description.has_value()) {
     exports.push_back(std::move(*description));
   }
@@ -79,13 +84,7 @@ void DefaultScopeComputation::addLocalSymbol(
   auto *container = node.getContainer();
   assert(container != nullptr);
 
-  auto info = services.references.nameProvider->nameOf(node);
-  if (info.empty()) {
-    return;
-  }
-  if (auto description =
-          services.workspace.astNodeDescriptionProvider->createDescription(
-              node, document, std::move(info));
+  if (auto description = make_description(node, document);
       description.has_value()) {
     symbols.emplace(container, std::move(*description));
   }

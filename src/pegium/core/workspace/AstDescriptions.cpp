@@ -6,7 +6,7 @@
 namespace pegium::workspace {
 
 const AstNode &resolve_ast_node(const Documents &documents,
-                                const AstNodeDescription &description) noexcept {
+                                const AstNodeDescription &description) {
   assert(description.documentId != InvalidDocumentId);
   assert(description.symbolId != InvalidSymbolId);
 
@@ -17,7 +17,7 @@ const AstNode &resolve_ast_node(const Documents &documents,
 
 const AstNode &resolve_ast_node(const Documents &documents,
                                 const AstNodeDescription &description,
-                                const Document &currentDocument) noexcept {
+                                const Document &currentDocument) {
   assert(description.documentId != InvalidDocumentId);
   assert(description.symbolId != InvalidSymbolId);
 

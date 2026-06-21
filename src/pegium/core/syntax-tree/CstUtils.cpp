@@ -151,23 +151,6 @@ void collect_keyword_nodes(const CstNodeView &node, std::string_view keyword,
   }
 }
 
-std::optional<CstNodeView> find_name_like_node_impl(const CstNodeView &node,
-                                                    std::string_view text) {
-  if (!node.valid()) {
-    return std::nullopt;
-  }
-
-  for (auto candidate = node;
-       candidate.valid() && candidate.getBegin() < node.getEnd();
-       candidate = candidate.next()) {
-    if (!candidate.isHidden() && candidate.isLeaf() &&
-        candidate.getText() == text) {
-      return candidate;
-    }
-  }
-  return std::nullopt;
-}
-
 bool contains(const CstNodeView &parent, const CstNodeView &child) noexcept {
   return parent.valid() && child.valid() &&
          parent.getBegin() <= child.getBegin() &&
@@ -225,22 +208,7 @@ std::optional<CstNodeView> find_direct_child_at_offset(const CstNodeView &node,
   return std::nullopt;
 }
 
-bool is_name_char(char c) noexcept {
-  const auto uc = static_cast<unsigned char>(c);
-  return std::isalnum(uc) != 0 || c == '_';
-}
-
 } // namespace
-
-bool is_valid(const CstNodeView &node) noexcept { return node.valid(); }
-
-TextOffset cst_begin(const CstNodeView &node) noexcept {
-  return node.valid() ? node.getBegin() : 0u;
-}
-
-TextOffset cst_end(const CstNodeView &node) noexcept {
-  return node.valid() ? node.getEnd() : 0u;
-}
 
 std::optional<std::string_view>
 get_terminal_rule_name(const CstNodeView &node) noexcept {
@@ -301,11 +269,6 @@ std::vector<CstNodeView> find_nodes_for_keyword(const CstNodeView &node,
   return matches;
 }
 
-std::optional<CstNodeView> find_name_like_node(const CstNodeView &node,
-                                               std::string_view expectedText) {
-  return find_name_like_node_impl(node, expectedText);
-}
-
 std::optional<CstNodeView> find_node_at_offset(const CstNodeView &node,
                                                TextOffset offset) {
   if (!node.valid() || node.isHidden() || offset < node.getBegin() ||
@@ -346,9 +309,17 @@ find_declaration_node_at_offset(const RootCstNode &root, TextOffset offset) {
   const auto size = static_cast<TextOffset>(text.size());
   auto adjustedOffset = std::min(offset, size);
 
+  // When the cursor sits past the end or on a non-identifier codepoint, step
+  // back onto the previous codepoint so a declaration touched on its right edge
+  // still resolves. Classify whole UTF-8 codepoints, not raw bytes, so the lead
+  // byte of a non-ASCII identifier (e.g. "é") is not mistaken for a separator.
   if (adjustedOffset > 0) {
-    if (adjustedOffset >= size || !is_name_char(text[adjustedOffset])) {
-      --adjustedOffset;
+    const char *const data = text.data();
+    if (adjustedOffset >= size ||
+        !utils::is_identifier_like_codepoint_at(data + adjustedOffset,
+                                                data + size)) {
+      adjustedOffset = static_cast<TextOffset>(
+          utils::previous_codepoint_start(text, adjustedOffset));
     }
   }
 

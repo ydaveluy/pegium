@@ -38,58 +38,6 @@ struct EditCheckpointState {
   std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
 };
 
-template <typename Context>
-concept FlatEditStateContext =
-    requires(const Context &ctx, Context &mutableCtx,
-             const EditCheckpointState &state) {
-      ctx.allowInsert;
-      ctx.allowDelete;
-      ctx.trackEditState;
-      ctx.inRecoveryPhase;
-      ctx.hadEdits;
-      ctx.consecutiveDeletes;
-      ctx.editCost;
-      ctx.editCount;
-      ctx.maxConsecutiveCodepointDeletes;
-      ctx.maxEditsPerAttempt;
-      ctx.maxEditCost;
-      mutableCtx.allowInsert = state.allowInsert;
-      mutableCtx.allowDelete = state.allowDelete;
-    };
-
-template <FlatEditStateContext Context>
-[[nodiscard]] inline EditCheckpointState
-capture_edit_checkpoint(const Context &ctx) noexcept {
-  return {
-      .allowInsert = ctx.allowInsert,
-      .allowDelete = ctx.allowDelete,
-      .trackEditState = ctx.trackEditState,
-      .inRecoveryPhase = ctx.inRecoveryPhase,
-      .hadEdits = ctx.hadEdits,
-      .consecutiveDeletes = ctx.consecutiveDeletes,
-      .editCost = ctx.editCost,
-      .editCount = ctx.editCount,
-      .maxConsecutiveCodepointDeletes = ctx.maxConsecutiveCodepointDeletes,
-      .maxEditsPerAttempt = ctx.maxEditsPerAttempt,
-      .maxEditCost = ctx.maxEditCost,
-  };
-}
-
-template <FlatEditStateContext Context>
-inline void restore_edit_checkpoint(Context &ctx,
-                                    const EditCheckpointState &state) noexcept {
-  ctx.allowInsert = state.allowInsert;
-  ctx.allowDelete = state.allowDelete;
-  ctx.trackEditState = state.trackEditState;
-  ctx.inRecoveryPhase = state.inRecoveryPhase;
-  ctx.hadEdits = state.hadEdits;
-  ctx.consecutiveDeletes = state.consecutiveDeletes;
-  ctx.editCost = state.editCost;
-  ctx.editCount = state.editCount;
-  ctx.maxConsecutiveCodepointDeletes = state.maxConsecutiveCodepointDeletes;
-  ctx.maxEditsPerAttempt = state.maxEditsPerAttempt;
-  ctx.maxEditCost = state.maxEditCost;
-}
 
 } // namespace detail
 
@@ -158,6 +106,36 @@ struct ExpectContext {
         _cursor(begin), _maxCursor(begin), _skipper(&skipper),
         _cancelToken(cancelToken) {}
 
+  [[nodiscard]] detail::EditCheckpointState captureEditState() const noexcept {
+    return {
+        .allowInsert = allowInsert,
+        .allowDelete = allowDelete,
+        .trackEditState = trackEditState,
+        .inRecoveryPhase = inRecoveryPhase,
+        .hadEdits = hadEdits,
+        .consecutiveDeletes = consecutiveDeletes,
+        .editCost = editCost,
+        .editCount = editCount,
+        .maxConsecutiveCodepointDeletes = maxConsecutiveCodepointDeletes,
+        .maxEditsPerAttempt = maxEditsPerAttempt,
+        .maxEditCost = maxEditCost,
+    };
+  }
+
+  void restoreEditState(const detail::EditCheckpointState &state) noexcept {
+    allowInsert = state.allowInsert;
+    allowDelete = state.allowDelete;
+    trackEditState = state.trackEditState;
+    inRecoveryPhase = state.inRecoveryPhase;
+    hadEdits = state.hadEdits;
+    consecutiveDeletes = state.consecutiveDeletes;
+    editCost = state.editCost;
+    editCount = state.editCount;
+    maxConsecutiveCodepointDeletes = state.maxConsecutiveCodepointDeletes;
+    maxEditsPerAttempt = state.maxEditsPerAttempt;
+    maxEditCost = state.maxEditCost;
+  }
+
   [[nodiscard]] Checkpoint mark() const noexcept {
     return {
         .cursor = _cursor,
@@ -168,7 +146,7 @@ struct ExpectContext {
         .contextPathSize = _contextPath.size(),
         .frontierSize = frontier.size(),
         .frontierBlocked = _frontierBlocked,
-        .editState = detail::capture_edit_checkpoint(*this),
+        .editState = captureEditState(),
     };
   }
 
@@ -181,7 +159,7 @@ struct ExpectContext {
     _contextPath.resize(checkpoint.contextPathSize);
     frontier.resize(checkpoint.frontierSize);
     _frontierBlocked = checkpoint.frontierBlocked;
-    detail::restore_edit_checkpoint(*this, checkpoint.editState);
+    restoreEditState(checkpoint.editState);
   }
 
   [[nodiscard]] SkipperGuard with_skipper(const Skipper &overrideSkipper) noexcept {
@@ -190,12 +168,12 @@ struct ExpectContext {
 
   [[nodiscard]] EditStateGuard
   withEditPermissions(bool nextAllowInsert, bool nextAllowDelete) noexcept {
-    return detail::make_edit_permissions_guard(*this, nextAllowInsert,
-                                               nextAllowDelete);
+    return EditStateGuard(*this, nextAllowInsert, nextAllowDelete,
+                          trackEditState);
   }
 
   [[nodiscard]] EditStateGuard withEditTrackingDisabled() noexcept {
-    return detail::make_edit_state_guard(*this, false, false, false);
+    return EditStateGuard(*this, false, false, false);
   }
 
   [[nodiscard]] ScopeGuard
@@ -350,8 +328,13 @@ struct ExpectContext {
 
   bool deleteOneCodepoint() noexcept;
 
+  // `fuzzyOperationDistance` is accepted for signature parity with
+  // `RecoveryContext::replaceLeaf` (whose out-of-window carve-out reads it).
+  // ExpectContext has no such carve-out and ignores it.
   bool replaceLeaf(const char *endPtr, const grammar::AbstractElement *element,
-                   std::uint32_t replacementCost, bool hidden = false);
+                   std::uint32_t replacementCost, bool hidden = false,
+                   std::uint32_t fuzzyOperationDistance =
+                       std::numeric_limits<std::uint32_t>::max());
 
   [[nodiscard]] bool frontierBlocked() const noexcept { return _frontierBlocked; }
 

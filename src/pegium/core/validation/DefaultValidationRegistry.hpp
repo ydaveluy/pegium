@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <typeindex>
@@ -54,16 +56,13 @@ private:
   };
 
   static void validate_category(std::string_view category);
+
+  /// Returns the compiled snapshot, building it on first use. Thread-safe: the
+  /// snapshot is published once under `_compileMutex` and then read lock-free
+  /// during validation (registration, which invalidates it, only runs before a
+  /// build starts).
   [[nodiscard]] std::shared_ptr<const detail::CompiledValidationRegistry>
   compiledRegistry() const;
-
-  /// Returns a per-category bitmask sized to `compiled.knownCategories`, with
-  /// identity-based caching across consecutive calls with the same `categories`
-  /// span pointer/size. The cache is invalidated when the compiled snapshot
-  /// changes.
-  [[nodiscard]] const std::vector<bool> &
-  enabled_category_mask(const detail::CompiledValidationRegistry &compiled,
-                        std::span<const std::string> categories) const;
 
   void registerTypedCheck(ValidationCheckRegistration registration,
                           std::string_view category) override;
@@ -75,15 +74,12 @@ private:
       std::string(kFastValidationCategory),
       std::string(kSlowValidationCategory),
       std::string(kBuiltInValidationCategory)};
+  mutable std::mutex _compileMutex;
   mutable std::shared_ptr<const detail::CompiledValidationRegistry> _compiled;
-  mutable bool _compiledDirty = true;
-
-  // Identity-based cache for the latest (compiled, categories) pair.
-  mutable const detail::CompiledValidationRegistry *_cachedMaskCompiled =
-      nullptr;
-  mutable const std::string *_cachedMaskCategoriesData = nullptr;
-  mutable std::size_t _cachedMaskCategoriesSize = 0;
-  mutable std::vector<bool> _cachedMask;
+  // True once `_compiled` is built and current; stored with release in
+  // compiledRegistry() and loaded with acquire so validation can dereference
+  // `_compiled` lock-free across parallel documents.
+  mutable std::atomic<bool> _compileClean{false};
 };
 
 } // namespace pegium::validation

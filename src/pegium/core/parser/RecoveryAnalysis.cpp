@@ -204,13 +204,10 @@ RecoveryWindow compute_recovery_window(const FailureSnapshot &snapshot,
     return window;
   }
 
-  const auto beginIndex =
-      snapshot.hasFailureToken
-          ? static_cast<std::uint32_t>(
-                snapshot.failureTokenIndex > backwardTokenCount
-                    ? snapshot.failureTokenIndex - backwardTokenCount
-                    : 0)
-          : 0u;
+  const auto beginIndex = static_cast<std::uint32_t>(
+      snapshot.failureTokenIndex > backwardTokenCount
+          ? snapshot.failureTokenIndex - backwardTokenCount
+          : 0);
   const auto clampedStablePrefixFloorOffset =
       std::min(stablePrefixFloorOffset, effectiveMaxCursorOffset);
   const auto activationBeginOffset =
@@ -252,30 +249,53 @@ enum class LeadingVisibleEntryKind : std::uint8_t {
   PredicateGuarded,
 };
 
+// Upper bound on this static leading-edge walk's recursion depth. A cycle in
+// the grammar can only be reached through rule-reference indirection
+// (ParserRule/InfixRule/DataTypeRule getElement() pointing back into the
+// path, e.g. `a=b; b=a|"z"`), which would otherwise recurse forever and
+// overflow the stack on adversarial grammars. This static walk is the only
+// recovery grammar traversal without the cycle protection the runtime
+// recover() descent has (ActiveRecoveryStack + kMaxRecoveryRuleDepth). The
+// cap is generous — far beyond any real grammar's leading-edge nesting, so
+// every terminating grammar is classified exactly as before — and on hitting
+// it we fall back to the same conservative default the switch already returns
+// for leaf/unknown elements.
+inline constexpr unsigned kMaxLeadingVisibleEntryDepth = 256u;
+
 [[nodiscard]] LeadingVisibleEntryKind
-classify_leading_visible_entry(const grammar::AbstractElement &element) noexcept {
+classify_leading_visible_entry(const grammar::AbstractElement &element,
+                               unsigned depth = 0u) noexcept {
   using enum grammar::ElementKind;
+  if (depth >= kMaxLeadingVisibleEntryDepth) {
+    return LeadingVisibleEntryKind::Unguarded;
+  }
+  const unsigned childDepth = depth + 1u;
   switch (element.getKind()) {
   case AndPredicate:
   case NotPredicate:
     return LeadingVisibleEntryKind::PredicateGuarded;
   case Assignment:
     return classify_leading_visible_entry(
-        *static_cast<const grammar::Assignment &>(element).getElement());
+        *static_cast<const grammar::Assignment &>(element).getElement(),
+        childDepth);
   case ParserRule:
     return classify_leading_visible_entry(
-        *static_cast<const grammar::ParserRule &>(element).getElement());
+        *static_cast<const grammar::ParserRule &>(element).getElement(),
+        childDepth);
   case InfixRule:
     return classify_leading_visible_entry(
-        *static_cast<const grammar::InfixRule &>(element).getElement());
+        *static_cast<const grammar::InfixRule &>(element).getElement(),
+        childDepth);
   case DataTypeRule:
     return classify_leading_visible_entry(
-        *static_cast<const grammar::DataTypeRule &>(element).getElement());
+        *static_cast<const grammar::DataTypeRule &>(element).getElement(),
+        childDepth);
   case Repetition: {
     const auto &repetition = static_cast<const grammar::Repetition &>(element);
     return repetition.getMin() == 0u
                ? LeadingVisibleEntryKind::None
-               : classify_leading_visible_entry(*repetition.getElement());
+               : classify_leading_visible_entry(*repetition.getElement(),
+                                                childDepth);
   }
   case Group: {
     const auto &group = static_cast<const grammar::Group &>(element);
@@ -284,7 +304,7 @@ classify_leading_visible_entry(const grammar::AbstractElement &element) noexcept
       if (child == nullptr) {
         continue;
       }
-      const auto childKind = classify_leading_visible_entry(*child);
+      const auto childKind = classify_leading_visible_entry(*child, childDepth);
       if (childKind != LeadingVisibleEntryKind::None) {
         return childKind;
       }
@@ -302,7 +322,7 @@ classify_leading_visible_entry(const grammar::AbstractElement &element) noexcept
       if (child == nullptr) {
         continue;
       }
-      const auto childKind = classify_leading_visible_entry(*child);
+      const auto childKind = classify_leading_visible_entry(*child, childDepth);
       if (childKind == LeadingVisibleEntryKind::Unguarded) {
         return LeadingVisibleEntryKind::Unguarded;
       }
@@ -320,7 +340,7 @@ classify_leading_visible_entry(const grammar::AbstractElement &element) noexcept
       if (child == nullptr) {
         continue;
       }
-      const auto childKind = classify_leading_visible_entry(*child);
+      const auto childKind = classify_leading_visible_entry(*child, childDepth);
       if (childKind == LeadingVisibleEntryKind::Unguarded) {
         return LeadingVisibleEntryKind::Unguarded;
       }

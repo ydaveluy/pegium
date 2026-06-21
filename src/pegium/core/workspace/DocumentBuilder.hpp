@@ -74,14 +74,19 @@ public:
   ///
   /// `documents` must only contain non-null managed documents with a
   /// normalized non-empty URI.
+  /// `downgradeLock`, when set, is invoked once the document model is fully
+  /// linked and before validation runs, so callers holding an exclusive lock
+  /// can release it for the validation phase.
   virtual void build(std::span<const std::shared_ptr<Document>> documents,
                      const BuildOptions &options = {},
-                     utils::CancellationToken cancelToken = {}) const = 0;
+                     utils::CancellationToken cancelToken = {},
+                     const std::function<void()> &downgradeLock = {}) const = 0;
 
   /// Rebuilds documents affected by change and deletion notifications.
   virtual void update(std::span<const DocumentId> changedDocumentIds,
                       std::span<const DocumentId> deletedDocumentIds,
-                      utils::CancellationToken cancelToken = {}) const = 0;
+                      utils::CancellationToken cancelToken = {},
+                      const std::function<void()> &downgradeLock = {}) const = 0;
 
   /// Subscribes to document update notifications.
   virtual utils::ScopedDisposable

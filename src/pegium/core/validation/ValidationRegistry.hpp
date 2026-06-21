@@ -173,25 +173,27 @@ public:
         }};
   }
 
+  // Binds @p Method to a validator owned elsewhere (e.g. by the service
+  // container, as `services.validator`). The registry does NOT take ownership:
+  // @p validator must outlive the registry's checks. Binding by reference —
+  // rather than copying the validator — keeps every check on the one owned
+  // instance, so a validator may safely hold per-build state and need not be
+  // copyable. A temporary cannot bind here, which rules out a dangling check.
   template <auto Method, typename Object>
-    requires detail::BoundValidationCheckMethod<Method, Object> &&
-             std::constructible_from<std::remove_cvref_t<Object>, Object>
+    requires detail::BoundValidationCheckMethod<Method, Object>
   [[nodiscard]] static ValidationCheckRegistration
-  makeValidationCheck(Object &&object) {
+  makeValidationCheck(Object &validator) {
     using Node =
         std::remove_cvref_t<detail::ValidationCheckMethodNode<Method>>;
-    using StoredObject = std::remove_cvref_t<Object>;
-    auto sharedObject =
-        std::make_shared<StoredObject>(std::forward<Object>(object));
+    auto *bound = std::addressof(validator);
     return makeValidationCheck<Node>(
-        [sharedObject = std::move(sharedObject)](
-            const Node &node, const ValidationAcceptor &acceptor,
-            const utils::CancellationToken &cancelToken) {
+        [bound](const Node &node, const ValidationAcceptor &acceptor,
+                const utils::CancellationToken &cancelToken) {
           if constexpr (detail::kValidationCheckMethodAcceptsCancellation<
                             Method>) {
-            std::invoke(Method, *sharedObject, node, acceptor, cancelToken);
+            std::invoke(Method, *bound, node, acceptor, cancelToken);
           } else {
-            std::invoke(Method, *sharedObject, node, acceptor);
+            std::invoke(Method, *bound, node, acceptor);
           }
         });
   }

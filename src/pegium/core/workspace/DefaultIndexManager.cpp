@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <ranges>
-#include <typeinfo>
 
 #include <pegium/core/services/ServiceRegistry.hpp>
+#include <pegium/core/syntax-tree/AstReflection.hpp>
 #include <pegium/core/workspace/Document.hpp>
 
 namespace pegium::workspace {
@@ -14,14 +14,7 @@ namespace {
 bool matches_type(const AstNodeDescription &description,
                   std::type_index expectedType,
                   const AstReflection &reflection) {
-  if (expectedType == std::type_index(typeid(void)) ||
-      description.type == std::type_index(typeid(void))) {
-    return false;
-  }
-  if (description.type == expectedType) {
-    return true;
-  }
-  return reflection.isSubtype(description.type, expectedType);
+  return type_is_assignable(description.type, expectedType, reflection);
 }
 
 } // namespace
@@ -176,22 +169,17 @@ std::vector<AstNodeDescription> DefaultIndexManager::getFileDescriptionsLocked(
   if (!type.has_value()) {
     return exportsIt->second;
   }
-  return _exportsByTypeCache.get(documentId, *type, [this, documentId, type] {
-    return filterDescriptionsByTypeLocked(documentId, *type);
+  return _exportsByTypeCache.get(documentId, *type, [this, &exportsIt, type] {
+    return filterDescriptionsByTypeLocked(exportsIt->second, *type);
   });
 }
 
 std::vector<AstNodeDescription>
-DefaultIndexManager::filterDescriptionsByTypeLocked(DocumentId documentId,
-                                                    std::type_index type) const {
+DefaultIndexManager::filterDescriptionsByTypeLocked(
+    const std::vector<AstNodeDescription> &exports, std::type_index type) const {
   std::vector<AstNodeDescription> filtered;
-  const auto exportsIt = _exportsByDocument.find(documentId);
-  if (exportsIt == _exportsByDocument.end()) {
-    return filtered;
-  }
-
   const auto &reflection = *shared.astReflection;
-  for (const auto &description : exportsIt->second) {
+  for (const auto &description : exports) {
     if (matches_type(description, type, reflection)) {
       filtered.push_back(description);
     }

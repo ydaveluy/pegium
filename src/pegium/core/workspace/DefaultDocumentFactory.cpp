@@ -53,7 +53,8 @@ std::shared_ptr<Document> DefaultDocumentFactory::fromUri(
   const auto normalizedUri = utils::normalize_uri(uri);
   if (const auto provider = shared.workspace.textDocuments;
       provider != nullptr) {
-    if (auto textDocument = provider->get(normalizedUri); textDocument != nullptr) {
+    if (auto textDocument = provider->getNormalized(normalizedUri);
+        textDocument != nullptr) {
       const auto &services =
           shared.serviceRegistry->getServices(textDocument->uri());
       return createDocument(std::move(textDocument), services, cancelToken);
@@ -81,7 +82,7 @@ Document &DefaultDocumentFactory::update(
   std::shared_ptr<TextDocument> latestTextDocument;
   if (const auto provider = shared.workspace.textDocuments;
       provider != nullptr) {
-    latestTextDocument = provider->get(document.uri);
+    latestTextDocument = provider->getNormalized(document.uri);
   }
 
   if (latestTextDocument == nullptr) {

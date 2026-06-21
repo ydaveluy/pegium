@@ -87,7 +87,8 @@ DefaultWorkspaceManager::initialized(const InitializedParams &params) {
 
   return shared.workspace.workspaceLock->write(
       [this, folders = std::move(folders)](
-          const utils::CancellationToken &cancelToken) mutable {
+          const utils::CancellationToken &cancelToken,
+          const WorkspaceLock::Downgrade &) mutable {
         try {
           utils::throw_if_cancelled(cancelToken);
           initializeWorkspace(folders, cancelToken);

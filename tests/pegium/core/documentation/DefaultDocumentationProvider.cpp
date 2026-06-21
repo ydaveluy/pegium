@@ -65,10 +65,16 @@ protected:
   }
 
   [[nodiscard]] std::optional<std::string>
-  documentationTagRenderer(const AstNode &node,
-                           std::string_view tag) const override {
+  documentationTagRenderer(const AstNode &node, std::string_view name,
+                           std::string_view content,
+                           bool inlineTag) const override {
     (void)node;
-    return "**" + std::string(tag) + "**";
+    (void)inlineTag;
+    std::string tag = "@" + std::string(name);
+    if (!content.empty()) {
+      tag += " " + std::string(content);
+    }
+    return "**" + tag + "**";
   }
 };
 
@@ -106,7 +112,7 @@ TEST(DefaultDocumentationProviderTest,
 }
 
 TEST(DefaultDocumentationProviderTest,
-     RendersJSDocMarkdownWithNormalizedLinksAndTags) {
+     RendersDocCommentMarkdownWithNormalizedLinksAndTags) {
   auto shared = test::make_empty_shared_core_services();
   pegium::installDefaultSharedCoreServices(*shared);
   {
@@ -141,11 +147,11 @@ TEST(DefaultDocumentationProviderTest,
   EXPECT_NE(documentation->find(
                 "[The Value](file:///tmp/pegium-tests/documentation.docs#L6,7)"),
             std::string::npos);
-  EXPECT_NE(documentation->find("- `@param p first value`"), std::string::npos);
+  EXPECT_NE(documentation->find("*@param* — p first value"), std::string::npos);
 }
 
 TEST(DefaultDocumentationProviderTest,
-     RendersJSDocMarkdownForSingleLineJSDoc) {
+     RendersDocCommentMarkdownForSingleLineDocComment) {
   auto shared = test::make_empty_shared_core_services();
   pegium::installDefaultSharedCoreServices(*shared);
   {
@@ -171,11 +177,11 @@ TEST(DefaultDocumentationProviderTest,
       services.documentation.documentationProvider->getDocumentation(
           *model->entries.front());
   ASSERT_TRUE(documentation.has_value());
-  EXPECT_EQ(*documentation, "- `@deprecated Since 1.0`");
+  EXPECT_EQ(*documentation, "*@deprecated* — Since 1.0");
 }
 
 TEST(DefaultDocumentationProviderTest,
-     RendersJSDocMarkdownForRootNodeDocumentation) {
+     RendersDocCommentMarkdownForRootNodeDocumentation) {
   auto shared = test::make_empty_shared_core_services();
   pegium::installDefaultSharedCoreServices(*shared);
   {

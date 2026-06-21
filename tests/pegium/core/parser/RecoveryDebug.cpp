@@ -138,7 +138,7 @@ TEST(RecoveryDebugTest,
       detail::recovery_attempt_to_json(harness.attempt, &harness.spec);
   const auto &object = json.object();
 
-  EXPECT_EQ(object.at("status").string(), "Stable");
+  EXPECT_EQ(object.at("status").string(), "Selectable");
   EXPECT_TRUE(object.at("entryRuleMatched").boolean());
   EXPECT_TRUE(object.at("fullMatch").boolean());
   EXPECT_GT(object.at("editCost").integer(), 0);
@@ -159,32 +159,33 @@ TEST(RecoveryDebugTest,
   EXPECT_EQ(editTrace.at("entryCount").integer(), 1);
   EXPECT_TRUE(editTrace.at("hasEdits").boolean());
 
-  ASSERT_TRUE(object.at("score").isObject());
-  const auto &score = object.at("score").object();
-  EXPECT_TRUE(score.at("stable").boolean());
-  EXPECT_TRUE(score.at("credible").boolean());
-  EXPECT_TRUE(score.at("fullMatch").boolean());
-  EXPECT_GT(score.at("editCost").integer(), 0);
-  EXPECT_EQ(score.at("entryCount").integer(), 1);
+  // `score` was a pre-shared-order projection of fields already exposed at
+  // top level / in editTrace; assert those instead.
+  EXPECT_EQ(object.at("status").string(), "Selectable");
+  EXPECT_TRUE(object.at("fullMatch").boolean());
+  EXPECT_GT(object.at("editCost").integer(), 0);
 
   ASSERT_TRUE(object.at("orderKey").isObject());
   const auto &orderKey = object.at("orderKey").object();
+  // The dump mirrors every is_better_recovery_key axis (raw fields + the two
+  // derived scores the comparator orders on), so a dump fully explains a rank.
+  EXPECT_TRUE(orderKey.at("fullMatch").boolean());
   EXPECT_TRUE(orderKey.at("matched").boolean());
   EXPECT_GE(orderKey.at("firstEditOffset").integer(), 0);
+  EXPECT_GE(orderKey.at("firstEditScore").integer(), 0);
   EXPECT_GT(orderKey.at("editCost").integer(), 0);
+  EXPECT_GT(orderKey.at("editCount").integer(), 0);
+  EXPECT_GT(orderKey.at("faithfulness").integer(), 0);
   EXPECT_GE(orderKey.at("progressAfterEdits").integer(), 0);
 
   ASSERT_TRUE(object.at("spec").isObject());
   const auto &spec = object.at("spec").object();
-  ASSERT_TRUE(spec.at("windows").isArray());
-  ASSERT_EQ(spec.at("windows").array().size(), 1u);
-  const auto &window = spec.at("windows").array().front().object();
+  ASSERT_TRUE(spec.at("window").isObject());
+  const auto &window = spec.at("window").object();
   EXPECT_EQ(window.at("backwardTokenCount").integer(), 16);
   EXPECT_EQ(window.at("forwardTokenCount").integer(), 16);
-  ASSERT_TRUE(object.at("replayWindows").isArray());
-  ASSERT_EQ(object.at("replayWindows").array().size(), 1u);
-  const auto &replayWindow =
-      object.at("replayWindows").array().front().object();
+  ASSERT_TRUE(object.at("replayWindow").isObject());
+  const auto &replayWindow = object.at("replayWindow").object();
   EXPECT_EQ(replayWindow.at("beginOffset").integer(), 0);
   EXPECT_EQ(replayWindow.at("maxCursorOffset").integer(), 5);
 }
@@ -217,10 +218,9 @@ TEST(RecoveryDebugTest,
   const auto &selectedAttempt = object.at("selectedAttempt").object();
   EXPECT_EQ(selectedAttempt.at("parsedLength").integer(),
             search.selectedAttempt.parsedLength);
-  EXPECT_EQ(selectedAttempt.at("status").string(), "Stable");
-  ASSERT_TRUE(selectedAttempt.at("replayWindows").isArray());
-  EXPECT_EQ(selectedAttempt.at("replayWindows").array().size(),
-            search.selectedAttempt.replayWindow.has_value() ? 1u : 0u);
+  EXPECT_EQ(selectedAttempt.at("status").string(), "Selectable");
+  EXPECT_EQ(selectedAttempt.contains("replayWindow"),
+            search.selectedAttempt.replayWindow.has_value());
 }
 
 TEST(RecoveryDebugTest,
@@ -253,7 +253,7 @@ TEST(RecoveryDebugTest,
   const auto &selectedAttempt = object.at("selectedAttempt").object();
   EXPECT_TRUE(selectedAttempt.at("entryRuleMatched").boolean());
   EXPECT_TRUE(selectedAttempt.at("fullMatch").boolean());
-  EXPECT_EQ(selectedAttempt.at("status").string(), "Stable");
+  EXPECT_EQ(selectedAttempt.at("status").string(), "Selectable");
 }
 
 TEST(RecoveryDebugTest, RecoveryWindowsJsonUsesSymmetricTokenCounts) {

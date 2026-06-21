@@ -33,16 +33,30 @@ struct TextEdit {
 
 /// Immutable-snapshot-backed text document aligned with the LSP text-document
 /// contract.
+///
+/// A `TextDocument` is immutable once shared: `getText()` reads the current
+/// snapshot without taking `_lineIndexMutex`, which is sound only because a
+/// shared instance is never mutated in place. The `update()`/`setText()`
+/// mutators are used exclusively on a fresh, unshared instance before it is
+/// published (the change pipeline copy-constructs a new document and swaps the
+/// `shared_ptr`); mutating an already-shared instance would data-race the
+/// lock-free `getText()`.
 class TextDocument {
   friend class DocumentFactory;
 
 public:
   TextDocument() = delete;
   ~TextDocument();
-  TextDocument(const TextDocument &other);
-  TextDocument &operator=(const TextDocument &other);
+  TextDocument(const TextDocument &other) = delete;
+  TextDocument &operator=(const TextDocument &other) = delete;
   TextDocument(TextDocument &&other) noexcept;
-  TextDocument &operator=(TextDocument &&other) noexcept;
+  TextDocument &operator=(TextDocument &&other);
+
+  /// Returns an independent deep copy. TextDocument is otherwise non-copyable so
+  /// its text snapshot and line index are never duplicated by accident; use
+  /// clone() only where a genuinely separate owned copy is required (e.g.
+  /// snapshotting an open document before applying an in-place edit).
+  [[nodiscard]] TextDocument clone() const;
 
   /// Creates a text document with readonly identity and version metadata.
   [[nodiscard]] static TextDocument create(

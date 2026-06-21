@@ -93,7 +93,7 @@ TEST(DocumentTest, AttachTextDocumentRebindsSnapshotWithoutResettingState) {
   document.parseResult.references.clear();
   document.diagnostics.push_back({});
 
-  auto updated = std::make_shared<TextDocument>(document.textDocument());
+  auto updated = std::make_shared<TextDocument>(document.textDocument().clone());
   const TextDocumentContentChangeEvent change{.text = "after"};
   (void)TextDocument::update(*updated, std::span(&change, std::size_t{1}),
                              updated->version() + 1);

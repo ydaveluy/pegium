@@ -10,7 +10,7 @@
 
 namespace pegium::documentation {
 
-/// Default documentation renderer for JSDoc-style comments.
+/// Default renderer for documentation comments.
 class DefaultDocumentationProvider : public DocumentationProvider,
                                      protected pegium::DefaultCoreService {
 public:
@@ -22,16 +22,22 @@ public:
   getDocumentation(const AstNode &node) const override;
 
 protected:
-  /// Renders one `{@link ...}` occurrence found in the documentation comment.
+  /// Renders one `{@link ...}` occurrence, given its split target and display.
+  ///
+  /// The default implementation resolves `name` to a declaration visible from
+  /// `node` and links to its source location, or returns `std::nullopt` when it
+  /// cannot be resolved.
   [[nodiscard]] virtual std::optional<std::string>
   documentationLinkRenderer(const AstNode &node, std::string_view name,
                             std::string_view display) const;
-  /// Renders one JSDoc tag line such as `@deprecated`.
+  /// Renders one documentation tag (a block tag or a non-link inline tag).
+  ///
+  /// `content` is the already-rendered Markdown content of the tag. The default
+  /// implementation returns `std::nullopt`, which falls back to the standard
+  /// `*@tag* — content` rendering.
   [[nodiscard]] virtual std::optional<std::string>
-  documentationTagRenderer(const AstNode &node, std::string_view tag) const;
-  /// Rewrites every `{@link ...}` occurrence in `line`.
-  [[nodiscard]] std::string normalizeJsdocLinks(const AstNode &node,
-                                                std::string line) const;
+  documentationTagRenderer(const AstNode &node, std::string_view name,
+                           std::string_view content, bool inlineTag) const;
   /// Looks up `name` in lexical local symbols visible from `node`.
   [[nodiscard]] virtual std::optional<workspace::AstNodeDescription>
   findNameInLocalSymbols(const AstNode &node, std::string_view name) const;

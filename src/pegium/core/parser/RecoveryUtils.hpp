@@ -11,14 +11,6 @@
 
 namespace pegium::parser::detail {
 
-template <typename Context>
-inline void enable_budget_overflow_edits_for_attempt(Context &ctx) noexcept {
-  if constexpr (requires { ctx.allowBudgetOverflowEdits(); }) {
-    ctx.allowBudgetOverflowEdits();
-  }
-}
-
-
 template <typename Context> struct ExtendedDeleteScanBudgetScope {
   Context &ctx;
   std::uint32_t savedMaxConsecutiveDeletes;
@@ -64,7 +56,9 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
       return;
     }
     restore();
-    enable_budget_overflow_edits_for_attempt(ctx);
+    if constexpr (requires { ctx.allowBudgetOverflowEdits(); }) {
+      ctx.allowBudgetOverflowEdits();
+    }
   }
 };
 
@@ -124,9 +118,6 @@ using DeleteRetryVisitResult = DeleteScanVisitResult;
 struct DeleteRetryOptions {
   DeleteScanOptions scan{};
   bool extendThroughHiddenTrivia = true;
-  bool stopAtHiddenTriviaBoundary = false;
-  bool visitAfterHiddenTriviaExtension = true;
-  bool stopAtStructuredVisibleSource = false;
   bool stopOverflowAtStructuredVisibleSource = false;
 };
 
@@ -176,15 +167,7 @@ position_starts_structured_visible_source(const Context &ctx,
       return false;
     }
   }
-  // Bounds-check the UTF-8 read so a lead byte at `end - 1` doesn't
-  // pull `decode_utf8_codepoint` past the buffer. Truncated multi-byte
-  // sequences are treated as non-identifier-like.
-  const auto length = utils::utf8_codepoint_length(*position);
-  if (length == 0 ||
-      length > static_cast<std::size_t>(ctx.end - position)) {
-    return false;
-  }
-  return is_identifier_like_codepoint(utils::decode_utf8_codepoint(position));
+  return is_identifier_like_codepoint_at(position, ctx.end);
 }
 
 template <typename VisitFn>
@@ -207,6 +190,29 @@ invoke_delete_scan_visit(VisitFn &visitFn, const DeleteScanVisitState &state) {
   }
 }
 
+// True iff a hidden-trivia boundary sits at the cursor (the just-deleted
+// codepoint abuts hidden trivia). Shared by the delete-scan and delete-retry
+// passes, which compute it identically. Contexts without skip_without_builder
+// (none on the recovery path today) report no boundary.
+template <typename Context>
+[[nodiscard]] inline bool detect_hidden_trivia_boundary(Context &ctx) noexcept {
+  if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
+    return ctx.skip_without_builder(ctx.cursor()) > ctx.cursor();
+  } else {
+    return false;
+  }
+}
+
+/// Guarded delete-scan: walk forward deleting one codepoint at a time (up to
+/// `options.scan.maxDeletes`, while `canDeleteStep()` holds), invoking `visit`
+/// at each cursor. Two passes: a normal-budget pass, then — only if
+/// `allowOverflow` and the overflow budget can be enabled — an overflow pass
+/// whose edits are committed only when `visit` returns Accept. At a hidden-
+/// trivia boundary the last delete is optionally extended through the trivia
+/// (and re-visited, unless `visitAfterHiddenTriviaExtension` is off), otherwise
+/// the scan may stop. Any non-Continue result ends the walk: the checkpoint is
+/// rewound unless the result is Accept; reaching the end rewinds and returns
+/// Stop. `recover_by_guarded_delete_scan` is the match / on-match wrapper.
 template <typename Context, typename CanDeleteStepFn, typename VisitFn>
 [[nodiscard]] inline DeleteScanVisitResult
 visit_guarded_delete_scan_positions(
@@ -233,11 +239,7 @@ visit_guarded_delete_scan_positions(
     while (deleteCount < options.scan.maxDeletes && canDeleteStep() &&
            ctx.deleteOneCodepoint()) {
       ++deleteCount;
-      bool hiddenTriviaBoundary = false;
-      if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
-        hiddenTriviaBoundary =
-            ctx.skip_without_builder(ctx.cursor()) > ctx.cursor();
-      }
+      const bool hiddenTriviaBoundary = detect_hidden_trivia_boundary(ctx);
       const auto visitState = DeleteScanVisitState{
           .overflowBudget = overflowBudget,
           .hiddenTriviaBoundary = hiddenTriviaBoundary,
@@ -324,6 +326,13 @@ template <typename Context, typename CanDeleteStepFn, typename MatchFn,
              {.scan = options}) == DeleteScanVisitResult::Accept;
 }
 
+/// Guarded delete-retry: the same two-pass delete walk as
+/// `visit_guarded_delete_scan_positions`, but each position is first gated by
+/// `shouldRetry` before `retry` runs, replay / commit go through a
+/// `DeleteRetryReplayScope`, and the overflow pass additionally bails
+/// (Continue) at a position that starts structured visible source once anything
+/// has been deleted, so overflow deletions never cut into real source.
+/// `recover_by_guarded_delete_retry` is the bool wrapper.
 template <typename Context, typename ShouldRetryFn, typename RetryFn>
 [[nodiscard]] inline DeleteRetryVisitResult
 visit_guarded_delete_retry_positions(
@@ -351,23 +360,16 @@ visit_guarded_delete_retry_positions(
   };
   const auto try_retry_pass = [&](bool overflowBudget) {
     while (deleteCount < options.scan.maxDeletes) {
-      const bool structuredVisibleSource =
-          position_starts_structured_visible_source(ctx,
-                                                                ctx.cursor());
-      if (((overflowBudget && options.stopOverflowAtStructuredVisibleSource) ||
-           options.stopAtStructuredVisibleSource) &&
-          structuredVisibleSource && deleteCount != 0u) {
+      if (overflowBudget && options.stopOverflowAtStructuredVisibleSource &&
+          deleteCount != 0u &&
+          position_starts_structured_visible_source(ctx, ctx.cursor())) {
         return DeleteRetryVisitResult::Continue;
       }
       if (!ctx.deleteOneCodepoint()) {
         break;
       }
       ++deleteCount;
-      bool hiddenTriviaBoundary = false;
-      if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
-        hiddenTriviaBoundary =
-            ctx.skip_without_builder(ctx.cursor()) > ctx.cursor();
-      }
+      const bool hiddenTriviaBoundary = detect_hidden_trivia_boundary(ctx);
       const auto visitState = DeleteRetryVisitState{
           .overflowBudget = overflowBudget,
           .hiddenTriviaBoundary = hiddenTriviaBoundary,
@@ -378,21 +380,12 @@ visit_guarded_delete_retry_positions(
           result != DeleteRetryVisitResult::Continue) {
         return result;
       }
-      if (options.stopAtStructuredVisibleSource &&
-          position_starts_structured_visible_source(ctx,
-                                                                ctx.cursor()) &&
-          deleteCount != 0u) {
-        return DeleteRetryVisitResult::Stop;
-      }
       if (!hiddenTriviaBoundary) {
         continue;
       }
       if (options.extendThroughHiddenTrivia) {
         if constexpr (requires { ctx.extendLastDeleteThroughHiddenTrivia(); }) {
           if (ctx.extendLastDeleteThroughHiddenTrivia()) {
-            if (!options.visitAfterHiddenTriviaExtension) {
-              continue;
-            }
             const auto extendedVisitState = DeleteRetryVisitState{
                 .overflowBudget = overflowBudget,
                 .hiddenTriviaBoundary = false,
@@ -404,18 +397,9 @@ visit_guarded_delete_retry_positions(
                 result != DeleteRetryVisitResult::Continue) {
               return result;
             }
-            if (options.stopAtStructuredVisibleSource &&
-                position_starts_structured_visible_source(
-                    ctx, ctx.cursor()) &&
-                deleteCount != 0u) {
-              return DeleteRetryVisitResult::Stop;
-            }
             continue;
           }
         }
-      }
-      if (options.stopAtHiddenTriviaBoundary) {
-        return DeleteRetryVisitResult::Stop;
       }
     }
     return DeleteRetryVisitResult::Continue;

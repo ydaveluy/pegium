@@ -16,41 +16,35 @@
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
 #include <pegium/core/parser/RecoveryCost.hpp>
-#include <pegium/core/parser/RecoveryEditSupport.hpp>
+#include <pegium/core/parser/EditableRecoverySupport.hpp>
 #include <pegium/core/parser/RecoveryUtils.hpp>
 #include <pegium/core/parser/TerminalShape.hpp>
 
 namespace pegium::parser::detail {
 
 struct TriviaGapProfile {
-  std::uint32_t hiddenCodepointSpan = 0u;
+  bool hasHiddenGap = false;
   bool visibleSourceAfterLocalSkip = false;
-
-  [[nodiscard]] constexpr bool hasHiddenGap() const noexcept {
-    return hiddenCodepointSpan > 0u;
-  }
 };
 
 [[nodiscard]] constexpr TerminalShape
 classify_literal_recovery_profile(std::string_view value) noexcept {
-  return make_terminal_shape_from_literal(
-      value, /*startsLikeWord=*/false, /*endsLikeWord=*/false);
+  return make_terminal_shape_from_literal(value);
 }
 
+/// A terminal element exposing a string `getValue()` must also expose
+/// `isCaseSensitive()`. The recovery `TerminalShape` is derived from the same
+/// `DirectLiteralRecoveryMetadata` the fuzzy matcher consumes, so the two have
+/// to be co-satisfied; otherwise the shape would silently fall back to the
+/// default and change insert/replace admissibility. All in-tree terminal
+/// elements derive from `grammar::Literal`, which declares both.
 template <typename Element>
-[[nodiscard]] constexpr TerminalShape
-infer_terminal_rule_recovery_profile(const Element &element) noexcept {
-  if constexpr (requires {
-                  {
-                    element.getValue()
-                  } -> std::convertible_to<std::string_view>;
-                }) {
-    return classify_literal_recovery_profile(element.getValue());
-  } else {
-    (void)element;
-    return {};
-  }
-}
+concept ConsistentLiteralRecoveryElement =
+    !requires(const Element &element) {
+      { element.getValue() } -> std::convertible_to<std::string_view>;
+    } || requires(const Element &element) {
+      { element.isCaseSensitive() } -> std::convertible_to<bool>;
+    };
 
 struct DirectLiteralRecoveryMetadata {
   std::string_view value{};
@@ -73,6 +67,16 @@ infer_direct_literal_recovery_metadata(const Element &element) noexcept {
   } else {
     return std::nullopt;
   }
+}
+
+/// Derives the terminal recovery `TerminalShape` from the same direct-literal
+/// metadata the fuzzy matcher consumes, so shape and metadata share one source
+/// of truth. Empty metadata (non-literal terminals) yields the default shape.
+[[nodiscard]] constexpr TerminalShape terminal_shape_from_recovery_metadata(
+    const std::optional<DirectLiteralRecoveryMetadata> &metadata) noexcept {
+  return metadata.has_value()
+             ? make_terminal_shape_from_literal(metadata->value)
+             : TerminalShape{};
 }
 
 struct TerminalRecoveryFacts {
@@ -116,7 +120,7 @@ current_local_skip_trivia_gap_profile(const Context &ctx) noexcept {
 template <typename Context>
 [[nodiscard]] TerminalRecoveryFacts effective_terminal_recovery_facts(
     const Context &ctx, TerminalRecoveryFacts facts) noexcept {
-  if (!facts.triviaGap.hasHiddenGap() &&
+  if (!facts.triviaGap.hasHiddenGap &&
       !facts.triviaGap.visibleSourceAfterLocalSkip) {
     facts.triviaGap = current_local_skip_trivia_gap_profile(ctx);
   }
@@ -126,7 +130,7 @@ template <typename Context>
 [[nodiscard]] constexpr bool
 allows_nearby_delete_scan(const TerminalRecoveryFacts &facts,
                           const TerminalShape &shape) noexcept {
-  if (!facts.triviaGap.hasHiddenGap()) {
+  if (!facts.triviaGap.hasHiddenGap) {
     return true;
   }
   return shape.hasCanonicalText && !shape.allowsInsert();
@@ -143,7 +147,7 @@ allows_terminal_entry_probe(const Context &ctx,
     return true;
   }
   const auto localGap = current_local_skip_trivia_gap_profile(ctx);
-  return localGap.visibleSourceAfterLocalSkip && localGap.hasHiddenGap();
+  return localGap.visibleSourceAfterLocalSkip && localGap.hasHiddenGap;
 }
 
 template <typename Context>
@@ -179,13 +183,7 @@ cursor_starts_structured_visible_source(const Context &ctx) noexcept {
   // codepoint extends past `end`, treat the cursor as not on a
   // structured visible-source codepoint — same conservative answer
   // as the lead-byte pre-check elsewhere in the recovery path.
-  const auto *const cursor = ctx.cursor();
-  const auto length = utils::utf8_codepoint_length(*cursor);
-  if (length == 0 ||
-      length > static_cast<std::size_t>(ctx.end - cursor)) {
-    return false;
-  }
-  return is_identifier_like_codepoint(utils::decode_utf8_codepoint(cursor));
+  return is_identifier_like_codepoint_at(ctx.cursor(), ctx.end);
 }
 
 template <typename Context>
@@ -212,18 +210,8 @@ make_trivia_gap_profile(const Context &ctx, const char *gapBegin,
   if (gapBegin == nullptr || gapEnd == nullptr || gapEnd <= gapBegin) {
     return profile;
   }
-  profile.hiddenCodepointSpan = static_cast<std::uint32_t>(gapEnd - gapBegin);
+  profile.hasHiddenGap = true;
   return profile;
-}
-
-template <typename Context>
-[[nodiscard]] bool
-allows_compact_local_gap_terminal_recovery(const Context &ctx) noexcept {
-  if (!cursor_starts_visible_source(ctx) &&
-      cursor_reaches_visible_source_after_local_skip(ctx)) {
-    return current_local_skip_trivia_gap_profile(ctx).hasHiddenGap();
-  }
-  return true;
 }
 
 [[nodiscard]] constexpr bool allows_entry_probe_fuzzy_candidate(
@@ -280,10 +268,11 @@ allows_fuzzy_replace_after_prior_edits(const TerminalShape &shape) noexcept {
     const LiteralFuzzyCandidate &candidate, const TerminalShape &shape,
     const TerminalRecoveryFacts &facts,
     bool cursorStartsStructuredVisibleSource) noexcept {
-  TerminalLegalityFacts legality;
-  legality.budgetAllowsReplace =
-      candidate.cost.primaryRankCost <= literal_fuzzy_primary_rank_limit(shape);
-  if (!is_terminal_replace_legal(shape, legality)) {
+  // `Replace` requires a multi-codepoint canonical text and an available
+  // fuzzy budget (single-codepoint replacements stay conservative and go
+  // through stricter paths).
+  if (!shape.allowsReplace() ||
+      candidate.cost.primaryRankCost > literal_fuzzy_primary_rank_limit(shape)) {
     return false;
   }
   if (shape.canonicalTextLength <= 2u) {
@@ -293,7 +282,7 @@ allows_fuzzy_replace_after_prior_edits(const TerminalShape &shape) noexcept {
   if (!cursorStartsStructuredVisibleSource) {
     return false;
   }
-  if (facts.triviaGap.hasHiddenGap() && candidate.substitutionCount != 0u) {
+  if (facts.triviaGap.hasHiddenGap && candidate.substitutionCount != 0u) {
     return false;
   }
   // For longer keywords (5+ codepoints), require the candidate to consume
@@ -306,7 +295,10 @@ allows_fuzzy_replace_after_prior_edits(const TerminalShape &shape) noexcept {
   // `len` or `len±1` codepoints).
   if (shape.canonicalTextLength >= 5u) {
     const std::uint32_t halfLength = shape.canonicalTextLength / 2u;
-    if (candidate.consumed < halfLength) {
+    // Both sides are CODEPOINT counts: `canonicalTextLength` is codepoints, so
+    // the consumed side must be too (`consumed` itself is a byte offset). For
+    // ASCII `consumedCodepoints == consumed`, so this is unchanged.
+    if (candidate.consumedCodepoints < halfLength) {
       return false;
     }
   }
@@ -316,7 +308,7 @@ allows_fuzzy_replace_after_prior_edits(const TerminalShape &shape) noexcept {
 template <EditableParseModeContext Context>
 [[nodiscard]] const char *literal_fuzzy_input_end(
     const Context &ctx, const char *cursor, const char *limit,
-    std::uint32_t textLength) noexcept {
+    const TerminalShape &shape) noexcept {
   // Route the fuzzy window through the canonical formula
   // `maxLookahead = canonicalTextLength + affordableDeleteSpan`. The
   // affordable-delete-span input is fixed so a future migration to a
@@ -326,15 +318,20 @@ template <EditableParseModeContext Context>
     return cursor;
   }
 
-  TerminalShape windowShape;
-  windowShape.hasCanonicalText = textLength > 0U;
-  windowShape.canonicalTextLength = textLength;
+  // `maxLookahead` is a CODEPOINT budget (canonicalTextLength is codepoints).
+  // Convert it to a byte limit by walking that many codepoints forward, bounded
+  // by `limit`, so a multibyte input window is not clipped mid-keyword. For
+  // ASCII (one byte per codepoint) this advances exactly `maxLookahead` bytes,
+  // identical to the prior byte arithmetic.
   const auto maxLookahead =
-      compute_terminal_max_lookahead(windowShape, kAffordableDeleteSpan);
-  const auto span = static_cast<std::size_t>(limit - cursor);
-  const char *const boundedLimit =
-      cursor +
-      std::min(span, static_cast<std::size_t>(maxLookahead));
+      compute_terminal_max_lookahead(shape, kAffordableDeleteSpan);
+  const char *boundedLimit = cursor;
+  for (std::uint32_t step = 0u;
+       step < maxLookahead && boundedLimit < limit; ++step) {
+    const char *const next =
+        pegium::utils::advanceOneCodepointLossy(boundedLimit);
+    boundedLimit = next > limit ? limit : next;
+  }
   if constexpr (requires { ctx.skip_without_builder(cursor); }) {
     const char *it = cursor;
     while (it < boundedLimit) {
@@ -352,8 +349,8 @@ template <EditableParseModeContext Context>
 template <EditableParseModeContext Context>
 [[nodiscard]] std::string_view literal_fuzzy_input_view(
     const Context &ctx, const char *cursor, const char *limit,
-    std::uint32_t textLength) noexcept {
-  const auto *viewEnd = literal_fuzzy_input_end(ctx, cursor, limit, textLength);
+    const TerminalShape &shape) noexcept {
+  const auto *viewEnd = literal_fuzzy_input_end(ctx, cursor, limit, shape);
   return {cursor, static_cast<std::size_t>(viewEnd - cursor)};
 }
 
@@ -371,10 +368,10 @@ template <typename Context>
 [[nodiscard]] LiteralFuzzyCandidatesCache *
 literal_fuzzy_candidates_cache_for(Context &ctx) noexcept {
   if constexpr (requires {
-                  { ctx.literalFuzzyCandidatesCache } ->
+                  { ctx.literalFuzzyCandidatesCache() } ->
                       std::same_as<LiteralFuzzyCandidatesCache &>;
                 }) {
-    return &ctx.literalFuzzyCandidatesCache;
+    return &ctx.literalFuzzyCandidatesCache();
   } else {
     (void)ctx;
     return nullptr;
@@ -392,8 +389,7 @@ template <EditableParseModeContext Context>
   }
 
   const auto inputView = literal_fuzzy_input_view(
-      ctx, cursorStart, literal_fuzzy_input_limit(ctx),
-      shape.canonicalTextLength);
+      ctx, cursorStart, literal_fuzzy_input_limit(ctx), shape);
   if (shape.canonicalTextLength <= 2u &&
       !short_literal_fuzzy_candidate_possible(literalValue, inputView,
                                               caseSensitive)) {
@@ -429,10 +425,19 @@ allows_extended_terminal_delete_scan_match(const Context &ctx,
                                            const char *cursorStart,
                                            const char *scanStart) noexcept {
   if constexpr (requires { ctx.maxConsecutiveCodepointDeletes; }) {
-    const auto deletedCount = static_cast<std::size_t>(scanStart - cursorStart);
+    // Byte span of the scanned/deleted region (pointer distance). Compared
+    // conservatively against the codepoint-delete limit: for multibyte input
+    // the byte span is >= the codepoint count, so the gate only ever errs
+    // toward requiring the structured-visible-source check below — never
+    // toward admitting more deletes than intended.
+    const auto deletedByteSpan = static_cast<std::size_t>(scanStart - cursorStart);
+    // `+ 1u` is deliberate one-codepoint slack on the OVERFLOW-probe extent —
+    // this gate decides whether to keep probing past the budget, it is NOT the
+    // budget enforcer. The hard per-codepoint delete cap lives in
+    // deleteOneCodepoint / can_delete; do not "tighten" this to remove the +1.
     const auto localLimit =
         static_cast<std::size_t>(ctx.maxConsecutiveCodepointDeletes) + 1u;
-    if (deletedCount <= localLimit) {
+    if (deletedByteSpan <= localLimit) {
       return true;
     }
 
@@ -495,23 +500,17 @@ probe_nearby_delete_scan_match(Context &ctx, MatchFn &&matchFn,
 template <EditableParseModeContext Context, typename ApplyFn>
 [[nodiscard]] TerminalRecoveryCandidate evaluate_terminal_recovery_candidate(
     Context &ctx, const char *cursorStart, TerminalRecoveryChoiceKind kind,
-    std::uint32_t distance, std::uint32_t substitutionCount,
-    std::uint32_t operationCount, ApplyFn &&applyFn,
-    std::uint32_t extraPrimaryRankCost = 0u,
-    std::uint32_t extraSecondaryRankCost = 0u) {
+    std::uint32_t distance, ApplyFn &&applyFn,
+    std::uint32_t extraPrimaryRankCost = 0u) {
   TerminalRecoveryCandidate candidate;
   const auto checkpoint = ctx.mark();
   if (std::forward<ApplyFn>(applyFn)()) {
     const auto budgetCost = ctx.editCostDelta(checkpoint);
     candidate = {
         .kind = kind,
-        .cost = make_recovery_cost(budgetCost,
-                                   distance + extraPrimaryRankCost,
-                                   budgetCost + extraSecondaryRankCost),
+        .cost = make_recovery_cost(budgetCost, distance + extraPrimaryRankCost),
         .distance = distance,
         .consumed = static_cast<std::size_t>(ctx.cursor() - cursorStart),
-        .substitutionCount = substitutionCount,
-        .operationCount = operationCount,
     };
   }
   ctx.rewind(checkpoint);
@@ -521,40 +520,36 @@ template <EditableParseModeContext Context, typename ApplyFn>
 template <EditableParseModeContext Context, typename Element>
 [[nodiscard]] TerminalRecoveryCandidate
 evaluate_insert_synthetic_terminal_candidate(
-    Context &ctx, const char *cursorStart, const Element *element,
-    std::uint32_t extraPrimaryRankCost = 0u) {
+    Context &ctx, const char *cursorStart, const Element *element) {
   return evaluate_terminal_recovery_candidate(
-      ctx, cursorStart, TerminalRecoveryChoiceKind::Insert, 1u, 0u, 1u,
-      [&ctx, element]() { return ctx.insertSynthetic(element); },
-      extraPrimaryRankCost);
+      ctx, cursorStart, TerminalRecoveryChoiceKind::Insert, 1u,
+      [&ctx, element]() { return ctx.insertSynthetic(element); });
 }
 
 template <EditableParseModeContext Context, typename Element>
 [[nodiscard]] TerminalRecoveryCandidate
 evaluate_insert_synthetic_gap_terminal_candidate(
     Context &ctx, const char *cursorStart, const char *position,
-    const Element *element, std::uint32_t extraPrimaryRankCost = 0u,
-    std::uint32_t extraSecondaryRankCost = 0u) {
+    const Element *element, std::uint32_t extraPrimaryRankCost = 0u) {
   return evaluate_terminal_recovery_candidate(
-      ctx, cursorStart, TerminalRecoveryChoiceKind::Insert, 1u, 0u, 1u,
+      ctx, cursorStart, TerminalRecoveryChoiceKind::Insert, 1u,
       [&ctx, position, element]() {
         return apply_insert_synthetic_gap_and_match_recovery_edit(ctx, position,
                                                                   element);
       },
-      extraPrimaryRankCost, extraSecondaryRankCost);
+      extraPrimaryRankCost);
 }
 
 template <EditableParseModeContext Context, typename Element>
 [[nodiscard]] TerminalRecoveryCandidate
 evaluate_replace_leaf_terminal_candidate(
     Context &ctx, const char *cursorStart, const char *endPtr,
-    const Element *element, RecoveryCost cost, std::uint32_t distance,
-    std::uint32_t substitutionCount, std::uint32_t operationCount) {
+    const Element *element, RecoveryCost cost, std::uint32_t distance) {
   auto candidate = evaluate_terminal_recovery_candidate(
       ctx, cursorStart, TerminalRecoveryChoiceKind::Replace, distance,
-      substitutionCount, operationCount,
-      [&ctx, endPtr, element, budgetCost = cost.budgetCost]() {
-        return ctx.replaceLeaf(endPtr, element, budgetCost);
+      [&ctx, endPtr, element, budgetCost = cost.budgetCost, distance]() {
+        return ctx.replaceLeaf(endPtr, element, budgetCost,
+                               /*hidden=*/false, distance);
       });
   if (candidate.kind == TerminalRecoveryChoiceKind::Replace) {
     candidate.cost = cost;
@@ -585,6 +580,8 @@ template <EditableParseModeContext Context, typename Element, typename MatchFn,
 
   const bool cursorStartsVisibleSource =
       detail::cursor_starts_visible_source(ctx);
+  const bool cursorStartsStructuredVisibleSource =
+      detail::cursor_starts_structured_visible_source(ctx);
   const auto visibleSourceEditCount = [&]() constexpr noexcept {
     if constexpr (requires { ctx.currentWindowEditCount(); }) {
       return ctx.currentWindowEditCount();
@@ -611,8 +608,7 @@ template <EditableParseModeContext Context, typename Element, typename MatchFn,
   }();
   const bool structuredVisibleContinuationInsertAllowed =
       facts.allowStructuredVisibleContinuationInsert &&
-      cursorStartsVisibleSource &&
-      detail::cursor_starts_structured_visible_source(ctx);
+      cursorStartsStructuredVisibleSource;
   const bool preferStructuredVisibleInsertOverDeleteScan =
       structuredVisibleContinuationInsertAllowed && allowInsert;
 
@@ -627,8 +623,7 @@ template <EditableParseModeContext Context, typename Element, typename MatchFn,
 
   const bool deleteScanBlocksVisibleInsert =
       deleteScanChoice.kind == TerminalRecoveryChoiceKind::DeleteScan &&
-      cursorStartsVisibleSource &&
-      !cursor_starts_structured_visible_source(ctx);
+      cursorStartsVisibleSource && !cursorStartsStructuredVisibleSource;
   const bool allowInsertCandidate =
       allowInsert &&
       (!cursorStartsVisibleSource ||
@@ -720,12 +715,9 @@ template <EditableParseModeContext Context, typename MatchFn,
   if (result != detail::DeleteScanVisitResult::Accept) {
     return false;
   }
-  TerminalLegalityFacts legality;
-  legality.budgetAllowsDeleteScan = budgetAllowsDeleteScan;
-  legality.strictTerminalOrFollowAfterScan = matchedEnd != nullptr;
-  if (!is_terminal_delete_scan_legal(shape, legality)) {
-    return false;
-  }
+  // On `Accept` the scan committed to a strict terminal match (`matchedEnd`
+  // is non-null) and the delete budget was already checked above, so the
+  // legality conjunction here is always satisfied.
   detail::invoke_delete_scan_on_match(onMatch, matchedEnd, matchedDeleteCount);
   return true;
 }
@@ -745,11 +737,9 @@ template <EditableParseModeContext Context, typename MatchFn,
     const auto deletedCost = default_edit_cost(ParseDiagnosticKind::Deleted);
     const auto distance = deletedCost == 0u ? 0u : cost / deletedCost;
     candidate.kind = TerminalRecoveryChoiceKind::DeleteScan;
-    candidate.cost = make_recovery_cost(cost, distance, cost);
+    candidate.cost = make_recovery_cost(cost, distance);
     candidate.distance = distance;
     candidate.consumed = static_cast<std::size_t>(ctx.cursor() - cursorStart);
-    candidate.substitutionCount = 0u;
-    candidate.operationCount = deletedCost == 0u ? 0u : cost / deletedCost;
   }
   ctx.rewind(checkpoint);
   return candidate;

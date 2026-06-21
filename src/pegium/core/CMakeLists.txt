@@ -16,4 +16,5 @@ target_include_directories(PegiumCore
 )
 
 target_compile_features(PegiumCore PUBLIC cxx_std_20)
-target_link_libraries(PegiumCore PRIVATE ${PEGIUM_INTERNAL_OPTION_TARGETS})
+target_link_libraries(PegiumCore PRIVATE ${PEGIUM_INTERNAL_OPTION_TARGETS}
+    Taskflow::Taskflow)

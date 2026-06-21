@@ -5,10 +5,8 @@
 #include <pegium/core/grammar/RuleValue.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
-#include <memory>
 #include <string_view>
 #include <typeindex>
-#include <variant>
 
 namespace pegium::parser {
 struct ValueBuildContext;

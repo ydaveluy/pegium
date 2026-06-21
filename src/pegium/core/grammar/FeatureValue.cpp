@@ -13,8 +13,6 @@ FeatureValue::FeatureValue(const AstNode *value) noexcept : _value(value) {}
 FeatureValue::FeatureValue(const AbstractReference *value) noexcept
     : _value(ReferenceValue{.value = value}) {}
 
-FeatureValue::FeatureValue(ReferenceValue value) noexcept : _value(value) {}
-
 FeatureValue::FeatureValue(Array value) noexcept : _value(std::move(value)) {}
 
 bool FeatureValue::isRuleValue() const noexcept {

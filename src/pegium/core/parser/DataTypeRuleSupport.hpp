@@ -69,6 +69,14 @@ template <typename T> struct DataTypeRuleValueSupport {
         using enum grammar::ElementKind;
         switch (grammarElement->getKind()) {
         case Literal:
+          // Use the canonical literal value: on a recovered/synthesized keyword
+          // node getText() is empty (inserted) or the typo'd input (fuzzy
+          // replace), whereas getValue(node) yields the grammar keyword and
+          // falls back to getText() for non-recovered nodes.
+          append_text_fragment(
+              value,
+              static_cast<const grammar::Literal *>(grammarElement)->getValue(it));
+          break;
         case CharacterRange:
         case AnyCharacter:
           append_text_fragment(value, it.getText());
@@ -116,42 +124,24 @@ template <typename T> struct DataTypeRuleValueSupport {
                                               bool &hasCustomValueConverter,
                                               Converter &&converter) {
     using ConverterType = std::remove_cvref_t<Converter>;
+    // A converter may return opt::ConversionResult<T> (fallible) or a value
+    // convertible to T directly (infallible); as_conversion_result normalizes
+    // both. The converter takes either the CstNodeView or its text.
     if constexpr (std::is_nothrow_invocable_v<ConverterType &,
                                               const CstNodeView &>) {
-      using ReturnType =
-          std::invoke_result_t<ConverterType &, const CstNodeView &>;
-      static_assert(
-          opt::IsConversionResultFor_v<ReturnType, T>,
-          "DataTypeRule converter must return "
-          "opt::ConversionResult<T> (or a compatible value type).");
       storage = [converterFn = std::forward<Converter>(converter)](
                     const CstNodeView &node, const ValueBuildContext *)
                     mutable -> opt::ConversionResult<T> {
-        auto result = std::invoke(converterFn, node);
-        if (result.has_value()) {
-          return opt::conversion_value<T>(
-              static_cast<T>(std::move(result).value()));
-        }
-        return opt::conversion_error<T>(result.error());
+        return opt::as_conversion_result<T>(std::invoke(converterFn, node));
       };
       hasCustomValueConverter = true;
     } else if constexpr (std::is_nothrow_invocable_v<ConverterType &,
                                                      std::string_view>) {
-      using ReturnType =
-          std::invoke_result_t<ConverterType &, std::string_view>;
-      static_assert(
-          opt::IsConversionResultFor_v<ReturnType, T>,
-          "DataTypeRule converter must return "
-          "opt::ConversionResult<T> (or a compatible value type).");
       storage = [converterFn = std::forward<Converter>(converter)](
                     const CstNodeView &node, const ValueBuildContext *)
                     mutable -> opt::ConversionResult<T> {
-        auto result = std::invoke(converterFn, node.getText());
-        if (result.has_value()) {
-          return opt::conversion_value<T>(
-              static_cast<T>(std::move(result).value()));
-        }
-        return opt::conversion_error<T>(result.error());
+        return opt::as_conversion_result<T>(
+            std::invoke(converterFn, node.getText()));
       };
       hasCustomValueConverter = true;
     } else {

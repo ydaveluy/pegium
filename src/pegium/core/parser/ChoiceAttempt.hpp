@@ -118,6 +118,10 @@ struct ChoiceRecoverCacheKey {
   std::uint32_t furthestVisibleLeafCount = 0;
   std::uint32_t currentVisibleLeafCount = 0;
   RecoveryPolicyFingerprint policy{};
+
+  [[nodiscard]] friend bool
+  operator==(const ChoiceRecoverCacheKey &a,
+             const ChoiceRecoverCacheKey &b) noexcept = default;
 };
 
 class ChoiceRecoverCache {
@@ -140,13 +144,20 @@ public:
   /// test harness.
   void setDisabled(bool disabled) noexcept { _disabled = disabled; }
 
-  [[nodiscard]] bool isDisabled() const noexcept { return _disabled; }
-
   [[nodiscard]] const ChoiceAttempt *
   tryGet(const ChoiceRecoverCacheKey &key) noexcept;
 
   void store(const ChoiceRecoverCacheKey &key,
              const ChoiceAttempt &value) noexcept;
+
+  /// Clears every entry and the hit/miss counters without releasing the backing
+  /// storage, re-establishing the exact state of a freshly constructed cache.
+  /// Lets the recovery driver reuse one ~1.4 MB allocation across the several
+  /// re-parses of a single window instead of allocating a cold cache per probe;
+  /// because each probe still starts from an empty cache, behaviour is
+  /// byte-for-byte identical to a per-attempt cache. Leaves `_disabled` untouched
+  /// (callers set it explicitly per attempt).
+  void reset() noexcept;
 
   [[nodiscard]] std::uint64_t hits() const noexcept { return _hits; }
   [[nodiscard]] std::uint64_t misses() const noexcept { return _misses; }
@@ -155,10 +166,19 @@ private:
   struct Entry {
     ChoiceRecoverCacheKey key{};
     ChoiceAttempt value{};
-    bool valid = false;
+    // Liveness is decided by `generation == _generation` rather than a bool,
+    // so `reset()` is an O(1) `++_generation` instead of an O(kCapacity) scan.
+    // A fresh (or wrapped-around) cache leaves entries at generation 0 while
+    // `_generation` starts at 1, so every slot reads stale until first written.
+    std::uint32_t generation = 0;
   };
 
   std::unique_ptr<std::array<Entry, kCapacity>> _entries;
+  // Current liveness epoch. Bumped by `reset()`. An entry is live iff its
+  // `generation` equals this value. Starts at 1 so the all-zero entry state
+  // produced by the constructor is stale. On wraparound back to 0 a one-time
+  // full clear re-establishes the invariant (see `reset()`).
+  std::uint32_t _generation = 1;
   std::uint64_t _hits = 0;
   std::uint64_t _misses = 0;
   bool _disabled = false;

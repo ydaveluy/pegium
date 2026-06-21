@@ -4,12 +4,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <concepts>
-#include <functional>
 #include <initializer_list>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -31,7 +31,7 @@ public:
   ValidationDiagnosticBuilderBase(const ValidationAcceptor &acceptor,
                                   pegium::DiagnosticSeverity severity,
                                   std::string_view message,
-                                  const AstNode &node) noexcept;
+                                  const AstNode &node);
 
   ValidationDiagnosticBuilderBase(const ValidationDiagnosticBuilderBase &) =
       delete;
@@ -219,7 +219,7 @@ public:
   template <typename Node>
     requires std::derived_from<std::remove_cvref_t<Node>, AstNode>
   ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>
-  error(const Node &node, std::string_view message) const noexcept {
+  error(const Node &node, std::string_view message) const {
     return ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>(
         *this, pegium::DiagnosticSeverity::Error, message, node);
   }
@@ -227,7 +227,7 @@ public:
   template <typename Node>
     requires std::derived_from<std::remove_cvref_t<Node>, AstNode>
   ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>
-  warning(const Node &node, std::string_view message) const noexcept {
+  warning(const Node &node, std::string_view message) const {
     return ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>(
         *this, pegium::DiagnosticSeverity::Warning, message, node);
   }
@@ -235,7 +235,7 @@ public:
   template <typename Node>
     requires std::derived_from<std::remove_cvref_t<Node>, AstNode>
   ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>
-  info(const Node &node, std::string_view message) const noexcept {
+  info(const Node &node, std::string_view message) const {
     return ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>(
         *this, pegium::DiagnosticSeverity::Information, message, node);
   }
@@ -243,7 +243,7 @@ public:
   template <typename Node>
     requires std::derived_from<std::remove_cvref_t<Node>, AstNode>
   ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>
-  hint(const Node &node, std::string_view message) const noexcept {
+  hint(const Node &node, std::string_view message) const {
     return ValidationDiagnosticBuilder<std::remove_cvref_t<Node>>(
         *this, pegium::DiagnosticSeverity::Hint, message, node);
   }
@@ -255,7 +255,7 @@ private:
 template <typename Derived>
 inline ValidationDiagnosticBuilderBase<Derived>::ValidationDiagnosticBuilderBase(
     const ValidationAcceptor &acceptor, pegium::DiagnosticSeverity severity,
-    std::string_view message, const AstNode &node) noexcept
+    std::string_view message, const AstNode &node)
     : _acceptor(&acceptor), _node(&node), _severity(severity), _message(message) {
   std::tie(_begin, _end) = range_of(node);
 }

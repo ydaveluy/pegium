@@ -80,29 +80,16 @@ struct TextDocument::Impl {
 
 TextDocument::~TextDocument() = default;
 
-TextDocument::TextDocument(const TextDocument &other)
-    : _uri(other._uri), _languageId(other._languageId),
-      _version(other._version), _snapshot(other._snapshot) {}
+TextDocument TextDocument::clone() const {
+  return TextDocument(_uri, _languageId, _version, _snapshot);
+}
 
 TextDocument::TextDocument(TextDocument &&other) noexcept
     : _uri(std::move(other._uri)), _languageId(std::move(other._languageId)),
       _version(other._version), _snapshot(std::move(other._snapshot)),
       _impl(std::move(other._impl)) {}
 
-TextDocument &TextDocument::operator=(const TextDocument &other) {
-  if (this == &other) {
-    return *this;
-  }
-  std::scoped_lock lock(_lineIndexMutex);
-  _uri = other._uri;
-  _languageId = other._languageId;
-  _version = other._version;
-  _snapshot = other._snapshot;
-  _impl.reset();
-  return *this;
-}
-
-TextDocument &TextDocument::operator=(TextDocument &&other) noexcept {
+TextDocument &TextDocument::operator=(TextDocument &&other) {
   if (this == &other) {
     return *this;
   }
@@ -310,8 +297,9 @@ void TextDocument::ensureLineIndex() const {
 
   const auto clampedSize = static_cast<TextOffset>(
       std::min<std::size_t>(size, std::numeric_limits<TextOffset>::max()));
-  impl.numChunks =
-      (clampedSize + kLineIndexChunkSize - 1) / kLineIndexChunkSize;
+  impl.numChunks = static_cast<std::uint32_t>(
+      (static_cast<std::uint64_t>(clampedSize) + kLineIndexChunkSize - 1) /
+      kLineIndexChunkSize);
   impl.chunkLineLowerBound.assign(static_cast<std::size_t>(impl.numChunks) + 1u,
                                   0u);
 
@@ -323,7 +311,7 @@ void TextDocument::ensureLineIndex() const {
         static_cast<std::uint32_t>(impl.lineStart.size() - 1);
 
     for (auto offset = chunkStart; offset < chunkEnd; ++offset) {
-      if (getText()[offset] == '\n' && offset + 1 <= clampedSize) {
+      if (getText()[offset] == '\n') {
         impl.lineStart.push_back(offset + 1);
       }
     }

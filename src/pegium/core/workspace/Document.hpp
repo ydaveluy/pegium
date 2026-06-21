@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,7 +40,11 @@ struct Document {
   /// their whole lifetime.
   const std::string uri;
 
-  DocumentState state = DocumentState::Changed;
+  // Atomic so the build can advance it while readers (e.g. waitUntil, LSP
+  // request gating) observe it concurrently without a data race. Transitions are
+  // ordered by the build's phase barriers and the phase-listener handshake; the
+  // atomic only removes the formal race on the byte itself.
+  std::atomic<DocumentState> state = DocumentState::Changed;
 
   parser::ParseResult parseResult;
   LocalSymbols localSymbols;

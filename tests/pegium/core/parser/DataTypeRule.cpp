@@ -69,6 +69,29 @@ TEST(DataTypeRuleTest, ParseRequiresFullConsumption) {
   }
 }
 
+TEST(DataTypeRuleTest, SuperCarriesForwardOverriddenAlternatives) {
+  DataTypeRule<std::string> rule{"Rule", "a"_kw};
+  const auto skipper = SkipperBuilder().build();
+  EXPECT_TRUE(parseDataTypeRule(rule, "a", skipper).fullMatch);
+  EXPECT_FALSE(parseDataTypeRule(rule, "b", skipper).fullMatch);
+
+  // Override extending the rule: super() folds in the prior body.
+  rule = rule.super() | "b"_kw;
+  EXPECT_TRUE(parseDataTypeRule(rule, "a", skipper).fullMatch);
+  EXPECT_TRUE(parseDataTypeRule(rule, "b", skipper).fullMatch);
+  EXPECT_FALSE(parseDataTypeRule(rule, "c", skipper).fullMatch);
+
+  rule = rule.super() | "c"_kw;
+  EXPECT_TRUE(parseDataTypeRule(rule, "a", skipper).fullMatch);
+  EXPECT_TRUE(parseDataTypeRule(rule, "b", skipper).fullMatch);
+  EXPECT_TRUE(parseDataTypeRule(rule, "c", skipper).fullMatch);
+
+  // Reassigning without super() drops the accumulated alternatives.
+  rule = "d"_kw;
+  EXPECT_FALSE(parseDataTypeRule(rule, "a", skipper).fullMatch);
+  EXPECT_TRUE(parseDataTypeRule(rule, "d", skipper).fullMatch);
+}
+
 TEST(DataTypeRuleTest, StringRuleConcatenatesVisibleTokens) {
   TerminalRule<> ws{"WS", some(s)};
   DataTypeRule<std::string> rule{"Rule", "a"_kw + "b"_kw};

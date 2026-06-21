@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <mutex>
 #include <unordered_map>
 
@@ -45,7 +46,9 @@ private:
   std::unordered_map<std::string, pegium::JsonValue> _settingsBySection;
   utils::EventEmitter<ConfigurationSectionUpdate> _onSectionUpdate;
   bool _workspaceConfigurationSupported = false;
-  bool _ready = false;
+  // Written by the async initialized() task and polled via isReady(); atomic to
+  // make that cross-thread read/write well-defined.
+  std::atomic<bool> _ready{false};
 };
 
 } // namespace pegium::workspace

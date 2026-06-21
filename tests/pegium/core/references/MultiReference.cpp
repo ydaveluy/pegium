@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 
 #include <pegium/core/CoreTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/references/References.hpp>
 
 namespace pegium::references {
 namespace {
@@ -19,9 +21,14 @@ struct Greeting : AstNode {
   multi_reference<Person> person;
 };
 
+struct Sighting : AstNode {
+  reference<Person> person;
+};
+
 struct Model : AstNode {
   vector<pointer<Person>> persons;
   vector<pointer<Greeting>> greetings;
+  vector<pointer<Sighting>> sightings;
 };
 
 class MultiReferenceParser final : public PegiumParser {
@@ -49,10 +56,14 @@ protected:
   Rule<Greeting> GreetingRule{"Greeting",
                               "hello"_kw + assign<&Greeting::person>(ID)};
 
+  Rule<Sighting> SightingRule{"Sighting",
+                              "see"_kw + assign<&Sighting::person>(ID)};
+
   Rule<Model> ModelRule{
       "Model",
       some(append<&Model::persons>(PersonRule) |
-           append<&Model::greetings>(GreetingRule))};
+           append<&Model::greetings>(GreetingRule) |
+           append<&Model::sightings>(SightingRule))};
 #pragma clang diagnostic pop
 };
 
@@ -238,7 +249,9 @@ TEST(MultiReferenceTest,
 
   auto references = services.references.references->findReferences(
       *model->persons[2], {.includeDeclaration = true});
-  ASSERT_EQ(references.size(), 2u);
+  // Both `Alice` declarations are logical siblings of the same multi-reference,
+  // so includeDeclaration surfaces both self-declarations plus the shared usage.
+  ASSERT_EQ(references.size(), 3u);
 }
 
 TEST(MultiReferenceTest, ReportsUnresolvedReferenceWhenNoCandidateMatches) {
@@ -269,6 +282,82 @@ TEST(MultiReferenceTest, ReportsUnresolvedReferenceWhenNoCandidateMatches) {
           *document)
           .empty());
   EXPECT_TRUE(has_diagnostic_message(*document, "named 'Alice'"));
+}
+
+TEST(MultiReferenceTest, FindReferencesIncludesSiblingDeclarationsOfMultiReference) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  ASSERT_TRUE(register_language(*shared));
+
+  auto document = open_and_build(*shared, "self-nodes.mr",
+                                 "person Alice\n"
+                                 "person Alice\n"
+                                 "hello Alice\n");
+  ASSERT_NE(document, nullptr);
+  auto *model = dynamic_cast<Model *>(document->parseResult.value);
+  ASSERT_NE(model, nullptr);
+  ASSERT_EQ(model->persons.size(), 2u);
+
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.references.references, nullptr);
+
+  const auto &alice0 = *model->persons[0];
+  const auto &alice1 = *model->persons[1];
+  const auto alice1Id = document->makeSymbolId(alice1);
+
+  FindReferencesOptions options{};
+  options.includeDeclaration = true;
+  const auto refs =
+      services.references.references->findReferences(alice0, options);
+
+  // includeDeclaration expands alice0 into its multi-reference sibling group, so
+  // alice1's declaration is reported as a self-reference.
+  const bool siblingIncluded = std::ranges::any_of(refs, [&](const auto &r) {
+    return r.local && r.targetSymbolId.has_value() &&
+           *r.targetSymbolId == alice1Id;
+  });
+  EXPECT_TRUE(siblingIncluded);
+}
+
+TEST(MultiReferenceTest,
+     FindReferencesExpandsSiblingsEvenWhenAPlainReferenceIsIndexedFirst) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  ASSERT_TRUE(register_language(*shared));
+
+  // `alice0` is targeted by BOTH a plain reference (`see Alice`, indexed first
+  // because it appears earlier) and a multi-reference (`hello Alice`). Only the
+  // multi-reference pulls in the sibling group, so expanding the self-nodes must
+  // not stop at the first (plain) incoming reference.
+  auto document = open_and_build(*shared, "masked-sibling.mr",
+                                 "person Alice\n"
+                                 "person Alice\n"
+                                 "see Alice\n"
+                                 "hello Alice\n");
+  ASSERT_NE(document, nullptr);
+  auto *model = dynamic_cast<Model *>(document->parseResult.value);
+  ASSERT_NE(model, nullptr);
+  ASSERT_EQ(model->persons.size(), 2u);
+  ASSERT_EQ(model->sightings.size(), 1u);
+  ASSERT_EQ(model->greetings.size(), 1u);
+
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  ASSERT_NE(services.references.references, nullptr);
+
+  const auto &alice0 = *model->persons[0];
+  const auto &alice1 = *model->persons[1];
+  const auto alice1Id = document->makeSymbolId(alice1);
+
+  FindReferencesOptions options{};
+  options.includeDeclaration = true;
+  const auto refs =
+      services.references.references->findReferences(alice0, options);
+
+  const bool siblingIncluded = std::ranges::any_of(refs, [&](const auto &r) {
+    return r.local && r.targetSymbolId.has_value() &&
+           *r.targetSymbolId == alice1Id;
+  });
+  EXPECT_TRUE(siblingIncluded);
 }
 
 } // namespace

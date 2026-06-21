@@ -2,7 +2,6 @@
 
 #include <pegium/core/observability/ObservabilitySinks.hpp>
 #include <pegium/core/services/DefaultServiceRegistry.hpp>
-#include <pegium/core/syntax-tree/DefaultAstReflection.hpp>
 #include <pegium/core/workspace/DefaultConfigurationProvider.hpp>
 #include <pegium/core/workspace/DefaultDocumentBuilder.hpp>
 #include <pegium/core/workspace/DefaultDocumentFactory.hpp>
@@ -19,7 +18,7 @@ void installDefaultSharedCoreServices(SharedCoreServices &sharedServices) {
         std::make_shared<observability::StderrObservabilitySink>();
   }
   if (!sharedServices.astReflection) {
-    sharedServices.astReflection = std::make_unique<DefaultAstReflection>();
+    sharedServices.astReflection = std::make_unique<AstReflection>();
   }
   if (!sharedServices.execution.taskScheduler) {
     sharedServices.execution.taskScheduler =

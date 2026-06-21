@@ -4,7 +4,7 @@
 ///
 /// Every numeric default that controls recovery behaviour is declared here
 /// so that it can be referenced by all contexts (ParseContext, ExpectContext,
-/// ContextShared::EditCheckpointState, Parser::ParseOptions) without drift.
+/// detail::EditCheckpointState, Parser::ParseOptions) without drift.
 
 #include <cstdint>
 
@@ -17,12 +17,15 @@ namespace pegium::parser {
 /// crossing a structural boundary.
 inline constexpr std::uint32_t kDefaultMaxConsecutiveCodepointDeletes = 8;
 
-/// Observation budget for InfixRule's RHS noise probe. Capped strictly below
-/// `maxConsecutiveCodepointDeletes` so the speculative scan cannot grow with
-/// the global delete budget and reach across statement boundaries (e.g. it
-/// must not gobble the next statement's leading identifier as the rhs
-/// primary). The replay still respects `maxConsecutiveCodepointDeletes`;
-/// this constant controls only the upfront observation.
-inline constexpr std::uint32_t kInfixOperatorNoiseObservationDeleteCap = 4;
+/// Maximum bytes a `Repetition` may skip when no normal recovery plan can
+/// bridge the current iteration (last-resort panic-mode budget). Shared by the
+/// `ParseOptions` default and the `RecoveryContext` per-window limit so they
+/// cannot drift.
+inline constexpr std::uint32_t kDefaultMaxResyncSkipCodepoints = 4096;
+
+/// Number of strict visible leaves that must parse after a recovery edit before
+/// the edit is considered stable. Shared by the `ParseOptions` default and the
+/// `RecoveryContext` per-context value so they cannot drift.
+inline constexpr std::uint32_t kDefaultRecoveryStabilityTokenCount = 2;
 
 } // namespace pegium::parser
