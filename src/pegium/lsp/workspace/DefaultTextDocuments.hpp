@@ -14,9 +14,9 @@ namespace pegium {
 /// Default in-memory store for opened LSP text documents.
 class DefaultTextDocuments : public TextDocuments {
 public:
-  /// Returns the current snapshot for `uri`, or `nullptr` when absent.
+  /// Returns the current snapshot for an already-normalized `uri`.
   [[nodiscard]] std::shared_ptr<workspace::TextDocument>
-  get(std::string_view uri) const override;
+  getNormalized(std::string_view normalizedUri) const override;
   /// Stores or replaces one opened document snapshot.
   [[nodiscard]] bool
   set(std::shared_ptr<workspace::TextDocument> document) override;

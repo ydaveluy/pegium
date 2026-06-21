@@ -65,8 +65,8 @@ to_text_document_save_reason(const ::lsp::TextDocumentSaveReasonEnum &reason) {
 
 } // namespace
 
-std::shared_ptr<TextDocument> DefaultTextDocuments::get(std::string_view uri) const {
-  const auto normalizedUri = utils::normalize_uri(uri);
+std::shared_ptr<TextDocument>
+DefaultTextDocuments::getNormalized(std::string_view normalizedUri) const {
   if (normalizedUri.empty()) {
     return nullptr;
   }
@@ -170,7 +170,7 @@ utils::ScopedDisposable DefaultTextDocuments::listen(
           if (it == _documents.end()) {
             return;
           }
-          document = std::make_shared<TextDocument>(*it->second);
+          document = std::make_shared<TextDocument>(it->second->clone());
           (void)TextDocument::update(*document, changes,
                                      params.textDocument.version);
           it->second = document;

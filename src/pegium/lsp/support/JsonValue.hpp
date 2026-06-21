@@ -14,9 +14,6 @@ namespace pegium {
 /// Converts one internal JSON value to the protocol representation.
 [[nodiscard]] ::lsp::LSPAny to_lsp_any(const pegium::JsonValue &value);
 
-/// Converts an LSP diagnostic severity to the shared diagnostic model.
-[[nodiscard]] pegium::DiagnosticSeverity
-from_lsp_diagnostic_severity(::lsp::DiagnosticSeverity severity);
 /// Converts a shared diagnostic severity to the LSP representation.
 [[nodiscard]] ::lsp::DiagnosticSeverity
 to_lsp_diagnostic_severity(pegium::DiagnosticSeverity severity);

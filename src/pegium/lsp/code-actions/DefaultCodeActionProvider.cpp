@@ -2,36 +2,24 @@
 
 #include <algorithm>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 
 #include <pegium/lsp/support/JsonValue.hpp>
-#include <pegium/lsp/runtime/LanguageServerRequestHandlerUtils.hpp>
 
 namespace pegium {
 namespace {
 
 constexpr std::string_view kDefaultCodeActionsKey = "pegiumDefaultCodeActions";
 
-template <typename Kind>
-bool is_quick_fix_kind(const Kind &kind) {
-  using KindType = std::decay_t<Kind>;
-  if constexpr (std::is_same_v<KindType, ::lsp::CodeActionKindEnum>) {
-    return kind == ::lsp::CodeActionKind::QuickFix;
-  } else if constexpr (std::is_convertible_v<const KindType &, std::string_view>) {
-    const auto mapped = pegium::to_lsp_code_action_kind(
-        std::string_view(kind));
-    return mapped.has_value() && *mapped == ::lsp::CodeActionKind::QuickFix;
-  } else {
-    return false;
-  }
+bool is_quick_fix_kind(const ::lsp::CodeActionKindEnum &kind) {
+  return kind == ::lsp::CodeActionKind::QuickFix;
 }
 
 bool accepts_quick_fix_only(const ::lsp::CodeActionContext &context) {
   if (!context.only.has_value() || context.only->empty()) {
     return true;
   }
-  return std::ranges::any_of(*context.only, is_quick_fix_kind<decltype((*context.only)[0])>);
+  return std::ranges::any_of(*context.only, is_quick_fix_kind);
 }
 
 std::optional<std::string> get_string_field(
@@ -132,7 +120,6 @@ DefaultCodeActionProvider::extractDefaultCodeActions(
       continue;
     }
     actions.push_back({.kind = std::move(*kind),
-                       .editKind = std::move(*editKind),
                        .title = std::move(*title),
                        .newText = std::move(*newText),
                        .begin = *begin,

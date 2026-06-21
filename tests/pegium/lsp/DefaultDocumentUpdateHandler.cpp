@@ -72,13 +72,15 @@ public:
 
   void build(std::span<const std::shared_ptr<workspace::Document>>,
              const workspace::BuildOptions & = {},
-             utils::CancellationToken cancelToken = {}) const override {
+             utils::CancellationToken cancelToken = {},
+             const std::function<void()> & = {}) const override {
     utils::throw_if_cancelled(cancelToken);
   }
 
   void update(std::span<const workspace::DocumentId>,
               std::span<const workspace::DocumentId>,
-              utils::CancellationToken cancelToken = {}) const override {
+              utils::CancellationToken cancelToken = {},
+              const std::function<void()> & = {}) const override {
     {
       std::scoped_lock lock(_mutex);
       _started = true;
@@ -188,7 +190,7 @@ protected:
   void TearDown() override {
     if (shared != nullptr && shared->workspace.workspaceLock != nullptr) {
       auto drain = shared->workspace.workspaceLock->write(
-          [](const utils::CancellationToken &) {});
+          [](const utils::CancellationToken &, const auto &) {});
       if (drain.valid()) {
         drain.get();
       }
@@ -261,7 +263,7 @@ public:
   [[nodiscard]] std::vector<std::string>
   searchFolder(std::string_view workspaceUri) const override {
     (void)workspaceUri;
-    return {};
+    return searchFolderResult;
   }
 
   [[nodiscard]] bool
@@ -269,6 +271,8 @@ public:
     (void)entry;
     return true;
   }
+
+  std::vector<std::string> searchFolderResult;
 
 private:
   mutable workspace::BuildOptions _options;
@@ -355,12 +359,15 @@ TEST_F(DefaultDocumentUpdateHandlerTest,
 
 TEST_F(DefaultDocumentUpdateHandlerTest,
        DidChangeWatchedFilesDeduplicatesUris) {
-  const auto changedUri = test::make_file_uri("one.test");
-  const auto deletedUri = test::make_file_uri("gone.test");
-  const auto changedDocumentId =
-      shared->workspace.documents->getOrCreateDocumentId(changedUri);
-  const auto deletedDocumentId =
-      shared->workspace.documents->getOrCreateDocumentId(deletedUri);
+  // A changed URI survives expansion only when it already backs a managed
+  // document, and a deleted URI removes the document it points at; back both
+  // URIs with real documents so the deduplication is what the test exercises.
+  auto changedDocument = addExistingDocument("one.test", "content");
+  auto deletedDocument = addExistingDocument("gone.test", "content");
+  const auto changedUri = changedDocument->uri;
+  const auto deletedUri = deletedDocument->uri;
+  const auto changedDocumentId = changedDocument->id;
+  const auto deletedDocumentId = deletedDocument->id;
 
   ::lsp::DidChangeWatchedFilesParams params{};
   params.changes = {
@@ -390,6 +397,74 @@ TEST_F(DefaultDocumentUpdateHandlerTest,
             std::vector<workspace::DocumentId>{changedDocumentId});
   EXPECT_EQ(call.deletedDocumentIds,
             std::vector<workspace::DocumentId>{deletedDocumentId});
+}
+
+TEST_F(DefaultDocumentUpdateHandlerTest,
+       DidChangeWatchedFilesDeletesSubtreeOfDeletedDirectory) {
+  // Deleting a directory must remove every managed document beneath it.
+  auto first = addExistingDocument("pkg/first.test", "content");
+  auto second = addExistingDocument("pkg/nested/second.test", "content");
+  auto outside = addExistingDocument("other.test", "content");
+
+  ::lsp::DidChangeWatchedFilesParams params{};
+  params.changes = {
+      ::lsp::FileEvent{
+          .uri = ::lsp::FileUri(::lsp::Uri::parse(test::make_file_uri("pkg"))),
+          .type = ::lsp::FileChangeType::Deleted,
+      },
+  };
+
+  handler->didChangeWatchedFiles(params);
+
+  ASSERT_TRUE(builder->waitForCalls(1));
+  const auto call = builder->lastCall();
+  EXPECT_TRUE(call.changedDocumentIds.empty());
+  std::vector<workspace::DocumentId> deleted = call.deletedDocumentIds;
+  std::ranges::sort(deleted);
+  std::vector<workspace::DocumentId> expected{first->id, second->id};
+  std::ranges::sort(expected);
+  EXPECT_EQ(deleted, expected);
+  EXPECT_EQ(std::ranges::count(deleted, outside->id), 0);
+}
+
+TEST_F(DefaultDocumentUpdateHandlerTest,
+       DidChangeWatchedFilesExpandsChangedDirectoryToContainedFiles) {
+  // A change reported on a directory URI must fan out to the source files the
+  // directory contains, discovering files that are not yet managed documents.
+  std::promise<void> readyPromise;
+  readyPromise.set_value();
+  auto manager = std::make_unique<ControlledReadyWorkspaceManager>(
+      readyPromise.get_future().share());
+  const auto firstUri = test::make_file_uri("watched/a.test");
+  const auto secondUri = test::make_file_uri("watched/b.test");
+  manager->searchFolderResult = {firstUri, secondUri};
+  shared->workspace.workspaceManager = std::move(manager);
+
+  const auto directoryUri = test::make_file_uri("watched");
+  auto fileSystem = std::make_shared<test::FakeFileSystemProvider>();
+  fileSystem->directories[utils::file_uri_to_path(directoryUri).value()] = {};
+  shared->workspace.fileSystemProvider = std::move(fileSystem);
+
+  ::lsp::DidChangeWatchedFilesParams params{};
+  params.changes = {
+      ::lsp::FileEvent{
+          .uri = ::lsp::FileUri(::lsp::Uri::parse(directoryUri)),
+          .type = ::lsp::FileChangeType::Changed,
+      },
+  };
+
+  handler->didChangeWatchedFiles(params);
+
+  ASSERT_TRUE(builder->waitForCalls(1));
+  const auto call = builder->lastCall();
+  EXPECT_TRUE(call.deletedDocumentIds.empty());
+  std::vector<workspace::DocumentId> changed = call.changedDocumentIds;
+  std::ranges::sort(changed);
+  std::vector<workspace::DocumentId> expected{
+      shared->workspace.documents->getOrCreateDocumentId(firstUri),
+      shared->workspace.documents->getOrCreateDocumentId(secondUri)};
+  std::ranges::sort(expected);
+  EXPECT_EQ(changed, expected);
 }
 
 TEST_F(DefaultDocumentUpdateHandlerTest,
@@ -652,6 +727,31 @@ TEST_F(DefaultDocumentUpdateHandlerTest,
             observability::ObservationCode::DocumentUpdateDispatchFailed);
   EXPECT_NE(observation->message.find("ready failed"), std::string::npos);
   EXPECT_EQ(observation->uri, document->uri());
+}
+
+TEST_F(DefaultDocumentUpdateHandlerTest,
+       QuiesceCancelsInFlightWriteAndBlocksUntilDispatchesDrain) {
+  // quiesce() is what the LSP runtime calls at teardown before destroying the
+  // diagnostics listeners / message handler the dispatch threads publish into.
+  // It must cancel any in-flight write and then BLOCK until the dispatch has
+  // fully drained, so no dispatch can resume on destroyed state afterwards.
+  auto blockingBuilder = std::make_unique<BlockingUpdateDocumentBuilder>();
+  auto *blockingBuilderPtr = blockingBuilder.get();
+  shared->workspace.documentBuilder = std::move(blockingBuilder);
+  handler = std::make_unique<DefaultDocumentUpdateHandler>(*shared);
+
+  auto document = makeTextDocument("quiesce-drain.test", "content");
+  handler->didChangeContent({.document = document});
+
+  ASSERT_TRUE(blockingBuilderPtr->waitUntilStarted());
+
+  handler->quiesce();
+
+  // The dispatch observed cancellation and has already finished by the time
+  // quiesce() returned (0ms timeout = assert no further waiting is needed).
+  EXPECT_TRUE(blockingBuilderPtr->observedCancellation());
+  EXPECT_TRUE(
+      blockingBuilderPtr->waitUntilFinished(std::chrono::milliseconds(0)));
 }
 
 } // namespace

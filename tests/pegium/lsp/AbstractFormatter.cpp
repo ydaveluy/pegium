@@ -816,78 +816,84 @@ TEST(AbstractFormatterTest, HiddenNodeCallbacksCanReplaceCommentText) {
             "}");
 }
 
-TEST(AbstractFormatterTest, MultilineCommentUtilityNormalizesTagsAndContinuation) {
-  EXPECT_EQ(FormattingApiProbe::formatComment(
-                "/**\n"
+TEST(AbstractFormatterTest, MultilineCommentUtilityFormatsAccordingToOptions) {
+  struct Case {
+    const char *name;
+    std::string_view input;
+    MultilineCommentFormatOptions options;
+    std::string_view expected;
+  };
+  static const Case kCases[] = {
+      // NormalizesTagsAndContinuation: default options collapse whitespace,
+      // normalize tag spacing, and indent tag continuation lines.
+      {.name = "NormalizesTagsAndContinuation",
+       .input = "/**\n"
                 "*   Adds   numbers.\n"
                 "* @param   x   first   value\n"
                 "*   more   details\n"
                 "*\n"
-                "*/"),
-            "/**\n"
-            " * Adds numbers.\n"
-            " * @param x first value\n"
-            " *  more details\n"
-            " */");
-}
-
-TEST(AbstractFormatterTest, MultilineCommentUtilityUsesConfiguredTagPrefix) {
-  EXPECT_EQ(FormattingApiProbe::formatComment(
-                "/**\n"
+                "*/",
+       .options = {},
+       .expected = "/**\n"
+                   " * Adds numbers.\n"
+                   " * @param x first value\n"
+                   " *  more details\n"
+                   " */"},
+      // UsesConfiguredTagPrefix: a custom tagStart ("!") drives tag handling.
+      {.name = "UsesConfiguredTagPrefix",
+       .input = "/**\n"
                 "* !param   x   first   value\n"
                 "*   more   details\n"
                 "*/",
-                {.tagStart = std::string("!")}),
-            "/**\n"
-            " * !param x first value\n"
-            " *  more details\n"
-            " */");
-}
-
-TEST(AbstractFormatterTest, MultilineCommentUtilityUsesConfiguredLinePrefix) {
-  EXPECT_EQ(FormattingApiProbe::formatComment(
-                "/*\n"
+       .options = {.tagStart = std::string("!")},
+       .expected = "/**\n"
+                   " * !param x first value\n"
+                   " *  more details\n"
+                   " */"},
+      // UsesConfiguredLinePrefix: custom start/end/newLineStart tokens.
+      {.name = "UsesConfiguredLinePrefix",
+       .input = "/*\n"
                 "#   hello\n"
                 "#   world\n"
                 "*/",
-                {.start = "/*",
-                 .end = "*/",
-                 .newLineStart = " #"}),
-            "/*\n"
-            " # hello\n"
-            " # world\n"
-            " */");
-}
-
-TEST(AbstractFormatterTest,
-     MultilineCommentUtilityKeepsFirstLineUntouchedWhenMultiline) {
-  EXPECT_EQ(FormattingApiProbe::formatComment(
-                "/*#   hello\n"
+       .options = {.start = "/*", .end = "*/", .newLineStart = " #"},
+       .expected = "/*\n"
+                   " # hello\n"
+                   " # world\n"
+                   " */"},
+      // KeepsFirstLineUntouchedWhenMultiline: content right after the start
+      // token is preserved on its own continuation line.
+      {.name = "KeepsFirstLineUntouchedWhenMultiline",
+       .input = "/*#   hello\n"
                 "#   world\n"
                 "*/",
-                {.start = "/*",
-                 .end = "*/",
-                 .newLineStart = " #"}),
-            "/*\n"
-            " # # hello\n"
-            " # world\n"
-            " */");
-}
-
-TEST(AbstractFormatterTest,
-     MultilineCommentUtilityKeepsWhitespaceOnlyPrefixesForClosingLine) {
-  EXPECT_EQ(FormattingApiProbe::formatComment(
-                "/*\n"
+       .options = {.start = "/*", .end = "*/", .newLineStart = " #"},
+       .expected = "/*\n"
+                   " # # hello\n"
+                   " # world\n"
+                   " */"},
+      // KeepsWhitespaceOnlyPrefixesForClosingLine: a whitespace-only
+      // newLineStart is applied to content and the closing line.
+      {.name = "KeepsWhitespaceOnlyPrefixesForClosingLine",
+       .input = "/*\n"
                 "comment\n"
                 "*/",
-                {.start = "/*", .end = "*/", .newLineStart = "    "}),
-            "/*\n"
-            "    comment\n"
-            "    */");
-}
+       .options = {.start = "/*", .end = "*/", .newLineStart = "    "},
+       .expected = "/*\n"
+                   "    comment\n"
+                   "    */"},
+      // LeavesUnmatchedCommentsUntouched: text not matching start/end is
+      // returned verbatim.
+      {.name = "LeavesUnmatchedCommentsUntouched",
+       .input = "/* keep me */",
+       .options = {},
+       .expected = "/* keep me */"},
+  };
 
-TEST(AbstractFormatterTest, MultilineCommentUtilityLeavesUnmatchedCommentsUntouched) {
-  EXPECT_EQ(FormattingApiProbe::formatComment("/* keep me */"), "/* keep me */");
+  for (const auto &c : kCases) {
+    SCOPED_TRACE(c.name);
+    EXPECT_EQ(FormattingApiProbe::formatComment(c.input, c.options), c.expected);
+  }
 }
 
 TEST(AbstractFormatterTest, LineCommentUtilityNormalizesSpacing) {

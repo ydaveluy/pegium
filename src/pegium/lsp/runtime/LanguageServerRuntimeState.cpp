@@ -12,9 +12,9 @@ void LanguageServerRuntimeState::reset() noexcept {
       pending;
   {
     std::scoped_lock lock(_requestCancellationMutex);
-    _initialized = false;
-    _shutdownRequested = false;
-    _exitRequested = false;
+    _initialized.store(false, std::memory_order_release);
+    _shutdownRequested.store(false, std::memory_order_release);
+    _exitRequested.store(false, std::memory_order_release);
     _initializeCapabilities = {};
     pending = std::move(_requestCancellation);
     _requestCancellation.clear();
@@ -25,27 +25,27 @@ void LanguageServerRuntimeState::reset() noexcept {
 }
 
 bool LanguageServerRuntimeState::initialized() const noexcept {
-  return _initialized;
+  return _initialized.load(std::memory_order_acquire);
 }
 
 void LanguageServerRuntimeState::setInitialized(bool value) noexcept {
-  _initialized = value;
+  _initialized.store(value, std::memory_order_release);
 }
 
 bool LanguageServerRuntimeState::shutdownRequested() const noexcept {
-  return _shutdownRequested;
+  return _shutdownRequested.load(std::memory_order_acquire);
 }
 
 void LanguageServerRuntimeState::setShutdownRequested(bool value) noexcept {
-  _shutdownRequested = value;
+  _shutdownRequested.store(value, std::memory_order_release);
 }
 
 bool LanguageServerRuntimeState::exitRequested() const noexcept {
-  return _exitRequested;
+  return _exitRequested.load(std::memory_order_acquire);
 }
 
 void LanguageServerRuntimeState::setExitRequested(bool value) noexcept {
-  _exitRequested = value;
+  _exitRequested.store(value, std::memory_order_release);
 }
 
 const workspace::InitializeCapabilities &

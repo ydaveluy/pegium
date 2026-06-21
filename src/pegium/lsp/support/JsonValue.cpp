@@ -88,24 +88,6 @@ pegium::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
   return nullptr;
 }
 
-pegium::DiagnosticSeverity
-from_lsp_diagnostic_severity(::lsp::DiagnosticSeverity severity) {
-  using enum ::lsp::DiagnosticSeverity;
-  switch (severity) {
-  case Error:
-    return pegium::DiagnosticSeverity::Error;
-  case Warning:
-    return pegium::DiagnosticSeverity::Warning;
-  case Information:
-    return pegium::DiagnosticSeverity::Information;
-  case Hint:
-    return pegium::DiagnosticSeverity::Hint;
-  case MAX_VALUE:
-    break;
-  }
-  return pegium::DiagnosticSeverity::Error;
-}
-
 ::lsp::DiagnosticSeverity
 to_lsp_diagnostic_severity(pegium::DiagnosticSeverity severity) {
   using enum pegium::DiagnosticSeverity;

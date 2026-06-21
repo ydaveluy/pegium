@@ -35,7 +35,6 @@ protected:
   /// Internal normalized edit description extracted from one diagnostic.
   struct DefaultCodeActionEdit {
     std::string kind;
-    std::string editKind;
     std::string title;
     std::string newText;
     std::uint32_t begin = 0;

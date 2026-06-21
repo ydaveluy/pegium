@@ -166,16 +166,7 @@ template <typename T> struct wrap_resolved_or_original {
 
   [[nodiscard]] T
   operator()(LanguageServerHandlerContext &, std::optional<T> value,
-             const utils::CancellationToken &) & {
-    if (value.has_value()) {
-      return std::move(*value);
-    }
-    return original;
-  }
-
-  [[nodiscard]] T
-  operator()(LanguageServerHandlerContext &, std::optional<T> value,
-             const utils::CancellationToken &) && {
+             const utils::CancellationToken &) {
     if (value.has_value()) {
       return std::move(*value);
     }

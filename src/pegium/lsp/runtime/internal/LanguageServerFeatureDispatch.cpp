@@ -3,11 +3,11 @@
 #include <cassert>
 #include <optional>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 
 #include <lsp/error.h>
 
+#include <pegium/lsp/runtime/internal/WorkspaceReadLock.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/support/JsonValue.hpp>
 
@@ -23,26 +23,6 @@ struct WrappedCodeLens {
   std::string uri;
   ::lsp::CodeLens codeLens;
 };
-
-template <typename F>
-decltype(auto) with_workspace_read_lock(
-    const pegium::SharedServices &sharedServices, F &&action) {
-  auto *lock = sharedServices.workspace.workspaceLock.get();
-  assert(lock != nullptr);
-
-  using Result = std::invoke_result_t<F>;
-  if constexpr (std::is_void_v<Result>) {
-    lock->read([task = std::forward<F>(action)]() mutable { task(); }).get();
-    return;
-  } else {
-    std::optional<Result> result;
-    lock->read([&result, task = std::forward<F>(action)]() mutable {
-      result.emplace(task());
-    }).get();
-    Result value = std::move(result).value();
-    return value;
-  }
-}
 
 template <typename Result, typename Accessor, typename Invoker>
 Result with_document_provider(pegium::SharedServices &sharedServices,

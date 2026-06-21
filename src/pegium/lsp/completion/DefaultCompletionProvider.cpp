@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cctype>
-#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -24,28 +22,6 @@ namespace pegium {
 using namespace pegium::provider_detail;
 
 namespace {
-
-const AbstractReference *
-find_reference_at_offset(const workspace::Document &document, TextOffset offset) {
-  const AbstractReference *best = nullptr;
-  TextOffset bestSpan = std::numeric_limits<TextOffset>::max();
-  for (const auto &handle : document.parseResult.references) {
-    const auto &reference = *handle.getConst();
-    const auto refNode = reference.getRefNode();
-    if (!refNode.valid()) {
-      continue;
-    }
-    if (offset < refNode.getBegin() || offset > refNode.getEnd()) {
-      continue;
-    }
-    const auto span = refNode.getEnd() - refNode.getBegin();
-    if (best == nullptr || span < bestSpan) {
-      best = &reference;
-      bestSpan = span;
-    }
-  }
-  return best;
-}
 
 const AstNode *find_completion_node(const workspace::Document &document,
                                     TextOffset anchorOffset) {
@@ -75,12 +51,6 @@ const AstNode *find_completion_node(const workspace::Document &document,
   }
 
   return &root;
-}
-
-bool reference_matches_feature(const AbstractReference &reference,
-                               const parser::ExpectPath &feature) {
-  const auto *assignment = feature.expectedReferenceAssignment();
-  return assignment == std::addressof(reference.getAssignment());
 }
 
 std::optional<::lsp::TextEdit>
@@ -135,17 +105,32 @@ DefaultCompletionProvider::getCompletion(
   const auto token = token_at(text, offset);
   const auto tokenOffset = token.text.empty() ? offset : token.begin;
   const auto tokenEndOffset = token.text.empty() ? offset : token.end;
-  const auto prefix =
-      token.text.empty()
-          ? std::string_view{}
-          : text.substr(token.begin,
-                        std::clamp(offset, token.begin, token.end) -
-                            token.begin);
-  const auto *node = find_completion_node(document, tokenOffset);
   const auto *reference = find_reference_at_offset(document, offset);
 
+  // A reference parsed through a datatype rule (such as a dotted qualified name)
+  // spans more than the token at the cursor. Widen the replaced range and the
+  // fuzzy-match prefix to the whole reference so the full name is replaced, not
+  // only the segment after the last separator. The parser frontier is still
+  // computed at the natural token start: the tokens inside the datatype rule are
+  // valid input that `expect` would otherwise consume, hiding the candidates.
+  auto replaceOffset = tokenOffset;
+  auto replaceEndOffset = tokenEndOffset;
+  if (reference != nullptr) {
+    if (const auto refNode = reference->getRefNode();
+        refNode.valid() && refNode.getBegin() < tokenOffset) {
+      replaceOffset = refNode.getBegin();
+      replaceEndOffset = std::max(tokenEndOffset, refNode.getEnd());
+    }
+  }
+
+  const auto prefixEnd = std::clamp(offset, replaceOffset, replaceEndOffset);
+  const auto prefix = prefixEnd > replaceOffset
+                          ? text.substr(replaceOffset, prefixEnd - replaceOffset)
+                          : std::string_view{};
+  const auto *node = find_completion_node(document, tokenOffset);
+
   std::vector<::lsp::CompletionItem> items;
-  utils::TransparentStringMap<std::size_t> itemsByKey;
+  utils::TransparentStringSet itemsByKey;
 
   const auto accept =
       [this, &items, &itemsByKey](const CompletionContext &context,
@@ -163,7 +148,7 @@ DefaultCompletionProvider::getCompletion(
     key.append(item.label);
     key.push_back('\x1f');
     key.append(detail);
-    if (!itemsByKey.try_emplace(std::move(key), items.size()).second) {
+    if (!itemsByKey.insert(std::move(key)).second) {
       return;
     }
     items.push_back(std::move(item));
@@ -175,8 +160,8 @@ DefaultCompletionProvider::getCompletion(
 
   for (const auto &feature : alternatives) {
     utils::throw_if_cancelled(cancelToken);
-    CompletionContext context{document, params, offset, tokenOffset,
-                              tokenEndOffset, token.text, prefix, node,
+    CompletionContext context{document, params, offset, replaceOffset,
+                              replaceEndOffset, token.text, prefix, node,
                               reference, feature};
     completionFor(context, [&accept, &context](CompletionValue value) {
       accept(context, std::move(value));
@@ -184,6 +169,23 @@ DefaultCompletionProvider::getCompletion(
     if (!continueCompletion(context)) {
       break;
     }
+  }
+
+  // A reference whose name is a datatype rule (such as a dotted qualified name)
+  // is not surfaced as a reference assignment in the parser frontier, so its
+  // candidates would be missed. When a concrete reference sits under the cursor,
+  // complete it directly over the widened (whole-name) range.
+  if (reference != nullptr) {
+    parser::ExpectPath referenceFeature;
+    referenceFeature.elements.push_back(
+        std::addressof(reference->getAssignment()));
+    CompletionContext context{document,         params,     offset,
+                              replaceOffset,     replaceEndOffset,
+                              token.text,        prefix,     node,
+                              reference,         referenceFeature};
+    completionFor(context, [&accept, &context](CompletionValue value) {
+      accept(context, std::move(value));
+    });
   }
 
   if (items.empty() && offset > tokenOffset) {
@@ -426,7 +428,8 @@ DefaultCompletionProvider::makeReferenceInfo(
     const CompletionContext &context,
     const grammar::Assignment &assignment) const {
   if (context.reference != nullptr &&
-      reference_matches_feature(*context.reference, context.feature)) {
+      std::addressof(context.reference->getAssignment()) ==
+          std::addressof(assignment)) {
     auto reference = pegium::makeReferenceInfo(*context.reference);
     reference.referenceText = context.prefix;
     return reference;

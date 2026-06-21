@@ -1,7 +1,5 @@
 #include <pegium/lsp/workspace/WorkspaceAdapters.hpp>
 
-#include <memory>
-#include <stdexcept>
 #include <utility>
 
 #include <lsp/messages.h>

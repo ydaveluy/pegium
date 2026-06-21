@@ -162,6 +162,25 @@ TEST(DefaultTextDocumentsTest, LookupAndRemoveNormalizeFileUris) {
   EXPECT_EQ(documents.get(unnormalized), nullptr);
 }
 
+TEST(DefaultTextDocumentsTest, GetNormalizedSkipsNormalization) {
+  DefaultTextDocuments documents;
+
+  const auto normalized =
+      utils::path_to_file_uri("/tmp/pegium-tests/default-text-documents-norm.test");
+  const auto unnormalized = std::string(
+      "file:///tmp/pegium-tests/folder/../default-text-documents-norm.test");
+
+  auto document =
+      test::set_text_document(documents, normalized, "test", "alpha", 1);
+  ASSERT_NE(document, nullptr);
+
+  // getNormalized assumes its argument is already normalized: it matches the
+  // canonical URI but, unlike get(), does NOT normalize a non-canonical one.
+  EXPECT_EQ(documents.getNormalized(normalized), document);
+  EXPECT_EQ(documents.getNormalized(unnormalized), nullptr);
+  EXPECT_EQ(documents.get(unnormalized), document);
+}
+
 TEST(DefaultTextDocumentsTest, AllAndKeysReflectCurrentState) {
   DefaultTextDocuments documents;
 

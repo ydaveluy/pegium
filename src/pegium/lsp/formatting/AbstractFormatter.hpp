@@ -46,8 +46,9 @@ struct FormattingActionOptions {
 /// - `lines`: a line break count, followed by the current indentation.
 /// - `tabs`: an indentation delta in indentation units.
 ///
-/// Most formatters should use the helpers in `pegium::Formatting` instead
-/// of constructing `FormattingMove` directly.
+/// Most formatters should use the helpers on `AbstractFormatter` (`oneSpace`,
+/// `newLine`, `indent`, `spaces`, `newLines`, `fit`, ...) instead of
+/// constructing `FormattingMove` directly.
 struct FormattingMove {
   std::optional<std::int32_t> characters;
   std::optional<std::int32_t> tabs;
@@ -108,7 +109,7 @@ struct MultilineCommentFormatOptions {
 /// A selection of CST nodes to which whitespace rules can be attached.
 ///
 /// Regions are usually obtained from `NodeFormatter`, for example with
-/// `property`, `properties`, `keyword`, `keywords`, `node`, `nodes`, `cst`, or
+/// `property`, `properties`, `keyword`, `keywords`, `hidden`, `hiddens`, or
 /// `interior`.
 class FormattingRegion {
 public:
@@ -420,10 +421,6 @@ public:
   formatDocumentOnType(const workspace::Document &document,
                        const ::lsp::DocumentOnTypeFormattingParams &params,
                        const utils::CancellationToken &cancelToken) const override;
-
-  /// Returns the trigger configuration for on-type formatting, if any.
-  [[nodiscard]] std::optional<::lsp::DocumentOnTypeFormattingOptions>
-  formatOnTypeOptions() const noexcept override;
 
 protected:
   struct SpaceActionBuilder {

@@ -5,8 +5,6 @@
 #include <pegium/lsp/services/SharedServices.hpp>
 #include <pegium/core/syntax-tree/CstUtils.hpp>
 
-#include <cassert>
-
 namespace pegium {
 
 std::optional<::lsp::Hover> MultilineCommentHoverProvider::getHoverContent(
@@ -24,15 +22,27 @@ std::optional<::lsp::Hover> MultilineCommentHoverProvider::getHoverContent(
     return std::nullopt;
   }
 
-  const auto documentation =
-      documentationProvider.getDocumentation(*declarations.front());
-  if (!documentation.has_value() || documentation->empty()) {
+  // Concatenate the documentation of every resolved declaration (a position can
+  // resolve to several, e.g. a multi-reference), joined with a space, rather
+  // than rendering only the first.
+  std::string combined;
+  for (const auto *declaration : declarations) {
+    const auto documentation =
+        documentationProvider.getDocumentation(*declaration);
+    if (documentation.has_value() && !documentation->empty()) {
+      if (!combined.empty()) {
+        combined += ' ';
+      }
+      combined += *documentation;
+    }
+  }
+  if (combined.empty()) {
     return std::nullopt;
   }
 
   ::lsp::MarkupContent markup{};
   markup.kind = ::lsp::MarkupKind::Markdown;
-  markup.value = *documentation;
+  markup.value = std::move(combined);
 
   ::lsp::Hover hover{};
   hover.contents = std::move(markup);

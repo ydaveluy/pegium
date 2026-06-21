@@ -10,6 +10,7 @@
 #include <pegium/core/grammar/Literal.hpp>
 #include <pegium/lsp/completion/DefaultCompletionProvider.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
 namespace pegium {
@@ -56,6 +57,47 @@ protected:
       "Model",
       some(append<&CompletionModel::entries>(EntryRule) |
            append<&CompletionModel::uses>(UseRule))};
+#pragma clang diagnostic pop
+};
+
+struct FqnPackage : AstNode {
+  string name;
+};
+
+struct FqnUse : AstNode {
+  reference<FqnPackage> target;
+};
+
+struct FqnModel : AstNode {
+  vector<pointer<FqnPackage>> packages;
+  vector<pointer<FqnUse>> uses;
+};
+
+class FqnCompletionParser final : public PegiumParser {
+public:
+  using PegiumParser::PegiumParser;
+  using PegiumParser::parse;
+
+protected:
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return ModelRule;
+  }
+
+  const Skipper &getSkipper() const noexcept override { return skipper; }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wuninitialized"
+  static constexpr auto WS = some(s);
+  Skipper skipper = SkipperBuilder().ignore(WS).build();
+
+  Terminal<std::string> ID{"ID", "a-zA-Z_"_cr + many(w)};
+  Rule<std::string> QualifiedName{"QualifiedName", some(ID, "."_kw)};
+  Rule<FqnPackage> PackageRule{"Package",
+                               "package"_kw + assign<&FqnPackage::name>(QualifiedName)};
+  Rule<FqnUse> UseRule{"Use", "use"_kw + assign<&FqnUse::target>(QualifiedName)};
+  Rule<FqnModel> ModelRule{
+      "Model", some(append<&FqnModel::packages>(PackageRule) |
+                    append<&FqnModel::uses>(UseRule))};
 #pragma clang diagnostic pop
 };
 
@@ -400,6 +442,47 @@ TEST_F(DefaultCompletionProviderTest, CompletesReferenceCandidatesFromScope) {
         EXPECT_EQ(find_item(completion, "Beta"), nullptr);
       });
   ASSERT_NE(document, nullptr);
+}
+
+TEST_F(DefaultCompletionProviderTest,
+       CompletesFullQualifiedNameAcrossDatatypeRule) {
+  registerParserServices<FqnCompletionParser>("fqn", {".fqn"});
+
+  // The cursor sits inside the `foo.ba` qualified name; completion must replace
+  // the whole name (from `foo`) with the candidate, not only the `ba` segment.
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("fqn.fqn"), "fqn",
+      "package foo.bar\n"
+      "use foo.ba");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = pegium::as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+  ASSERT_NE(services->lsp.completionProvider, nullptr);
+
+  const auto &text = document->textDocument().getText();
+  const auto cursor = static_cast<TextOffset>(text.size());
+  ::lsp::CompletionParams params{};
+  params.position = document->textDocument().positionAt(cursor);
+
+  const auto completion = services->lsp.completionProvider->getCompletion(
+      *document, params, utils::default_cancel_token);
+  ASSERT_TRUE(completion.has_value());
+  const auto *item = find_item(*completion, "foo.bar");
+  ASSERT_NE(item, nullptr);
+  const auto *edit = text_edit(*item);
+  ASSERT_NE(edit, nullptr);
+  EXPECT_EQ(edit->newText, "foo.bar");
+
+  // The replaced range must start at the datatype-rule start (`foo` in `use`).
+  const auto useFooOffset =
+      static_cast<TextOffset>(text.find("foo", text.find("use")));
+  const auto expectedStart = document->textDocument().positionAt(useFooOffset);
+  EXPECT_EQ(edit->range.start.line, expectedStart.line);
+  EXPECT_EQ(edit->range.start.character, expectedStart.character);
+  EXPECT_EQ(edit->range.end.line, params.position.line);
+  EXPECT_EQ(edit->range.end.character, params.position.character);
 }
 
 TEST_F(DefaultCompletionProviderTest,

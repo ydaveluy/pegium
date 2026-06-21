@@ -5,7 +5,6 @@
 #include <string>
 #include <utility>
 
-#include <pegium/core/utils/TextUtils.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 
 namespace pegium {
@@ -38,15 +37,11 @@ DefaultWorkspaceSymbolProvider::getSymbols(
   const auto &nodeKindProvider = *shared.lsp.nodeKindProvider;
   const auto &fuzzyMatcher = *shared.lsp.fuzzyMatcher;
 
-  std::string query = params.query;
-  std::ranges::transform(query, query.begin(),
-                         [](char value) { return utils::tolower(value); });
-
   std::vector<::lsp::WorkspaceSymbol> symbols;
   auto allElements = indexManager.allElements();
   for (const auto &entry : allElements) {
     utils::throw_if_cancelled(cancelToken);
-    if (!fuzzyMatcher.match(query, entry.name)) {
+    if (!fuzzyMatcher.match(params.query, entry.name)) {
       continue;
     }
 

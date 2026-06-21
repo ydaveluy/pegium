@@ -149,6 +149,9 @@ LanguageServerCapabilities collect_language_server_capabilities(
         semanticTokensFull = false;
       } else if (const auto *asBool = std::get_if<bool>(&*options.full)) {
         semanticTokensFull = semanticTokensFull && *asBool;
+        // A provider that reports `full` via a plain bool gives no delta
+        // guarantee, so narrow the merged delta capability conservatively.
+        semanticTokensDelta = false;
       } else if (const auto *asOptions =
                      std::get_if<::lsp::SemanticTokensOptionsFull>(
                          &*options.full)) {
