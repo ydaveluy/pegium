@@ -50,7 +50,7 @@ public:
   TextDocument(const TextDocument &other) = delete;
   TextDocument &operator=(const TextDocument &other) = delete;
   TextDocument(TextDocument &&other) noexcept;
-  TextDocument &operator=(TextDocument &&other);
+  TextDocument &operator=(TextDocument &&other) noexcept;
 
   /// Returns an independent deep copy. TextDocument is otherwise non-copyable so
   /// its text snapshot and line index are never duplicated by accident; use

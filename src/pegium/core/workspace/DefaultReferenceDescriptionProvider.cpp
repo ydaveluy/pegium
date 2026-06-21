@@ -28,7 +28,7 @@ DefaultReferenceDescriptionProvider::createDescriptions(
     }
 
     TextOffset sourceOffset = 0;
-    TextOffset sourceLength = static_cast<TextOffset>(targetText.size());
+    auto sourceLength = static_cast<TextOffset>(targetText.size());
     if (const auto refNode = reference.getRefNode(); refNode.valid()) {
       sourceOffset = refNode.getBegin();
       sourceLength = refNode.getEnd() - refNode.getBegin();

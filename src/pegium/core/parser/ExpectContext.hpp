@@ -224,7 +224,9 @@ struct ExpectContext {
   [[nodiscard]] constexpr NodeCount node_count() const noexcept { return 0; }
 
   void override_grammar_element(NodeId,
-                                const grammar::AbstractElement *) const noexcept {}
+                                const grammar::AbstractElement *) const noexcept {
+    /* no-op: ExpectContext does not record grammar elements */
+  }
 
   [[nodiscard]] constexpr const char *cursor() const noexcept { return _cursor; }
   [[nodiscard]] constexpr const char *maxCursor() const noexcept {

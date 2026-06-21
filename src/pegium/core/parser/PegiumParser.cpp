@@ -65,7 +65,7 @@ ParseResult PegiumParser::parse(text::TextSnapshot text,
   const auto &skipper = getSkipper();
   const ParseOptions options = getParseOptions();
   ParseResult result;
-  const TextOffset inputSize = static_cast<TextOffset>(text.size());
+  const auto inputSize = static_cast<TextOffset>(text.size());
   auto recoverySearch =
       detail::orchestrate_recovery_search(entryRule, skipper, options, text,
                                           cancelToken);

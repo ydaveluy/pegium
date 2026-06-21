@@ -90,8 +90,8 @@ std::optional<WrappedCodeLens> unwrap_code_lens(const ::lsp::CodeLens &codeLens)
   }
 
   const auto &metadata = data.object();
-  const auto markerIt = metadata.find(kCodeLensMetadataKey);
-  if (markerIt == metadata.end() || !markerIt->second.isBoolean() ||
+  if (const auto markerIt = metadata.find(kCodeLensMetadataKey);
+      markerIt == metadata.end() || !markerIt->second.isBoolean() ||
       !markerIt->second.boolean()) {
     return std::nullopt;
   }

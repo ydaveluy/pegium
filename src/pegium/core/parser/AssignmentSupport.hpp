@@ -139,7 +139,7 @@ ordered_choice_no_selectable_error(const CstNodeView &node) {
     message += child.isLeaf() ? "true" : "false";
     message += "}";
   }
-  return std::runtime_error(std::move(message));
+  return std::runtime_error(message);
 }
 
 template <auto feature>

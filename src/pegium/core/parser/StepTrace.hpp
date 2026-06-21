@@ -164,10 +164,11 @@ inline void stepTraceDumpSummary(Args &&...) noexcept {}
 #define PEGIUM_STEP_TRACE_RESET() ((void)0)
 #define PEGIUM_STEP_TRACE_DUMP_SUMMARY(...) ((void)0)
 
-inline void stepTraceReset() noexcept {}
-inline void stepTraceInc(StepCounter, std::uint64_t = 1) noexcept {}
+inline void stepTraceReset() noexcept { /* step counters disabled */ }
+inline void stepTraceInc(StepCounter, std::uint64_t = 1) noexcept { /* step counters disabled */
+}
 template <typename... Args>
-inline void stepTraceDumpSummary(Args &&...) noexcept {}
+inline void stepTraceDumpSummary(Args &&...) noexcept { /* step counters disabled */ }
 
 #endif
 

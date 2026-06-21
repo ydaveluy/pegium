@@ -113,8 +113,8 @@ std::vector<std::string>
 find_changed_uris(const pegium::SharedServices &sharedServices,
                   const std::string &changedUri) {
   const auto &documents = *sharedServices.workspace.documents;
-  const auto *textDocuments = sharedServices.workspace.textDocuments.get();
-  if (documents.hasDocument(changedUri) ||
+  if (const auto *textDocuments = sharedServices.workspace.textDocuments.get();
+      documents.hasDocument(changedUri) ||
       (textDocuments != nullptr &&
        textDocuments->getNormalized(changedUri) != nullptr)) {
     return {changedUri};

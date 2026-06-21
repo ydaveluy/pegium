@@ -148,7 +148,7 @@ std::shared_ptr<TextDocument> DefaultDocumentFactory::normalizeTextDocument(
   }
 
   return std::make_shared<TextDocument>(TextDocument::create(
-      normalizedUri, std::move(canonicalLanguageId), textDocument->version(),
+      normalizedUri, canonicalLanguageId, textDocument->version(),
       std::string(textDocument->getText())));
 }
 

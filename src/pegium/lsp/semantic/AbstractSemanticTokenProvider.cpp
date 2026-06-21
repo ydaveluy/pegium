@@ -434,7 +434,7 @@ AbstractSemanticTokenProvider::buildSemanticTokens(
       [&document, &range,
        supportsMultilineTokens = _supportsMultilineTokens.load() != 0,
        &tokens](SemanticTokenInfo token) {
-    append_semantic_token(document, range, std::move(token),
+    append_semantic_token(document, range, token,
                           supportsMultilineTokens, tokens);
       };
 

@@ -76,7 +76,7 @@ public:
   [[nodiscard]] T *create(Args &&...args) {
     const NodeId id = _count;
     void *mem = _pool->allocate(sizeof(T), alignof(T));
-    T *obj = ::new (mem) T(std::forward<Args>(args)...);
+    auto *obj = ::new (mem) T(std::forward<Args>(args)...);
     obj->_symbolId = id;
     obj->_arena = this;
     registerNode(obj);

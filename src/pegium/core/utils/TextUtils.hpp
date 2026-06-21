@@ -188,8 +188,8 @@ is_identifier_like_codepoint_at(const char *p, const char *end) noexcept {
   if (p == nullptr || p >= end) {
     return false;
   }
-  const auto length = utf8_codepoint_length(*p);
-  if (length == 0 || length > static_cast<std::size_t>(end - p)) {
+  if (const auto length = utf8_codepoint_length(*p);
+      length == 0 || length > static_cast<std::size_t>(end - p)) {
     return false;
   }
   return is_identifier_like_codepoint(decode_utf8_codepoint(p));

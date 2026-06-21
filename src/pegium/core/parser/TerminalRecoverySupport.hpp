@@ -435,9 +435,9 @@ allows_extended_terminal_delete_scan_match(const Context &ctx,
     // this gate decides whether to keep probing past the budget, it is NOT the
     // budget enforcer. The hard per-codepoint delete cap lives in
     // deleteOneCodepoint / can_delete; do not "tighten" this to remove the +1.
-    const auto localLimit =
-        static_cast<std::size_t>(ctx.maxConsecutiveCodepointDeletes) + 1u;
-    if (deletedByteSpan <= localLimit) {
+    if (const auto localLimit =
+            static_cast<std::size_t>(ctx.maxConsecutiveCodepointDeletes) + 1u;
+        deletedByteSpan <= localLimit) {
       return true;
     }
 

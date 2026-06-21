@@ -1541,11 +1541,10 @@ private:
     ctx.skip();
     const auto postSkipCursorOffset = ctx.cursorOffset();
     ctx.rewind(postMatchCheckpoint);
-    if (!allowNullableTailStop) {
-      if (postSkipCursorOffset <= parseStartOffset) {
-        ctx.rewind(checkpoint);
-        return false;
-      }
+    if (!allowNullableTailStop &&
+        postSkipCursorOffset <= parseStartOffset) {
+      ctx.rewind(checkpoint);
+      return false;
     }
     return true;
   }

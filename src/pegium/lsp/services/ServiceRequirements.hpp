@@ -12,7 +12,7 @@ struct ServiceRequirement {
 
   constexpr ServiceRequirement() noexcept = default;
   constexpr ServiceRequirement(workspace::DocumentState state) noexcept
-      : type(Type::Document), state(state) {}
+      : state(state) {}
   constexpr ServiceRequirement(Type type,
                                workspace::DocumentState state) noexcept
       : type(type), state(state) {}

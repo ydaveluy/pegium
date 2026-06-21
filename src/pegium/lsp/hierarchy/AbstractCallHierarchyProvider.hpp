@@ -38,7 +38,9 @@ protected:
 
   /// Customizes the item built for `node` before it is returned.
   virtual void customizeCallHierarchyItem(const AstNode &,
-                                          ::lsp::CallHierarchyItem &) const {}
+                                          ::lsp::CallHierarchyItem &) const {
+    /* default: no customization */
+  }
 
 private:
   [[nodiscard]] std::optional<::lsp::CallHierarchyItem>

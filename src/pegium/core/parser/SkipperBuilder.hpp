@@ -103,7 +103,7 @@ struct SkipperBuilder {
         _ignoredRules{std::move(ignoredRules)} {}
 
   template <NonNullableTerminalCapableExpression... Rules>
-    requires((std::tuple_size_v<IgnoredTuple> == 0))
+    requires(std::tuple_size_v<IgnoredTuple> == 0)
   [[nodiscard]] auto ignore(Rules &&...rules) {
     return SkipperBuilder<HiddenTuple, decltype(ignored(std::forward<Rules>(rules)...).rules)>{
         std::move(_hiddenRules),
@@ -111,7 +111,7 @@ struct SkipperBuilder {
   }
 
   template <NonNullableTerminalCapableExpression... Rules>
-    requires((std::tuple_size_v<HiddenTuple> == 0))
+    requires(std::tuple_size_v<HiddenTuple> == 0)
   [[nodiscard]] auto hide(Rules &&...rules) {
     return SkipperBuilder<decltype(hidden(std::forward<Rules>(rules)...).rules),
                           IgnoredTuple>{

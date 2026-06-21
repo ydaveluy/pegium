@@ -78,8 +78,8 @@ std::size_t last_character(std::string_view line) {
 // or std::nullopt when the line does not start with it.
 std::optional<std::size_t> match_prefix_marker(std::string_view line,
                                                std::string_view marker) {
-  const auto begin = skip_whitespace(line, 0);
-  if (line.compare(begin, marker.size(), marker) == 0) {
+  if (const auto begin = skip_whitespace(line, 0);
+      line.compare(begin, marker.size(), marker) == 0) {
     return begin + marker.size();
   }
   return std::nullopt;
@@ -258,24 +258,26 @@ std::vector<Token> tokenize(const std::vector<std::string_view> &lines,
     std::size_t index = 0;
 
     if (first && !options.start.empty()) {
-      if (const auto match = match_prefix_marker(line, options.start)) {
+      if (const auto match = match_prefix_marker(line, options.start);
+          match.has_value()) {
         index = *match;
       }
     } else if (!options.line.empty()) {
-      if (const auto match = match_prefix_marker(line, options.line)) {
+      if (const auto match = match_prefix_marker(line, options.line);
+          match.has_value()) {
         index = *match;
       }
     }
     if (last && !options.end.empty()) {
-      if (const auto truncate = match_suffix_marker(line, options.end)) {
+      if (const auto truncate = match_suffix_marker(line, options.end);
+          truncate.has_value()) {
         line = line.substr(0, *truncate);
       }
     }
 
     line = line.substr(0, last_character(line));
-    const auto whitespaceEnd = skip_whitespace(line, index);
-
-    if (whitespaceEnd >= line.size()) {
+    if (const auto whitespaceEnd = skip_whitespace(line, index);
+        whitespaceEnd >= line.size()) {
       if (!tokens.empty()) {
         const auto pos = position(currentLine, currentCharacter);
         tokens.push_back({Token::Type::Break, "", {pos, pos}});
@@ -345,8 +347,8 @@ DocCommentNode parse_text(ParseContext &context) {
   DocCommentNode paragraph;
   paragraph.kind = DocCommentNode::Kind::Paragraph;
   while (context.index < context.tokens.size()) {
-    const auto type = context.tokens[context.index].type;
-    if (type == Token::Type::Break || type == Token::Type::Tag) {
+    if (const auto type = context.tokens[context.index].type;
+        type == Token::Type::Break || type == Token::Type::Tag) {
       break;
     }
     lastRange = context.tokens[context.index].range;
@@ -597,9 +599,11 @@ bool is_doc_comment(std::string_view comment, const DocCommentParseOptions &opti
     return false;
   }
   const bool startsOk =
-      options.start.empty() || match_prefix_marker(lines.front(), options.start);
+      options.start.empty() ||
+      match_prefix_marker(lines.front(), options.start).has_value();
   const bool endsOk =
-      options.end.empty() || match_suffix_marker(lines.back(), options.end);
+      options.end.empty() ||
+      match_suffix_marker(lines.back(), options.end).has_value();
   return startsOk && endsOk;
 }
 

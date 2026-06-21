@@ -401,7 +401,15 @@ public:
     return probe_resync_entry_consumes_visible(ctx);
   }
 
-  void init_impl(AstReflectionInitContext &ctx) const { parser::init(_element, ctx); }
+  void init_impl(AstReflectionInitContext &ctx) const {
+    parser::init(_element, ctx);
+    // Populate the shape-facts cache during the sequential init pass so it is
+    // never written lazily during parsing: one parser instance is shared across
+    // parallel document builds, and a first-touch write in shapeFacts() on this
+    // mutable cache would be a data race. The facts are purely structural, so
+    // computing them here yields the same result as the former lazy path.
+    (void)shapeFacts();
+  }
 
 private:
   template <StrictParseModeContext Context>

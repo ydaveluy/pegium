@@ -657,7 +657,7 @@ DocumentId DefaultDocumentBuilder::awaitDocumentState(
         document_state_name(workspaceState))));
   };
   const auto check_now =
-      [&](std::exception_ptr &error) -> bool {
+      [&](std::exception_ptr &error) {
     const auto document =
         shared.workspace.documents->getDocument(documentId);
     if (document == nullptr) {
@@ -676,8 +676,7 @@ DocumentId DefaultDocumentBuilder::awaitDocumentState(
     return false;
   };
 
-  std::exception_ptr initialError;
-  if (check_now(initialError)) {
+  if (std::exception_ptr initialError; check_now(initialError)) {
     if (initialError != nullptr) {
       std::rethrow_exception(initialError);
     }
@@ -724,8 +723,7 @@ DocumentId DefaultDocumentBuilder::awaitDocumentState(
   });
   (void)cancelCallback;
 
-  std::exception_ptr recheckError;
-  if (check_now(recheckError)) {
+  if (std::exception_ptr recheckError; check_now(recheckError)) {
     finish(recheckError);
   }
 

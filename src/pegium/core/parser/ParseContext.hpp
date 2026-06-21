@@ -540,7 +540,8 @@ struct RecoveryContext : TrackedParseContext {
   // in-group failures). The LAST element of a Group installs NO guard at all
   // (Group::with_current_follow_probe) so the enclosing scope's follow stays
   // live — which is exactly the semantic follow the last element needs.
-  struct [[nodiscard]] FollowProbeGuard {
+  struct [[nodiscard("a discarded FollowProbeGuard temporary tears the follow "
+                     "probe down immediately")]] FollowProbeGuard {
     FollowProbeGuard(RecoveryContext &c, FollowProbeFn fn, const void *data,
                      FollowProbeFn recoverableFn = nullptr,
                      const void *recoverableData = nullptr,
@@ -1293,8 +1294,8 @@ private:
       if (!recoveryState.editBudget.hadEdits) {
         return;
       }
-      const auto *window = currentEditWindow();
-      if (window != nullptr && beginOffset >= window->maxCursorOffset) {
+      if (const auto *window = currentEditWindow();
+          window != nullptr && beginOffset >= window->maxCursorOffset) {
         ++recoveryState.windowReplay.currentForwardVisibleLeafCount;
       }
       return;

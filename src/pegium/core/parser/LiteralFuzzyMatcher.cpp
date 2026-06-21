@@ -147,7 +147,7 @@ reconstruct_candidate(const std::vector<ParentTrace> &parents, std::size_t cols,
                       DpLane lane) noexcept {
   const auto parent_at =
       [&parents, cols, lane](std::size_t literalIndex,
-                             std::size_t consumedIndex) noexcept -> ParentOp {
+                             std::size_t consumedIndex) noexcept {
     const auto &trace = parents[literalIndex * cols + consumedIndex];
     return lane == DpLane::AnyEdit ? trace.anyEdit : trace.noSubstitution;
   };

@@ -320,8 +320,8 @@ public:
   [[nodiscard]] bool has(workspace::DocumentId documentId, const K &key) const {
     this->throwIfDisposed();
     std::scoped_lock lock(_mutex);
-    const auto *cache = findContextCacheLocked(documentId);
-    if (cache != nullptr) {
+    if (const auto *cache = findContextCacheLocked(documentId);
+        cache != nullptr) {
       return cache->values.contains(key);
     }
     return false;
