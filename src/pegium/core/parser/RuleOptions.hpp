@@ -117,6 +117,33 @@ constexpr auto conversion_error(std::string_view message) noexcept {
   return ConversionResult<T>{conversion_error_tag, message};
 }
 
+/// Normalizes whatever a rule converter returns into a `ConversionResult<T>`:
+/// a `ConversionResult<U>` is forwarded (a *fallible* converter that can report
+/// an error), while any other value convertible to `T` is wrapped as a
+/// successful conversion (an *infallible* converter that simply returns the
+/// value). This lets converters that never fail be written as
+/// `[](std::string_view t) noexcept { return make_value(t); }` instead of
+/// wrapping every result in `opt::conversion_value<T>(...)`.
+template <typename T, typename Result>
+[[nodiscard]] constexpr ConversionResult<T> as_conversion_result(Result &&result) {
+  if constexpr (IsConversionResult_v<Result>) {
+    static_assert(IsConversionResultFor_v<Result, T>,
+                  "A converter returning opt::ConversionResult<U> requires U to "
+                  "be convertible to the rule's value type.");
+    if (result.has_value()) {
+      return conversion_value<T>(
+          static_cast<T>(std::forward<Result>(result).value()));
+    }
+    return conversion_error<T>(result.error());
+  } else {
+    static_assert(
+        std::convertible_to<std::remove_cvref_t<Result>, T>,
+        "A converter must return either opt::ConversionResult<T> (fallible) or "
+        "a value convertible to the rule's value type (infallible).");
+    return conversion_value<T>(static_cast<T>(std::forward<Result>(result)));
+  }
+}
+
 namespace detail {
 
 template <typename T> struct DependentFalse : std::false_type {};

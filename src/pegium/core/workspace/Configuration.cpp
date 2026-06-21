@@ -5,18 +5,6 @@
 namespace pegium::workspace {
 namespace {
 
-void apply_boolean_setting(const pegium::JsonValue::Object &configuration,
-                           std::string_view key, bool &target) {
-  const auto it = configuration.find(std::string(key));
-  if (it == configuration.end()) {
-    return;
-  }
-  const auto &value = it->second;
-  if (value.isBoolean()) {
-    target = value.boolean();
-  }
-}
-
 [[nodiscard]] std::optional<bool>
 read_optional_boolean(const pegium::JsonValue::Object &configuration,
                       std::string_view key) {

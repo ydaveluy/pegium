@@ -35,10 +35,11 @@ struct RecoveryAttemptEditSummary {
 
 [[nodiscard]] RecoveryAttemptEditSummary
 summarize_recovery_attempt_edits(const RecoveryAttempt &attempt) {
+  // No-edit attempts report the sentinel: with no edits there is no
+  // meaningful first-edit offset. The loop below min-folds the real edit
+  // offsets when edits exist.
   RecoveryAttemptEditSummary summary{
-      .firstEditOffset =
-          attempt.recoveryEdits.empty() ? attempt.noEditFirstEditOffset
-                                        : std::numeric_limits<TextOffset>::max(),
+      .firstEditOffset = std::numeric_limits<TextOffset>::max(),
       .editCount = attempt.editCount,
       .entryCount = attempt.recoveryEdits.size(),
       .editCost = attempt.editCost,
@@ -126,36 +127,28 @@ edit_summary_to_json(const RecoveryAttemptEditSummary &summary) {
   };
 }
 
-[[nodiscard]] pegium::JsonValue
-attempt_score_projection_to_json(const RecoveryAttempt &attempt,
-                                 const RecoveryAttemptEditSummary &summary) {
-  return pegium::JsonValue::Object{
-      {"credible", attempt.status == RecoveryAttemptStatus::Credible ||
-                       attempt.status == RecoveryAttemptStatus::Stable},
-      {"entryCount", json_int(summary.entryCount)},
-      {"editCost", json_int(summary.editCost)},
-      {"editSpan", json_int(summary.editSpan)},
-      {"firstEditOffset", json_int(summary.firstEditOffset)},
-      {"fullMatch", attempt.fullMatch},
-      {"stable", attempt.status == RecoveryAttemptStatus::Stable},
-  };
-}
-
 [[nodiscard]] pegium::JsonValue order_key_to_json(const RecoveryKey &key) {
+  // Mirror every is_better_recovery_key axis in comparison order so a dump
+  // fully explains a ranking: fullMatch > matched > firstEditScore >
+  // faithfulness > progressAfterEdits. The raw fields (firstEditOffset,
+  // editCost, editCount) are kept alongside the two DERIVED scores the
+  // comparator actually orders on.
   return pegium::JsonValue::Object{
+      {"fullMatch", key.fullMatch},
       {"matched", key.matched},
       {"firstEditOffset", json_int(key.firstEditOffset)},
+      {"firstEditScore", json_int(recovery_key_first_edit_score(key))},
       {"editCost", json_int(key.editCost)},
+      {"editCount", json_int(key.editCount)},
+      {"faithfulness", json_int(faithfulness(key))},
       {"progressAfterEdits", json_int(key.progressAfterEdits)},
   };
 }
 
 [[nodiscard]] pegium::JsonValue
 attempt_spec_to_json(const RecoveryAttemptSpec &spec) {
-  pegium::JsonValue::Array windows;
-  windows.emplace_back(recovery_window_to_json(spec.window));
   pegium::JsonValue::Object object{
-      {"windows", std::move(windows)},
+      {"window", recovery_window_to_json(spec.window)},
   };
   if (!spec.committedRecoveryEdits.empty()) {
     object.try_emplace("committedRecoveryResumeFloor",
@@ -176,10 +169,8 @@ recovery_attempt_status_name(RecoveryAttemptStatus status) noexcept {
     return "StrictFailure";
   case RecoveredButNotCredible:
     return "RecoveredButNotCredible";
-  case Credible:
-    return "Credible";
-  case Stable:
-    return "Stable";
+  case Selectable:
+    return "Selectable";
   }
   return "Unknown";
 }
@@ -277,16 +268,14 @@ recovery_attempt_to_json(const RecoveryAttempt &attempt,
       {"recoveryEdits", std::move(recoveryEdits)},
       {"parsedLength", json_int(attempt.parsedLength)},
       {"reachedRecoveryTarget", attempt.reachedRecoveryTarget},
-      {"score", attempt_score_projection_to_json(attempt, editSummary)},
       {"hasStablePrefix", attempt.hasStablePrefix},
       {"stableAfterRecovery", attempt.stableAfterRecovery},
       {"stablePrefixOffset", json_int(attempt.stablePrefixOffset)},
       {"status", std::string(recovery_attempt_status_name(attempt.status))},
   };
   if (attempt.replayWindow.has_value()) {
-    pegium::JsonValue::Array replayWindows;
-    replayWindows.emplace_back(recovery_window_to_json(*attempt.replayWindow));
-    object.try_emplace("replayWindows", std::move(replayWindows));
+    object.try_emplace("replayWindow",
+                       recovery_window_to_json(*attempt.replayWindow));
   }
   if (spec != nullptr) {
     object.try_emplace("spec", attempt_spec_to_json(*spec));

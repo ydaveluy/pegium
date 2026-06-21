@@ -22,12 +22,21 @@
 
 namespace pegium::parser::detail {
 
+/// Recovery caches reused across every re-parse of one recovery search. The
+/// choice cache is cleared before each probe (so behaviour is identical to a
+/// per-attempt cache, only the ~1.4 MB allocation is reused); the fuzzy cache is
+/// shared warm because its entries are a pure function of (literal, input,
+/// case-sensitivity) and `store` frees on overwrite, so reuse only adds hits.
+struct RecoveryParseCachePool {
+  ChoiceRecoverCache choice;
+  LiteralFuzzyCandidatesCache fuzzy;
+};
+
 AttemptFacts
 derive_attempt_facts(const RecoveryAttempt &attempt) noexcept {
   AttemptFacts facts;
   facts.hasEdits = !attempt.recoveryEdits.empty();
   if (!facts.hasEdits) {
-    facts.firstEditOffset = attempt.noEditFirstEditOffset;
     return facts;
   }
 
@@ -36,7 +45,7 @@ derive_attempt_facts(const RecoveryAttempt &attempt) noexcept {
   // offset is the minimum and the running max captures the last end offset.
   const auto editSummary =
       summarize_edits_since(attempt.recoveryEdits, 0);
-  facts.firstEditOffset = editSummary.firstEditBeginOffset;
+  const auto firstEditOffset = editSummary.firstEditBeginOffset;
   facts.lastEditOffset = editSummary.maxEndOffset;
   facts.hasDeleteOnlyRecovery = editSummary.allDeleted;
 
@@ -47,22 +56,11 @@ derive_attempt_facts(const RecoveryAttempt &attempt) noexcept {
       attempt.maxCursorOffset > facts.lastEditOffset;
 
   facts.preservesStablePrefixBeforeFirstEdit =
-      attempt.hasStablePrefix &&
-      facts.firstEditOffset >= attempt.stablePrefixOffset;
+      attempt.hasStablePrefix && firstEditOffset >= attempt.stablePrefixOffset;
 
   facts.hasEditPastReplayWindowHorizon =
       attempt.replayWindow.has_value() &&
       facts.lastEditOffset > attempt.replayWindow->maxCursorOffset;
-
-  const bool singleInsert =
-      attempt.recoveryEdits.size() == 1u &&
-      attempt.recoveryEdits.front().kind == ParseDiagnosticKind::Inserted;
-  facts.allowsLocalGapRecoveryWithoutStablePrefix =
-      !attempt.hasStablePrefix && !attempt.stableAfterRecovery &&
-      attempt.reachedRecoveryTarget && singleInsert;
-
-  facts.allowsLocalDeleteGapRecoveryWithoutStablePrefix =
-      !attempt.hasStablePrefix && facts.hasDeleteOnlyRecovery;
 
   return facts;
 }
@@ -129,16 +127,11 @@ struct StrictFailureStageResult {
   TextOffset failureVisibleCursorOffset = 0;
 };
 
-struct WindowRecoverySearchResult {
-  std::optional<RecoveryAttempt> attempt;
-  bool isFallback = false;
-};
-
 namespace {
 
-void consider_window_attempt_candidate(
-    WindowRecoverySearchResult &result, RecoveryAttempt attempt,
-    const RecoveryAttempt &selectedAttempt, bool continuingRecovery);
+[[nodiscard]] std::optional<RecoveryAttempt> consider_window_attempt_candidate(
+    RecoveryAttempt attempt, const RecoveryAttempt &selectedAttempt,
+    bool continuingRecovery);
 
 [[nodiscard]] CommittedPrefixContract
 committed_replay_prefix_contract(
@@ -202,14 +195,12 @@ failure_visible_cursor_offset(const FailureSnapshot &snapshot,
 }
 
 void fill_strict_attempt_from_summary(RecoveryAttempt &attempt,
-                                      const StrictParseSummary &summary,
-                                      TextOffset inputSize) noexcept {
+                                      const StrictParseSummary &summary) noexcept {
   attempt.entryRuleMatched = summary.entryRuleMatched;
   attempt.parsedLength = summary.parsedLength;
   attempt.lastVisibleCursorOffset = summary.lastVisibleCursorOffset;
   attempt.fullMatch = summary.fullMatch;
   attempt.maxCursorOffset = summary.maxCursorOffset;
-  attempt.noEditFirstEditOffset = inputSize;
 }
 
 [[nodiscard]] StrictFailureStageResult
@@ -218,7 +209,6 @@ parse_strict_capturing_failure(const grammar::ParserRule &entryRule,
                          const text::TextSnapshot &text,
                          const utils::CancellationToken &cancelToken) {
   StrictFailureStageResult result;
-  const auto inputSize = static_cast<TextOffset>(text.size());
 
   // Fast path: run strict parse without failure history.
   //
@@ -231,8 +221,7 @@ parse_strict_capturing_failure(const grammar::ParserRule &entryRule,
   auto strictResult =
       run_strict_parse(entryRule, skipper, text, cancelToken);
   result.strictAttempt.cst = std::move(strictResult.cst);
-  fill_strict_attempt_from_summary(result.strictAttempt, strictResult.summary,
-                                   inputSize);
+  fill_strict_attempt_from_summary(result.strictAttempt, strictResult.summary);
   result.failureVisibleCursorOffset =
       result.strictAttempt.lastVisibleCursorOffset;
 
@@ -245,7 +234,7 @@ parse_strict_capturing_failure(const grammar::ParserRule &entryRule,
       run_strict_parse_with_failure_snapshot(entryRule, skipper, text, cancelToken);
   result.strictAttempt.cst = std::move(analysis.strictResult.cst);
   const auto &summary = analysis.strictResult.summary;
-  fill_strict_attempt_from_summary(result.strictAttempt, summary, inputSize);
+  fill_strict_attempt_from_summary(result.strictAttempt, summary);
   result.failureVisibleCursorOffset =
       result.strictAttempt.lastVisibleCursorOffset;
 
@@ -264,8 +253,9 @@ parse_strict_capturing_failure(const grammar::ParserRule &entryRule,
 [[nodiscard]] bool
 recovery_attempt_budget_exhausted(const RecoverySearchRunResult &result,
                                   const ParseOptions &options) noexcept {
-  return result.budgetedRecoveryAttemptRuns >= options.maxRecoveryAttempts ||
-         result.recoveryAttemptRuns >= options.maxTotalRecoveryAttemptRuns;
+  return result.recoveryAttemptRuns >=
+         std::min(options.maxRecoveryAttempts,
+                  options.maxTotalRecoveryAttemptRuns);
 }
 
 [[nodiscard]] TextOffset
@@ -291,7 +281,7 @@ last_failure_leaf_end_offset(const FailureSnapshot &snapshot) noexcept {
 /// worst case, bounded by `maxRecoveryEditsPerAttempt`.
 ///
 /// Pruning probes are post-hoc and do not count against
-/// `recoveryAttemptRuns` or `budgetedRecoveryAttemptRuns`: they fire only
+/// `recoveryAttemptRuns`: they fire only
 /// after an attempt already reached `fullMatch`, i.e. the global budget
 /// was already paid to obtain that candidate. Adding them to the counter
 /// would defeat tests that cap the budget at 1 attempt.
@@ -303,7 +293,8 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
                         RecoveryAttempt attempt,
                         std::uint64_t &choiceRecoverCacheHits,
                         std::uint64_t &choiceRecoverCacheMisses,
-                        const utils::CancellationToken &cancelToken) {
+                        const utils::CancellationToken &cancelToken,
+                        RecoveryParseCachePool *cachePool) {
   if (!attempt.fullMatch || attempt.recoveryEdits.size() <= 1u) {
     return attempt;
   }
@@ -322,13 +313,13 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
   // Each outer iteration restarts the scan from the first edit because dropping
   // one edit can unlock another whose necessity depended on the earlier one.
   const auto tryPrunedEditSet =
-      [&](auto shouldDrop) -> std::optional<RecoveryAttempt> {
+      [&](std::size_t dropIndex) -> std::optional<RecoveryAttempt> {
     RecoveryAttemptSpec prunedSpec;
     prunedSpec.window = spec.window;
     prunedSpec.committedRecoveryResumeFloor = spec.committedRecoveryResumeFloor;
     prunedSpec.committedRecoveryEdits.reserve(attempt.recoveryEdits.size());
     for (std::size_t i = 0; i < attempt.recoveryEdits.size(); ++i) {
-      if (!shouldDrop(i)) {
+      if (i != dropIndex) {
         prunedSpec.committedRecoveryEdits.push_back(attempt.recoveryEdits[i]);
       }
     }
@@ -337,17 +328,18 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
       return std::nullopt;
     }
 
-    // Run the probe with recovery OFF. Committed edits in the spec are
-    // still replayed; only *new* edits are forbidden. If the parse still
-    // reaches `fullMatch`, the dropped edit was genuinely redundant. If
-    // we left recovery on, the parser would just re-discover the dropped
-    // edit and return an equivalent set.
+    // Run the probe forbidding any *new* edit. Committed edits in the spec are
+    // still replayed; the no-new-edits invariant is enforced purely by pinning
+    // `maxRecoveryEditsPerAttempt` to the committed-prefix size (not by a
+    // recovery-off switch — `execute_recovery_parse` does not consult
+    // `recoveryEnabled`). If the parse still reaches `fullMatch`, the dropped
+    // edit was genuinely redundant.
     ParseOptions probeOptions = options;
-    probeOptions.recoveryEnabled = false;
     probeOptions.maxRecoveryEditsPerAttempt =
         static_cast<std::uint32_t>(prunedSpec.committedRecoveryEdits.size());
     auto prunedAttempt = execute_recovery_parse(
-        entryRule, skipper, probeOptions, text, prunedSpec, cancelToken);
+        entryRule, skipper, probeOptions, text, prunedSpec, cancelToken,
+        cachePool);
     classify_recovery_attempt(prunedAttempt);
     choiceRecoverCacheHits += prunedAttempt.choiceRecoverCacheHits;
     choiceRecoverCacheMisses += prunedAttempt.choiceRecoverCacheMisses;
@@ -370,10 +362,7 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
   while (changed && attempt.recoveryEdits.size() > 1u) {
     changed = false;
     for (std::size_t i = 0; i < attempt.recoveryEdits.size(); ++i) {
-      if (auto prunedAttempt =
-              tryPrunedEditSet([i](std::size_t candidateIndex) noexcept {
-                return candidateIndex == i;
-              })) {
+      if (auto prunedAttempt = tryPrunedEditSet(i)) {
         attempt = std::move(*prunedAttempt);
         changed = true;
         break;
@@ -389,22 +378,84 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
   return attempt;
 }
 
-[[nodiscard]] WindowRecoverySearchResult try_recovery_window(
+/// Structural signature of an out-of-window fuzzy *fold*: a destructive prefix
+/// Delete run immediately followed by a Replaced whose `beginOffset` equals the
+/// preceding Delete's `endOffset` (the fold splices the trailing deleted
+/// codepoint(s) into a single fuzzy keyword Replace), with that Replace landing
+/// at or beyond the window's `maxCursorOffset` (i.e. out of the active window).
+///
+/// This is the shape produced when the greedy descent folds the last prefix
+/// codepoint into a fuzzy keyword match instead of deleting it outright, hiding
+/// a competing pure-delete candidate. It is the trigger for the no-fold sibling
+/// probe; it does NOT depend on any specific grammar or literal.
+[[nodiscard]] bool
+matches_out_of_window_fuzzy_fold_signature(
+    std::span<const SyntaxScriptEntry> recoveryEdits,
+    TextOffset windowMaxCursorOffset) noexcept {
+  for (std::size_t i = 1; i < recoveryEdits.size(); ++i) {
+    const auto &prev = recoveryEdits[i - 1];
+    const auto &cur = recoveryEdits[i];
+    if (prev.kind == ParseDiagnosticKind::Deleted &&
+        cur.kind == ParseDiagnosticKind::Replaced &&
+        cur.beginOffset == prev.endOffset &&
+        cur.beginOffset >= windowMaxCursorOffset) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// True when the committed edit script carries the whole-keyword fuzzy-Replace
+/// fold signature: a non-empty Replaced edit immediately followed by an
+/// Inserted at its end. That is the shape the greedy descent produces when it
+/// fuzzy-Replaces a whole keyword (folding the would-be next token into it) and
+/// then synthesises the real next element — when a keep-keyword split-Insert may
+/// be strictly more faithful. The trigger for the forbid-Replace sibling probe;
+/// grammar/literal agnostic.
+[[nodiscard]] bool matches_whole_keyword_fuzzy_replace_with_continuation_signature(
+    std::span<const SyntaxScriptEntry> recoveryEdits) noexcept {
+  bool sawNonEmptyReplace = false;
+  for (std::size_t i = 0; i < recoveryEdits.size(); ++i) {
+    const auto &cur = recoveryEdits[i];
+    if (cur.kind == ParseDiagnosticKind::Replaced &&
+        cur.endOffset > cur.beginOffset) {
+      sawNonEmptyReplace = true;
+    }
+    if (i > 0) {
+      const auto &prev = recoveryEdits[i - 1];
+      // The fold synthesised the real continuation right after the keyword.
+      if (prev.kind == ParseDiagnosticKind::Replaced &&
+          prev.endOffset > prev.beginOffset &&
+          cur.kind == ParseDiagnosticKind::Inserted &&
+          cur.beginOffset == prev.endOffset) {
+        return true;
+      }
+    }
+    // The fold swallowed a glued continuation (e.g. keyword `module` plus name
+    // `b` written `Moduleb`), so the real continuation is later deleted instead.
+    // A keep-keyword split-Insert may be strictly more faithful; let the probe's
+    // keep-iff-better guard decide.
+    if (sawNonEmptyReplace && cur.kind == ParseDiagnosticKind::Deleted) {
+      return true;
+    }
+  }
+  return false;
+}
+
+[[nodiscard]] std::optional<RecoveryAttempt> try_recovery_window(
     const grammar::ParserRule &entryRule, const Skipper &skipper,
     const ParseOptions &options, const text::TextSnapshot &text,
     const RecoveryAttemptSpec &spec, const RecoveryAttempt &selectedAttempt,
     bool continuingRecovery,
     std::uint32_t &recoveryAttemptRuns,
-    std::uint32_t &budgetedRecoveryAttemptRuns,
     std::uint64_t &choiceRecoverCacheHits,
     std::uint64_t &choiceRecoverCacheMisses,
-    const utils::CancellationToken &cancelToken) {
-  WindowRecoverySearchResult result;
+    const utils::CancellationToken &cancelToken,
+    RecoveryParseCachePool *cachePool) {
   ++recoveryAttemptRuns;
-  ++budgetedRecoveryAttemptRuns;
   PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
   auto primaryAttempt = execute_recovery_parse(entryRule, skipper, options, text,
-                                             spec, cancelToken);
+                                             spec, cancelToken, cachePool);
   classify_recovery_attempt(primaryAttempt);
   trace_recovery_attempt(primaryAttempt, spec);
   choiceRecoverCacheHits += primaryAttempt.choiceRecoverCacheHits;
@@ -413,27 +464,39 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
   // Minimize the edit set before the ranker sees the attempt.
   primaryAttempt = minimize_recovery_edits(
       entryRule, skipper, options, text, spec, std::move(primaryAttempt),
-      choiceRecoverCacheHits, choiceRecoverCacheMisses, cancelToken);
+      choiceRecoverCacheHits, choiceRecoverCacheMisses, cancelToken, cachePool);
 
-  // Minimal-edit strategy probe. Complements the option-insert gate and
-  // the InfixRule rhs-region constraint: those remove enumeration-time
-  // speculation, but edits accumulated via a rebound recovery that has
-  // already crossed an earlier committed edit can
-  // still produce multi-edit paths. Running a second attempt with
-  // `maxRecoveryEditsPerAttempt = 1` exposes a single-edit candidate
-  // to the shared `RecoveryKey` ranker. Not counted against the
-  // attempt budget: the probe only reinterprets the same window with a
-  // tighter cap after the greedy attempt already paid the budget.
-  //
-  // The probe runs in two cases:
-  //   - primary `fullMatch` with multiple edits: the original case,
-  //     where the greedy path may have over-spent edits;
-  //   - primary `RecoveredButNotCredible` with multiple edits: a
-  //     greedy non-credible path may obscure a single-edit candidate
-  //     that would actually reach `fullMatch` (e.g. a fuzzy keyword
-  //     repair like `extend -> extends` whose 1-cost Replace is
-  //     hidden behind a 3-insert "skip option + fabricate body"
-  //     primary that fails downstream and surfaces as non-credible).
+  // Post-greedy strategy probes re-parse the same window with one policy axis
+  // perturbed, looking for a fullMatch the greedy primary missed. They are
+  // intentionally NOT counted against the attempt budget (it was already paid to
+  // obtain the primary). All probes share one body — re-parse, classify, trace,
+  // accumulate the choice-cache stats, keep the result only if it reaches
+  // fullMatch and outranks the current primary — so it lives in one helper;
+  // each probe owns only its trigger, its perturbed option, and its counters.
+  // Returns true when it replaced the primary (for a per-probe "win" counter).
+  const auto runProbeAndKeepIfBetter =
+      [&](const ParseOptions &probeOptions,
+          const RecoveryAttemptSpec &probeSpec) -> bool {
+    PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
+    auto attempt = execute_recovery_parse(entryRule, skipper, probeOptions, text,
+                                          probeSpec, cancelToken, cachePool);
+    classify_recovery_attempt(attempt);
+    trace_recovery_attempt(attempt, spec);
+    choiceRecoverCacheHits += attempt.choiceRecoverCacheHits;
+    choiceRecoverCacheMisses += attempt.choiceRecoverCacheMisses;
+    if (attempt.fullMatch &&
+        is_better_recovery_attempt(attempt, primaryAttempt)) {
+      primaryAttempt = std::move(attempt);
+      return true;
+    }
+    return false;
+  };
+
+  // Minimal-edit probe. A greedy path can over-spend edits, or settle for a
+  // non-credible multi-edit cascade that hides a single-edit fullMatch (e.g. a
+  // 1-cost fuzzy `extend -> extends` Replace hidden behind a 3-insert primary).
+  // Re-running with the edit budget tightened to "committed prefix + 1 new edit"
+  // exposes the minimal candidate to the shared ranker.
   const bool minimalProbeWorthRunning =
       (primaryAttempt.fullMatch ||
        primaryAttempt.status ==
@@ -443,77 +506,25 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
   if (minimalProbeWorthRunning) {
     PEGIUM_STEP_TRACE_INC(StepCounter::MinimalEditProbeRuns);
     ParseOptions minimalOptions = options;
-    // The committed prefix replay consumes from the same edit budget,
-    // so cap at "committed count + 1 new edit" rather than just 1.
-    // Without this, a window with N committed edits cannot add any
-    // new edit at all, defeating the purpose of the probe in
-    // continuing-recovery contexts.
     minimalOptions.maxRecoveryEditsPerAttempt =
         static_cast<std::uint32_t>(spec.committedRecoveryEdits.size()) + 1u;
-    PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
-    auto minimalAttempt = execute_recovery_parse(entryRule, skipper,
-                                               minimalOptions, text, spec,
-                                               cancelToken);
-    classify_recovery_attempt(minimalAttempt);
-    trace_recovery_attempt(minimalAttempt, spec);
-    choiceRecoverCacheHits += minimalAttempt.choiceRecoverCacheHits;
-    choiceRecoverCacheMisses += minimalAttempt.choiceRecoverCacheMisses;
-    if (minimalAttempt.fullMatch &&
-        is_better_recovery_attempt(minimalAttempt, primaryAttempt)) {
+    if (runProbeAndKeepIfBetter(minimalOptions, spec)) {
       PEGIUM_STEP_TRACE_INC(StepCounter::MinimalEditProbeWins);
-      primaryAttempt = std::move(minimalAttempt);
     }
   }
 
-  // Alternative-strategy probes. When the primary attempt
-  // settles for `RecoveredButNotCredible` because its greedy local
-  // recovery picked the wrong cascade (consumed past a missing closing
-  // delimiter, then resorted to delete-scan), alternative attempts
-  // with different edit-budget configurations can let an Insert-only
-  // path reach `fullMatch`. The probes stay cheap: they only run when
-  // the primary is incomplete and they reuse the same window. Like the
-  // minimal probe, they are intentionally NOT counted against the
-  // attempt budget.
-  // Run alternative-strategy probes for any non-fullMatch primary that
-  // wasn't classified as a clean Stable. Specifically, also probe for
-  // `StrictFailure` outcomes — these arise when the dispatcher's first
-  // pass through a continuing-recovery window cannot place a single
-  // edit cleanly inside the editFloor and the original edit budget is
-  // not enough to cascade through the structure. The widened budget /
-  // relaxed stability probes give the dispatcher a chance to find a
-  // credible cascade in this scenario.
+  // Forbid-consecutive-deletes probe. On a non-fullMatch primary classified
+  // RecoveredButNotCredible/StrictFailure whose edits include a delete, an
+  // Insert-only repair may reach fullMatch where the greedy delete-scan produced
+  // a non-credible "skip ahead" (e.g. a missing `}` whose Insert lands cleanly).
+  // Evaluated AFTER the minimal probe and re-reading the live primaryAttempt, so
+  // a fullMatch produced above disables this probe.
   const bool alternativeProbeWorthRunning =
       !primaryAttempt.fullMatch &&
       (primaryAttempt.status ==
            RecoveryAttemptStatus::RecoveredButNotCredible ||
        primaryAttempt.status == RecoveryAttemptStatus::StrictFailure);
   if (alternativeProbeWorthRunning) {
-    // Each probe re-runs the recovery with a different policy axis relaxed,
-    // looking for a fullMatch path the primary missed. Probes are ordered
-    // cheap → expensive; the first one that reaches fullMatch short-circuits
-    // the rest via the early `primaryAttempt.fullMatch` guard.
-    const auto runProbe = [&](ParseOptions probeOptions) {
-      if (primaryAttempt.fullMatch) {
-        return;
-      }
-      PEGIUM_STEP_TRACE_INC(StepCounter::RecoveryPhaseRuns);
-      auto attempt = execute_recovery_parse(entryRule, skipper, probeOptions,
-                                            text, spec, cancelToken);
-      classify_recovery_attempt(attempt);
-      trace_recovery_attempt(attempt, spec);
-      choiceRecoverCacheHits += attempt.choiceRecoverCacheHits;
-      choiceRecoverCacheMisses += attempt.choiceRecoverCacheMisses;
-      if (attempt.fullMatch &&
-          is_better_recovery_attempt(attempt, primaryAttempt)) {
-        primaryAttempt = std::move(attempt);
-      }
-    };
-
-    // Forbid consecutive deletes. Targets cases where the primary's
-    // delete-scan produced a non-credible "skip ahead" path while an
-    // Insert-only repair would actually reach `fullMatch` (e.g. a missing
-    // `}` whose Insert lands cleanly when the dispatcher cannot fall back to
-    // deleting bytes).
     const bool primaryHasDeletes = std::ranges::any_of(
         primaryAttempt.recoveryEdits, [](const auto &edit) noexcept {
           return edit.kind == ParseDiagnosticKind::Deleted;
@@ -521,13 +532,46 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
     if (primaryHasDeletes && options.maxConsecutiveCodepointDeletes > 0u) {
       ParseOptions probe = options;
       probe.maxConsecutiveCodepointDeletes = 0u;
-      runProbe(probe);
+      runProbeAndKeepIfBetter(probe, spec);
     }
   }
 
-  consider_window_attempt_candidate(result, std::move(primaryAttempt),
-                                    selectedAttempt, continuingRecovery);
-  return result;
+  // No-fold sibling probe. A fullMatch primary may have folded the trailing
+  // prefix codepoint(s) into an out-of-window fuzzy keyword Replace (candidate
+  // B) instead of deleting them outright (candidate A). The two can tie on
+  // editCost, in which case the parsimony tie-break (fewer edits) prefers the
+  // pure-delete A — but the greedy descent never generates A because it stops
+  // at the first credible fullMatch. Re-descend the same window with the fold
+  // carve-out forced off so a pure-delete A is generated and handed to the
+  // shared ranker. Bounded: at most one extra (uncounted) re-parse per window,
+  // only when the primary carries the fold signature.
+  if (primaryAttempt.fullMatch &&
+      matches_out_of_window_fuzzy_fold_signature(
+          primaryAttempt.recoveryEdits, spec.window.maxCursorOffset) &&
+      !spec.probeAxes.forbidOutOfWindowFuzzyFold) {
+    RecoveryAttemptSpec probeSpec = spec;
+    probeSpec.probeAxes.forbidOutOfWindowFuzzyFold = true;
+    runProbeAndKeepIfBetter(options, probeSpec);
+  }
+
+  // Forbid-Replace sibling probe. A fullMatch may have fuzzy-Replaced a whole
+  // keyword (folding the next token into it) then synthesised the real next
+  // element, when a keep-keyword split-Insert would be strictly more faithful.
+  // Re-descend with the whole-keyword fuzzy Replace forbidden so the split-Insert
+  // is generated and handed to the shared ranker; kept only if it reaches
+  // fullMatch and outranks — so a keyword-only grammar, where the split-Insert
+  // leaves the extra char unconsumed (non-fullMatch), stays on the Replace.
+  if (primaryAttempt.fullMatch &&
+      matches_whole_keyword_fuzzy_replace_with_continuation_signature(
+          primaryAttempt.recoveryEdits) &&
+      !spec.probeAxes.forbidWholeKeywordFuzzyReplace) {
+    RecoveryAttemptSpec probeSpec = spec;
+    probeSpec.probeAxes.forbidWholeKeywordFuzzyReplace = true;
+    runProbeAndKeepIfBetter(options, probeSpec);
+  }
+
+  return consider_window_attempt_candidate(std::move(primaryAttempt),
+                                           selectedAttempt, continuingRecovery);
 }
 
 [[nodiscard]] bool preserves_committed_replay_prefix(
@@ -548,91 +592,53 @@ minimize_recovery_edits(const grammar::ParserRule &entryRule,
   return candidate.parsedLength > contract.resumeFloor;
 }
 
-/// Single decision predicate for window-attempt acceptance. The two
-/// paths share the same committed-prefix / boundary-rewrite / continuation
-/// gates; only the final ranking rule differs by
-/// `requireStrictlyBetterNonCredible`. When `false`, the candidate is
-/// `is_selectable_recovery_attempt` (Credible or Stable) and may replace
-/// the current selected attempt based on the central
-/// `is_better_recovery_attempt` ranking. When `true`, the candidate is
-/// not selectable but the entry rule matched, and it may replace a
-/// non-fullMatch selected attempt provided it strictly outranks an
-/// existing non-credible fallback.
-[[nodiscard]] bool validate_window_attempt(
-    const RecoveryAttempt &candidate,
-    const RecoveryAttempt &selectedAttempt,
-    bool continuingRecovery,
-    bool requireStrictlyBetterNonCredible) noexcept {
-  CommittedPrefixContract committedReplayContract;
-  if (!preserves_committed_replay_prefix(candidate, selectedAttempt,
-                                         committedReplayContract) ||
-      rewrites_committed_replay_boundary(candidate, committedReplayContract)) {
-    return false;
-  }
-  // Continuation rule (shared): a candidate that does not extend the
-  // current recovery site cannot accept under continuation.
-  if (continuingRecovery) {
-    return extends_current_recovery_site(candidate, committedReplayContract);
-  }
-
-  // Non-continuing ranking rule.
-  if (!requireStrictlyBetterNonCredible) {
-    return is_better_recovery_attempt(candidate, selectedAttempt);
-  }
-
-  // Non-credible fallback, non-continuing: only beat a non-credible
-  // selected when strictly better. The eligibility of `candidate` as a
-  // non-credible fallback (`satisfies_non_credible_fallback_contract`)
-  // is gated at the call site once and is not re-checked here.
-  return selectedAttempt.status !=
-             RecoveryAttemptStatus::RecoveredButNotCredible ||
-         is_better_recovery_attempt(candidate, selectedAttempt);
-}
-
-void consider_window_attempt_candidate(
-    WindowRecoverySearchResult &result, RecoveryAttempt attempt,
-    const RecoveryAttempt &selectedAttempt, bool continuingRecovery) {
-  if (is_selectable_recovery_attempt(attempt)) {
-    if (validate_window_attempt(attempt, selectedAttempt, continuingRecovery,
-                                /*requireStrictlyBetterNonCredible=*/false)) {
-      result.attempt = std::move(attempt);
-      result.isFallback = false;
-    }
-    return;
-  }
-  if (attempt.entryRuleMatched &&
+/// Single decision predicate for window-attempt acceptance, returning the
+/// accepted attempt or `nullopt`. Two admission paths share the same
+/// committed-prefix / boundary-rewrite / continuation gates; only the final
+/// non-continuing ranking rule differs. A `Selectable` candidate replaces the
+/// selected attempt on the central
+/// `is_better_recovery_attempt` ranking; a non-selectable but entry-rule-
+/// matched fallback may replace a non-fullMatch selected attempt only when it
+/// strictly outranks an existing non-credible fallback.
+[[nodiscard]] std::optional<RecoveryAttempt> consider_window_attempt_candidate(
+    RecoveryAttempt attempt, const RecoveryAttempt &selectedAttempt,
+    bool continuingRecovery) {
+  const bool selectable = is_selectable_recovery_attempt(attempt);
+  const bool fallbackEligible =
+      !selectable && attempt.entryRuleMatched &&
       (continuingRecovery ||
-       satisfies_non_credible_fallback_contract(attempt, selectedAttempt))) {
-    if (validate_window_attempt(attempt, selectedAttempt, continuingRecovery,
-                                /*requireStrictlyBetterNonCredible=*/true)) {
-      result.attempt = std::move(attempt);
-      result.isFallback = true;
-    }
-    return;
+       satisfies_non_credible_fallback_contract(attempt, selectedAttempt));
+  if (!selectable && !fallbackEligible) {
+    PEGIUM_RECOVERY_TRACE("[parser attempt] rejected for selection status=",
+                          recovery_attempt_status_name(attempt.status));
+    return std::nullopt;
   }
-  PEGIUM_RECOVERY_TRACE("[parser attempt] rejected for selection status=",
-                        recovery_attempt_status_name(attempt.status));
-}
 
-void apply_window_acceptance(RecoveryAttempt acceptedAttempt,
-                             const RecoveryWindow &window,
-                             RecoveryAttempt &selectedAttempt,
-                             bool fallback) {
-  selectedAttempt = std::move(acceptedAttempt);
-#if defined(PEGIUM_ENABLE_RECOVERY_TRACE)
-  PEGIUM_RECOVERY_TRACE(
-      fallback ? "[parser window] accepted fallback begin="
-               : "[parser window] accepted begin=",
-      window.beginOffset, " max=", window.maxCursorOffset,
-      " full=", selectedAttempt.fullMatch,
-      " len=", selectedAttempt.parsedLength, " cost=", selectedAttempt.editCost,
-      " status=", recovery_attempt_status_name(selectedAttempt.status));
-  trace_recovery_json("[parser selected-attempt]",
-                      recovery_attempt_to_json(selectedAttempt));
-#else
-  (void)window;
-  (void)fallback;
-#endif
+  CommittedPrefixContract committedReplayContract;
+  if (!preserves_committed_replay_prefix(attempt, selectedAttempt,
+                                         committedReplayContract) ||
+      rewrites_committed_replay_boundary(attempt, committedReplayContract)) {
+    return std::nullopt;
+  }
+
+  bool accept = false;
+  if (continuingRecovery) {
+    // A candidate that does not extend the current recovery site cannot
+    // accept under continuation.
+    accept = extends_current_recovery_site(attempt, committedReplayContract);
+  } else if (selectable) {
+    accept = is_better_recovery_attempt(attempt, selectedAttempt);
+  } else {
+    // Non-credible fallback, non-continuing: only beat a non-credible
+    // selected attempt when strictly better.
+    accept = selectedAttempt.status !=
+                 RecoveryAttemptStatus::RecoveredButNotCredible ||
+             is_better_recovery_attempt(attempt, selectedAttempt);
+  }
+  if (accept) {
+    return std::move(attempt);
+  }
+  return std::nullopt;
 }
 
 [[nodiscard]] constexpr bool same_syntax_script_entry(
@@ -656,18 +662,20 @@ can_try_prefix_delete_retry(const grammar::ParserRule &entryRule,
 }
 
 [[nodiscard]] bool starts_with_root_insert_then_destructive_suffix_edit(
-    std::span<const SyntaxScriptEntry> recoveryEdits) noexcept {
+    std::span<const SyntaxScriptEntry> recoveryEdits,
+    TextOffset baseOffset) noexcept {
   if (recoveryEdits.empty()) {
     return false;
   }
   const auto &first = recoveryEdits.front();
-  if (first.kind != ParseDiagnosticKind::Inserted || first.beginOffset != 0) {
+  if (first.kind != ParseDiagnosticKind::Inserted ||
+      first.beginOffset != baseOffset) {
     return false;
   }
   return std::ranges::any_of(recoveryEdits.begin() + 1, recoveryEdits.end(),
-                             [](const SyntaxScriptEntry &entry) noexcept {
+                             [baseOffset](const SyntaxScriptEntry &entry) noexcept {
                                return is_destructive_edit_kind(entry.kind) &&
-                                      entry.beginOffset > 0;
+                                      entry.beginOffset > baseOffset;
                              });
 }
 
@@ -698,23 +706,9 @@ try_prefix_delete_retry_entry_rule(RecoveryContext &ctx,
         if (matched) {
           ctx.skip();
           const auto retryEdits = ctx.recoveryEditsView();
-          bool retryInsertThenDestructiveSuffix = false;
-          if (retryEdits.size() > retryEditCountBefore) {
-            const auto &firstRetryEdit = retryEdits[retryEditCountBefore];
-            const bool startsWithSyntheticInsert =
-                firstRetryEdit.kind == ParseDiagnosticKind::Inserted &&
-                firstRetryEdit.beginOffset == retryStartOffset;
-            if (startsWithSyntheticInsert) {
-              retryInsertThenDestructiveSuffix = std::ranges::any_of(
-                  retryEdits.begin() +
-                      static_cast<std::ptrdiff_t>(retryEditCountBefore + 1u),
-                  retryEdits.end(),
-                  [retryStartOffset](const SyntaxScriptEntry &entry) {
-                    return is_destructive_edit_kind(entry.kind) &&
-                           entry.beginOffset > retryStartOffset;
-                  });
-            }
-          }
+          const bool retryInsertThenDestructiveSuffix =
+              starts_with_root_insert_then_destructive_suffix_edit(
+                  retryEdits.subspan(retryEditCountBefore), retryStartOffset);
           const auto recoveredVisibleLeafCount = ctx.failureHistorySize();
           const bool exposesStructuredEntry =
               recoveredVisibleLeafCount >= retryVisibleLeafCount + 2u ||
@@ -734,40 +728,24 @@ try_prefix_delete_retry_entry_rule(RecoveryContext &ctx,
 
 } // namespace
 
-void WindowPlanner::begin(const FailureSnapshot &failureSnapshot,
-                          const RecoveryAttempt &selectedAttempt) noexcept {
-  _failureSnapshot = &failureSnapshot;
+RecoveryWindow plan_recovery_window(const FailureSnapshot &failureSnapshot,
+                                    const RecoveryAttempt &selectedAttempt,
+                                    const ParseOptions &options,
+                                    std::uint32_t forwardTokenCount) noexcept {
   const auto prefixContract =
       recovery_window_prefix_contract(failureSnapshot, selectedAttempt);
-  _editFloorOffset = prefixContract.editFloorOffset;
-  _stablePrefixOffset = prefixContract.stablePrefixOffset;
-  _hasStablePrefix = prefixContract.hasStablePrefix;
-  _windowTokenCount =
-      std::max<std::uint32_t>(1u, _options.recoveryWindowTokenCount);
-  _forwardWindowTokenCount = _windowTokenCount;
-}
-
-PlannedRecoveryWindow WindowPlanner::plan() const noexcept {
+  const auto backwardTokenCount =
+      std::max<std::uint32_t>(1u, options.recoveryWindowTokenCount);
   auto window =
-      compute_recovery_window(*_failureSnapshot, _windowTokenCount,
-                              _forwardWindowTokenCount, _editFloorOffset);
-  window.stablePrefixOffset = _stablePrefixOffset;
-  window.hasStablePrefix = _hasStablePrefix;
-  return {.window = window, .requestedTokenCount = _forwardWindowTokenCount};
+      compute_recovery_window(failureSnapshot, backwardTokenCount,
+                              forwardTokenCount, prefixContract.editFloorOffset);
+  window.stablePrefixOffset = prefixContract.stablePrefixOffset;
+  window.hasStablePrefix = prefixContract.hasStablePrefix;
+  return window;
 }
 
-bool WindowPlanner::tryWiden() noexcept {
-  const auto cap =
-      std::max(_options.maxRecoveryWindowTokenCount, _windowTokenCount);
-  if (_forwardWindowTokenCount >= cap) {
-    return false;
-  }
-  _forwardWindowTokenCount = cap;
-  return true;
-}
-
-void fill_committed_recovery_prefix(RecoveryAttemptSpec &spec,
-                                    const RecoveryAttempt &selectedAttempt) {
+static void fill_committed_recovery_prefix(RecoveryAttemptSpec &spec,
+                                           const RecoveryAttempt &selectedAttempt) {
   const auto contract = committed_replay_prefix_contract(selectedAttempt);
   spec.committedRecoveryResumeFloor = contract.resumeFloor;
   spec.committedRecoveryEdits.clear();
@@ -785,7 +763,8 @@ execute_recovery_parse(const grammar::ParserRule &entryRule,
                      const Skipper &skipper, const ParseOptions &options,
                      const text::TextSnapshot &text,
                      const RecoveryAttemptSpec &spec,
-                     const utils::CancellationToken &cancelToken) {
+                     const utils::CancellationToken &cancelToken,
+                     RecoveryParseCachePool *cachePool) {
   RecoveryAttempt attempt;
   attempt.stablePrefixOffset = spec.window.stablePrefixOffset;
   attempt.hasStablePrefix = spec.window.hasStablePrefix;
@@ -809,16 +788,32 @@ execute_recovery_parse(const grammar::ParserRule &entryRule,
   parseCtx.recoveryState.windowReplay.inRecoveryPhase = false;
   parseCtx.maxConsecutiveCodepointDeletes =
       options.maxConsecutiveCodepointDeletes;
+  parseCtx.forbidOutOfWindowFuzzyFold = spec.probeAxes.forbidOutOfWindowFuzzyFold;
+  parseCtx.forbidWholeKeywordFuzzyReplace =
+      spec.probeAxes.forbidWholeKeywordFuzzyReplace;
   parseCtx.stabilityTokenCount = options.recoveryStabilityTokenCount;
   parseCtx.maxEditsPerAttempt = options.maxRecoveryEditsPerAttempt;
   parseCtx.maxEditCost = options.maxRecoveryEditCost;
-  parseCtx.maxResyncSkipBytes = options.maxResyncSkipBytes;
+  parseCtx.maxResyncSkipCodepoints = options.maxResyncSkipCodepoints;
   parseCtx.maxRecoveryRuleEntries = options.maxRecoveryRuleEntries;
-  parseCtx.choiceRecoverCache.setDisabled(
+  if (cachePool != nullptr) {
+    // Reuse the driver-owned cache storage across this window's re-parses. The
+    // choice cache is cleared so this probe starts from an empty cache (behaviour
+    // identical to a per-attempt cache, only the allocation is reused); the fuzzy
+    // cache is shared warm (its entries are a pure function of their key).
+    cachePool->choice.reset();
+    parseCtx.usePooledRecoveryCaches(&cachePool->choice, &cachePool->fuzzy);
+  }
+  parseCtx.choiceRecoverCache().setDisabled(
       options.diagnostics.recoveryCacheDisabled);
 
   parseCtx.skip();
   const auto attemptCheckpoint = parseCtx.mark();
+  // `recoveryRuleEntries` is a monotonic per-attempt budget that
+  // `RecoveryContext::rewind` intentionally does NOT restore. Snapshot it at the
+  // checkpoint so the weak-match fallback below can re-descend with the same
+  // budget the original descent had (see the prefix-delete-retry block).
+  const auto entryRuleEntriesAtCheckpoint = parseCtx.recoveryRuleEntries;
   attempt.entryRuleMatched = entryRule.recover(parseCtx);
   const auto failureParsedLength = parseCtx.cursorOffset();
   const auto failureMaxCursorOffset = parseCtx.maxCursorOffset();
@@ -839,20 +834,36 @@ execute_recovery_parse(const grammar::ParserRule &entryRule,
   const bool rootInsertThenDestructiveSuffixAttempt =
       attempt.entryRuleMatched &&
       starts_with_root_insert_then_destructive_suffix_edit(
-          failureRecoveryEdits);
+          failureRecoveryEdits, /*baseOffset=*/0);
   if (!attempt.entryRuleMatched || weakMatchedZeroPrefixAttempt ||
       rootInsertThenDestructiveSuffixAttempt) {
     const bool hadDirectMatch = attempt.entryRuleMatched;
     parseCtx.rewind(attemptCheckpoint);
+    bool retrySucceeded = false;
     if (can_try_prefix_delete_retry(entryRule, spec)) {
       PEGIUM_STEP_TRACE_INC(StepCounter::RootPrefixRetryRuns);
-      attempt.entryRuleMatched =
-          try_prefix_delete_retry_entry_rule(parseCtx, entryRule);
-      if (attempt.entryRuleMatched) {
+      retrySucceeded = try_prefix_delete_retry_entry_rule(parseCtx, entryRule);
+      attempt.entryRuleMatched = retrySucceeded;
+      if (retrySucceeded) {
         PEGIUM_STEP_TRACE_INC(StepCounter::RootPrefixRetryWins);
       }
     }
-    if (!attempt.entryRuleMatched && hadDirectMatch) {
+    // Key the rebuild on whether the retry actually produced a match, not on
+    // `entryRuleMatched`: when the retry is not applicable that flag still holds
+    // the stale pre-rewind `true`, which would skip the rebuild and emit a
+    // degenerate strict-failure attempt for a repair we actually found.
+    if (!retrySucceeded && hadDirectMatch) {
+      // Rebuild the direct match the rewind above discarded. The failed
+      // prefix-delete retry already restored the cursor and edit script (its own
+      // rewind), but NOT the monotonic `recoveryRuleEntries` budget, which
+      // `RecoveryContext::rewind` deliberately preserves. Re-descending with the
+      // inflated counter can trip `maxRecoveryRuleEntries` earlier than the
+      // original descent did and yield a degraded/empty CST whose shape depends
+      // on how much budget the failed retry happened to consume. Re-establish
+      // the exact pre-descent state — cursor/edits AND the original budget — so
+      // the rebuild reproduces the direct match deterministically.
+      parseCtx.rewind(attemptCheckpoint);
+      parseCtx.recoveryRuleEntries = entryRuleEntriesAtCheckpoint;
       attempt.entryRuleMatched = entryRule.recover(parseCtx);
     }
   }
@@ -872,9 +883,8 @@ execute_recovery_parse(const grammar::ParserRule &entryRule,
                                 : failureMaxCursorOffset;
   if (attempt.entryRuleMatched) {
     auto window = spec.window;
-    const auto replayForwardCounts = parseCtx.replayForwardTokenCounts();
-    if (!replayForwardCounts.empty()) {
-      window.forwardTokenCount = replayForwardCounts.front();
+    if (const auto replayForwardCount = parseCtx.replayForwardTokenCount()) {
+      window.forwardTokenCount = *replayForwardCount;
     }
     attempt.replayWindow = window;
   }
@@ -891,22 +901,36 @@ execute_recovery_parse(const grammar::ParserRule &entryRule,
       failureSnapshotOffset = attempt.parsedLength;
       trackedSnapshot = failureRecorder.snapshot(failureSnapshotOffset);
     }
-    auto committedSnapshot =
-        snapshot_from_committed_cst(*cst, failureSnapshotOffset);
-    const bool trackedCarriesLaterVisibleFailureHistory =
-        last_failure_leaf_end_offset(trackedSnapshot) >
-        last_failure_leaf_end_offset(committedSnapshot);
-    const bool committedCarriesLaterVisibleFailureHistory =
-        last_failure_leaf_end_offset(committedSnapshot) >
-        last_failure_leaf_end_offset(trackedSnapshot);
-    if (committedCarriesLaterVisibleFailureHistory) {
-      trackedSnapshot = std::move(committedSnapshot);
-    } else if (!committedSnapshot.failureLeafHistory.empty() &&
-               !trackedCarriesLaterVisibleFailureHistory &&
-               (trackedSnapshot.failureLeafHistory.empty() ||
-                (!trackedSnapshot.hasFailureToken &&
-                 committedSnapshot.hasFailureToken))) {
-      trackedSnapshot = std::move(committedSnapshot);
+    // Lazy committed-CST snapshot. `snapshot_from_committed_cst` walks every
+    // committed leaf and allocates a fresh leaf vector on each non-full attempt
+    // (including the uncounted minimize/probe re-parses), yet its result can
+    // only be selected over the tracked snapshot when the tracked one is
+    // deficient at the failure horizon. A committed snapshot's last visible leaf
+    // cannot end past `failureSnapshotOffset` (the committed CST spans at most
+    // that far), so once the tracked snapshot already reaches the horizon with a
+    // failure token it dominates on every selection axis below and the committed
+    // walk can be skipped entirely — identical outcome, no walk, no allocation.
+    const bool trackedDominatesFailureHorizon =
+        trackedSnapshot.hasFailureToken &&
+        last_failure_leaf_end_offset(trackedSnapshot) >= failureSnapshotOffset;
+    if (!trackedDominatesFailureHorizon) {
+      auto committedSnapshot =
+          snapshot_from_committed_cst(*cst, failureSnapshotOffset);
+      // Committed wins iff its last visible failure leaf ends strictly later,
+      // or ties while it is the only one carrying usable failure history
+      // (tracked empty, or tracked lacks a failure token that committed has).
+      const auto committedEnd = last_failure_leaf_end_offset(committedSnapshot);
+      const auto trackedEnd = last_failure_leaf_end_offset(trackedSnapshot);
+      const bool committedWins =
+          committedEnd > trackedEnd ||
+          (committedEnd == trackedEnd &&
+           !committedSnapshot.failureLeafHistory.empty() &&
+           (trackedSnapshot.failureLeafHistory.empty() ||
+            (!trackedSnapshot.hasFailureToken &&
+             committedSnapshot.hasFailureToken)));
+      if (committedWins) {
+        trackedSnapshot = std::move(committedSnapshot);
+      }
     }
     attempt.failureSnapshot = std::move(trackedSnapshot);
   }
@@ -925,8 +949,8 @@ execute_recovery_parse(const grammar::ParserRule &entryRule,
                                     : failureStableAfterRecovery;
   (void)builder.getRootCstNode();
   attempt.cst = std::move(cst);
-  attempt.choiceRecoverCacheHits = parseCtx.choiceRecoverCache.hits();
-  attempt.choiceRecoverCacheMisses = parseCtx.choiceRecoverCache.misses();
+  attempt.choiceRecoverCacheHits = parseCtx.choiceRecoverCache().hits();
+  attempt.choiceRecoverCacheMisses = parseCtx.choiceRecoverCache().misses();
   return attempt;
 }
 
@@ -936,7 +960,6 @@ orchestrate_recovery_search(const grammar::ParserRule &entryRule,
                     const text::TextSnapshot &text,
                     const utils::CancellationToken &cancelToken) {
   RecoverySearchRunResult result;
-  WindowPlanner windowPlanner{options};
 
   PEGIUM_STEP_TRACE_INC(StepCounter::ParsePhaseRuns);
   auto strictFailureStage =
@@ -955,18 +978,16 @@ orchestrate_recovery_search(const grammar::ParserRule &entryRule,
 
   FailureSnapshot currentFailure = *std::move(strictFailureStage.failureSnapshot);
   TextOffset previousRecoveryEditFloor = 0;
+  // One set of recovery caches reused across every window probe of this search,
+  // so each re-parse reuses these allocations instead of building cold caches.
+  RecoveryParseCachePool cachePool;
+  // Search constants: pure functions of the (const) options, identical every
+  // iteration — computed once outside the loop.
+  const auto windowTokenCount =
+      std::max<std::uint32_t>(1u, options.recoveryWindowTokenCount);
+  const auto widenedTokenCount =
+      std::max(options.maxRecoveryWindowTokenCount, windowTokenCount);
   while (true) {
-    if (recovery_attempt_budget_exhausted(result, options)) {
-      return result;
-    }
-    windowPlanner.begin(currentFailure, result.selectedAttempt);
-
-    const auto initialPlan = windowPlanner.plan();
-    if (result.recoveryWindowsTried > 0u &&
-        initialPlan.window.editFloorOffset <= previousRecoveryEditFloor) {
-      return result;
-    }
-
     RecoveryWindow committedWindow{};
     bool siteCommitted = false;
     // The committed-prefix replay info depends on the currently selected
@@ -976,35 +997,56 @@ orchestrate_recovery_search(const grammar::ParserRule &entryRule,
     RecoveryAttemptSpec spec{};
     const bool continuingRecovery = !result.selectedWindows.empty();
     fill_committed_recovery_prefix(spec, result.selectedAttempt);
+    std::uint32_t forwardTokenCount = windowTokenCount;
     while (true) {
       if (recovery_attempt_budget_exhausted(result, options)) {
         return result;
       }
-      const auto plannedWindow = windowPlanner.plan();
-      const auto &window = plannedWindow.window;
-      trace_recovery_window(result.recoveryWindowsTried,
-                            plannedWindow.requestedTokenCount, window,
-                            result.selectedWindows.size());
+      const auto window = plan_recovery_window(
+          currentFailure, result.selectedAttempt, options, forwardTokenCount);
+      // editFloorOffset is forwardTokenCount-invariant (compute_recovery_window
+      // threads forwardTokenCount only into window.forwardTokenCount), so the
+      // first planned window of this site carries the same edit floor a separate
+      // pre-pass would. Stall out here — before counting this window — when a
+      // previously committed site failed to advance the edit floor.
+      if (forwardTokenCount == windowTokenCount &&
+          result.recoveryWindowsTried > 0u &&
+          window.editFloorOffset <= previousRecoveryEditFloor) {
+        return result;
+      }
+      trace_recovery_window(result.recoveryWindowsTried, forwardTokenCount,
+                            window, result.selectedWindows.size());
       ++result.recoveryWindowsTried;
 
       spec.window = window;
-      auto windowSearch = try_recovery_window(
+      auto acceptedAttempt = try_recovery_window(
           entryRule, skipper, options, text, spec, result.selectedAttempt,
           continuingRecovery, result.recoveryAttemptRuns,
-          result.budgetedRecoveryAttemptRuns,
           result.choiceRecoverCacheHits, result.choiceRecoverCacheMisses,
-          cancelToken);
-      if (windowSearch.attempt.has_value()) {
-        apply_window_acceptance(std::move(*windowSearch.attempt), window,
-                                result.selectedAttempt, windowSearch.isFallback);
+          cancelToken, &cachePool);
+      if (acceptedAttempt.has_value()) {
+        result.selectedAttempt = std::move(*acceptedAttempt);
+#if defined(PEGIUM_ENABLE_RECOVERY_TRACE)
+        PEGIUM_RECOVERY_TRACE(
+            "[parser window] accepted begin=", window.beginOffset,
+            " max=", window.maxCursorOffset,
+            " full=", result.selectedAttempt.fullMatch,
+            " len=", result.selectedAttempt.parsedLength,
+            " cost=", result.selectedAttempt.editCost,
+            " status=",
+            recovery_attempt_status_name(result.selectedAttempt.status));
+        trace_recovery_json("[parser selected-attempt]",
+                            recovery_attempt_to_json(result.selectedAttempt));
+#endif
         committedWindow = result.selectedAttempt.replayWindow.value_or(window);
         result.selectedWindows.push_back(committedWindow);
         siteCommitted = true;
         break;
       }
-      if (!windowPlanner.tryWiden()) {
+      if (forwardTokenCount >= widenedTokenCount) {
         break;
       }
+      forwardTokenCount = widenedTokenCount;
     }
 
     if (!siteCommitted) {
@@ -1038,10 +1080,16 @@ void classify_recovery_attempt(RecoveryAttempt &attempt) noexcept {
 
   // A full match is the strongest possible success signal; the budget exists
   // to cap exploratory edits, not to reject a complete parse.
+  const bool singleInsert =
+      attempt.recoveryEdits.size() == 1u &&
+      attempt.recoveryEdits.front().kind == ParseDiagnosticKind::Inserted;
+  const bool allowsLocalGapRecoveryWithoutStablePrefix =
+      !attempt.hasStablePrefix && !attempt.stableAfterRecovery &&
+      attempt.reachedRecoveryTarget && singleInsert;
   if (attempt.editCost > attempt.configuredMaxEditCost &&
       !attempt.fullMatch &&
       !facts.preservesStablePrefixBeforeFirstEdit &&
-      !facts.allowsLocalGapRecoveryWithoutStablePrefix) {
+      !allowsLocalGapRecoveryWithoutStablePrefix) {
     attempt.status =
         facts.hasEdits ? RecoveredButNotCredible : StrictFailure;
     return;
@@ -1058,10 +1106,10 @@ void classify_recovery_attempt(RecoveryAttempt &attempt) noexcept {
       attempt.status = RecoveredButNotCredible;
       return;
     }
-    attempt.status = Stable;
+    attempt.status = Selectable;
   } else if (attempt.reachedRecoveryTarget &&
              facts.continuesAfterFirstEdit) {
-    attempt.status = Credible;
+    attempt.status = Selectable;
   } else if (facts.hasEdits) {
     attempt.status = RecoveredButNotCredible;
   } else {
@@ -1070,26 +1118,21 @@ void classify_recovery_attempt(RecoveryAttempt &attempt) noexcept {
 }
 
 bool is_selectable_recovery_attempt(const RecoveryAttempt &attempt) noexcept {
-  using enum RecoveryAttemptStatus;
-  return attempt.status == Credible || attempt.status == Stable;
+  return attempt.status == RecoveryAttemptStatus::Selectable;
 }
 
-[[nodiscard]] auto build_non_credible_replay_contract(
-    const RecoveryAttempt &attempt) noexcept
-    -> std::optional<CommittedPrefixContract> {
+[[nodiscard]] bool admits_non_credible_fallback(
+    const RecoveryAttempt &attempt) noexcept {
   if (!attempt.entryRuleMatched ||
       attempt.status != RecoveryAttemptStatus::RecoveredButNotCredible ||
       attempt.recoveryEdits.empty()) {
-    return std::nullopt;
+    return false;
   }
 
   const auto &facts = attempt.facts;
 
   if (facts.preservesStablePrefixBeforeFirstEdit) {
-    return CommittedPrefixContract{
-        .resumeFloor = attempt.stablePrefixOffset,
-        .preservedEditCount = 0u,
-    };
+    return true;
   }
 
   // When the entry rule's leading literal failed strictly and was
@@ -1119,21 +1162,14 @@ bool is_selectable_recovery_attempt(const RecoveryAttempt &attempt) noexcept {
       attempt.recoveryEdits.front().kind == ParseDiagnosticKind::Replaced;
   if (!attempt.hasStablePrefix && firstEditIsReplaceAtRoot &&
       attempt.parsedLength > attempt.recoveryEdits.front().endOffset) {
-    return CommittedPrefixContract{
-        .resumeFloor = attempt.recoveryEdits.front().endOffset,
-        .preservedEditCount =
-            static_cast<std::uint32_t>(attempt.recoveryEdits.size()),
-    };
+    return true;
   }
 
-  if (!facts.allowsLocalDeleteGapRecoveryWithoutStablePrefix) {
-    return std::nullopt;
+  if (attempt.hasStablePrefix || !facts.hasDeleteOnlyRecovery) {
+    return false;
   }
 
-  return CommittedPrefixContract{
-      .resumeFloor = facts.firstEditOffset,
-      .preservedEditCount = 0u,
-  };
+  return true;
 }
 
 namespace {
@@ -1177,6 +1213,10 @@ committed_replay_prefix_contract(
   if (selectedAttempt.recoveryEdits.empty()) {
     return contract;
   }
+  // Reading selectedAttempt.facts is safe here: the only attempt that reaches a
+  // contract un-classified is the zero-edit strict attempt, excluded by the
+  // empty-edits early return above. Any attempt with edits has been classified
+  // (facts populated). See the facts contract in RecoverySearch.hpp.
   contract.resumeFloor =
       std::max(selectedAttempt.parsedLength, selectedAttempt.facts.lastEditOffset);
   while (contract.preservedEditCount < selectedAttempt.recoveryEdits.size() &&
@@ -1192,11 +1232,11 @@ committed_replay_prefix_contract(
 bool satisfies_non_credible_fallback_contract(
     const RecoveryAttempt &candidate,
     const RecoveryAttempt &selectedAttempt) noexcept {
-  auto contract = build_non_credible_replay_contract(candidate);
-  if (!contract.has_value() ||
+  CommittedPrefixContract contract;
+  if (!admits_non_credible_fallback(candidate) ||
       !preserves_committed_replay_prefix(candidate, selectedAttempt,
-                                         *contract) ||
-      rewrites_committed_replay_boundary(candidate, *contract)) {
+                                         contract) ||
+      rewrites_committed_replay_boundary(candidate, contract)) {
     return false;
   }
 
@@ -1205,11 +1245,11 @@ bool satisfies_non_credible_fallback_contract(
 
   if (selectedFacts.hasEdits &&
       selectedAttempt.status == RecoveryAttemptStatus::RecoveredButNotCredible &&
-      contract->preservedEditCount == selectedAttempt.recoveryEdits.size()) {
+      contract.preservedEditCount == selectedAttempt.recoveryEdits.size()) {
     const auto committedSourceFloor =
         std::max(selectedAttempt.parsedLength, selectedFacts.lastEditOffset);
     const auto newEdits = std::span(candidate.recoveryEdits)
-                              .subspan(contract->preservedEditCount);
+                              .subspan(contract.preservedEditCount);
     const bool rewritesCommittedSource = std::ranges::any_of(
         newEdits, [&](const SyntaxScriptEntry &entry) noexcept {
           return entry.beginOffset >= committedSourceFloor &&
@@ -1221,11 +1261,11 @@ bool satisfies_non_credible_fallback_contract(
   }
 
   if (!candidateFacts.hasCursorProgressPastLastEdit ||
-      candidate.maxCursorOffset <= contract->resumeFloor) {
+      candidate.maxCursorOffset <= contract.resumeFloor) {
     return false;
   }
 
-  if (contract->preservedEditCount == 0u) {
+  if (contract.preservedEditCount == 0u) {
     return !candidateFacts.hasDeleteOnlyRecovery ||
            candidateFacts.continuesAfterFirstEdit;
   }
@@ -1236,22 +1276,23 @@ bool satisfies_non_credible_fallback_contract(
 [[nodiscard]] RecoveryKey
 recovery_attempt_key(const RecoveryAttempt &attempt) noexcept {
   const bool selectableAttempt =
-      attempt.status == RecoveryAttemptStatus::Credible ||
-      attempt.status == RecoveryAttemptStatus::Stable;
+      attempt.status == RecoveryAttemptStatus::Selectable;
   // Read the two facts directly from the attempt rather than from
   // `attempt.facts`: the cached `facts` is populated by
   // `classify_recovery_attempt`, and a caller that ranks attempts before
   // classification would otherwise see a default zero-edit shape and
   // build a silently wrong key.
   const bool hasEdits = !attempt.recoveryEdits.empty();
-  const TextOffset effectiveFirstEditOffset =
-      hasEdits ? attempt.recoveryEdits.front().beginOffset
-               : attempt.parsedLength;
+  const TextOffset effectiveFirstEditOffset = effective_first_edit_offset(
+      hasEdits,
+      hasEdits ? attempt.recoveryEdits.front().beginOffset : TextOffset{0},
+      attempt.parsedLength);
   return {
       .fullMatch = attempt.fullMatch,
       .matched = selectableAttempt,
       .firstEditOffset = effectiveFirstEditOffset,
       .editCost = attempt.editCost,
+      .editCount = attempt.editCount,
       .progressAfterEdits = attempt.parsedLength,
   };
 }

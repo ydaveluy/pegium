@@ -1,13 +1,16 @@
 #pragma once
 
-/// Helpers for evaluating recovery candidates in editable parse modes.
+/// Helpers for evaluating AND applying recovery candidates in editable parse
+/// modes.
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 
+#include <pegium/core/parser/ParseAttempt.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
 
 namespace pegium::parser::detail {
@@ -25,9 +28,9 @@ is_destructive_edit_kind(ParseDiagnosticKind kind) noexcept {
 
 /// Summary of the edit-script slice [`baseEditCount`, end()): the first
 /// edit's begin offset, the maximum end offset, and whether any edit in
-/// the slice is destructive (`Deleted` or `Replaced`). Both
-/// `EditableRecoveryCandidate` and `StructuralProgressRecoveryCandidate`
-/// constructors collapse the same loop into this projection.
+/// the slice is destructive (`Deleted` or `Replaced`). Both the OrderedChoice/
+/// Group/InfixRule and the Repetition `EditableRecoveryCandidate` producers
+/// collapse the same loop into this projection.
 struct EditSliceSummary {
   TextOffset firstEditBeginOffset = 0;
   TextOffset maxEndOffset = 0;
@@ -61,15 +64,10 @@ summarize_edits_since(std::span<const SyntaxScriptEntry> edits,
 
 [[nodiscard]] inline TextOffset
 post_skip_cursor_offset(RecoveryContext &ctx) {
-  if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
-    const auto skipped = ctx.skip_without_builder(ctx.cursor());
-    return static_cast<TextOffset>(skipped - ctx.begin);
-  }
-  const auto postMatchCheckpoint = ctx.mark();
-  ctx.skip();
-  const auto offset = ctx.cursorOffset();
-  ctx.rewind(postMatchCheckpoint);
-  return offset;
+  // RecoveryContext always exposes skip_without_builder, so a side-effect-free
+  // trivia skip suffices (no mark/skip/rewind dance needed).
+  const auto skipped = ctx.skip_without_builder(ctx.cursor());
+  return static_cast<TextOffset>(skipped - ctx.begin);
 }
 
 template <typename Checkpoint, typename Runner>
@@ -81,11 +79,12 @@ evaluate_editable_recovery_candidate(RecoveryContext &ctx,
                                      Runner &&runner) {
   EditableRecoveryCandidate candidate;
   const char *const savedFurthestExploredCursor =
-      ctx.furthestExploredCursor();
+      ctx.maxCursor();
   if (std::forward<Runner>(runner)()) {
     candidate.matched = true;
-    candidate.cursorOffset = ctx.cursorOffset();
     candidate.postSkipCursorOffset = post_skip_cursor_offset(ctx);
+    // OrderedChoice / Group / InfixRule rank on the post-skip cursor.
+    candidate.keyProgressOffset = candidate.postSkipCursorOffset;
     candidate.editCost = ctx.currentEditCost() - baseEditCost;
     candidate.editCount =
         static_cast<std::uint32_t>(ctx.recoveryEditCount() -
@@ -103,19 +102,13 @@ evaluate_editable_recovery_candidate(RecoveryContext &ctx,
                                                      baseRecoveryEditCount);
       candidate.firstEditOffset = editSummary.firstEditBeginOffset;
       candidate.hasDestructiveEdit = editSummary.hasDestructiveEdit;
-      candidate.editSpan =
-          editSummary.maxEndOffset > editSummary.firstEditBeginOffset
-              ? editSummary.maxEndOffset - editSummary.firstEditBeginOffset
-              : 0;
+      candidate.lastEditEndOffset = editSummary.maxEndOffset;
     }
-    candidate.reachedEof =
-        candidate.postSkipCursorOffset >=
-        static_cast<TextOffset>(ctx.end - ctx.begin);
-    candidate.replayPrefix = classify_editable_replay_prefix(
-        candidate.editCount, candidate.hasDestructiveEdit);
+    candidate.replayPrefix = classify_replay_prefix(
+        candidate.editCount != 0u, candidate.hasDestructiveEdit);
   }
   ctx.rewind(entryCheckpoint);
-  ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+  ctx.restoreMaxCursor(savedFurthestExploredCursor);
   return candidate;
 }
 
@@ -125,12 +118,46 @@ capture_recovery_probe_progress(const RecoveryContext &ctx,
   const auto furthestVisibleLeafCount = ctx.furthestFailureHistorySize();
   return {
       .committedOffset = ctx.cursorOffset(),
-      .furthestExploredOffset = ctx.furthestExploredOffset(),
+      .furthestExploredOffset = ctx.maxCursorOffset(),
       .exploredVisibleLeafCount =
           furthestVisibleLeafCount > visibleLeafCountBefore
               ? furthestVisibleLeafCount - visibleLeafCountBefore
               : 0u,
   };
+}
+
+// ---- Recovery-edit application helpers (formerly RecoveryEditSupport.hpp) ----
+
+template <EditableParseModeContext Context>
+[[nodiscard]] constexpr bool
+can_apply_recovery_match(const Context &ctx, const char *endPtr) noexcept {
+  if constexpr (RecoveryParseModeContext<Context>) {
+    (void)ctx;
+    return endPtr != nullptr;
+  } else {
+    return ctx.canTraverseUntil(endPtr);
+  }
+}
+
+template <EditableParseModeContext Context, typename Element>
+[[nodiscard]] constexpr bool
+apply_insert_synthetic_gap_and_match_recovery_edit(
+    Context &ctx, const char *position, const Element *element,
+    const char *message = nullptr) {
+  if (!ctx.insertSyntheticGapAt(position, message)) {
+    return false;
+  }
+  // The source text already matches `element`; the recovery edit only inserts a
+  // synthetic separator at `position` so the existing match can be committed.
+  ctx.leaf(position, element);
+  return true;
+}
+
+template <Expression E>
+[[nodiscard]] inline bool
+attempt_parse_without_side_effects(RecoveryContext &ctx, const E &expression) {
+  detail::ProbeRestoreScope guard{ctx};
+  return attempt_parse_no_edits(ctx, expression);
 }
 
 } // namespace pegium::parser::detail

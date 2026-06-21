@@ -31,11 +31,15 @@ public:
   /// Clears every cached resolution previously produced for `document`.
   virtual void unlink(workspace::Document &document) const = 0;
 
-  /// Returns the best matching description for one reference lookup.
+  /// Returns the best matching candidate description for one reference lookup,
+  /// or a LinkingError. The returned pointer is index-stable. This is the
+  /// scope-lookup primitive that `resolve` builds on.
   virtual workspace::AstNodeDescriptionOrError
   getCandidate(const ReferenceInfo &reference) const = 0;
 
-  /// Returns every visible candidate description for one reference lookup.
+  /// Returns every visible candidate description (deduplicated) for one
+  /// reference lookup, or a LinkingError. Pointers are index-stable. This is the
+  /// primitive that `resolveAll` builds on.
   virtual workspace::AstNodeDescriptionsOrError
   getCandidates(const ReferenceInfo &reference) const = 0;
 

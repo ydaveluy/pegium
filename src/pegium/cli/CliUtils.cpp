@@ -160,7 +160,9 @@ void print_error_diagnostics(const workspace::Document &document,
 
     const auto position =
         document.textDocument().positionAt(diagnostic.begin);
-    out << "line " << position.line << ": " << diagnostic.message;
+    // Positions are zero-based; report the conventional 1-based line and column.
+    out << "line " << (position.line + 1) << ", column "
+        << (position.character + 1) << ": " << diagnostic.message;
     if (diagnostic.end > diagnostic.begin &&
         diagnostic.end <= document.textDocument().getText().size()) {
       out << " ["

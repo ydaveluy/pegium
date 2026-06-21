@@ -149,7 +149,6 @@ enum class ReferenceState : std::uint8_t {
   Resolved,
   ErrorNoLinker,
   ErrorNotFound,
-  ErrorIncompatibleType,
   ErrorCycle,
   ErrorException,
 };
@@ -235,6 +234,11 @@ public:
   [[nodiscard]] std::string getErrorMessage() const;
 
   virtual void clearLinkState() const noexcept = 0;
+
+  /// Forces resolution to run for its side effects (populating the cached
+  /// result or error state) and discards the resolved value. Used by the
+  /// linker's warm-up pass to resolve every reference up front.
+  virtual void forceResolve() const = 0;
 
   [[nodiscard]] bool isMultiReference() const noexcept { return _isMulti; }
 
@@ -336,6 +340,35 @@ protected:
                               std::memory_order_release);
         return true;
       }
+    }
+  }
+
+  /// Runs the one-shot resolution protocol shared by every concrete reference,
+  /// keeping the resolver-liveness invariant in a single place. Acquires the
+  /// resolver role (returning early when another thread already published a
+  /// terminal state), guards against a missing linker, then runs `doResolve`,
+  /// which performs the linker call and publishes either an error (via
+  /// `applyLinkingError`) or `Resolved`. A cyclic resolution publishes
+  /// `ErrorCycle`; any other exception runs `onFail` (caller-specific cleanup),
+  /// publishes `ErrorException` so waiters never strand at `Resolving`, then
+  /// rethrows.
+  template <typename DoResolve, typename OnFail>
+  void runResolution(DoResolve &&doResolve, OnFail &&onFail) const {
+    if (!acquireResolverRole()) {
+      return;
+    }
+    if (_linker == nullptr) {
+      publishState(ReferenceState::ErrorNoLinker);
+      return;
+    }
+    try {
+      doResolve();
+    } catch (const CyclicReferenceResolution &) {
+      applyLinkingError(workspace::LinkingErrorKind::Cycle);
+    } catch (...) {
+      onFail();
+      publishState(ReferenceState::ErrorException);
+      throw;
     }
   }
 

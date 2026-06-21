@@ -19,19 +19,10 @@
 
 namespace pegium::parser::detail {
 
-/// True iff `codepoint` is part of an identifier-like token. Accepts:
-///   - ASCII letters, digits, underscore (looked up in the 256-byte
-///     `is_word_lookup` table from TextUtils);
-///   - Any non-ASCII codepoint (≥ 0x80). This is a recovery heuristic,
-///     not a strict Unicode classification: it covers letters of every
-///     script (Latin-extended, Cyrillic, CJK, Arabic, …) without
-///     embedding the Unicode XID tables. False positives on Unicode
-///     punctuation are acceptable; the strict parse path uses the
-///     grammar's own terminal charsets.
-[[nodiscard]] constexpr bool
-is_identifier_like_codepoint(std::uint32_t codepoint) noexcept {
-  return codepoint >= 0x80 || utils::isWord(static_cast<char>(codepoint));
-}
+// The identifier-codepoint classifier lives in TextUtils so the parser,
+// recovery and editor-facing (token boundary) code share one definition.
+using utils::is_identifier_like_codepoint;
+using utils::is_identifier_like_codepoint_at;
 
 [[nodiscard]] constexpr bool
 is_word_like_terminal(std::string_view value) noexcept {
@@ -97,7 +88,7 @@ template <typename Context> class ProbeRestoreScope {
 public:
   explicit ProbeRestoreScope(Context &ctx) noexcept
       : _ctx(&ctx), _checkpoint(ctx.mark()),
-        _savedFurthestExploredCursor(ctx.furthestExploredCursor()) {}
+        _savedFurthestExploredCursor(ctx.maxCursor()) {}
 
   ProbeRestoreScope(const ProbeRestoreScope &) = delete;
   ProbeRestoreScope &operator=(const ProbeRestoreScope &) = delete;
@@ -109,7 +100,7 @@ public:
       return;
     }
     _ctx->rewind(_checkpoint);
-    _ctx->restoreFurthestExploredCursor(_savedFurthestExploredCursor);
+    _ctx->restoreMaxCursor(_savedFurthestExploredCursor);
   }
 
   /// Suppress the restore. The mutations performed inside the guarded
@@ -163,22 +154,6 @@ private:
   bool _prevTrackEditState;
   bool _active = true;
 };
-
-template <typename Context>
-[[nodiscard]] inline EditStateGuard<Context>
-make_edit_permissions_guard(Context &ctx, bool nextAllowInsert,
-                            bool nextAllowDelete) noexcept {
-  return EditStateGuard<Context>(ctx, nextAllowInsert, nextAllowDelete,
-                                 ctx.trackEditState);
-}
-
-template <typename Context>
-[[nodiscard]] inline EditStateGuard<Context>
-make_edit_state_guard(Context &ctx, bool nextAllowInsert, bool nextAllowDelete,
-                      bool nextTrackEditState) noexcept {
-  return EditStateGuard<Context>(ctx, nextAllowInsert, nextAllowDelete,
-                                 nextTrackEditState);
-}
 
 template <typename Context> class SkipperGuard {
 public:

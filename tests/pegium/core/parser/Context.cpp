@@ -5,7 +5,7 @@
 #include <pegium/core/parser/ParseAttempt.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/parser/RecoveryAnalysis.hpp>
-#include <pegium/core/parser/RecoveryEditSupport.hpp>
+#include <pegium/core/parser/EditableRecoverySupport.hpp>
 #include <pegium/core/text/TextSnapshot.hpp>
 
 using namespace pegium::parser;
@@ -245,9 +245,9 @@ TEST(ContextTest,
   EXPECT_TRUE(ctx.isInRecoveryPhase());
 
   ASSERT_TRUE(ctx.insertSynthetic(std::addressof(b)));
-  const auto replayForwardCounts = ctx.replayForwardTokenCounts();
-  ASSERT_EQ(replayForwardCounts.size(), 1u);
-  EXPECT_EQ(replayForwardCounts.front(), 3u);
+  const auto replayForwardCount = ctx.replayForwardTokenCount();
+  ASSERT_TRUE(replayForwardCount.has_value());
+  EXPECT_EQ(*replayForwardCount, 3u);
 
   ctx.leaf(input.begin() + 2, std::addressof(b));
   EXPECT_TRUE(ctx.isInRecoveryPhase());
@@ -362,17 +362,17 @@ TEST(
   RecoveryContext ctx{builder, skipper, recorder};
 
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
+  EXPECT_EQ(ctx.maxCursorOffset(), 0u);
 
   const auto checkpoint = ctx.mark();
   ctx.leaf(input.begin() + 1, std::addressof(literal));
   EXPECT_EQ(ctx.cursorOffset(), 1u);
-  EXPECT_EQ(ctx.furthestExploredOffset(), 1u);
+  EXPECT_EQ(ctx.maxCursorOffset(), 1u);
 
   ctx.rewind(checkpoint);
 
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.furthestExploredOffset(), 1u);
+  EXPECT_EQ(ctx.maxCursorOffset(), 1u);
 }
 
 TEST(ContextTest,
@@ -387,15 +387,15 @@ TEST(ContextTest,
   auto literal = "("_kw;
 
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
+  EXPECT_EQ(ctx.maxCursorOffset(), 0u);
 
   EXPECT_TRUE(probe_started_without_edits(ctx, delimited));
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
+  EXPECT_EQ(ctx.maxCursorOffset(), 0u);
 
   EXPECT_TRUE(detail::attempt_parse_without_side_effects(ctx, literal));
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
+  EXPECT_EQ(ctx.maxCursorOffset(), 0u);
 }
 
 TEST(ProbeRestoreScopeTest, RestoresCheckpointAndFurthestOnDestruction) {
@@ -408,17 +408,17 @@ TEST(ProbeRestoreScopeTest, RestoresCheckpointAndFurthestOnDestruction) {
   RecoveryContext ctx{builder, skipper, recorder};
 
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
+  EXPECT_EQ(ctx.maxCursorOffset(), 0u);
 
   {
     detail::ProbeRestoreScope guard{ctx};
     ctx.leaf(input.begin() + 3, std::addressof(literal));
     EXPECT_EQ(ctx.cursorOffset(), 3u);
-    EXPECT_EQ(ctx.furthestExploredOffset(), 3u);
+    EXPECT_EQ(ctx.maxCursorOffset(), 3u);
   }
 
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
+  EXPECT_EQ(ctx.maxCursorOffset(), 0u);
 }
 
 TEST(ProbeRestoreScopeTest, CommitSuppressesRestore) {
@@ -459,5 +459,5 @@ TEST(ProbeRestoreScopeTest, RestoresOnEarlyReturnPath) {
   withGuardThatBailsEarly();
 
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_EQ(ctx.furthestExploredOffset(), 0u);
+  EXPECT_EQ(ctx.maxCursorOffset(), 0u);
 }

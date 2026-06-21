@@ -101,32 +101,22 @@ struct NoEditParseObservation {
   bool startedWithoutEdits = false;
 };
 
-enum class NoEditStartSignalFallback : std::uint8_t {
-  Disabled,
-  Probe,
-};
-
 template <Expression E>
 inline NoEditParseObservation observe_no_edit_parse(RecoveryContext &ctx,
-                                                    const E &expression,
-                                                    NoEditStartSignalFallback
-                                                        startSignalFallback =
-                                                            NoEditStartSignalFallback::
-                                                                Probe) {
+                                                    const E &expression) {
   const auto startOffset = ctx.cursorOffset();
-  const auto furthestExploredOffsetBefore = ctx.furthestExploredOffset();
+  const auto furthestExploredOffsetBefore = ctx.maxCursorOffset();
   auto noEditGuard = ctx.withEditTrackingDisabled();
   (void)noEditGuard;
   TrackedParseContext &strictCtx = ctx;
   const auto cursor_advanced = [&] {
     return ctx.cursorOffset() > startOffset ||
-           ctx.furthestExploredOffset() >
+           ctx.maxCursorOffset() >
                std::max(startOffset, furthestExploredOffsetBefore);
   };
   const auto failed_observation_with = [&](bool cursorAdvanced) {
     bool startedWithoutEdits = cursorAdvanced;
-    if (!startedWithoutEdits &&
-        startSignalFallback == NoEditStartSignalFallback::Probe) {
+    if (!startedWithoutEdits) {
       startedWithoutEdits = probe_started_without_edits(ctx, expression);
     }
     return NoEditParseObservation{
@@ -267,19 +257,19 @@ inline bool probe_started_without_edits(RecoveryContext &ctx,
   const auto startOffset = ctx.cursorOffset();
   const auto checkpoint = ctx.mark();
   const char *const savedFurthestExploredCursor =
-      ctx.furthestExploredCursor();
-  ctx.restoreFurthestExploredCursor(ctx.cursor());
+      ctx.maxCursor();
+  ctx.restoreMaxCursor(ctx.cursor());
   if (attempt_fast_probe(ctx, expression)) {
     ctx.rewind(checkpoint);
-    ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+    ctx.restoreMaxCursor(savedFurthestExploredCursor);
     return true;
   }
   (void)attempt_parse_no_edits(ctx, expression);
   const bool started =
       ctx.cursorOffset() > startOffset ||
-      ctx.furthestExploredOffset() > startOffset;
+      ctx.maxCursorOffset() > startOffset;
   ctx.rewind(checkpoint);
-  ctx.restoreFurthestExploredCursor(savedFurthestExploredCursor);
+  ctx.restoreMaxCursor(savedFurthestExploredCursor);
   return started;
 }
 

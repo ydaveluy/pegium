@@ -2,7 +2,6 @@
 
 /// Parser expression representing prioritized alternatives.
 
-#include <algorithm>
 #include <array>
 #include <concepts>
 #include <pegium/core/grammar/OrderedChoice.hpp>
@@ -112,26 +111,6 @@ struct OrderedChoice : grammar::OrderedChoice {
   static_assert(nullable_only_last(),
                 "OrderedChoice: a nullable alternative must be the last one.");
 
-  /// Per-call upper bound on temporary recovery candidates evaluated
-  /// inside one `recover()` invocation, expressed structurally as a
-  /// function of grammar arity. The value matches:
-  ///
-  ///   - `collect_choice_attempts` evaluates each branch twice — once
-  ///     in the no-edit pass and once in the editable pass, comparing
-  ///     each via `consider_choice_attempt`. That contributes
-  ///     `2 * sizeof...(Elements)` outer comparisons.
-  ///
-  ///   - The editable pass admits at most one candidate per branch.
-  ///     The conservative ceiling allows up to 3 additional comparisons
-  ///     per branch to leave room for future sub-attempt families.
-  ///
-  /// The bound is therefore `5 * sizeof...(Elements)`. It is grammar-
-  /// derived (linear in arity, no dependency on input length) which
-  /// satisfies the plan's obligation that the candidate storage be
-  /// bounded by a function of the grammar.
-  static constexpr std::size_t kMaxRecoveryCandidatesPerCall =
-      5U * sizeof...(Elements);
-
   constexpr explicit OrderedChoice(std::tuple<Elements...> &&elements)
       : choices{std::move(elements)} {}
   constexpr OrderedChoice(OrderedChoice &&) noexcept = default;
@@ -206,13 +185,12 @@ private:
   }
 
   bool parse_recovery_impl(RecoveryContext &ctx) const {
-    if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows() &&
-        !ctx.allowsCompletedWindowContinuationRecovery()) {
+    if (ctx.recoveryDescentInactive()) {
       TrackedParseContext &strictCtx = ctx;
       return parse_strict_impl(strictCtx);
     }
     if (!ctx.isInRecoveryPhase() && ctx.hasPendingRecoveryWindows() &&
-        ctx.cursorOffset() < ctx.pendingRecoveryWindowActivationOffset()) {
+        ctx.cursorOffset() < ctx.pendingRecoveryWindowBeginOffset()) {
       return match_choice(ctx);
     }
     PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceRecoverCalls);
@@ -224,26 +202,25 @@ private:
 
     const auto cacheKey = detail::make_choice_recover_cache_key(ctx, this);
     ChoiceAttempt bestAttempt;
-    if (const auto *cached = ctx.choiceRecoverCache.tryGet(cacheKey)) {
+    if (const auto *cached = ctx.choiceRecoverCache().tryGet(cacheKey)) {
       bestAttempt = *cached;
       ctx.bumpMaxCursor(ctx.begin + bestAttempt.postEvalMaxCursorOffset);
       ctx.bumpFurthestFailureHistorySize(
           bestAttempt.postEvalFurthestVisibleLeafCount);
       ctx.bumpFurthestFailureOffset(bestAttempt.postEvalFurthestFailureOffset);
     } else {
-      const auto parseStartOffset = ctx.cursorOffset();
       const auto baseEditCost = ctx.currentEditCost();
       const auto baseRecoveryEditCount = ctx.recoveryEditCount();
       bestAttempt = collect_choice_attempts(
           ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
-          parseStartOffset, std::make_index_sequence<sizeof...(Elements)>{});
+          std::make_index_sequence<sizeof...(Elements)>{});
       PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceStrictPasses);
       PEGIUM_STEP_TRACE_INC(detail::StepCounter::ChoiceEditablePasses);
       bestAttempt.postEvalMaxCursorOffset = ctx.maxCursorOffset();
       bestAttempt.postEvalFurthestVisibleLeafCount =
           static_cast<std::uint32_t>(ctx.furthestFailureHistorySize());
       bestAttempt.postEvalFurthestFailureOffset = ctx.furthestFailureOffset();
-      ctx.choiceRecoverCache.store(cacheKey, bestAttempt);
+      ctx.choiceRecoverCache().store(cacheKey, bestAttempt);
     }
     if (replay_choice_attempt(ctx, entryCheckpoint, bestAttempt)) {
       return true;
@@ -385,17 +362,16 @@ private:
   /// construction.
   [[nodiscard]] detail::EditableRecoveryCandidate
   capture_choice_candidate(RecoveryContext &ctx) const {
-    detail::EditableRecoveryCandidate candidate{
+    // No recovery edits here (no-edit branch), so replayPrefix stays at its
+    // default ReplayPrefixClass::Empty — same as classify_replay_prefix(false,...).
+    // OrderedChoice ranks on the post-skip cursor, so keyProgressOffset mirrors
+    // postSkipCursorOffset.
+    const TextOffset postSkipCursor = detail::post_skip_cursor_offset(ctx);
+    return detail::EditableRecoveryCandidate{
         .matched = true,
-        .cursorOffset = ctx.cursorOffset(),
-        .postSkipCursorOffset = detail::post_skip_cursor_offset(ctx),
+        .postSkipCursorOffset = postSkipCursor,
+        .keyProgressOffset = postSkipCursor,
     };
-    candidate.reachedEof =
-        candidate.postSkipCursorOffset >=
-        static_cast<TextOffset>(ctx.end - ctx.begin);
-    candidate.replayPrefix = detail::classify_editable_replay_prefix(
-        candidate.editCount, candidate.hasDestructiveEdit);
-    return candidate;
   }
 
   /// Selects the better of two choice attempts. Three-stage shape:
@@ -416,8 +392,9 @@ private:
       return;
     }
     if (bestAttempt.envelope.key.matched &&
-        detail::extension_outranks_anchor_base(candidate.envelope,
-                                               bestAttempt.envelope)) {
+        detail::extension_dominates(
+            candidate.envelope, bestAttempt.envelope,
+            detail::ExtensionDominanceGuard::WhenCurrentProgressedPastAnchor)) {
       bestAttempt = candidate;
       return;
     }
@@ -556,13 +533,12 @@ private:
   ChoiceAttempt collect_choice_attempts(
       RecoveryContext &ctx, const Checkpoint &entryCheckpoint,
       std::uint32_t baseEditCost, std::size_t baseRecoveryEditCount,
-      TextOffset parseStartOffset, std::index_sequence<Is...>) const {
+      std::index_sequence<Is...>) const {
     ChoiceAttempt bestAttempt;
     (([&]() {
        const auto noEditAttempt =
            evaluate_branch_no_edit_choice_attempt<Is>(ctx, entryCheckpoint);
        consider_choice_attempt(bestAttempt, noEditAttempt);
-       (void)parseStartOffset;
        const auto editableCandidate = detail::evaluate_editable_recovery_candidate(
            ctx, entryCheckpoint, baseEditCost, baseRecoveryEditCount,
            [this, &ctx]() {
@@ -573,9 +549,7 @@ private:
            ChoiceAttempt{
                .branchIndex = Is,
                .kind = ChoiceAttemptKind::Editable,
-               .envelope = detail::to_candidate_envelope(
-                   editableCandidate,
-                   detail::CandidateOrigin::OrderedChoiceBranch),
+               .envelope = detail::to_candidate_envelope(editableCandidate),
            });
      }()),
      ...);
@@ -585,9 +559,7 @@ private:
   template <std::size_t I, typename Checkpoint>
   ChoiceAttempt evaluate_branch_no_edit_choice_attempt(
       RecoveryContext &ctx, const Checkpoint &entryCheckpoint) const {
-    const auto noEditObservation = observe_no_edit_parse(
-        ctx, std::get<I>(choices), NoEditStartSignalFallback::Disabled);
-    if (!noEditObservation.matched) {
+    if (!attempt_parse_no_edits(ctx, std::get<I>(choices))) {
       ctx.rewind(entryCheckpoint);
       return {.branchIndex = I};
     }
@@ -598,8 +570,7 @@ private:
     return {
         .branchIndex = I,
         .kind = ChoiceAttemptKind::NoEditReplay,
-        .envelope = detail::to_candidate_envelope(
-            candidate, detail::CandidateOrigin::OrderedChoiceBranch),
+        .envelope = detail::to_candidate_envelope(candidate),
     };
   }
 

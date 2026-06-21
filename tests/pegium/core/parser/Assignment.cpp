@@ -773,13 +773,6 @@ TEST(AssignmentTest, AssignOnBoolWithNonBoolElementSetsTrue) {
 })json");
 }
 
-// Disabled: pointer<NonAstNode> is no longer supported after the arena
-// migration. AST containment (pointer<T>) is reserved for AstNode subtypes
-// owned by the document's AstArena. Non-AST values can use direct value
-// storage or std::unique_ptr<T> in user code outside the parser-managed path.
-TEST(AssignmentTest, DISABLED_DirectObjectValuesAssignAndAppendSharedPointers) {
-}
-
 TEST(AssignmentTest, NullptrValueAssignmentIsAccepted) {
   NullValueParser parser;
 

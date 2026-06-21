@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <ostream>
+#include <string_view>
 
 #include <pegium/core/grammar/AbstractElement.hpp>
 #include <pegium/core/grammar/AbstractRule.hpp>
@@ -26,6 +28,32 @@ inline std::ostream &print_element_reference(std::ostream &os,
     return os << static_cast<const AbstractRule &>(element).getName();
   }
   return os << element;
+}
+
+/// Renders an n-ary element container (anything exposing `size()`/`get(index)`)
+/// as `(e0<sep>e1<sep>...)`.
+template <typename Nary>
+std::ostream &print_nary(std::ostream &os, const Nary &nary,
+                         std::string_view separator) {
+  os << '(';
+  const auto elementCount = nary.size();
+  for (std::size_t elementIndex = 0; elementIndex < elementCount;
+       ++elementIndex) {
+    if (elementIndex > 0) {
+      os << separator;
+    }
+    print_element_reference(os, *nary.get(elementIndex));
+  }
+  return os << ')';
+}
+
+/// Renders a rule (anything exposing `getName()`/`getTypeName()`/`getElement()`)
+/// as `Name returns Type: <element>;`.
+template <typename Rule>
+std::ostream &print_rule(std::ostream &os, const Rule &rule) {
+  os << rule.getName() << " returns " << rule.getTypeName() << ": ";
+  print_element_reference(os, *rule.getElement());
+  return os << ';';
 }
 
 } // namespace pegium::grammar::detail

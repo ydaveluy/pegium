@@ -22,6 +22,8 @@ public:
     resetBaseLinkState();
   }
 
+  void forceResolve() const override { ensureResolved(); }
+
   [[nodiscard]] const AstNode *resolve() const override { return get(); }
 
   [[nodiscard]] const T *get() const {
@@ -47,39 +49,29 @@ protected:
 
 private:
   void ensureResolved() const {
-    if (!acquireResolverRole()) {
-      return;
-    }
+    runResolution(
+        [this] {
+          const auto resolution = _linker->resolve(*this);
+          if (const auto *error =
+                  std::get_if<workspace::LinkingError>(&resolution);
+              error != nullptr) {
+            applyLinkingError(error->kind);
+            return;
+          }
 
-    if (_linker == nullptr) {
-      publishState(ReferenceState::ErrorNoLinker);
-      return;
-    }
-
-    workspace::ResolvedAstNodeDescriptionOrError resolution;
-    try {
-      resolution = _linker->resolve(*this);
-    } catch (const CyclicReferenceResolution &) {
-      applyLinkingError(workspace::LinkingErrorKind::Cycle);
-      return;
-    }
-
-    if (const auto *error = std::get_if<workspace::LinkingError>(&resolution);
-        error != nullptr) {
-      applyLinkingError(error->kind);
-      return;
-    }
-
-    const auto &resolved =
-        std::get<workspace::ResolvedAstNodeDescription>(resolution);
-    // The scope provider already type-checked candidates against the
-    // reference's expected type via `AstReflection::isSubtype` (see
-    // `DefaultScopeProvider::find_scope_entry`). A correct linker therefore
-    // hands us a node that IS-A `T`, making the cast a static downcast.
-    assert(dynamic_cast<const T *>(resolved.node) != nullptr);
-    _target = static_cast<const T *>(resolved.node);
-    _description = resolved.description;
-    publishState(ReferenceState::Resolved);
+          const auto &resolved =
+              std::get<workspace::ResolvedAstNodeDescription>(resolution);
+          // The scope provider already type-checked candidates against the
+          // reference's expected type via `AstReflection::isSubtype` (see
+          // `DefaultScopeProvider::find_scope_entry`). A correct linker
+          // therefore hands us a node that IS-A `T`, making the cast a static
+          // downcast.
+          assert(dynamic_cast<const T *>(resolved.node) != nullptr);
+          _target = static_cast<const T *>(resolved.node);
+          _description = resolved.description;
+          publishState(ReferenceState::Resolved);
+        },
+        [] {});
   }
 
   mutable const T *_target = nullptr;
@@ -107,6 +99,8 @@ public:
     _items.clear();
     resetBaseLinkState();
   }
+
+  void forceResolve() const override { ensureResolved(); }
 
   [[nodiscard]] std::span<const Item> items() const {
     ensureResolved();
@@ -180,38 +174,31 @@ protected:
 
 private:
   void ensureResolved() const {
-    if (!acquireResolverRole()) {
-      return;
-    }
+    runResolution(
+        [this] {
+          const auto resolution = _linker->resolveAll(*this);
+          if (const auto *error =
+                  std::get_if<workspace::LinkingError>(&resolution);
+              error != nullptr) {
+            applyLinkingError(error->kind);
+            return;
+          }
 
-    if (_linker == nullptr) {
-      publishState(ReferenceState::ErrorNoLinker);
-      return;
-    }
-
-    workspace::ResolvedAstNodeDescriptionsOrError resolution;
-    try {
-      resolution = _linker->resolveAll(*this);
-    } catch (const CyclicReferenceResolution &) {
-      applyLinkingError(workspace::LinkingErrorKind::Cycle);
-      return;
-    }
-
-    if (const auto *error = std::get_if<workspace::LinkingError>(&resolution);
-        error != nullptr) {
-      applyLinkingError(error->kind);
-      return;
-    }
-
-    const auto &descriptions =
-        std::get<std::vector<workspace::ResolvedAstNodeDescription>>(resolution);
-    _items.reserve(descriptions.size());
-    for (const auto &resolved : descriptions) {
-      assert(dynamic_cast<const T *>(resolved.node) != nullptr);
-      _items.push_back(Item{.description = resolved.description,
-                            .ref = static_cast<const T *>(resolved.node)});
-    }
-    publishState(ReferenceState::Resolved);
+          const auto &descriptions =
+              std::get<std::vector<workspace::ResolvedAstNodeDescription>>(
+                  resolution);
+          _items.reserve(descriptions.size());
+          for (const auto &resolved : descriptions) {
+            assert(dynamic_cast<const T *>(resolved.node) != nullptr);
+            _items.push_back(
+                Item{.description = resolved.description,
+                     .ref = static_cast<const T *>(resolved.node)});
+          }
+          publishState(ReferenceState::Resolved);
+        },
+        // On exception, drop any partial items before the terminal error is
+        // published so the cache never exposes a half-built result.
+        [this] { _items.clear(); });
   }
 
   mutable std::vector<Item> _items;

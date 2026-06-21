@@ -1,11 +1,13 @@
 #include <pegium/core/services/JsonValue.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <ostream>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -57,6 +59,9 @@ void append_escaped_json_string(std::string &out, std::string_view text) {
 }
 
 std::string serialize_number(double value) {
+  if (!std::isfinite(value)) {
+    return "null";
+  }
   std::ostringstream stream;
   stream.precision(std::numeric_limits<double>::max_digits10);
   stream << value;
@@ -124,7 +129,7 @@ void append_json_object(std::string &out, const JsonValue::Object &object,
       }
       append_escaped_json_string(out, keys[i]);
       out.push_back(':');
-      append_json_value(out, object.at(std::string(keys[i])), options, indent);
+      append_json_value(out, object.find(keys[i])->second, options, indent);
     }
     out.push_back('}');
     return;
@@ -139,7 +144,7 @@ void append_json_object(std::string &out, const JsonValue::Object &object,
     append_indent(out, childIndent);
     append_escaped_json_string(out, keys[i]);
     out += ": ";
-    append_json_value(out, object.at(std::string(keys[i])), options, childIndent);
+    append_json_value(out, object.find(keys[i])->second, options, childIndent);
   }
   out += '\n';
   append_indent(out, indent);
@@ -185,7 +190,8 @@ JsonValue::JsonValue(bool value) noexcept : _value(value) {}
 JsonValue::JsonValue(int value) noexcept
     : _value(static_cast<std::int64_t>(value)) {}
 JsonValue::JsonValue(std::int64_t value) noexcept : _value(value) {}
-JsonValue::JsonValue(double value) noexcept : _value(value) {}
+JsonValue::JsonValue(double value) noexcept
+    : _value(std::isfinite(value) ? Storage(value) : Storage(nullptr)) {}
 JsonValue::JsonValue(std::string value) noexcept : _value(std::move(value)) {}
 JsonValue::JsonValue(const char *value)
     : _value(value == nullptr ? Storage(nullptr) : Storage(std::string(value))) {}
@@ -229,6 +235,19 @@ std::int64_t JsonValue::integer() const {
     return *value;
   }
   if (const auto *value = std::get_if<double>(&_value)) {
+    if (!std::isfinite(*value)) {
+      throw std::out_of_range(
+          "Cannot convert a non-finite JSON number to an integer.");
+    }
+    const auto wideValue = static_cast<long double>(*value);
+    constexpr auto minInteger =
+        static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    constexpr auto maxInteger =
+        static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    if (wideValue < minInteger || wideValue > maxInteger) {
+      throw std::out_of_range(
+          "Cannot convert an out-of-range JSON number to an integer.");
+    }
     return static_cast<std::int64_t>(*value);
   }
   throw std::bad_variant_access();

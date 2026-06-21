@@ -101,11 +101,18 @@ concept TerminalAtom =
 template <Expression E, StrictParseModeContext Context>
 bool attempt_fast_probe(Context &ctx, const E &expression);
 
+template <Expression E, typename Context>
+bool probe_match_here(const E &expression, Context &ctx);
+
 struct Wrapper {
   struct Ops {
     using ParseFn = bool (*)(const void *, ParseContext &);
     using TrackedParseFn = bool (*)(const void *, TrackedParseContext &);
     using TrackedFastProbeFn = bool (*)(const void *, TrackedParseContext &);
+    using TrackedProbeMatchHereFn =
+        bool (*)(const void *, TrackedParseContext &);
+    using RecoveryProbeMatchHereFn =
+        bool (*)(const void *, RecoveryContext &);
     using RecoveryParseFn = bool (*)(const void *, RecoveryContext &);
     using ExpectParseFn = bool (*)(const void *, ExpectContext &);
     using RecoveryProbeFn = bool (*)(const void *, RecoveryContext &);
@@ -121,6 +128,8 @@ struct Wrapper {
     ParseFn parse = nullptr;
     TrackedParseFn parseTracked = nullptr;
     TrackedFastProbeFn fastProbeTracked = nullptr;
+    TrackedProbeMatchHereFn probeMatchHereTracked = nullptr;
+    RecoveryProbeMatchHereFn probeMatchHereRecover = nullptr;
     RecoveryParseFn parseRecover = nullptr;
     ExpectParseFn parseExpect = nullptr;
     RecoveryProbeFn probeRecoverable = nullptr;
@@ -148,11 +157,12 @@ struct Wrapper {
     if (this == &other)
       return *this;
 
+    // Clone into a local first so a throwing clone leaves *this unchanged;
+    // publish _ops/_obj only after the allocation succeeds.
+    auto *cloned = other._obj ? other._ops->clone(other._obj) : nullptr;
     reset();
     _ops = other._ops;
-    if (other._obj) {
-      _obj = _ops->clone(other._obj);
-    }
+    _obj = cloned;
     return *this;
   }
 
@@ -213,6 +223,14 @@ struct Wrapper {
 
   bool fast_probe(TrackedParseContext &ctx) const {
     return _ops->fastProbeTracked(_obj, ctx);
+  }
+
+  bool probe_match_here(TrackedParseContext &ctx) const {
+    return _ops->probeMatchHereTracked(_obj, ctx);
+  }
+
+  bool probe_match_here(RecoveryContext &ctx) const {
+    return _ops->probeMatchHereRecover(_obj, ctx);
   }
 
   const grammar::AbstractElement *element() const noexcept {
@@ -277,6 +295,15 @@ private:
       return parser::attempt_fast_probe(ctx,
                                         static_cast<const Model *>(self)->value);
     }
+    static bool probeMatchHereTracked(const void *self,
+                                      TrackedParseContext &ctx) {
+      return parser::probe_match_here(static_cast<const Model *>(self)->value,
+                                      ctx);
+    }
+    static bool probeMatchHereRecover(const void *self, RecoveryContext &ctx) {
+      return parser::probe_match_here(static_cast<const Model *>(self)->value,
+                                      ctx);
+    }
     static bool parseRecover(const void *self, RecoveryContext &ctx) {
       return parser::parse(static_cast<const Model *>(self)->value, ctx);
     }
@@ -323,6 +350,8 @@ private:
           .parse = &Model::parse,
           .parseTracked = &Model::parseTracked,
           .fastProbeTracked = &Model::fastProbeTracked,
+          .probeMatchHereTracked = &Model::probeMatchHereTracked,
+          .probeMatchHereRecover = &Model::probeMatchHereRecover,
           .parseRecover = &Model::parseRecover,
           .parseExpect = &Model::parseExpect,
           .elem = &Model::elem,

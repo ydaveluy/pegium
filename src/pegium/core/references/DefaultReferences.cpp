@@ -1,5 +1,6 @@
 #include <pegium/core/references/DefaultReferences.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <optional>
@@ -14,6 +15,26 @@ namespace pegium::references {
 
 namespace {
 
+// Tracks the smallest CST span fully enclosing `target`. Returns true — and
+// tightens `bestSpan` — when `candidate` encloses `target` (inclusive
+// boundaries) with a strictly smaller span than any seen so far, signalling the
+// caller to record `candidate`'s owner as the new best. Earlier candidates win
+// on ties.
+[[nodiscard]] bool tightens_enclosing_span(const CstNodeView &candidate,
+                                           const CstNodeView &target,
+                                           TextOffset &bestSpan) {
+  if (target.getBegin() < candidate.getBegin() ||
+      candidate.getEnd() < target.getEnd()) {
+    return false;
+  }
+  const auto span = candidate.getEnd() - candidate.getBegin();
+  if (span >= bestSpan) {
+    return false;
+  }
+  bestSpan = span;
+  return true;
+}
+
 const AbstractReference *
 find_reference_at_cst_node(const workspace::Document &document,
                            const CstNodeView &selectedNode) {
@@ -21,18 +42,10 @@ find_reference_at_cst_node(const workspace::Document &document,
   TextOffset bestSpan = std::numeric_limits<TextOffset>::max();
   for (const auto &handle : document.parseResult.references) {
     const auto &reference = *handle.getConst();
-    const auto refNode = reference.getRefNode();
-    if (!refNode.valid()) {
-      continue;
-    }
-    if (selectedNode.getBegin() < refNode.getBegin() ||
-        refNode.getEnd() < selectedNode.getEnd()) {
-      continue;
-    }
-    const auto span = refNode.getEnd() - refNode.getBegin();
-    if (best == nullptr || span < bestSpan) {
+    if (const auto refNode = reference.getRefNode();
+        refNode.valid() &&
+        tightens_enclosing_span(refNode, selectedNode, bestSpan)) {
       best = &reference;
-      bestSpan = span;
     }
   }
   return best;
@@ -48,9 +61,7 @@ void append_reference_targets(const AbstractReference &reference,
   const auto append =
       [&results, &seen, &documents,
        &currentDocument](const workspace::AstNodeDescription &description) {
-        const auto key = workspace::NodeKey{.documentId = description.documentId,
-                                            .symbolId = description.symbolId};
-        if (!seen.insert(key).second) {
+        if (!seen.insert(workspace::NodeKey::of(description)).second) {
           return;
         }
         results.push_back(std::addressof(
@@ -80,21 +91,11 @@ const AstNode *find_named_declaration(const AstNode &root,
   const AstNode *selected = nullptr;
   TextOffset selectedSpan = std::numeric_limits<TextOffset>::max();
 
-  const auto consider = [&nameProvider, &selectedNode, &selected,
-                         &selectedSpan](const AstNode &node) {
-    const auto candidateNode = declaration_site_node(node, *nameProvider);
-    if (!candidateNode.has_value()) {
-      return;
-    }
-    if (selectedNode.getBegin() < candidateNode->getBegin() ||
-        candidateNode->getEnd() < selectedNode.getEnd()) {
-      return;
-    }
-
-    const auto span = candidateNode->getEnd() - candidateNode->getBegin();
-    if (selected == nullptr || span < selectedSpan) {
+  const auto consider = [&](const AstNode &node) {
+    if (const auto candidateNode = declaration_site_node(node, *nameProvider);
+        candidateNode.has_value() &&
+        tightens_enclosing_span(*candidateNode, selectedNode, selectedSpan)) {
       selected = &node;
-      selectedSpan = span;
     }
   };
 
@@ -104,6 +105,54 @@ const AstNode *find_named_declaration(const AstNode &root,
   }
 
   return selected;
+}
+
+const AbstractReference *
+find_reference_at_offset(const workspace::Document &document,
+                         TextOffset offset) {
+  for (const auto &handle : document.parseResult.references) {
+    const auto &reference = *handle.getConst();
+    if (const auto refNode = reference.getRefNode();
+        refNode.valid() && refNode.getBegin() == offset) {
+      return &reference;
+    }
+  }
+  return nullptr;
+}
+
+// Expands a declaration node into every logical sibling declared under the same
+// name through a multi-reference. When `node` is the target of a multi-reference,
+// that reference also targets its siblings, so it yields the whole group; for a
+// plain reference (or none) it returns just `node`.
+std::vector<const AstNode *>
+get_self_nodes(const AstNode &node, const pegium::CoreServices &services) {
+  const auto *indexManager = services.shared.workspace.indexManager.get();
+  const auto &documents = *services.shared.workspace.documents;
+  const auto &document = getDocument(node);
+
+  const auto targetKey = workspace::NodeKey{
+      .documentId = document.id, .symbolId = document.makeSymbolId(node)};
+  // `node` may be targeted by several references; only a multi-reference pulls
+  // in the sibling group. Scan every incoming reference — not just the first —
+  // so a plain reference enumerated ahead of the multi-reference does not mask
+  // the siblings.
+  for (const auto &incoming : indexManager->findAllReferences(targetKey)) {
+    const auto sourceDocument = documents.getDocument(incoming.sourceDocumentId);
+    if (sourceDocument == nullptr) {
+      continue;
+    }
+    const auto *sourceReference =
+        find_reference_at_offset(*sourceDocument, incoming.sourceOffset);
+    if (sourceReference == nullptr || !sourceReference->isMultiReference()) {
+      continue;
+    }
+    std::vector<const AstNode *> siblings;
+    append_reference_targets(*sourceReference, services, siblings);
+    if (std::ranges::find(siblings, &node) != siblings.end()) {
+      return siblings;
+    }
+  }
+  return {&node};
 }
 
 } // namespace
@@ -125,7 +174,7 @@ DefaultReferences::findDeclarations(const CstNodeView &sourceCstNode) const {
     if (const auto *declaration = find_named_declaration(
             *document.parseResult.value, sourceCstNode, services);
         declaration != nullptr) {
-      results.push_back(declaration);
+      return get_self_nodes(*declaration, services);
     }
   }
   return results;
@@ -150,17 +199,21 @@ DefaultReferences::findReferences(const AstNode &targetNode,
 
   std::vector<workspace::ReferenceDescription> results;
   if (options.includeDeclaration) {
-    const auto declarationNode =
-        required_declaration_site_node(targetNode, *nameProvider);
-    results.push_back(workspace::ReferenceDescription{
-        .sourceDocumentId = document.id,
-        .sourceOffset = declarationNode.getBegin(),
-        .sourceLength = declarationNode.getEnd() - declarationNode.getBegin(),
-        .referenceType = std::type_index(typeid(void)),
-        .local = true,
-        .targetDocumentId = document.id,
-        .targetSymbolId = document.makeSymbolId(targetNode),
-    });
+    // Expand the target into all logical siblings (multi-reference) so each
+    // sibling declaration is reported as a self-reference.
+    for (const auto *selfNode : get_self_nodes(targetNode, services)) {
+      const auto &selfDocument = getDocument(*selfNode);
+      const auto declarationNode =
+          required_declaration_site_node(*selfNode, *nameProvider);
+      results.push_back(workspace::ReferenceDescription{
+          .sourceDocumentId = selfDocument.id,
+          .sourceOffset = declarationNode.getBegin(),
+          .sourceLength = declarationNode.getEnd() - declarationNode.getBegin(),
+          .local = true,
+          .targetDocumentId = selfDocument.id,
+          .targetSymbolId = selfDocument.makeSymbolId(*selfNode),
+      });
+    }
   }
 
   const auto targetKey = workspace::NodeKey{

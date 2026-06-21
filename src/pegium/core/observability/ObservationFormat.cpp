@@ -31,9 +31,9 @@ void append_field(std::string &out, std::string_view key, std::string_view value
 std::string format_observation(const Observation &observation) {
   std::string formatted;
   formatted.reserve(observation.message.size() + 96);
-  formatted += std::string(to_string(observation.severity));
+  formatted.append(to_string(observation.severity));
   formatted += " ";
-  formatted += std::string(to_string(observation.code));
+  formatted.append(to_string(observation.code));
   formatted += ": ";
   formatted += sanitize_single_line(observation.message);
   append_field(formatted, "uri", observation.uri);
@@ -43,7 +43,8 @@ std::string format_observation(const Observation &observation) {
     formatted += std::format(" documentId={}", observation.documentId);
   }
   if (observation.state.has_value()) {
-    formatted += " state=" + std::string(to_string(*observation.state));
+    formatted.append(" state=");
+    formatted.append(to_string(*observation.state));
   }
   return formatted;
 }

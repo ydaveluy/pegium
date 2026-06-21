@@ -12,16 +12,22 @@ namespace pegium::parser::detail {
 struct RecoveryCost {
   std::uint32_t budgetCost = std::numeric_limits<std::uint32_t>::max();
   std::uint32_t primaryRankCost = std::numeric_limits<std::uint32_t>::max();
-  std::uint32_t secondaryRankCost = std::numeric_limits<std::uint32_t>::max();
 };
 
+/// Saturating ("monus") subtraction: `a - b`, clamped to 0 when `b > a`.
+/// Single-sources the `a > b ? a - b : 0` idiom used by the recovery
+/// ranking score's two clamps.
+[[nodiscard]] constexpr std::uint32_t monus(std::uint32_t a,
+                                            std::uint32_t b) noexcept {
+  return a > b ? a - b : 0u;
+}
+
 [[nodiscard]] constexpr RecoveryCost
-make_recovery_cost(std::uint32_t budgetCost, std::uint32_t primaryRankCost,
-                   std::uint32_t secondaryRankCost) noexcept {
+make_recovery_cost(std::uint32_t budgetCost,
+                   std::uint32_t primaryRankCost) noexcept {
   return {
       .budgetCost = budgetCost,
       .primaryRankCost = primaryRankCost,
-      .secondaryRankCost = secondaryRankCost,
   };
 }
 

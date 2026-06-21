@@ -5,8 +5,9 @@
 #include <format>
 #include <string>
 #include <string_view>
-#include <vector>
+#include <utility>
 
+#include <pegium/core/documentation/DocComment.hpp>
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
 #include <pegium/core/syntax-tree/AstUtils.hpp>
@@ -18,7 +19,7 @@ namespace pegium::documentation {
 
 namespace {
 
-std::string trim(std::string_view text) {
+std::string_view trim(std::string_view text) {
   std::size_t begin = 0;
   std::size_t end = text.size();
   while (begin < end &&
@@ -29,97 +30,70 @@ std::string trim(std::string_view text) {
          std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) {
     --end;
   }
-  return std::string(text.substr(begin, end - begin));
+  return text.substr(begin, end - begin);
 }
 
-bool is_jsdoc_comment(std::string_view comment) {
-  const auto cleaned = trim(comment);
-  return cleaned.size() >= 5 && cleaned.starts_with("/**") &&
-         cleaned.ends_with("*/");
+bool is_link_tag(std::string_view name) {
+  return name == "link" || name == "linkplain" || name == "linkcode";
 }
 
-std::string strip_jsdoc_delimiters(std::string_view comment) {
-  auto cleaned = trim(comment);
-  if (cleaned.starts_with("/**")) {
-    cleaned.erase(0, 3);
+// Splits an inline link's content into a `target` and a `display` value. The
+// two may be separated by `|` or whitespace; with no separator the target is
+// also used as the display.
+std::pair<std::string, std::string> split_link_content(std::string_view content) {
+  auto separator = content.find('|');
+  if (separator == std::string_view::npos) {
+    separator = content.find_first_of(" \t");
   }
-  if (cleaned.ends_with("*/")) {
-    cleaned.erase(cleaned.size() - 2);
+  if (separator == std::string_view::npos) {
+    const auto target = std::string(trim(content));
+    return {target, target};
   }
-  return trim(cleaned);
-}
-
-std::string normalize_jsdoc_line(std::string_view line) {
-  auto trimmed = trim(line);
-  if (!trimmed.empty() && trimmed.front() == '*') {
-    trimmed.erase(trimmed.begin());
-    if (!trimmed.empty() &&
-        std::isspace(static_cast<unsigned char>(trimmed.front())) != 0) {
-      trimmed.erase(trimmed.begin());
-    }
+  auto target = std::string(trim(content.substr(0, separator)));
+  auto display = std::string(trim(content.substr(separator + 1)));
+  if (display.empty()) {
+    display = target;
   }
-  return trimmed;
-}
-
-std::vector<std::string> split_jsdoc_lines(std::string_view comment) {
-  const auto body = strip_jsdoc_delimiters(comment);
-  const auto bodyView = std::string_view(body);
-  std::vector<std::string> lines;
-  std::size_t begin = 0;
-  while (begin <= bodyView.size()) {
-    const auto end = bodyView.find('\n', begin);
-    const auto slice =
-        end == std::string::npos
-            ? bodyView.substr(begin)
-            : bodyView.substr(begin, end - begin);
-    auto normalized = normalize_jsdoc_line(slice);
-    lines.push_back(std::move(normalized));
-    if (end == std::string::npos) {
-      break;
-    }
-    begin = end + 1;
-  }
-  return lines;
-}
-
-std::string render_jsdoc_markdown(const std::vector<std::string> &lines) {
-  std::string markdown;
-  for (const auto &line : lines) {
-    if (!markdown.empty()) {
-      markdown.push_back('\n');
-    }
-    markdown += line;
-  }
-  return trim(markdown);
+  return {std::move(target), std::move(display)};
 }
 
 } // namespace
 
 std::optional<std::string> DefaultDocumentationProvider::getDocumentation(
     const AstNode &node) const {
-  const auto commentView =
+  const auto comment =
       services.documentation.commentProvider->getComment(node);
-  if (commentView.empty()) {
+  // is_doc_comment already rejects empty / whitespace-only input (its prefix
+  // marker fails on the empty front line), so no separate trim().empty() check
+  // is needed.
+  if (!is_doc_comment(comment)) {
     return std::nullopt;
   }
 
-  const auto cleanedComment = trim(commentView);
-  if (cleanedComment.empty()) {
-    return std::nullopt;
-  }
+  const auto parsed = parse_doc_comment(comment);
 
-  if (!is_jsdoc_comment(cleanedComment)) {
-    return std::nullopt;
-  }
-
-  auto lines = split_jsdoc_lines(cleanedComment);
-  for (auto &line : lines) {
-    line = normalizeJsdocLinks(node, std::move(line));
-    if (!line.empty() && line.front() == '@') {
-      line = documentationTagRenderer(node, line).value_or("- `" + line + "`");
+  DocCommentRenderOptions options;
+  options.renderTag =
+      [this, &node](std::string_view name, std::string_view content,
+                    bool inlineTag) -> std::optional<std::string> {
+    // Inline links resolve their target to the declaration's source location;
+    // everything else defers to the user-overridable tag hook.
+    if (inlineTag && is_link_tag(name)) {
+      const auto [target, display] = split_link_content(content);
+      if (auto resolved = documentationLinkRenderer(node, target, display);
+          resolved.has_value()) {
+        return resolved;
+      }
+      return display;
     }
+    return documentationTagRenderer(node, name, content, inlineTag);
+  };
+
+  auto markdown = parsed.toMarkdown(options);
+  if (markdown.empty()) {
+    return std::nullopt;
   }
-  return render_jsdoc_markdown(lines);
+  return markdown;
 }
 
 std::optional<std::string>
@@ -135,68 +109,36 @@ DefaultDocumentationProvider::documentationLinkRenderer(
   assert(description->nameLength > 0);
 
   const auto &contextDocument = getDocument(node);
-  const auto &targetDocument =
-      description->documentId == contextDocument.id
-          ? contextDocument
-          : *services.shared.workspace.documents->getDocument(
-                description->documentId);
+  const workspace::Document *targetDocument = &contextDocument;
+  std::shared_ptr<workspace::Document> targetHolder;
+  if (description->documentId != contextDocument.id) {
+    targetHolder = services.shared.workspace.documents->getDocument(
+        description->documentId);
+    if (targetHolder == nullptr) {
+      // The target lives in a document that resolved through the global index
+      // but is no longer loaded (e.g. evicted or deleted during a reindex).
+      // Degrade to plain display text rather than dereferencing null.
+      return std::nullopt;
+    }
+    targetDocument = targetHolder.get();
+  }
 
   const auto position =
-      targetDocument.textDocument().positionAt(description->offset);
-  const auto uri = std::format("{}#L{},{}", targetDocument.uri,
+      targetDocument->textDocument().positionAt(description->offset);
+  const auto uri = std::format("{}#L{},{}", targetDocument->uri,
                                position.line + 1, position.character + 1);
   return std::format("[{}]({})", display, uri);
 }
 
 std::optional<std::string>
 DefaultDocumentationProvider::documentationTagRenderer(
-    const AstNode &node, std::string_view tag) const {
+    const AstNode &node, std::string_view name, std::string_view content,
+    bool inlineTag) const {
   (void)node;
-  return std::format("- `{}`", tag);
-}
-
-std::string
-DefaultDocumentationProvider::normalizeJsdocLinks(const AstNode &node,
-                                                  std::string line) const {
-  const std::string_view open = "{@link";
-  std::size_t cursor = 0;
-  while ((cursor = line.find(open, cursor)) != std::string::npos) {
-    const auto end = line.find('}', cursor);
-    if (end == std::string::npos) {
-      break;
-    }
-
-    const auto payload = trim(std::string_view(line).substr(
-        cursor + open.size(), end - (cursor + open.size())));
-    if (payload.empty()) {
-      line.erase(cursor, end - cursor + 1);
-      continue;
-    }
-
-    const auto payloadView = std::string_view(payload);
-    std::string target;
-    std::string display;
-    if (const auto pipe = payloadView.find('|'); pipe != std::string::npos) {
-      target = trim(payloadView.substr(0, pipe));
-      display = trim(payloadView.substr(pipe + 1));
-    } else if (const auto separator = payloadView.find_first_of(" \t");
-               separator != std::string::npos) {
-      target = trim(payloadView.substr(0, separator));
-      display = trim(payloadView.substr(separator + 1));
-    } else {
-      target = trim(payloadView);
-    }
-
-    if (display.empty()) {
-      display = target;
-    }
-
-    const auto replacement =
-        documentationLinkRenderer(node, target, display).value_or(display);
-    line.replace(cursor, end - cursor + 1, replacement);
-    cursor += replacement.size();
-  }
-  return line;
+  (void)name;
+  (void)content;
+  (void)inlineTag;
+  return std::nullopt;
 }
 
 std::optional<workspace::AstNodeDescription>
@@ -207,7 +149,8 @@ DefaultDocumentationProvider::findNameInLocalSymbols(const AstNode &node,
     return std::nullopt;
   }
 
-  for (auto current = &node; current != nullptr; current = current->getContainer()) {
+  for (const auto *current = &node; current != nullptr;
+       current = current->getContainer()) {
     const auto *entries = document.localSymbols.forContainer(current);
     if (entries == nullptr) {
       continue;
@@ -235,4 +178,5 @@ DefaultDocumentationProvider::findNameInGlobalScope(
   }
   return std::nullopt;
 }
+
 } // namespace pegium::documentation

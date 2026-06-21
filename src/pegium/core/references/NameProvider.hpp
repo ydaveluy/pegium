@@ -31,8 +31,8 @@ public:
   /// Returns the textual name and its CST source for `node` in a single
   /// lookup. The result is empty when the node has no name. This is the
   /// preferred entry point for indexing/scope-computation paths that need
-  /// both pieces of information; the legacy `getName` / `getNameNode`
-  /// helpers below delegate to this method.
+  /// both pieces of information; the `getName` / `getNameNode` helpers below
+  /// delegate to this method.
   [[nodiscard]] virtual AstNodeName nameOf(const AstNode &node) const = 0;
 
   /// Returns the symbolic name of `node`, or `std::nullopt` when the node

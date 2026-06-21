@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <future>
 #include <mutex>
+#include <optional>
 
 #include <pegium/core/CoreTestSupport.hpp>
 #include <pegium/core/TestRuleParser.hpp>
@@ -251,121 +253,117 @@ TEST(DefaultDocumentBuilderTest,
   EXPECT_EQ(validatedUris, std::vector<std::string>{document->uri});
 }
 
-TEST(DefaultDocumentBuilderTest,
-     ParseInsertedDiagnosticUsesTokenTypeNameForTokenTypes) {
+// Table-driven cover for the single-ParseDiagnostic builder family: each row
+// drives a FakeParser that emits exactly one parse diagnostic with a given
+// shape, then asserts the resulting Document diagnostic message / span / code
+// and the default code-action data (if any). Folded from twelve near-identical
+// TEST cases that differed only in the diagnostic shape and the expected
+// rendering; see the per-row `name`/SCOPED_TRACE for the original intent.
+//
+// The shared boilerplate (install services, register a FakeParser, open +
+// build a document) lives in run_single_parse_diagnostic_case below; tests that
+// emit more than one diagnostic, use a real RuleParser, or assert structurally
+// different things (parseResult.value, etc.) are kept as their own TEST cases.
+
+// Which grammar element a row attaches to a diagnostic / expectation. The
+// concrete grammar objects are constructed once per case in the loop body
+// because TerminalRule / DataTypeRule / keyword instances are not constexpr.
+enum class SingleParseElement { None, IdRule, ModuleKeyword, ExpressionRule };
+
+// What a row asserts about the diagnostic's default code-action data:
+//   NoData     -> data must be absent.
+//   Action     -> exactly one action with the given title / newText (and,
+//                 when actionBegin/actionEnd are set, the action span).
+//   Unchecked  -> the row does not look at data at all.
+enum class SingleParseData { Unchecked, NoData, Action };
+
+struct SingleParseDiagnosticCase {
+  const char *name;
+  const char *uri;
+  const char *text;
+  bool fullMatch;
+
+  // Single emitted parse diagnostic.
+  parser::ParseDiagnosticKind kind;
+  TextOffset offset;
+  TextOffset beginOffset;
+  TextOffset endOffset;
+  SingleParseElement diagnosticElement;
+  const char *diagnosticMessage; // nullptr -> empty message
+
+  // Parser expectation frontier (independent of diagnosticElement).
+  SingleParseElement expectation;
+
+  // Document-diagnostic assertions (nullopt -> not checked).
+  const char *expectedMessage;     // nullptr -> message not checked
+  const char *expectedCode;        // nullptr -> code not checked
+  std::optional<std::uint32_t> expectedBegin;
+  std::optional<std::uint32_t> expectedEnd;
+  bool requireExactlyOneDiagnostic; // ASSERT_EQ(size, 1) vs ASSERT_FALSE(empty)
+
+  // Code-action assertions.
+  SingleParseData data;
+  const char *actionTitle;
+  const char *actionNewText;
+  std::optional<std::int64_t> actionBegin;
+  std::optional<std::int64_t> actionEnd;
+};
+
+// Result of building one row. Holds the SharedCoreServices alive alongside the
+// Document because the Document holds non-owning references into those services;
+// both must outlive the row's assertions.
+struct SingleParseDiagnosticResult {
+  std::unique_ptr<pegium::SharedCoreServices> services;
+  std::shared_ptr<Document> document;
+};
+
+SingleParseDiagnosticResult
+run_single_parse_diagnostic_case(const SingleParseDiagnosticCase &c,
+                                 const grammar::AbstractRule &idRule,
+                                 const grammar::AbstractRule &expressionRule,
+                                 const grammar::Literal &moduleKeyword) {
   using namespace pegium::parser;
 
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = false;
-  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
-  parser::ParseDiagnostic insertedDiagnostic;
-  insertedDiagnostic.kind = ParseDiagnosticKind::Inserted;
-  insertedDiagnostic.offset = 0;
-  insertedDiagnostic.element = std::addressof(id);
-  parser->parseDiagnostics.push_back(insertedDiagnostic);
-  parser->expectations = expectation_result({rule_expectation(id)});
-
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
-  }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-inserted.test"), "test", "");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_FALSE(document->diagnostics.empty());
-  EXPECT_EQ(document->diagnostics.front().message, "Expecting ID");
-  ASSERT_TRUE(document->diagnostics.front().code.has_value());
-  EXPECT_EQ(std::get<std::string>(*document->diagnostics.front().code),
-            "parse.inserted");
-  EXPECT_FALSE(document->diagnostics.front().data.has_value());
-}
-
-TEST(DefaultDocumentBuilderTest,
-     ParseKeywordDiagnosticUsesLiteralValueForKeywords) {
-  using namespace pegium::parser;
+  const auto resolveElement =
+      [&](SingleParseElement which) -> const grammar::AbstractElement * {
+    switch (which) {
+    case SingleParseElement::IdRule:
+      return std::addressof(idRule);
+    case SingleParseElement::ModuleKeyword:
+      return std::addressof(moduleKeyword);
+    case SingleParseElement::ExpressionRule:
+      return std::addressof(expressionRule);
+    case SingleParseElement::None:
+      break;
+    }
+    return nullptr;
+  };
 
   auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = false;
-  static constexpr auto moduleKeyword = "module"_kw;
-  parser::ParseDiagnostic insertedDiagnostic;
-  insertedDiagnostic.kind = ParseDiagnosticKind::Inserted;
-  insertedDiagnostic.offset = 0;
-  insertedDiagnostic.element = std::addressof(moduleKeyword);
-  parser->parseDiagnostics.push_back(insertedDiagnostic);
-  parser->expectations =
-      expectation_result({keyword_expectation(moduleKeyword)});
-
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
-  }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-keyword.test"), "test",
-      "foo");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_FALSE(document->diagnostics.empty());
-  EXPECT_EQ(document->diagnostics.front().message,
-            "Expecting 'module' but found `foo`.");
-  const auto &actions = default_code_actions(document->diagnostics.front());
-  ASSERT_EQ(actions.size(), 1u);
-  const auto &action = actions.front().object();
-  EXPECT_EQ(action.at("title").string(), "Insert 'module'");
-  EXPECT_EQ(action.at("newText").string(), "module");
-}
-
-TEST(DefaultDocumentBuilderTest,
-     ParseIncompleteDiagnosticUsesExpectedTokenAtEndOfInput) {
-  using namespace pegium::parser;
-
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = false;
-  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
-  parser::ParseDiagnostic incompleteDiagnostic;
-  incompleteDiagnostic.kind = ParseDiagnosticKind::Incomplete;
-  incompleteDiagnostic.offset = 0;
-  incompleteDiagnostic.element = std::addressof(id);
-  parser->parseDiagnostics.push_back(incompleteDiagnostic);
-  parser->expectations = expectation_result({rule_expectation(id)});
-
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
-  }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-incomplete-eof.test"), "test",
-      "");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_FALSE(document->diagnostics.empty());
-  EXPECT_EQ(document->diagnostics.front().message, "Expecting ID");
-  EXPECT_FALSE(document->diagnostics.front().data.has_value());
-}
-
-TEST(DefaultDocumentBuilderTest,
-     ParseDeletedDiagnosticAddsDefaultCodeActionData) {
-  using namespace pegium::parser;
-
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = true;
+  parser->fullMatch = c.fullMatch;
   parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::Deleted, .offset = 0, .element = nullptr});
+      {.kind = c.kind,
+       .offset = c.offset,
+       .beginOffset = c.beginOffset,
+       .endOffset = c.endOffset,
+       .element = resolveElement(c.diagnosticElement),
+       .message = c.diagnosticMessage ? c.diagnosticMessage : ""});
+
+  switch (c.expectation) {
+  case SingleParseElement::IdRule:
+    parser->expectations = expectation_result({rule_expectation(idRule)});
+    break;
+  case SingleParseElement::ExpressionRule:
+    parser->expectations =
+        expectation_result({rule_expectation(expressionRule)});
+    break;
+  case SingleParseElement::ModuleKeyword:
+    parser->expectations =
+        expectation_result({keyword_expectation(moduleKeyword)});
+    break;
+  case SingleParseElement::None:
+    break;
+  }
 
   auto shared = test::make_empty_shared_core_services();
   pegium::installDefaultSharedCoreServices(*shared);
@@ -377,288 +375,308 @@ TEST(DefaultDocumentBuilderTest,
   }
 
   auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-deleted-action.test"), "test",
-      "unexpected");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_EQ(document->diagnostics.size(), 1u);
-  const auto &actions = default_code_actions(document->diagnostics.front());
-  ASSERT_EQ(actions.size(), 1u);
-  const auto &action = actions.front().object();
-  EXPECT_EQ(action.at("title").string(), "Delete unexpected text");
-  EXPECT_EQ(action.at("newText").string(), "");
-  EXPECT_EQ(action.at("begin").integer(), 0);
-  EXPECT_EQ(action.at("end").integer(), 10);
+      *shared, test::make_file_uri(c.uri), "test", c.text);
+  return {.services = std::move(shared), .document = std::move(document)};
 }
 
-TEST(DefaultDocumentBuilderTest,
-     ParseReplacedLiteralDiagnosticAddsDefaultCodeActionData) {
+TEST(DefaultDocumentBuilderTest, ParseDiagnosticRenderingTable) {
   using namespace pegium::parser;
+  using E = SingleParseElement;
+  using D = SingleParseData;
+  using K = ParseDiagnosticKind;
 
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = true;
-  static constexpr auto moduleKeyword = "module"_kw;
-  parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::Replaced,
+  static const SingleParseDiagnosticCase kCases[] = {
+      // ParseInsertedDiagnosticUsesTokenTypeNameForTokenTypes
+      {.name = "InsertedTokenTypeUsesTokenTypeName",
+       .uri = "builder-parse-inserted.test",
+       .text = "",
+       .fullMatch = false,
+       .kind = K::Inserted,
        .offset = 0,
-       .element = std::addressof(moduleKeyword)});
-
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
-  }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-replaced-action.test"),
-      "test", "modulx");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_EQ(document->diagnostics.size(), 1u);
-  const auto &actions = default_code_actions(document->diagnostics.front());
-  ASSERT_EQ(actions.size(), 1u);
-  const auto &action = actions.front().object();
-  EXPECT_EQ(action.at("title").string(), "Replace with 'module'");
-  EXPECT_EQ(action.at("newText").string(), "module");
-  EXPECT_EQ(action.at("begin").integer(), 0);
-  EXPECT_EQ(action.at("end").integer(), 6);
-}
-
-TEST(DefaultDocumentBuilderTest,
-     ParseReplacedLiteralDiagnosticUsesReportedSourceRangeAndText) {
-  using namespace pegium::parser;
-
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = true;
-  static constexpr auto moduleKeyword = "module"_kw;
-  parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::Replaced,
+       .beginOffset = 0,
+       .endOffset = 0,
+       .diagnosticElement = E::IdRule,
+       .diagnosticMessage = nullptr,
+       .expectation = E::IdRule,
+       .expectedMessage = "Expecting ID",
+       .expectedCode = "parse.inserted",
+       .expectedBegin = std::nullopt,
+       .expectedEnd = std::nullopt,
+       .requireExactlyOneDiagnostic = false,
+       .data = D::NoData},
+      // ParseKeywordDiagnosticUsesLiteralValueForKeywords
+      {.name = "KeywordInsertedUsesLiteralValue",
+       .uri = "builder-parse-keyword.test",
+       .text = "foo",
+       .fullMatch = false,
+       .kind = K::Inserted,
+       .offset = 0,
+       .beginOffset = 0,
+       .endOffset = 0,
+       .diagnosticElement = E::ModuleKeyword,
+       .diagnosticMessage = nullptr,
+       .expectation = E::ModuleKeyword,
+       .expectedMessage = "Expecting 'module' but found `foo`.",
+       .expectedCode = nullptr,
+       .expectedBegin = std::nullopt,
+       .expectedEnd = std::nullopt,
+       .requireExactlyOneDiagnostic = false,
+       .data = D::Action,
+       .actionTitle = "Insert 'module'",
+       .actionNewText = "module",
+       .actionBegin = std::nullopt,
+       .actionEnd = std::nullopt},
+      // ParseIncompleteDiagnosticUsesExpectedTokenAtEndOfInput
+      {.name = "IncompleteAtEndOfInputUsesExpectedToken",
+       .uri = "builder-parse-incomplete-eof.test",
+       .text = "",
+       .fullMatch = false,
+       .kind = K::Incomplete,
+       .offset = 0,
+       .beginOffset = 0,
+       .endOffset = 0,
+       .diagnosticElement = E::IdRule,
+       .diagnosticMessage = nullptr,
+       .expectation = E::IdRule,
+       .expectedMessage = "Expecting ID",
+       .expectedCode = nullptr,
+       .expectedBegin = std::nullopt,
+       .expectedEnd = std::nullopt,
+       .requireExactlyOneDiagnostic = false,
+       .data = D::NoData},
+      // ParseDeletedDiagnosticAddsDefaultCodeActionData
+      {.name = "DeletedAddsDeleteUnexpectedTextAction",
+       .uri = "builder-parse-deleted-action.test",
+       .text = "unexpected",
+       .fullMatch = true,
+       .kind = K::Deleted,
+       .offset = 0,
+       .beginOffset = 0,
+       .endOffset = 0,
+       .diagnosticElement = E::None,
+       .diagnosticMessage = nullptr,
+       .expectation = E::None,
+       .expectedMessage = nullptr,
+       .expectedCode = nullptr,
+       .expectedBegin = std::nullopt,
+       .expectedEnd = std::nullopt,
+       .requireExactlyOneDiagnostic = true,
+       .data = D::Action,
+       .actionTitle = "Delete unexpected text",
+       .actionNewText = "",
+       .actionBegin = 0,
+       .actionEnd = 10},
+      // ParseReplacedLiteralDiagnosticAddsDefaultCodeActionData
+      {.name = "ReplacedAddsReplaceWithLiteralAction",
+       .uri = "builder-parse-replaced-action.test",
+       .text = "modulx",
+       .fullMatch = true,
+       .kind = K::Replaced,
+       .offset = 0,
+       .beginOffset = 0,
+       .endOffset = 0,
+       .diagnosticElement = E::ModuleKeyword,
+       .diagnosticMessage = nullptr,
+       .expectation = E::None,
+       .expectedMessage = nullptr,
+       .expectedCode = nullptr,
+       .expectedBegin = std::nullopt,
+       .expectedEnd = std::nullopt,
+       .requireExactlyOneDiagnostic = true,
+       .data = D::Action,
+       .actionTitle = "Replace with 'module'",
+       .actionNewText = "module",
+       .actionBegin = 0,
+       .actionEnd = 6},
+      // ParseReplacedLiteralDiagnosticUsesReportedSourceRangeAndText
+      {.name = "ReplacedUsesReportedSourceRangeAndText",
+       .uri = "builder-parse-replaced-range.test",
+       .text = "modle name",
+       .fullMatch = true,
+       .kind = K::Replaced,
        .offset = 0,
        .beginOffset = 0,
        .endOffset = 5,
-       .element = std::addressof(moduleKeyword)});
-
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
-  }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-replaced-range.test"),
-      "test", "modle name");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_EQ(document->diagnostics.size(), 1u);
-  const auto &diagnostic = document->diagnostics.front();
-  EXPECT_EQ(diagnostic.begin, 0u);
-  EXPECT_EQ(diagnostic.end, 5u);
-  EXPECT_EQ(diagnostic.message, "Expecting 'module' but found `modle`.");
-  const auto &actions = default_code_actions(diagnostic);
-  ASSERT_EQ(actions.size(), 1u);
-  const auto &action = actions.front().object();
-  EXPECT_EQ(action.at("title").string(), "Replace with 'module'");
-  EXPECT_EQ(action.at("newText").string(), "module");
-  EXPECT_EQ(action.at("begin").integer(), 0);
-  EXPECT_EQ(action.at("end").integer(), 5);
-}
-
-TEST(DefaultDocumentBuilderTest,
-     ParseInsertedRuleDiagnosticDoesNotAddDefaultCodeActionData) {
-  using namespace pegium::parser;
-
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = false;
-  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
-  parser->parseDiagnostics.push_back({.kind = ParseDiagnosticKind::Inserted,
-                                      .offset = 0,
-                                      .element = std::addressof(id)});
-  parser->expectations = expectation_result({rule_expectation(id)});
-
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
-  }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-inserted-rule.test"), "test",
-      "");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_EQ(document->diagnostics.size(), 1u);
-  EXPECT_FALSE(document->diagnostics.front().data.has_value());
-}
-
-TEST(DefaultDocumentBuilderTest,
-     ParseRecoveredDiagnosticDoesNotAddDefaultCodeActionData) {
-  using namespace pegium::parser;
-
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = true;
-  parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::Recovered, .offset = 0});
-
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
-  }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-recovered.test"), "test",
-      "alpha");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_EQ(document->diagnostics.size(), 1u);
-  EXPECT_FALSE(document->diagnostics.front().data.has_value());
-}
-
-TEST(DefaultDocumentBuilderTest,
-     ParseConversionDiagnosticUsesDedicatedCodeAndSpan) {
-  using namespace pegium::parser;
-
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = true;
-  parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::ConversionError,
+       .diagnosticElement = E::ModuleKeyword,
+       .diagnosticMessage = nullptr,
+       .expectation = E::None,
+       .expectedMessage = "Expecting 'module' but found `modle`.",
+       .expectedCode = nullptr,
+       .expectedBegin = 0u,
+       .expectedEnd = 5u,
+       .requireExactlyOneDiagnostic = true,
+       .data = D::Action,
+       .actionTitle = "Replace with 'module'",
+       .actionNewText = "module",
+       .actionBegin = 0,
+       .actionEnd = 5},
+      // ParseInsertedRuleDiagnosticDoesNotAddDefaultCodeActionData
+      {.name = "InsertedRuleAddsNoCodeActionData",
+       .uri = "builder-parse-inserted-rule.test",
+       .text = "",
+       .fullMatch = false,
+       .kind = K::Inserted,
+       .offset = 0,
+       .beginOffset = 0,
+       .endOffset = 0,
+       .diagnosticElement = E::IdRule,
+       .diagnosticMessage = nullptr,
+       .expectation = E::IdRule,
+       .expectedMessage = nullptr,
+       .expectedCode = nullptr,
+       .expectedBegin = std::nullopt,
+       .expectedEnd = std::nullopt,
+       .requireExactlyOneDiagnostic = true,
+       .data = D::NoData},
+      // ParseRecoveredDiagnosticDoesNotAddDefaultCodeActionData
+      {.name = "RecoveredAddsNoCodeActionData",
+       .uri = "builder-parse-recovered.test",
+       .text = "alpha",
+       .fullMatch = true,
+       .kind = K::Recovered,
+       .offset = 0,
+       .beginOffset = 0,
+       .endOffset = 0,
+       .diagnosticElement = E::None,
+       .diagnosticMessage = nullptr,
+       .expectation = E::None,
+       .expectedMessage = nullptr,
+       .expectedCode = nullptr,
+       .expectedBegin = std::nullopt,
+       .expectedEnd = std::nullopt,
+       .requireExactlyOneDiagnostic = true,
+       .data = D::NoData},
+      // ParseConversionDiagnosticUsesDedicatedCodeAndSpan
+      {.name = "ConversionUsesDedicatedCodeAndSpan",
+       .uri = "builder-parse-conversion.test",
+       .text = "name123",
+       .fullMatch = true,
+       .kind = K::ConversionError,
        .offset = 4,
        .beginOffset = 4,
        .endOffset = 7,
-       .element = nullptr,
-       .message = "bad value"});
-
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
-  }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-conversion.test"), "test",
-      "name123");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_EQ(document->diagnostics.size(), 1u);
-  EXPECT_EQ(document->diagnostics.front().message, "bad value");
-  EXPECT_EQ(document->diagnostics.front().begin, 4u);
-  EXPECT_EQ(document->diagnostics.front().end, 7u);
-  ASSERT_TRUE(document->diagnostics.front().code.has_value());
-  EXPECT_EQ(std::get<std::string>(*document->diagnostics.front().code),
-            "parse.conversion");
-}
-
-TEST(DefaultDocumentBuilderTest,
-     ParseIncompleteDiagnosticWithTrailingInputUsesDirectFrontier) {
-  using namespace pegium::parser;
-
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = false;
-  DataTypeRule<int> expression{"Expression", some(d)};
-  parser->parseDiagnostics.push_back({.kind = ParseDiagnosticKind::Incomplete,
-                                      .offset = 12,
-                                      .element = nullptr});
-  parser->expectations = expectation_result({rule_expectation(expression)});
-
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
-  }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-incomplete-trailing.test"),
-      "test", "module name\n2   *");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_FALSE(document->diagnostics.empty());
-  EXPECT_EQ(document->diagnostics.front().message,
-            "Expecting Expression but found `2   *`.");
-  EXPECT_EQ(document->diagnostics.front().begin, 12u);
-  EXPECT_EQ(document->diagnostics.front().end, 12u);
-}
-
-TEST(DefaultDocumentBuilderTest,
-     ParseIncompleteDiagnosticWithTrailingRecoveredSuffixUsesReportedRange) {
-  using namespace pegium::parser;
-
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = false;
-  parser->parseDiagnostics.push_back({.kind = ParseDiagnosticKind::Incomplete,
-                                      .offset = 7,
-                                      .beginOffset = 4,
-                                      .endOffset = 11,
-                                      .element = nullptr,
-                                      .message = "Unexpected input."});
-
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
-  }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-parse-incomplete-recovered-tail.test"),
-      "test", "abcd   tail");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_FALSE(document->diagnostics.empty());
-  EXPECT_EQ(document->diagnostics.front().message, "Unexpected input.");
-  EXPECT_EQ(document->diagnostics.front().begin, 4u);
-  EXPECT_EQ(document->diagnostics.front().end, 11u);
-}
-
-TEST(DefaultDocumentBuilderTest,
-     EmptyDocumentUsesDirectFrontierInsteadOfEmptyFoundToken) {
-  using namespace pegium::parser;
-
-  auto parser = std::make_unique<test::FakeParser>();
-  parser->fullMatch = false;
-  static constexpr auto moduleKeyword = "module"_kw;
-  parser->parseDiagnostics.push_back(
-      {.kind = ParseDiagnosticKind::Inserted,
+       .diagnosticElement = E::None,
+       .diagnosticMessage = "bad value",
+       .expectation = E::None,
+       .expectedMessage = "bad value",
+       .expectedCode = "parse.conversion",
+       .expectedBegin = 4u,
+       .expectedEnd = 7u,
+       .requireExactlyOneDiagnostic = true,
+       .data = D::Unchecked},
+      // ParseIncompleteDiagnosticWithTrailingInputUsesDirectFrontier
+      {.name = "IncompleteWithTrailingInputUsesDirectFrontier",
+       .uri = "builder-parse-incomplete-trailing.test",
+       .text = "module name\n2   *",
+       .fullMatch = false,
+       .kind = K::Incomplete,
+       .offset = 12,
+       .beginOffset = 0,
+       .endOffset = 0,
+       .diagnosticElement = E::None,
+       .diagnosticMessage = nullptr,
+       .expectation = E::ExpressionRule,
+       .expectedMessage = "Expecting Expression but found `2   *`.",
+       .expectedCode = nullptr,
+       .expectedBegin = 12u,
+       .expectedEnd = 12u,
+       .requireExactlyOneDiagnostic = false,
+       .data = D::Unchecked},
+      // ParseIncompleteDiagnosticWithTrailingRecoveredSuffixUsesReportedRange
+      {.name = "IncompleteWithRecoveredTailUsesReportedRange",
+       .uri = "builder-parse-incomplete-recovered-tail.test",
+       .text = "abcd   tail",
+       .fullMatch = false,
+       .kind = K::Incomplete,
+       .offset = 7,
+       .beginOffset = 4,
+       .endOffset = 11,
+       .diagnosticElement = E::None,
+       .diagnosticMessage = "Unexpected input.",
+       .expectation = E::None,
+       .expectedMessage = "Unexpected input.",
+       .expectedCode = nullptr,
+       .expectedBegin = 4u,
+       .expectedEnd = 11u,
+       .requireExactlyOneDiagnostic = false,
+       .data = D::Unchecked},
+      // EmptyDocumentUsesDirectFrontierInsteadOfEmptyFoundToken
+      {.name = "EmptyDocumentUsesDirectFrontier",
+       .uri = "builder-empty-grammar-sequence.test",
+       .text = "",
+       .fullMatch = false,
+       .kind = K::Inserted,
        .offset = 0,
-       .element = std::addressof(moduleKeyword)});
-  parser->expectations =
-      expectation_result({keyword_expectation(moduleKeyword)});
+       .beginOffset = 0,
+       .endOffset = 0,
+       .diagnosticElement = E::ModuleKeyword,
+       .diagnosticMessage = nullptr,
+       .expectation = E::ModuleKeyword,
+       .expectedMessage = "Expecting 'module'",
+       .expectedCode = nullptr,
+       .expectedBegin = std::nullopt,
+       .expectedEnd = std::nullopt,
+       .requireExactlyOneDiagnostic = false,
+       .data = D::Unchecked},
+  };
 
-  auto shared = test::make_empty_shared_core_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  {
-    auto registeredServices = test::make_uninstalled_core_services(
-        *shared, "test", {".test"}, {}, std::move(parser));
-    pegium::installDefaultCoreServices(*registeredServices);
-    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  // Constructed once and shared across rows; selected per row via the
+  // SingleParseElement enum (these grammar objects cannot be constexpr).
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  DataTypeRule<int> expression{"Expression", some(d)};
+  static constexpr auto moduleKeyword = "module"_kw;
+
+  for (const auto &c : kCases) {
+    SCOPED_TRACE(c.name);
+
+    auto result =
+        run_single_parse_diagnostic_case(c, id, expression, moduleKeyword);
+    const auto &document = result.document;
+
+    ASSERT_NE(document, nullptr);
+    if (c.requireExactlyOneDiagnostic) {
+      ASSERT_EQ(document->diagnostics.size(), 1u);
+    } else {
+      ASSERT_FALSE(document->diagnostics.empty());
+    }
+
+    const auto &diagnostic = document->diagnostics.front();
+    if (c.expectedMessage != nullptr) {
+      EXPECT_EQ(diagnostic.message, c.expectedMessage);
+    }
+    if (c.expectedBegin.has_value()) {
+      EXPECT_EQ(diagnostic.begin, *c.expectedBegin);
+    }
+    if (c.expectedEnd.has_value()) {
+      EXPECT_EQ(diagnostic.end, *c.expectedEnd);
+    }
+    if (c.expectedCode != nullptr) {
+      ASSERT_TRUE(diagnostic.code.has_value());
+      EXPECT_EQ(std::get<std::string>(*diagnostic.code), c.expectedCode);
+    }
+
+    switch (c.data) {
+    case D::NoData:
+      EXPECT_FALSE(diagnostic.data.has_value());
+      break;
+    case D::Action: {
+      const auto &actions = default_code_actions(diagnostic);
+      ASSERT_EQ(actions.size(), 1u);
+      const auto &action = actions.front().object();
+      EXPECT_EQ(action.at("title").string(), c.actionTitle);
+      EXPECT_EQ(action.at("newText").string(), c.actionNewText);
+      if (c.actionBegin.has_value()) {
+        EXPECT_EQ(action.at("begin").integer(), *c.actionBegin);
+      }
+      if (c.actionEnd.has_value()) {
+        EXPECT_EQ(action.at("end").integer(), *c.actionEnd);
+      }
+      break;
+    }
+    case D::Unchecked:
+      break;
+    }
   }
-
-  auto document = test::open_and_build_document(
-      *shared, test::make_file_uri("builder-empty-grammar-sequence.test"),
-      "test", "");
-
-  ASSERT_NE(document, nullptr);
-  ASSERT_FALSE(document->diagnostics.empty());
-  EXPECT_EQ(document->diagnostics.front().message, "Expecting 'module'");
 }
 
 TEST(DefaultDocumentBuilderTest,
@@ -1149,6 +1167,18 @@ TEST(DefaultDocumentBuilderTest,
   ASSERT_EQ(document->diagnostics.size(), 2u);
   EXPECT_EQ(document->diagnostics[0].message, "fast-diagnostic");
   EXPECT_EQ(document->diagnostics[1].message, "slow-diagnostic");
+
+  // Regression: a third build with the same categories must not re-validate
+  // anything. The cumulative validation-check history records that both "fast"
+  // and "slow" already ran, so no category is missing. Resetting that history
+  // (an unconditional state.result.emplace()) made this build re-run "fast"
+  // and append a duplicate diagnostic.
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, fastAndSlow);
+
+  EXPECT_EQ(validatorPtr->validateCalls, 2u);
+  EXPECT_EQ(validatorPtr->seenOptions.size(), 2u);
+  EXPECT_EQ(document->diagnostics.size(), 2u);
 }
 
 TEST(DefaultDocumentBuilderTest,
@@ -1264,7 +1294,9 @@ TEST(DefaultDocumentBuilderTest,
   EXPECT_THROW((void)shared->workspace.documentBuilder->update(
                    {}, {}, cancellationSource.get_token()),
                utils::OperationCancelled);
-  ASSERT_EQ(document->state, DocumentState::Parsed);
+  // Parsing and content indexing share one phase: cancelling from the Parsed
+  // build-phase callback stops at that phase's boundary (IndexedContent).
+  ASSERT_EQ(document->state, DocumentState::IndexedContent);
 
   updateOptions.eagerLinking = true;
   updateOptions.validation = true;
@@ -1350,6 +1382,60 @@ TEST(DefaultDocumentBuilderTest, WaitUntilDocumentReturnsBuiltDocumentId) {
       std::array<std::shared_ptr<Document>, 1>{document}, options);
 
   EXPECT_EQ(waiter.get(), document->id);
+}
+
+TEST(DefaultDocumentBuilderTest,
+     WaitUntilDocumentIsMemorySafeWithConcurrentWaitersAndBuild) {
+  // Concurrency smoke test for the supported pattern: several threads call
+  // waitUntil(documentId) while a build advances and notifies the awaited state.
+  // It exercises awaitDocumentState's wait-state lifetime against the build
+  // thread's phase-listener invocation, the site of the use-after-free fixed by
+  // holding the wait state in a heap WaitState captured by value. (A
+  // deterministic single-shot reproduction of that race is not possible without
+  // an artificial pause between the listener snapshot and its invocation; the
+  // guarantee rests on the by-value shared_ptr capture, which makes a late
+  // listener invocation operate on still-alive state by construction.)
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices =
+        test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  BuildOptions options;
+  options.validation = true;
+  auto &builder = *shared->workspace.documentBuilder;
+
+  constexpr int kIterations = 200;
+  constexpr int kWaitersPerBuild = 4;
+  for (int i = 0; i < kIterations; ++i) {
+    auto document = shared->workspace.documentFactory->fromString(
+        "content",
+        test::make_file_uri("wait-race-" + std::to_string(i) + ".test"));
+    ASSERT_NE(document, nullptr);
+    shared->workspace.documents->addDocument(document);
+
+    std::vector<std::future<void>> waiters;
+    waiters.reserve(kWaitersPerBuild);
+    for (int w = 0; w < kWaitersPerBuild; ++w) {
+      waiters.push_back(std::async(std::launch::async, [&builder, document]() {
+        try {
+          (void)builder.waitUntil(DocumentState::Validated, document->id);
+        } catch (...) {
+          // Only memory safety is under test here; a concurrent observation may
+          // legitimately throw.
+        }
+      }));
+    }
+
+    builder.build(std::array<std::shared_ptr<Document>, 1>{document}, options);
+
+    for (auto &waiter : waiters) {
+      waiter.get();
+    }
+  }
 }
 
 TEST(DefaultDocumentBuilderTest, WaitUntilWorkspaceUnblocksWhenArmedBeforeBuild) {
@@ -1508,7 +1594,11 @@ TEST(DefaultDocumentBuilderTest,
                    std::array<std::shared_ptr<Document>, 1>{document}, options,
                    cancellationSource.get_token()),
                utils::OperationCancelled);
-  EXPECT_EQ(document->state, DocumentState::ComputedScopes);
+  // ComputedScopes is computed inside the same phase that links and indexes
+  // references, so cancelling from the ComputedScopes build-phase callback (which
+  // runs once that phase has drained) stops the build at the phase boundary —
+  // the document has reached IndexedReferences but not yet Validated.
+  EXPECT_EQ(document->state, DocumentState::IndexedReferences);
   EXPECT_EQ(waiter.wait_for(20ms), std::future_status::timeout);
 
   EXPECT_NO_THROW(shared->workspace.documentBuilder->build(
@@ -1589,7 +1679,10 @@ TEST(DefaultDocumentBuilderTest,
   EXPECT_THROW((void)shared->workspace.documentBuilder->update(
                    {}, {}, updateCancellation.get_token()),
                utils::OperationCancelled);
-  ASSERT_EQ(interruptedDocument->state, DocumentState::Parsed);
+  // Parsing and content indexing share one phase, so cancelling from the Parsed
+  // build-phase callback stops the build at that phase's boundary: the document
+  // has reached IndexedContent.
+  ASSERT_EQ(interruptedDocument->state, DocumentState::IndexedContent);
 
   BuildOptions validatedOptions;
   validatedOptions.validation = true;

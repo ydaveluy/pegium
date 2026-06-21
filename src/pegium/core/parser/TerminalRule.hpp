@@ -37,7 +37,6 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
   template <NonNullableTerminalCapableExpression Element>
   constexpr TerminalRule(std::string_view name, Element &&element)
       : TerminalRule(name,
-                     detail::infer_terminal_rule_recovery_profile(element),
                      detail::infer_direct_literal_recovery_metadata(element),
                      std::forward<Element>(element)) {}
 
@@ -46,7 +45,6 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
   constexpr TerminalRule(std::string_view name, Element &&element,
                          Options &&...options)
       : TerminalRule(name,
-                     detail::infer_terminal_rule_recovery_profile(element),
                      detail::infer_direct_literal_recovery_metadata(element),
                      std::forward<Element>(element)) {
     (applyOption(std::forward<Options>(options)), ...);
@@ -166,13 +164,22 @@ private:
 
   template <NonNullableTerminalCapableExpression Element>
   constexpr TerminalRule(std::string_view name,
-                         detail::TerminalShape terminalShape,
                          std::optional<detail::DirectLiteralRecoveryMetadata>
                              literalRecoveryMetadata,
                          Element &&element)
       : BaseRule(name, std::forward<Element>(element)),
-        _terminalShape(terminalShape),
-        _literalRecoveryMetadata(std::move(literalRecoveryMetadata)) {}
+        // Derive the shape from the same metadata the matcher reads (one
+        // source of truth); `_terminalShape` is declared before
+        // `_literalRecoveryMetadata`, so this reads the param before the move.
+        _terminalShape(
+            detail::terminal_shape_from_recovery_metadata(literalRecoveryMetadata)),
+        _literalRecoveryMetadata(std::move(literalRecoveryMetadata)) {
+    static_assert(
+        detail::ConsistentLiteralRecoveryElement<std::remove_cvref_t<Element>>,
+        "A terminal element exposing getValue() must also expose "
+        "isCaseSensitive() so the recovery shape and matcher metadata stay "
+        "consistent.");
+  }
 
   detail::TerminalShape _terminalShape{};
   std::optional<detail::DirectLiteralRecoveryMetadata>
@@ -234,9 +241,7 @@ private:
             const auto candidate =
                 detail::evaluate_replace_leaf_terminal_candidate(
                     ctx, cursorStart, replaceEnd, this, replaceCandidate.cost,
-                    replaceCandidate.distance,
-                    replaceCandidate.substitutionCount,
-                    replaceCandidate.operationCount);
+                    replaceCandidate.distance);
             if (detail::is_better_recovery_key(
                     detail::terminal_recovery_key(candidate),
                     detail::terminal_recovery_key(bestChoice))) {
@@ -261,7 +266,8 @@ private:
           [this, &ctx, cursorStart, choice]() {
             const char *const replaceEnd = cursorStart + choice.consumed;
             if (!detail::can_apply_recovery_match(ctx, replaceEnd) ||
-                !ctx.replaceLeaf(replaceEnd, this, choice.cost.budgetCost)) {
+                !ctx.replaceLeaf(replaceEnd, this, choice.cost.budgetCost,
+                                 /*hidden=*/false, choice.distance)) {
               return false;
             }
             if constexpr (RecoveryParseModeContext<Context>) {
@@ -279,9 +285,8 @@ private:
                                     getName(), " offset=", ctx.cursorOffset());
             }
           },
-          [this, &ctx, &effectiveRecoveryFacts, &matchRecoverableTerminal,
+          [this, &ctx, &facts, &matchRecoverableTerminal,
            &applyRecoveredLeaf]() {
-            const auto &facts = effectiveRecoveryFacts;
             return detail::recover_by_terminal_delete_scan(
                 ctx, matchRecoverableTerminal, applyRecoveredLeaf,
                 facts, _terminalShape);
@@ -289,25 +294,24 @@ private:
     };
 
     if constexpr (RecoveryParseModeContext<Context>) {
-      if (!ctx.isInRecoveryPhase() &&
-          !ctx.hasPendingCommittedRecoveryEdits()) {
+      const bool notInPhase = !ctx.isInRecoveryPhase() &&
+                              !ctx.hasPendingCommittedRecoveryEdits();
+      if (notInPhase) {
         PEGIUM_RECOVERY_TRACE("[terminal rule] enter ", getName(),
                               " offset=", ctx.cursorOffset());
-        if (matchedEnd != nullptr) {
-          PEGIUM_RECOVERY_TRACE("[terminal rule] direct match ", getName(),
-                                " offset=", ctx.cursorOffset());
-          ctx.leaf(matchedEnd, this);
-          return true;
-        }
-        PEGIUM_RECOVERY_TRACE("[terminal rule] strict fail ", getName(),
-                              " offset=", ctx.cursorOffset());
-        return false;
       }
       if (matchedEnd != nullptr) {
         PEGIUM_RECOVERY_TRACE("[terminal rule] direct match ", getName(),
                               " offset=", ctx.cursorOffset());
         ctx.leaf(matchedEnd, this);
         return true;
+      }
+      // Outside an active recovery phase a strict miss stops here (no local
+      // recovery is attempted until a window opens).
+      if (notInPhase) {
+        PEGIUM_RECOVERY_TRACE("[terminal rule] strict fail ", getName(),
+                              " offset=", ctx.cursorOffset());
+        return false;
       }
       if (effectiveRecoveryFacts.localRecoveryBlocked) {
         return false;
@@ -363,10 +367,15 @@ private:
 public:
   template <NonNullableTerminalCapableExpression Element>
   TerminalRule &operator=(Element &&element) {
-    _terminalShape =
-        detail::infer_terminal_rule_recovery_profile(element);
+    static_assert(
+        detail::ConsistentLiteralRecoveryElement<std::remove_cvref_t<Element>>,
+        "A terminal element exposing getValue() must also expose "
+        "isCaseSensitive() so the recovery shape and matcher metadata stay "
+        "consistent.");
     _literalRecoveryMetadata =
         detail::infer_direct_literal_recovery_metadata(element);
+    _terminalShape =
+        detail::terminal_shape_from_recovery_metadata(_literalRecoveryMetadata);
     BaseRule::operator=(std::forward<Element>(element));
     return *this;
   }
@@ -527,20 +536,14 @@ private:
         std::is_nothrow_invocable_v<ConverterType &, std::string_view>,
         "TerminalRule converter must be noexcept and invocable with "
         "std::string_view.");
-    using ReturnType = std::invoke_result_t<ConverterType &, std::string_view>;
-    static_assert(opt::IsConversionResultFor_v<ReturnType, T>,
-                  "TerminalRule converter must return "
-                  "opt::ConversionResult<T> (or a compatible value type).");
 
+    // The converter may return opt::ConversionResult<T> (fallible) or a value
+    // convertible to T directly (infallible); as_conversion_result normalizes
+    // both and statically rejects anything else.
     _value_converter =
         [converterFn = std::forward<Converter>(converter)](
             std::string_view sv) mutable -> opt::ConversionResult<T> {
-      auto result = std::invoke(converterFn, sv);
-      if (result.has_value()) {
-        return opt::conversion_value<T>(
-            static_cast<T>(std::move(result).value()));
-      }
-      return opt::conversion_error<T>(result.error());
+      return opt::as_conversion_result<T>(std::invoke(converterFn, sv));
     };
     _hasCustomValueConverter = true;
   }

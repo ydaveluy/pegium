@@ -34,7 +34,7 @@ void RecoveryContext::refreshRecoveryPhaseSlow() noexcept {
     if (windowReplay.activeEditWindowCompleted) {
       return;
     }
-    const auto recoveryBeginOffset = pendingRecoveryWindowActivationOffset();
+    const auto recoveryBeginOffset = pendingRecoveryWindowBeginOffset();
     if (hasPendingCommittedRecoveryEdits() ||
         cursorOffset() < recoveryBeginOffset) {
       return;
@@ -146,14 +146,9 @@ bool RecoveryContext::deleteOneCodepoint() noexcept {
   }
   auto *mergedDeleteEdit = pendingHiddenTriviaDeleteEdit();
   const auto *window = currentEditWindow();
-  const bool destructiveEditOutsideActiveWindow =
-      recoveryState.windowReplay.inRecoveryPhase && window != nullptr &&
-      cursorOffset() > window->maxCursorOffset &&
-      recoveryState.editBudget.hadEdits &&
-      !allowDestructiveWindowContinuation &&
-      !continues_local_edit_cluster_at_cursor() &&
-      recoveryState.editBudget.consecutiveDeletes == 0u;
-  if (!canDelete() || destructiveEditOutsideActiveWindow ||
+  if (!canDelete() ||
+      destructiveEditOutsideActiveWindow(
+          window, recoveryState.editBudget.consecutiveDeletes == 0u) ||
       !canAffordEdit(ParseDiagnosticKind::Deleted)) {
     clearPendingDeleteHiddenTriviaBridge();
     PEGIUM_RECOVERY_TRACE("[rule] delete blocked offset=", cursorOffset(),

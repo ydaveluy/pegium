@@ -68,6 +68,30 @@ TEST(ParserRuleTest, ParseRequiresFullConsumption) {
   }
 }
 
+TEST(ParserRuleTest, SuperCarriesForwardOverriddenAlternatives) {
+  ParserRule<DummyAstNode> rule{"R", "a"_kw + create<DummyAstNode>()};
+  EXPECT_TRUE(parse_rule(rule, "a").fullMatch);
+  EXPECT_FALSE(parse_rule(rule, "b").fullMatch);
+
+  // Override extending the rule: super() folds in the prior body, so the
+  // inherited alternative keeps matching alongside the newly added one.
+  rule = rule.super() | ("b"_kw + create<DummyAstNode>());
+  EXPECT_TRUE(parse_rule(rule, "a").fullMatch);
+  EXPECT_TRUE(parse_rule(rule, "b").fullMatch);
+  EXPECT_FALSE(parse_rule(rule, "c").fullMatch);
+
+  // super() accumulates across successive overrides.
+  rule = rule.super() | ("c"_kw + create<DummyAstNode>());
+  EXPECT_TRUE(parse_rule(rule, "a").fullMatch);
+  EXPECT_TRUE(parse_rule(rule, "b").fullMatch);
+  EXPECT_TRUE(parse_rule(rule, "c").fullMatch);
+
+  // Reassigning without super() drops the accumulated alternatives.
+  rule = "d"_kw + create<DummyAstNode>();
+  EXPECT_FALSE(parse_rule(rule, "a").fullMatch);
+  EXPECT_TRUE(parse_rule(rule, "d").fullMatch);
+}
+
 TEST(ParserRuleTest, NestedParserRuleAssignmentSetsContainer) {
   ParserRule<LeafNode> leafRule{"Leaf", assign<&LeafNode::name>("leaf"_kw)};
   ParserRule<RootNode> rootRule{"Root", assign<&RootNode::leaf>(leafRule)};

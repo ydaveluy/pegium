@@ -8,6 +8,7 @@
 
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
+#include <pegium/core/syntax-tree/AstReflection.hpp>
 #include <pegium/core/syntax-tree/AstUtils.hpp>
 #include <pegium/core/workspace/AstDescriptions.hpp>
 
@@ -48,14 +49,7 @@ using DescriptionVisitor =
 [[nodiscard]] bool accepts_bucket(
     const pegium::SharedCoreServices &shared, std::type_index referenceType,
     const ScopeEntryBucket &bucket) {
-  if (referenceType == std::type_index(typeid(void)) ||
-      bucket.type == std::type_index(typeid(void))) {
-    return false;
-  }
-  if (bucket.type == referenceType) {
-    return true;
-  }
-  return shared.astReflection->isSubtype(bucket.type, referenceType);
+  return type_is_assignable(bucket.type, referenceType, *shared.astReflection);
 }
 
 [[nodiscard]] const AstNodeDescription *

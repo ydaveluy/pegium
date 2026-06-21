@@ -117,13 +117,6 @@ enum class OrderedChoiceAssignStatus { Assigned, AssignFailed, NoSelectable };
 
 template <auto feature>
 [[nodiscard]] inline std::runtime_error
-ordered_choice_no_selectable_error() {
-  return std::runtime_error("OrderedChoice has no assignable selected value for " +
-                            std::string(detail::member_name_v<feature>));
-}
-
-template <auto feature>
-[[nodiscard]] inline std::runtime_error
 ordered_choice_no_selectable_error(const CstNodeView &node) {
   std::string message =
       "OrderedChoice has no assignable selected value for " +
@@ -191,16 +184,11 @@ public:
     using RawValueType = std::remove_cvref_t<Value>;
     if constexpr (AssignmentIsOptional<AttrType>::value) {
       using OptionalValueType = typename AssignmentIsOptional<AttrType>::type;
-      if constexpr (pegium::is_reference_v<OptionalValueType>) {
-        if constexpr (std::same_as<RawValueType, std::string> ||
-                      std::same_as<RawValueType, std::string_view>) {
-          helpers::AssignmentHelper<AttrType>{}(
-              astNode, member, std::string{std::forward<Value>(value)},
-              context);
-          return true;
-        }
-        return false;
-      }
+      // Optional references (std::optional<Reference<T>> /
+      // std::optional<MultiReference<T>>) are routed to assign_reference_target
+      // upstream by assign_direct_strict, so they never reach this helper.
+      static_assert(!pegium::is_reference_v<OptionalValueType>,
+                    "optional references are handled by assign_reference_target");
 
       if constexpr (std::same_as<RawValueType, OptionalValueType>) {
         if constexpr (std::same_as<AttrType, std::optional<OptionalValueType>> &&
@@ -227,46 +215,6 @@ public:
         }
         helpers::AssignmentHelper<AttrType>{}(astNode, member,
                                               std::string{value}, context);
-        return true;
-      }
-      return false;
-    }
-    return false;
-  }
-
-  template <typename ClassType, typename AttrType, typename Value>
-  static bool assign_pointer_target(ClassType *astNode,
-                                    AttrType ClassType::*member, Value &&value,
-                                    const ValueBuildContext &context) {
-    using RawValueType = std::remove_cvref_t<Value>;
-    if constexpr (AssignmentIsAstPtr<AttrType>::value ||
-                  AssignmentIsVectorAstPtr<AttrType>::value) {
-      using PointeeType =
-          typename std::conditional_t<AssignmentIsAstPtr<AttrType>::value,
-                                      AssignmentIsAstPtr<AttrType>,
-                                      AssignmentIsVectorAstPtr<AttrType>>::type;
-
-      if constexpr (AssignmentIsAstPtr<RawValueType>::value) {
-        using ValuePointeeType =
-            typename AssignmentIsAstPtr<RawValueType>::type;
-        if constexpr (std::derived_from<ValuePointeeType, PointeeType>) {
-          helpers::AssignmentHelper<AttrType>{}(astNode, member, value, context);
-          return true;
-        } else if constexpr (std::derived_from<ValuePointeeType, AstNode> &&
-                             std::derived_from<PointeeType, AstNode>) {
-          auto *castedPtr =
-              value != nullptr ? dynamic_cast<PointeeType *>(value) : nullptr;
-          if (castedPtr == nullptr) {
-            return false;
-          }
-          helpers::AssignmentHelper<AttrType>{}(astNode, member, castedPtr,
-                                                context);
-          return true;
-        }
-      } else if constexpr (std::derived_from<RawValueType, PointeeType>) {
-        helpers::AssignmentHelper<AttrType>{}(astNode, member,
-                                              std::forward<Value>(value),
-                                              context);
         return true;
       }
       return false;
@@ -327,8 +275,11 @@ public:
                                     context);
     } else if constexpr (AssignmentIsAstPtr<AttrType>::value ||
                          AssignmentIsVectorAstPtr<AttrType>::value) {
-      return assign_pointer_target(astNode, member, std::forward<Value>(value),
-                                   context);
+      // AST-pointer members are assigned exclusively via assign_ast_ptr_to_target:
+      // convert_raw_to_target routes AST-pointer raw values there before reaching
+      // this strict path, so anything arriving here is a non-AST value that
+      // cannot target an AST-pointer member.
+      return false;
     } else {
       return assign_scalar_target(astNode, member, std::forward<Value>(value),
                                   context);
@@ -357,8 +308,7 @@ public:
   template <typename ClassType, typename VariantType, typename Value,
             std::size_t I = 0>
   static bool assign_variant_from_ast_ptr(ClassType *astNode,
-                                          VariantType &target, Value &&value,
-                                          const ValueBuildContext &context) {
+                                          VariantType &target, Value &&value) {
     if constexpr (I == std::variant_size_v<VariantType>) {
       return false;
     } else {
@@ -378,7 +328,7 @@ public:
         }
       }
       return assign_variant_from_ast_ptr<ClassType, VariantType, Value, I + 1>(
-          astNode, target, std::forward<Value>(value), context);
+          astNode, target, std::forward<Value>(value));
     }
   }
 
@@ -432,8 +382,7 @@ public:
       if constexpr (AssignmentIsVariant<TargetValueType>::value) {
         TargetValueType converted{};
         if (!assign_variant_from_ast_ptr(astNode, converted,
-                                         std::forward<RawValue>(rawValue),
-                                         context)) {
+                                         std::forward<RawValue>(rawValue))) {
           return false;
         }
         return assign_direct_strict(astNode, member, std::move(converted),

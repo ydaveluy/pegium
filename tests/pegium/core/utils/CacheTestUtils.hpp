@@ -59,7 +59,8 @@ make_document(pegium::SharedCoreServices &sharedServices, std::string uri,
 
 inline void replace_document_text(workspace::Document &document, std::string text) {
   AttachingDocumentFactory factory;
-  auto textDocument = std::make_shared<workspace::TextDocument>(document.textDocument());
+  auto textDocument =
+      std::make_shared<workspace::TextDocument>(document.textDocument().clone());
   const workspace::TextDocumentContentChangeEvent change{.text = std::move(text)};
   (void)workspace::TextDocument::update(*textDocument,
                                         std::span(&change, std::size_t{1}),

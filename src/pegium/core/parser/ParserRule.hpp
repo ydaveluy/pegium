@@ -7,7 +7,6 @@
 #include <pegium/core/parser/CompletionSupport.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/Introspection.hpp>
-#include <pegium/core/parser/NodeParseHelpers.hpp>
 #include <pegium/core/parser/ParseAttempt.hpp>
 #include <pegium/core/parser/Parser.hpp>
 #include <pegium/core/parser/ParserRuleSupport.hpp>
@@ -170,8 +169,7 @@ private:
                             " offset=", ctx.cursorOffset());
       return true;
     } else if constexpr (RecoveryParseModeContext<Context>) {
-      if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows() &&
-          !ctx.allowsCompletedWindowContinuationRecovery()) {
+      if (ctx.recoveryDescentInactive()) {
         return parse_impl(static_cast<TrackedParseContext &>(ctx));
       }
       // Pathological grammar shapes (e.g. unclosed nested call expressions)
@@ -230,7 +228,7 @@ private:
         if (ctx.activeRecoveryDepth() == 1 &&
             ctx.hasHadEdits() && !ctx.hasPendingCommittedRecoveryEdits()) {
           TextOffset lastEditOffset = 0;
-          for (const auto &edit : ctx.snapshotRecoveryEdits()) {
+          for (const auto &edit : ctx.recoveryEditsView()) {
             lastEditOffset = std::max(lastEditOffset, edit.endOffset);
           }
           const bool currentWindowContributed =

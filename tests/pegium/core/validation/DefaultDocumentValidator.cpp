@@ -232,6 +232,54 @@ TEST(DefaultDocumentValidatorTest, UsesReferenceNodeRangeWhenAvailable) {
   EXPECT_EQ(diagnostics.front().end, 20u);
 }
 
+TEST(DefaultDocumentValidatorTest, LinkingDiagnosticCarriesStructuredData) {
+  auto sharedServices = make_validation_shared_services();
+  pegium::CoreServices languageServices(*sharedServices);
+  languageServices.languageMetaData.languageId = "mini";
+  auto registry = std::make_unique<DefaultValidationRegistry>(languageServices);
+  languageServices.validation.validationRegistry = std::move(registry);
+  pegium::installDefaultCoreServices(languageServices);
+  DefaultDocumentValidator validator(languageServices);
+
+  ParserRule<ValidationRefNode> root{
+      "Root", "prefix"_kw + ":"_kw +
+                  assign<&ValidationRefNode::ref>("UnknownSymbol"_kw)};
+
+  workspace::Document document(test::make_text_document(
+      "file:///validation-ref-data.pg", "mini", "prefix:UnknownSymbol"));
+  document.id = 4u;
+  pegium::test::RuleParser parser(languageServices, root,
+                                  SkipperBuilder().build());
+  pegium::test::apply_parse_result(
+      document, parser.parse(document.textDocument().getText()));
+  ASSERT_FALSE(document.parseResult.references.empty());
+
+  document.state = workspace::DocumentState::ComputedScopes;
+  auto *reference = dynamic_cast<AbstractSingleReference *>(
+      document.parseResult.references.front().get());
+  ASSERT_NE(reference, nullptr);
+  EXPECT_EQ(reference->resolve(), nullptr);
+  ASSERT_TRUE(reference->hasError());
+
+  ValidationOptions builtInOnly;
+  builtInOnly.categories = {"built-in"};
+  const auto diagnostics = validator.validateDocument(document, builtInOnly, {});
+  ASSERT_EQ(diagnostics.size(), 1u);
+
+  ASSERT_TRUE(diagnostics.front().data.has_value());
+  const auto &data = *diagnostics.front().data;
+  ASSERT_TRUE(data.isObject());
+  const auto &object = data.object();
+  const auto field = [&](std::string_view key) -> std::string {
+    const auto it = object.find(std::string(key));
+    return it == object.end() ? std::string{} : it->second.string();
+  };
+  EXPECT_EQ(field("code"), "linking-error");
+  EXPECT_EQ(field("containerType"), "ValidationRefNode");
+  EXPECT_EQ(field("property"), "ref");
+  EXPECT_EQ(field("refText"), "UnknownSymbol");
+}
+
 TEST(DefaultDocumentValidatorTest,
      BuiltInParseDiagnosticsUseLanguageIdAsSourceAndStopCustomValidation) {
   auto parser = std::make_unique<test::FakeParser>();

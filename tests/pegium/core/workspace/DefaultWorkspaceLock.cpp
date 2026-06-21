@@ -32,7 +32,8 @@ TEST(DefaultWorkspaceLockTest, WriteActionsAreExecutedSequentially) {
   }
 
   for (std::size_t index = 0; index < kActionCount; ++index) {
-    futures.push_back(lock.write([&, index](const utils::CancellationToken &) {
+    futures.push_back(lock.write([&, index](const utils::CancellationToken &,
+                                            const auto &) {
       ++counter;
       gateFutures[index].wait();
     }));
@@ -57,7 +58,7 @@ TEST(DefaultWorkspaceLockTest, NewWriteCancelsPreviousWrite) {
   std::atomic<bool> firstCancelled = false;
   std::atomic<bool> secondExecuted = false;
 
-  auto first = lock.write([&](const utils::CancellationToken &cancelToken) {
+  auto first = lock.write([&](const utils::CancellationToken &cancelToken, const auto &) {
     firstStarted.set_value();
     while (!cancelToken.stop_requested()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -68,7 +69,7 @@ TEST(DefaultWorkspaceLockTest, NewWriteCancelsPreviousWrite) {
   ASSERT_EQ(firstStartedFuture.wait_for(std::chrono::seconds(1)),
             std::future_status::ready);
 
-  auto second = lock.write([&](const utils::CancellationToken &cancelToken) {
+  auto second = lock.write([&](const utils::CancellationToken &cancelToken, const auto &) {
     EXPECT_FALSE(cancelToken.stop_requested());
     secondExecuted = true;
   });
@@ -90,7 +91,7 @@ TEST(DefaultWorkspaceLockTest, WriteActionsHavePriorityOverQueuedReads) {
   std::atomic<int> counter = 0;
 
   auto firstWrite =
-      lock.write([&](const utils::CancellationToken &) {
+      lock.write([&](const utils::CancellationToken &, const auto &) {
         ++counter;
         releaseFirstWriteFuture.wait();
       });
@@ -103,7 +104,7 @@ TEST(DefaultWorkspaceLockTest, WriteActionsHavePriorityOverQueuedReads) {
   });
 
   auto secondWrite =
-      lock.write([&](const utils::CancellationToken &) {
+      lock.write([&](const utils::CancellationToken &, const auto &) {
         ++counter;
         secondWriteStarted.set_value();
       });
@@ -126,7 +127,7 @@ TEST(DefaultWorkspaceLockTest, ReadsObserveCompletedWrites) {
   int value = 0;
   int observed = 0;
 
-  auto write = lock.write([&](const utils::CancellationToken &) { value = 42; });
+  auto write = lock.write([&](const utils::CancellationToken &, const auto &) { value = 42; });
   auto read = lock.read([&]() { observed = value; });
 
   write.get();
@@ -151,6 +152,113 @@ TEST(DefaultWorkspaceLockTest, ReadActionResultCanBeAwaited) {
   EXPECT_EQ(future.get(), 42);
 }
 
+TEST(DefaultWorkspaceLockTest, DowngradeLetsReadsRunWhileWriteTailContinues) {
+  DefaultWorkspaceLock lock;
+
+  std::promise<void> downgraded;
+  auto downgradedFuture = downgraded.get_future();
+  std::promise<void> releaseTail;
+  auto releaseTailFuture = releaseTail.get_future().share();
+  std::atomic<bool> readRan = false;
+
+  auto write = lock.write([&](const utils::CancellationToken &,
+                              const auto &downgrade) {
+    // Exclusive part done — downgrade, then keep working as a reader (this models
+    // validation running after the model is linked).
+    downgrade();
+    downgraded.set_value();
+    releaseTailFuture.wait();
+  });
+
+  ASSERT_EQ(downgradedFuture.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+
+  // The write is still running its (downgraded) tail. A read must run now,
+  // concurrently, rather than block until the write returns.
+  auto read = lock.read([&]() { readRan = true; });
+  ASSERT_EQ(read.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  EXPECT_TRUE(readRan.load());
+
+  releaseTail.set_value();
+  write.get();
+}
+
+TEST(DefaultWorkspaceLockTest, NewWriteWaitsForDowngradedWriteTail) {
+  DefaultWorkspaceLock lock;
+
+  std::promise<void> downgraded;
+  auto downgradedFuture = downgraded.get_future();
+  std::promise<void> releaseTail;
+  auto releaseTailFuture = releaseTail.get_future().share();
+  std::atomic<bool> tailFinished = false;
+  std::atomic<bool> secondSawFinishedTail = false;
+
+  auto first = lock.write([&](const utils::CancellationToken &,
+                             const auto &downgrade) {
+    downgrade();
+    downgraded.set_value();
+    releaseTailFuture.wait();
+    tailFinished = true;
+  });
+
+  ASSERT_EQ(downgradedFuture.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+
+  auto second = lock.write([&](const utils::CancellationToken &, const auto &) {
+    secondSawFinishedTail = tailFinished.load();
+  });
+
+  // Give the second write a chance to (incorrectly) start before the first's
+  // downgraded tail has finished; it must not, because the downgraded write
+  // still counts as a reader.
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  releaseTail.set_value();
+
+  first.get();
+  second.get();
+  EXPECT_TRUE(secondSawFinishedTail.load());
+}
+
+TEST(DefaultWorkspaceLockTest, DestructorDrainsReadsBlockedOnAHeldWrite) {
+  // read() runs synchronously in the caller's thread, so the blocking reads must
+  // each run on their own thread for the main thread to reach the destructor.
+  std::vector<std::thread> readThreads;
+  std::atomic<int> readsCompleted = 0;
+  {
+    DefaultWorkspaceLock lock;
+
+    std::promise<void> writeRunning;
+    auto writeRunningFuture = writeRunning.get_future();
+    auto write = lock.write([&](const utils::CancellationToken &token,
+                                const auto &) {
+      writeRunning.set_value();
+      while (!token.stop_requested()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    });
+    ASSERT_EQ(writeRunningFuture.wait_for(std::chrono::seconds(1)),
+              std::future_status::ready);
+
+    // These reads block because the write holds exclusivity.
+    readThreads.reserve(8);
+    for (int index = 0; index < 8; ++index) {
+      readThreads.emplace_back([&lock, &readsCompleted]() {
+        lock.read([]() {}).get();
+        ++readsCompleted;
+      });
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    // The lock is destroyed here while reads are blocked: it must cancel the
+    // write, drain the blocked reads, and not tear down the gate under them.
+  }
+
+  for (auto &thread : readThreads) {
+    thread.join();
+  }
+  EXPECT_EQ(readsCompleted.load(), 8);
+}
+
 TEST(DefaultWorkspaceLockTest, CancelWriteStopsCurrentWriteAction) {
   DefaultWorkspaceLock lock;
 
@@ -158,7 +266,8 @@ TEST(DefaultWorkspaceLockTest, CancelWriteStopsCurrentWriteAction) {
   auto startedFuture = started.get_future();
   std::atomic<bool> observedCancellation = false;
 
-  auto future = lock.write([&](const utils::CancellationToken &token) {
+  auto future = lock.write([&](const utils::CancellationToken &token,
+                               const auto &) {
     started.set_value();
     while (!token.stop_requested()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));

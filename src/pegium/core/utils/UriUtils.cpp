@@ -18,7 +18,7 @@ bool has_file_scheme(std::string_view uri) {
     return false;
   }
   for (std::size_t index = 0; index < 7; ++index) {
-    if (tolower(uri[index]) != "file://"[index]) {
+    if (tolower(static_cast<unsigned char>(uri[index])) != "file://"[index]) {
       return false;
     }
   }
@@ -35,6 +35,14 @@ char to_hex(unsigned char value) {
 }
 
 std::string percent_encode(std::string_view text) {
+  // Common case (canonical file paths): nothing to escape, so skip the
+  // per-byte build loop and return the input as-is.
+  if (std::ranges::all_of(text, [](char c) {
+        return is_unreserved(static_cast<unsigned char>(c));
+      })) {
+    return std::string(text);
+  }
+
   std::string encoded;
   encoded.reserve(text.size());
 
@@ -53,7 +61,7 @@ std::string percent_encode(std::string_view text) {
 }
 
 int from_hex(char c) {
-  const auto lower = static_cast<unsigned char>(tolower(c));
+  const auto lower = static_cast<unsigned char>(tolower(static_cast<unsigned char>(c)));
   if (lower >= '0' && lower <= '9') {
     return lower - '0';
   }
@@ -133,7 +141,10 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
         !authority.empty()) {
       std::string lowered(authority);
       std::ranges::transform(lowered, lowered.begin(),
-                             [](char c) { return tolower(c); });
+                             [](char c) {
+                               return static_cast<char>(
+                                   tolower(static_cast<unsigned char>(c)));
+                             });
       if (lowered != "localhost") {
         return std::nullopt;
       }

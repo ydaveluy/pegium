@@ -1,16 +1,16 @@
-/// `ReplayPrefixClass` classification on `EditableRecoveryCandidate`.
+/// `ReplayPrefixClass` classification on recovery candidates.
 ///
 /// `OrderedChoice` dominance reads the closed `ReplayPrefixClass`
-/// axis of `RecoveryContract`. Each `EditableRecoveryCandidate` is
-/// classified at construction via
-/// `classify_editable_replay_prefix(editCount, hasDestructiveEdit)`. The
+/// axis of the candidate envelope. Each candidate is classified at
+/// construction via `classify_replay_prefix(hadEdits, hasDestructiveEdit)`
+/// (editable candidates derive `hadEdits` as `editCount != 0`). The
 /// dominance predicate reads the closed enum field instead of
 /// re-deriving the family from raw edit counts and `hasDestructiveEdit`
 /// flags.
 ///
 /// This suite pins the closed mapping the classifier implements:
 ///
-///   - 0 edits                          -> `Empty`
+///   - no edits                         -> `Empty`
 ///   - edits with at least one delete   -> `ExtendedCommittedPrefix`
 ///   - insert-only edits                -> `NewLocalPrefix`
 ///
@@ -26,41 +26,41 @@
 /// mapping contract.
 
 #include <pegium/core/parser/RecoveryCandidate.hpp>
-#include <pegium/core/parser/RecoveryContract.hpp>
 
 #include <gtest/gtest.h>
 
-using pegium::parser::detail::classify_editable_replay_prefix;
-using pegium::parser::detail::classify_structural_replay_prefix;
+using pegium::parser::detail::classify_replay_prefix;
 using pegium::parser::detail::EditableRecoveryCandidate;
 using pegium::parser::detail::ReplayPrefixClass;
-using pegium::parser::detail::StructuralProgressRecoveryCandidate;
 
-TEST(ReplayPrefixClassification, zero_edits_classify_as_empty) {
-  EXPECT_EQ(classify_editable_replay_prefix(/*editCount=*/0, false),
-            ReplayPrefixClass::Empty);
-  EXPECT_EQ(classify_editable_replay_prefix(/*editCount=*/0, true),
-            ReplayPrefixClass::Empty);
-}
-
-TEST(ReplayPrefixClassification,
-     non_zero_edits_with_delete_classify_as_extended_committed_prefix) {
-  EXPECT_EQ(
-      classify_editable_replay_prefix(/*editCount=*/1, /*hasDestructiveEdit=*/true),
-      ReplayPrefixClass::ExtendedCommittedPrefix);
-  EXPECT_EQ(
-      classify_editable_replay_prefix(/*editCount=*/5, /*hasDestructiveEdit=*/true),
-      ReplayPrefixClass::ExtendedCommittedPrefix);
-}
-
-TEST(ReplayPrefixClassification,
-     insert_only_edits_classify_as_new_local_prefix) {
-  EXPECT_EQ(
-      classify_editable_replay_prefix(/*editCount=*/1, /*hasDestructiveEdit=*/false),
-      ReplayPrefixClass::NewLocalPrefix);
-  EXPECT_EQ(
-      classify_editable_replay_prefix(/*editCount=*/3, /*hasDestructiveEdit=*/false),
-      ReplayPrefixClass::NewLocalPrefix);
+TEST(ReplayPrefixClassification, closed_mapping_over_edit_axes) {
+  // Table-driven fold of the closed `{hadEdits, hasDestructiveEdit} ->
+  // ReplayPrefixClass` mapping. Every distinct input pair and its
+  // expected class from the former per-mapping tests survives as one
+  // row, including the structural-progress angle on the destructive
+  // pair (Deleted OR Replaced are both destructive and commit to a
+  // strictly different replay prefix — same mapping as edit+delete).
+  struct Row {
+    bool hadEdits;
+    bool hasDestructiveEdit;
+    ReplayPrefixClass expected;
+    const char *label;
+  };
+  static constexpr Row kRows[] = {
+      {false, false, ReplayPrefixClass::Empty, "no edits, no destructive"},
+      {false, true, ReplayPrefixClass::Empty, "no edits, destructive flag set"},
+      {true, true, ReplayPrefixClass::ExtendedCommittedPrefix,
+       "edits with delete/replace -> extended committed prefix"},
+      {true, false, ReplayPrefixClass::NewLocalPrefix,
+       "insert-only edits -> new local prefix"},
+  };
+  for (const auto &row : kRows) {
+    SCOPED_TRACE(testing::Message()
+                 << "case=" << row.label << " hadEdits=" << row.hadEdits
+                 << " hasDestructiveEdit=" << row.hasDestructiveEdit);
+    EXPECT_EQ(classify_replay_prefix(row.hadEdits, row.hasDestructiveEdit),
+              row.expected);
+  }
 }
 
 TEST(ReplayPrefixClassification,
@@ -70,12 +70,11 @@ TEST(ReplayPrefixClassification,
   // prefix snapshot. The `OrderedChoice` / `Group` / `Repetition`
   // construction sites do not have such a snapshot at hand and must
   // never produce this value through the classifier.
-  for (std::uint32_t editCount = 0; editCount <= 4u; ++editCount) {
+  for (const bool hadEdits : {false, true}) {
     for (const bool hasDestructiveEdit : {false, true}) {
-      const auto cls =
-          classify_editable_replay_prefix(editCount, hasDestructiveEdit);
+      const auto cls = classify_replay_prefix(hadEdits, hasDestructiveEdit);
       EXPECT_NE(cls, ReplayPrefixClass::SameCommittedPrefix)
-          << "editCount=" << editCount
+          << "hadEdits=" << hadEdits
           << " hasDestructiveEdit=" << hasDestructiveEdit;
     }
   }
@@ -86,48 +85,10 @@ TEST(ReplayPrefixClassification, default_constructed_candidate_is_empty) {
   // candidate must be `Empty`, matching the classifier's mapping for
   // the zero-edit shape. This guarantees that placeholders (e.g.
   // `bestCandidate{}` accumulators) start at the safe class that
-  // disqualifies them from dominance until they are filled.
+  // disqualifies them from dominance until they are filled. Both
+  // OrderedChoice/Group and Repetition now share this single carrier.
   const EditableRecoveryCandidate candidate;
   EXPECT_EQ(candidate.replayPrefix, ReplayPrefixClass::Empty);
   EXPECT_EQ(candidate.editCount, 0u);
-  EXPECT_FALSE(candidate.hasDestructiveEdit);
-}
-
-// -----------------------------------------------------------------------------
-// Structural classifier (Repetition's `IterationAttempt` candidate)
-// -----------------------------------------------------------------------------
-
-TEST(ReplayPrefixClassification,
-     structural_no_edits_classify_as_empty) {
-  EXPECT_EQ(classify_structural_replay_prefix(/*hadEdits=*/false,
-                                               /*hasDestructiveEdit=*/false),
-            ReplayPrefixClass::Empty);
-  EXPECT_EQ(classify_structural_replay_prefix(/*hadEdits=*/false,
-                                               /*hasDestructiveEdit=*/true),
-            ReplayPrefixClass::Empty);
-}
-
-TEST(ReplayPrefixClassification,
-     structural_destructive_edits_classify_as_extended_committed_prefix) {
-  // The Repetition classifier treats Deleted OR Replaced as
-  // destructive — both kinds commit to a strictly different replay
-  // prefix.
-  EXPECT_EQ(classify_structural_replay_prefix(/*hadEdits=*/true,
-                                               /*hasDestructiveEdit=*/true),
-            ReplayPrefixClass::ExtendedCommittedPrefix);
-}
-
-TEST(ReplayPrefixClassification,
-     structural_insert_only_edits_classify_as_new_local_prefix) {
-  EXPECT_EQ(classify_structural_replay_prefix(/*hadEdits=*/true,
-                                               /*hasDestructiveEdit=*/false),
-            ReplayPrefixClass::NewLocalPrefix);
-}
-
-TEST(ReplayPrefixClassification,
-     default_constructed_structural_candidate_is_empty) {
-  const StructuralProgressRecoveryCandidate candidate;
-  EXPECT_EQ(candidate.replayPrefix, ReplayPrefixClass::Empty);
-  EXPECT_FALSE(candidate.hadEdits);
   EXPECT_FALSE(candidate.hasDestructiveEdit);
 }

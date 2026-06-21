@@ -12,8 +12,6 @@ struct ValidationOptions {
   std::vector<std::string> categories;
   std::optional<bool> stopAfterParsingErrors;
   std::optional<bool> stopAfterLinkingErrors;
-
-  [[nodiscard]] bool empty() const noexcept { return categories.empty(); }
 };
 
 /// Build-time validation setting: disabled, enabled, or detailed options.

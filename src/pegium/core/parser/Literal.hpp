@@ -66,8 +66,38 @@ private:
     }
   }
 
+  /// Extended-delete-scan match probe shared by the select/apply terminal
+  /// recovery passes: from `scanStart`, returns the terminal's end iff the scan
+  /// is admissible AND the match can be committed, else nullptr.
   template <EditableParseModeContext Context>
-  [[nodiscard]] LocalRecoveryChoice selectLocalRecoveryChoice(
+  [[nodiscard]] const char *
+  delete_scan_match_end(Context &ctx, const char *cursorStart,
+                        const char *scanStart) const noexcept {
+    if (!detail::allows_extended_terminal_delete_scan_match(ctx, cursorStart,
+                                                            scanStart)) {
+      return nullptr;
+    }
+    const char *const scanEnd = terminal(scanStart);
+    if (scanEnd == nullptr || !detail::can_apply_recovery_match(ctx, scanEnd)) {
+      return nullptr;
+    }
+    return scanEnd;
+  }
+
+  /// Terminal recovery verdict-ladder (recovery branch only): enumerate the
+  /// local repair candidates, keep the best by `terminal_recovery_key`
+  /// (`is_better_recovery_key`), then realize it — select and apply in one
+  /// flow (mirrors TerminalRule::try_local_recovery), so the delete-scan match
+  /// probe is wired once.
+  ///   1. split-Insert — synthesize a separator when the keyword matched as a
+  ///      prefix and a visible token immediately follows (`splitInsertConsidered`);
+  ///   2. fuzzy-Replace leaves — each enumerated fuzzy candidate, unless
+  ///      `allow_replace` is off or the forbid-Replace sibling probe suppresses
+  ///      them (see the comment in the body);
+  ///   3. the insert / extended-delete-scan fallback inside
+  ///      `complete_terminal_recovery_choice`.
+  template <EditableParseModeContext Context>
+  bool try_local_recovery(
       Context &ctx, const char *cursorStart, const char *matchedEnd,
       const detail::LiteralFuzzyCandidates &fuzzyCandidates,
       detail::TerminalRecoveryFacts terminalRecoveryFacts) const {
@@ -91,49 +121,53 @@ private:
           return true;
         };
 
-    if (matchedEnd != nullptr && hasImmediateVisibleContinuation(matchedEnd)) {
+    const bool splitInsertConsidered =
+        matchedEnd != nullptr && hasImmediateVisibleContinuation(matchedEnd);
+    if (splitInsertConsidered) {
       considerChoice(detail::evaluate_insert_synthetic_gap_terminal_candidate(
-          ctx, cursorStart, matchedEnd, this, 3u, 3u));
+          ctx, cursorStart, matchedEnd, this, 3u));
     }
 
+    // forbid-Replace sibling probe: when re-descending with the whole-keyword
+    // fuzzy Replace forbidden AND a boundary split-Insert is already enumerable
+    // (the keyword matched exactly as a prefix with a visible continuation),
+    // suppress the Replace candidates so the keep-keyword split-Insert is the
+    // surviving choice. Contexts without the flag (non-recovery) never suppress.
+    const bool suppressFuzzyReplace = [&]() constexpr noexcept {
+      if constexpr (requires { ctx.forbidWholeKeywordFuzzyReplace; }) {
+        return ctx.forbidWholeKeywordFuzzyReplace && splitInsertConsidered;
+      } else {
+        return false;
+      }
+    }();
+
     if constexpr (allow_replace) {
-      for (const auto &fuzzyCandidate : fuzzyCandidates) {
-        const char *const fuzzyEnd = cursorStart + fuzzyCandidate.consumed;
-        if (detail::can_apply_recovery_match(ctx, fuzzyEnd)) {
-          considerChoice(detail::evaluate_replace_leaf_terminal_candidate(
-              ctx, cursorStart, fuzzyEnd, this, fuzzyCandidate.cost,
-              fuzzyCandidate.distance, fuzzyCandidate.substitutionCount,
-              fuzzyCandidate.operationCount));
+      if (!suppressFuzzyReplace) {
+        for (const auto &fuzzyCandidate : fuzzyCandidates) {
+          const char *const fuzzyEnd = cursorStart + fuzzyCandidate.consumed;
+          if (detail::can_apply_recovery_match(ctx, fuzzyEnd)) {
+            considerChoice(detail::evaluate_replace_leaf_terminal_candidate(
+                ctx, cursorStart, fuzzyEnd, this, fuzzyCandidate.cost,
+                fuzzyCandidate.distance));
+          }
         }
       }
     }
 
-    return detail::complete_terminal_recovery_choice(
+    // The extended-delete-scan match probe is shared by the completion (select)
+    // and the delete-scan application below.
+    const auto matchRecoverableTerminal =
+        [this, &ctx, cursorStart](const char *scanStart) noexcept {
+          return delete_scan_match_end(ctx, cursorStart, scanStart);
+        };
+
+    const auto choice = detail::complete_terminal_recovery_choice(
         ctx, cursorStart, this, terminalRecoveryFacts, terminalShape,
-        allow_insert, bestChoice,
-        [this, &ctx, cursorStart](const char *scanStart) noexcept
-            -> const char * {
-          if (!detail::allows_extended_terminal_delete_scan_match(
-                  ctx, cursorStart, scanStart)) {
-            return nullptr;
-          }
-          const char *const scanEnd = terminal(scanStart);
-          if (scanEnd == nullptr ||
-              !detail::can_apply_recovery_match(ctx, scanEnd)) {
-            return nullptr;
-          }
-          return scanEnd;
-        },
+        allow_insert, bestChoice, matchRecoverableTerminal,
         [this, &ctx, cursorStart](const char *scanEnd) {
           ctx.leaf(cursorStart, scanEnd, this, false, true);
         });
-  }
 
-  template <EditableParseModeContext Context>
-  bool applyLocalRecoveryChoice(
-      Context &ctx, const LocalRecoveryChoice &choice,
-      const char *cursorStart, const char *matchedEnd,
-      detail::TerminalRecoveryFacts terminalRecoveryFacts) const {
     return detail::apply_terminal_recovery_choice(
         ctx, choice, this,
         [this, &ctx, matchedEnd]() {
@@ -152,7 +186,8 @@ private:
         [this, &ctx, cursorStart, &choice]() {
           const char *const fuzzyEnd = cursorStart + choice.consumed;
           if (!detail::can_apply_recovery_match(ctx, fuzzyEnd) ||
-              !ctx.replaceLeaf(fuzzyEnd, this, choice.cost.budgetCost)) {
+              !ctx.replaceLeaf(fuzzyEnd, this, choice.cost.budgetCost,
+                               /*hidden=*/false, choice.distance)) {
             return false;
           }
           if constexpr (RecoveryParseModeContext<Context>) {
@@ -170,22 +205,10 @@ private:
                                   "' at ", ctx.cursorOffset());
           }
         },
-        [this, &ctx, cursorStart, terminalRecoveryFacts]() {
+        [this, &ctx, cursorStart, terminalRecoveryFacts,
+         &matchRecoverableTerminal]() {
           return detail::recover_by_terminal_delete_scan(
-              ctx,
-              [this, &ctx, cursorStart](const char *scanStart) noexcept
-                  -> const char * {
-                if (!detail::allows_extended_terminal_delete_scan_match(
-                        ctx, cursorStart, scanStart)) {
-                  return nullptr;
-                }
-                const char *const scanEnd = terminal(scanStart);
-                if (scanEnd == nullptr ||
-                    !detail::can_apply_recovery_match(ctx, scanEnd)) {
-                  return nullptr;
-                }
-                return scanEnd;
-              },
+              ctx, matchRecoverableTerminal,
               [this, &ctx, cursorStart](const char *scanEnd) {
                 if constexpr (RecoveryParseModeContext<Context>) {
                   PEGIUM_RECOVERY_TRACE("[literal rule] delete-scan match '",
@@ -206,6 +229,14 @@ private:
     return !has_word_boundary_violation(ctx, matchEnd);
   }
 
+  /// Error-tolerant match of this literal at the cursor, walking a fixed ladder
+  /// from strongest to weakest match: (1) an exact terminal match commits a
+  /// leaf; otherwise, unless local recovery is blocked or no edit budget
+  /// remains, (2) a low-cost fuzzy Replace repairs a truncated/typoed
+  /// occurrence (`applyFuzzyRecovery` -> `try_local_recovery`). In
+  /// expect/editable mode the ladder additionally admits the completion anchor,
+  /// an anchor-bounded exact match, and a partial literal prefix up to the
+  /// anchor (each registered as a keyword) before the same fuzzy fallback.
   template <EditableParseModeContext Context>
   bool parse_terminal_recovery_impl(
       Context &ctx,
@@ -223,24 +254,18 @@ private:
                                    return false;
                                  }(ctx);
     const char *const matchedEnd = terminal(cursorStart);
-    const auto hasWordBoundaryViolation = [&ctx](const char *end) noexcept {
-      return has_word_boundary_violation(ctx, end);
-    };
     const auto applyFuzzyRecovery = [&]() -> bool {
       const auto fuzzyCandidates =
           (hasHadEdits &&
            !detail::allows_fuzzy_replace_after_prior_edits(terminalShape))
               ? detail::LiteralFuzzyCandidates{}
               : findReplaceCandidates(ctx, cursorStart, effectiveRecoveryFacts);
-      const auto bestChoice = selectLocalRecoveryChoice(
-          ctx, cursorStart, matchedEnd, fuzzyCandidates,
-          effectiveRecoveryFacts);
-      return applyLocalRecoveryChoice(ctx, bestChoice, cursorStart, matchedEnd,
-                                      effectiveRecoveryFacts);
+      return try_local_recovery(ctx, cursorStart, matchedEnd, fuzzyCandidates,
+                                effectiveRecoveryFacts);
     };
 
     if constexpr (RecoveryParseModeContext<Context>) {
-      if (matchedEnd != nullptr && !hasWordBoundaryViolation(matchedEnd)) {
+      if (matchedEnd != nullptr && !has_word_boundary_violation(ctx, matchedEnd)) {
         PEGIUM_RECOVERY_TRACE("[literal rule] direct match '", getValue(),
                               "' at ", ctx.cursorOffset());
         ctx.leaf(matchedEnd, this);
@@ -266,7 +291,7 @@ private:
       }
 
       if (matchedEnd != nullptr && ctx.canTraverseUntil(matchedEnd) &&
-          !hasWordBoundaryViolation(matchedEnd)) {
+          !has_word_boundary_violation(ctx, matchedEnd)) {
         ctx.leaf(matchedEnd, this);
         return true;
       }
@@ -378,9 +403,11 @@ public:
       const auto remaining = static_cast<std::size_t>(ctx.end - cursorStart);
       const std::string_view view{cursorStart, std::min(window, remaining)};
       // Linear O(N) single-edit detector keeps the failure-tracking strict
-      // pass free of the recovery Levenshtein DP. The acceptance set is
-      // identical to the original DP probe (`distance == 1 &&
-      // |consumed - N| <= 1`).
+      // pass free of the recovery Levenshtein DP. For single-byte (ASCII)
+      // codepoints the acceptance set matches the recovery DP probe
+      // (`distance == 1 && |consumed - N| <= 1`); multibyte single-edit cases
+      // are conservatively deferred to that DP (this byte-granular probe only
+      // declines to fire the strict hint for them).
       return detail::literal_has_single_edit_strict_match(getValue(), view,
                                                           case_sensitive);
     }
@@ -439,9 +466,6 @@ public:
             terminalShape)) {
       return false;
     }
-    if (!detail::allows_compact_local_gap_terminal_recovery(ctx)) {
-      return false;
-    }
     const char *const cursorStart = ctx.cursor();
     const auto hasImmediateVisibleContinuation =
         [&ctx](const char *position) constexpr noexcept {
@@ -482,9 +506,6 @@ public:
     if (ctx.hasHadEdits() &&
         !detail::allows_fuzzy_replace_after_prior_edits(
             terminalShape)) {
-      return false;
-    }
-    if (!detail::allows_compact_local_gap_terminal_recovery(ctx)) {
       return false;
     }
     const char *const cursorStart = ctx.cursor();
@@ -562,22 +583,10 @@ private:
       (void)end;
       return false;
     } else {
-      // `decode_utf8_codepoint` reads up to 4 bytes from `end`; the
-      // `end < ctx.end` guard only covers the lead byte. Truncated
-      // multi-byte tails sitting in the last 1-3 bytes of the buffer
-      // would otherwise pull the decode past `ctx.end` (ASan
-      // heap-buffer-overflow on adversarial fuzz inputs, mirroring the
-      // hardening already applied in TerminalRecoverySupport.hpp).
-      if (end == nullptr || end >= ctx.end) {
-        return false;
-      }
-      const auto length = utils::utf8_codepoint_length(*end);
-      if (length == 0 ||
-          length > static_cast<std::size_t>(ctx.end - end)) {
-        return false;
-      }
-      return detail::is_identifier_like_codepoint(
-          utils::decode_utf8_codepoint(end));
+      // Bounds-checked decode+classify (handles truncated multi-byte
+      // tails in the last 1-3 bytes of the buffer — ASan-flagged on
+      // adversarial fuzz input).
+      return detail::is_identifier_like_codepoint_at(end, ctx.end);
     }
   }
 

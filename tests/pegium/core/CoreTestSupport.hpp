@@ -307,14 +307,13 @@ public:
 class InMemoryTextDocuments final : public workspace::TextDocumentProvider {
 public:
   [[nodiscard]] std::shared_ptr<workspace::TextDocument>
-  get(std::string_view uri) const override {
-    const auto normalizedUri = utils::normalize_uri(uri);
+  getNormalized(std::string_view normalizedUri) const override {
     if (normalizedUri.empty()) {
       return nullptr;
     }
 
     std::scoped_lock lock(_mutex);
-    const auto it = _documents.find(normalizedUri);
+    const auto it = _documents.find(std::string(normalizedUri));
     return it == _documents.end() ? nullptr : it->second;
   }
 
@@ -379,13 +378,15 @@ public:
 
   void build(std::span<const std::shared_ptr<workspace::Document>>,
              const workspace::BuildOptions & = {},
-             utils::CancellationToken cancelToken = {}) const override {
+             utils::CancellationToken cancelToken = {},
+             const std::function<void()> & = {}) const override {
     utils::throw_if_cancelled(cancelToken);
   }
 
   void update(std::span<const workspace::DocumentId> changedDocumentIds,
               std::span<const workspace::DocumentId> deletedDocumentIds,
-              utils::CancellationToken cancelToken = {}) const override {
+              utils::CancellationToken cancelToken = {},
+              const std::function<void()> & = {}) const override {
     (void)changedDocumentIds;
     utils::throw_if_cancelled(cancelToken);
     emitUpdate({}, {});

@@ -76,30 +76,23 @@ mix_policy(const RecoveryPolicyFingerprint &policy) noexcept {
   return static_cast<std::size_t>(h) & (ChoiceRecoverCache::kCapacity - 1);
 }
 
-[[nodiscard]] bool keys_equal(const ChoiceRecoverCacheKey &a,
-                              const ChoiceRecoverCacheKey &b) noexcept {
-  return a.choice == b.choice && a.cursorOffset == b.cursorOffset &&
-         a.maxCursorOffset == b.maxCursorOffset &&
-         a.furthestVisibleLeafCount == b.furthestVisibleLeafCount &&
-         a.currentVisibleLeafCount == b.currentVisibleLeafCount &&
-         a.policy == b.policy;
-}
-
 } // namespace
 
 ChoiceRecoverCache::ChoiceRecoverCache() {
-  // Allocate uninitialised storage and only initialise the `valid` flag
-  // of each entry. Keys and values are not constructed; tryGet rejects
-  // every slot whose `valid` is false before reading any other field,
-  // so the uninit key/value bytes are never observed in production.
-  // store() overwrites both before raising `valid`, fully constructing
-  // the entry. Saves ~1.4 MB of memset per cache construction (~12% of
-  // total Ir on recovery-heavy workloads in callgrind).
+  // Allocate uninitialised storage and only initialise the `generation`
+  // field of each entry to 0 (stale). Keys and values are not constructed;
+  // tryGet rejects every slot whose `generation != _generation` before
+  // reading any other field, so the uninit key/value bytes are never
+  // observed in production. store() overwrites both before stamping
+  // `generation`, fully constructing the entry. Saves ~1.4 MB of memset
+  // per cache construction (~12% of total Ir on recovery-heavy workloads
+  // in callgrind). `_generation` starts at 1 (see header) so the all-zero
+  // entries read stale on the first probe.
   static_assert(std::is_trivially_destructible_v<Entry>);
   void *const raw = ::operator new(sizeof(std::array<Entry, kCapacity>));
   _entries.reset(static_cast<std::array<Entry, kCapacity> *>(raw));
   for (auto &entry : *_entries) {
-    entry.valid = false;
+    entry.generation = 0;
   }
 }
 
@@ -111,7 +104,7 @@ ChoiceRecoverCache::tryGet(const ChoiceRecoverCacheKey &key) noexcept {
   }
   const auto index = slot(key);
   const auto &entry = (*_entries)[index];
-  if (!entry.valid || !keys_equal(entry.key, key)) {
+  if (entry.generation != _generation || !(entry.key == key)) {
     ++_misses;
     return nullptr;
   }
@@ -125,7 +118,25 @@ void ChoiceRecoverCache::store(const ChoiceRecoverCacheKey &key,
   auto &entry = (*_entries)[index];
   entry.key = key;
   entry.value = value;
-  entry.valid = true;
+  entry.generation = _generation;
+}
+
+void ChoiceRecoverCache::reset() noexcept {
+  // O(1) invalidation: bumping the epoch makes every previously-stamped entry
+  // read stale (its `generation` no longer matches `_generation`). Only on
+  // wraparound back to 0 must we re-zero the entries, because then a fresh
+  // store at generation 0 would collide with the never-written sentinel; the
+  // one-time full clear restores the invariant (mirrors the fuzzy cache's
+  // wraparound handling). After the clear, restart the epoch at 1 so the
+  // freshly zeroed entries stay stale.
+  if (++_generation == 0) {
+    for (auto &entry : *_entries) {
+      entry.generation = 0;
+    }
+    _generation = 1;
+  }
+  _hits = 0;
+  _misses = 0;
 }
 
 } // namespace pegium::parser::detail

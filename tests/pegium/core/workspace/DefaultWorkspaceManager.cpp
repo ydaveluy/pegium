@@ -26,7 +26,8 @@ public:
 
   void build(std::span<const std::shared_ptr<Document>>,
              const BuildOptions & = {},
-             utils::CancellationToken cancelToken = {}) const override {
+             utils::CancellationToken cancelToken = {},
+             const std::function<void()> & = {}) const override {
     _started = true;
 
     try {
@@ -46,7 +47,8 @@ public:
   }
 
   void update(std::span<const DocumentId>, std::span<const DocumentId>,
-              utils::CancellationToken cancelToken = {}) const override {
+              utils::CancellationToken cancelToken = {},
+              const std::function<void()> & = {}) const override {
     utils::throw_if_cancelled(cancelToken);
   }
 

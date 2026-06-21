@@ -17,27 +17,14 @@ enum class StepCounter : std::size_t {
   ParseContextExit,
   ParseContextLeaf,
   ParseContextInsert,
-  ParseContextInsertForced,
   ParseContextDelete,
   ParseContextReplace,
   ParsePhaseRuns,
   RecoveryPhaseRuns,
   ChoiceRecoverCalls,
-  ChoiceFastAttempts,
-  ChoiceFastSuccess,
-  ChoiceFastFailures,
   ChoiceStrictPasses,
   ChoiceEditablePasses,
-  GroupRecoverCalls,
-  GroupFastAttempts,
-  GroupFastSuccess,
-  GroupFastFailures,
-  GroupStrictPasses,
-  GroupEditablePasses,
   UnorderedRecoverCalls,
-  UnorderedFastAttempts,
-  UnorderedFastSuccess,
-  UnorderedFastFailures,
   UnorderedStrictPasses,
   UnorderedEditablePasses,
   RepetitionRecoverCalls,
@@ -97,8 +84,6 @@ inline const char *step_trace_name(StepCounter counter) noexcept {
     return "ParseContextLeaf";
   case StepCounter::ParseContextInsert:
     return "ParseContextInsert";
-  case StepCounter::ParseContextInsertForced:
-    return "ParseContextInsertForced";
   case StepCounter::ParseContextDelete:
     return "ParseContextDelete";
   case StepCounter::ParseContextReplace:
@@ -109,36 +94,12 @@ inline const char *step_trace_name(StepCounter counter) noexcept {
     return "RecoveryPhaseRuns";
   case StepCounter::ChoiceRecoverCalls:
     return "ChoiceRecoverCalls";
-  case StepCounter::ChoiceFastAttempts:
-    return "ChoiceFastAttempts";
-  case StepCounter::ChoiceFastSuccess:
-    return "ChoiceFastSuccess";
-  case StepCounter::ChoiceFastFailures:
-    return "ChoiceFastFailures";
   case StepCounter::ChoiceStrictPasses:
     return "ChoiceStrictPasses";
   case StepCounter::ChoiceEditablePasses:
     return "ChoiceEditablePasses";
-  case StepCounter::GroupRecoverCalls:
-    return "GroupRecoverCalls";
-  case StepCounter::GroupFastAttempts:
-    return "GroupFastAttempts";
-  case StepCounter::GroupFastSuccess:
-    return "GroupFastSuccess";
-  case StepCounter::GroupFastFailures:
-    return "GroupFastFailures";
-  case StepCounter::GroupStrictPasses:
-    return "GroupStrictPasses";
-  case StepCounter::GroupEditablePasses:
-    return "GroupEditablePasses";
   case StepCounter::UnorderedRecoverCalls:
     return "UnorderedRecoverCalls";
-  case StepCounter::UnorderedFastAttempts:
-    return "UnorderedFastAttempts";
-  case StepCounter::UnorderedFastSuccess:
-    return "UnorderedFastSuccess";
-  case StepCounter::UnorderedFastFailures:
-    return "UnorderedFastFailures";
   case StepCounter::UnorderedStrictPasses:
     return "UnorderedStrictPasses";
   case StepCounter::UnorderedEditablePasses:
@@ -181,10 +142,6 @@ inline void stepTraceInc(StepCounter counter,
   stepTraceCounters[step_trace_index(counter)] += delta;
 }
 
-inline std::uint64_t stepTraceValue(StepCounter counter) noexcept {
-  return stepTraceCounters[step_trace_index(counter)];
-}
-
 template <typename Stream>
 inline void stepTraceDumpSummary(Stream &stream) noexcept {
   for (std::size_t i = 0; i < stepTraceCounters.size(); ++i) {
@@ -209,7 +166,6 @@ inline void stepTraceDumpSummary(Args &&...) noexcept {}
 
 inline void stepTraceReset() noexcept {}
 inline void stepTraceInc(StepCounter, std::uint64_t = 1) noexcept {}
-inline std::uint64_t stepTraceValue(StepCounter) noexcept { return 0; }
 template <typename... Args>
 inline void stepTraceDumpSummary(Args &&...) noexcept {}
 

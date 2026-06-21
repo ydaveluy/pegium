@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <functional>
 #include <gtest/gtest.h>
 #include <pegium/core/TestCstBuilderHarness.hpp>
 #include <pegium/core/TestRuleParser.hpp>
@@ -202,6 +203,24 @@ TEST(TerminalRuleTest, ConstructorOptionCanSetValueConverter) {
   EXPECT_EQ(typed->value, 3);
 }
 
+TEST(TerminalRuleTest, ConverterCanReturnValueDirectly) {
+  // Infallible converter: returns the value directly instead of wrapping it in
+  // opt::conversion_value<...>. The conversion can never fail.
+  TerminalRule<std::string> word{
+      "Word", "hi"_kw,
+      opt::with_converter(
+          [](std::string_view sv) noexcept { return std::string(sv) + "!"; })};
+
+  auto result = parseTerminalRule(word, "hi", SkipperBuilder().build());
+  ASSERT_TRUE(result.fullMatch);
+  ASSERT_TRUE(result.value);
+  EXPECT_TRUE(result.parseDiagnostics.empty());
+  auto *typed =
+      pegium::ast_ptr_cast<TerminalValueNode<std::string>>(result.value);
+  ASSERT_TRUE(typed != nullptr);
+  EXPECT_EQ(typed->value, "hi!");
+}
+
 TEST(TerminalRuleTest, ConverterCanSetValue) {
   TerminalRule<int> number{
       "Number", "42"_kw,
@@ -340,21 +359,94 @@ TEST(TerminalRuleTest, ParseRuleFailureLeavesCursorAndTreeUntouched) {
   EXPECT_EQ(root->begin(), root->end());
 }
 
-TEST(TerminalRuleTest, LongLiteralBackedTerminalRuleDoesNotInsertAtEof) {
-  TerminalRule<std::string_view> terminal{"Token", "abc"_kw};
-  auto builderHarness = pegium::test::makeCstBuilderHarness("");
-  auto &builder = builderHarness.builder;
-  auto skipper = SkipperBuilder().build();
-  detail::FailureHistoryRecorder recorder(builder.input_begin());
+TEST(TerminalRuleTest, NoInsertOverVisibleSourceOrEof) {
+  // Folds LongLiteralBackedTerminalRuleDoesNotInsertAtEof,
+  // WordLikeFreeFormTerminalDoesNotInsertSynthesizedLeafOverVisibleSource, and
+  // CompositeWordLikeFreeFormTerminalDoesNotInsertSynthesizedLeafOverVisibleSource.
+  // Each row builds a RecoveryContext over a TerminalRule<std::string_view> and
+  // asserts the identical no-recovery + untouched-tree shape; only the terminal
+  // builder and the harness input vary. Each row's `run` reproduces that test's
+  // construction verbatim (some rows keep a backing `literal` terminal alive)
+  // and returns the asserted scalars.
+  struct NoRecovery {
+    bool parsed;
+    pegium::TextOffset cursorOffset;
+    bool editsEmpty;
+    bool rootNonNull;
+    bool treeEmpty;
+  };
+  struct Case {
+    const char *name;
+    std::function<NoRecovery()> run;
+  };
+  static const Case kCases[] = {
+      {"LongLiteralBackedTerminalRuleDoesNotInsertAtEof",
+       [] {
+         TerminalRule<std::string_view> terminal{"Token", "abc"_kw};
+         auto builderHarness = pegium::test::makeCstBuilderHarness("");
+         auto &builder = builderHarness.builder;
+         auto skipper = SkipperBuilder().build();
+         detail::FailureHistoryRecorder recorder(builder.input_begin());
 
-  RecoveryContext ctx{builder, skipper, recorder};
-  EXPECT_FALSE(parse(terminal, ctx));
-  EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_TRUE(ctx.snapshotRecoveryEdits().empty());
+         RecoveryContext ctx{builder, skipper, recorder};
+         NoRecovery row;
+         row.parsed = static_cast<bool>(parse(terminal, ctx));
+         row.cursorOffset = ctx.cursorOffset();
+         row.editsEmpty = ctx.snapshotRecoveryEdits().empty();
+         const auto *root = builder.getRootCstNode();
+         row.rootNonNull = root != nullptr;
+         row.treeEmpty = root != nullptr && root->begin() == root->end();
+         return row;
+       }},
+      {"WordLikeFreeFormTerminalDoesNotInsertSynthesizedLeafOverVisibleSource",
+       [] {
+         TerminalRule<std::string_view> literal{"Literal", "abc"_kw};
+         TerminalRule<std::string_view> terminal{"Token", literal};
+         auto builderHarness = pegium::test::makeCstBuilderHarness("?");
+         auto &builder = builderHarness.builder;
+         auto skipper = SkipperBuilder().build();
+         detail::FailureHistoryRecorder recorder(builder.input_begin());
 
-  const auto *root = builder.getRootCstNode();
-  ASSERT_NE(root, nullptr);
-  EXPECT_EQ(root->begin(), root->end());
+         RecoveryContext ctx{builder, skipper, recorder};
+         NoRecovery row;
+         row.parsed = static_cast<bool>(parse(terminal, ctx));
+         row.cursorOffset = ctx.cursorOffset();
+         row.editsEmpty = ctx.snapshotRecoveryEdits().empty();
+         const auto *root = builder.getRootCstNode();
+         row.rootNonNull = root != nullptr;
+         row.treeEmpty = root != nullptr && root->begin() == root->end();
+         return row;
+       }},
+      {"CompositeWordLikeFreeFormTerminalDoesNotInsertSynthesizedLeafOverVisibleSource",
+       [] {
+         TerminalRule<std::string_view> terminal{"Token",
+                                                 "a-zA-Z_"_cr + many(w)};
+         auto builderHarness = pegium::test::makeCstBuilderHarness("?");
+         auto &builder = builderHarness.builder;
+         auto skipper = SkipperBuilder().build();
+         detail::FailureHistoryRecorder recorder(builder.input_begin());
+
+         RecoveryContext ctx{builder, skipper, recorder};
+         NoRecovery row;
+         row.parsed = static_cast<bool>(parse(terminal, ctx));
+         row.cursorOffset = ctx.cursorOffset();
+         row.editsEmpty = ctx.snapshotRecoveryEdits().empty();
+         const auto *root = builder.getRootCstNode();
+         row.rootNonNull = root != nullptr;
+         row.treeEmpty = root != nullptr && root->begin() == root->end();
+         return row;
+       }},
+  };
+
+  for (const auto &testCase : kCases) {
+    SCOPED_TRACE(testCase.name);
+    const auto row = testCase.run();
+    EXPECT_FALSE(row.parsed);
+    EXPECT_EQ(row.cursorOffset, 0u);
+    EXPECT_TRUE(row.editsEmpty);
+    ASSERT_TRUE(row.rootNonNull);
+    EXPECT_TRUE(row.treeEmpty);
+  }
 }
 
 TEST(TerminalRuleTest,
@@ -373,25 +465,6 @@ TEST(TerminalRuleTest,
   ASSERT_EQ(diagnostics.size(), 1u);
   EXPECT_EQ(diagnostics.front().kind, ParseDiagnosticKind::Inserted);
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-}
-
-TEST(TerminalRuleTest,
-     WordLikeFreeFormTerminalDoesNotInsertSynthesizedLeafOverVisibleSource) {
-  TerminalRule<std::string_view> literal{"Literal", "abc"_kw};
-  TerminalRule<std::string_view> terminal{"Token", literal};
-  auto builderHarness = pegium::test::makeCstBuilderHarness("?");
-  auto &builder = builderHarness.builder;
-  auto skipper = SkipperBuilder().build();
-  detail::FailureHistoryRecorder recorder(builder.input_begin());
-
-  RecoveryContext ctx{builder, skipper, recorder};
-  EXPECT_FALSE(parse(terminal, ctx));
-  EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_TRUE(ctx.snapshotRecoveryEdits().empty());
-
-  const auto *root = builder.getRootCstNode();
-  ASSERT_NE(root, nullptr);
-  EXPECT_EQ(root->begin(), root->end());
 }
 
 TEST(TerminalRuleTest,
@@ -422,25 +495,6 @@ TEST(TerminalRuleTest,
   ASSERT_EQ(diagnostics.size(), 1u);
   EXPECT_EQ(diagnostics.front().kind, ParseDiagnosticKind::Inserted);
   EXPECT_EQ(ctx.cursorOffset(), 0u);
-}
-
-TEST(
-    TerminalRuleTest,
-    CompositeWordLikeFreeFormTerminalDoesNotInsertSynthesizedLeafOverVisibleSource) {
-  TerminalRule<std::string_view> terminal{"Token", "a-zA-Z_"_cr + many(w)};
-  auto builderHarness = pegium::test::makeCstBuilderHarness("?");
-  auto &builder = builderHarness.builder;
-  auto skipper = SkipperBuilder().build();
-  detail::FailureHistoryRecorder recorder(builder.input_begin());
-
-  RecoveryContext ctx{builder, skipper, recorder};
-  EXPECT_FALSE(parse(terminal, ctx));
-  EXPECT_EQ(ctx.cursorOffset(), 0u);
-  EXPECT_TRUE(ctx.snapshotRecoveryEdits().empty());
-
-  const auto *root = builder.getRootCstNode();
-  ASSERT_NE(root, nullptr);
-  EXPECT_EQ(root->begin(), root->end());
 }
 
 TEST(TerminalRuleTest,
@@ -541,78 +595,141 @@ TEST(TerminalRuleTest, EnumGetValueUsesUnderlyingVariantType) {
   EXPECT_EQ(std::get<std::uint16_t>(value), static_cast<std::uint16_t>(42));
 }
 
-TEST(TerminalRuleTest, RecoveryPrefersDeletingStrayPrefixBeforeMatchingWord) {
-  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
-  auto parsed = parseTerminalRule(id, ":qa", SkipperBuilder().build());
+TEST(TerminalRuleTest, DeleteStrayPrefixRecovery) {
+  // Folds RecoveryPrefersDeletingStrayPrefixBeforeMatchingWord,
+  // RecoveryPrefersDeletingShortStrayPunctuationRunBeforeMatchingDelimiter,
+  // RecoveryProbeSeesExtendedDeleteScanMatchForLongPunctuationRun, and
+  // RecoveryDeleteScanMatchesQuotedTerminalAfterDeletedPunctuationAndSkippedTrivia.
+  // Every row asserts the same 9-step Deleted-recovery shape; only the
+  // builder/input/skipper/endOffset/value vary. The value-node template type
+  // differs per row (std::string vs std::string_view), so each row's `run`
+  // builds its own terminal, casts to the matching node type, and returns the
+  // already-extracted asserted values.
+  struct DeletedRecovery {
+    bool hasValue;
+    bool fullMatch;
+    std::size_t diagnosticCount;
+    ParseDiagnosticKind kind;
+    pegium::TextOffset beginOffset;
+    pegium::TextOffset endOffset;
+    bool typedNonNull;
+    std::string value;
+  };
+  struct Case {
+    const char *name;
+    std::function<DeletedRecovery()> run;
+  };
+  static const Case kCases[] = {
+      {"RecoveryPrefersDeletingStrayPrefixBeforeMatchingWord",
+       [] {
+         TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+         auto parsed = parseTerminalRule(id, ":qa", SkipperBuilder().build());
+         DeletedRecovery row;
+         row.hasValue = static_cast<bool>(parsed.value);
+         row.fullMatch = parsed.fullMatch;
+         row.diagnosticCount = parsed.parseDiagnostics.size();
+         row.kind = parsed.parseDiagnostics.front().kind;
+         row.beginOffset = parsed.parseDiagnostics.front().beginOffset;
+         row.endOffset = parsed.parseDiagnostics.front().endOffset;
+         auto *typed = pegium::ast_ptr_cast<TerminalValueNode<std::string>>(
+             parsed.value);
+         row.typedNonNull = typed != nullptr;
+         if (typed != nullptr) {
+           row.value = std::string{typed->value};
+         }
+         return row;
+       }},
+      {"RecoveryPrefersDeletingShortStrayPunctuationRunBeforeMatchingDelimiter",
+       [] {
+         TerminalRule<std::string_view> semi{"Semi", ";"_kw};
+         auto parsed =
+             parseTerminalRule(semi, "***;", SkipperBuilder().build());
+         DeletedRecovery row;
+         row.hasValue = static_cast<bool>(parsed.value);
+         row.fullMatch = parsed.fullMatch;
+         row.diagnosticCount = parsed.parseDiagnostics.size();
+         row.kind = parsed.parseDiagnostics.front().kind;
+         row.beginOffset = parsed.parseDiagnostics.front().beginOffset;
+         row.endOffset = parsed.parseDiagnostics.front().endOffset;
+         auto *typed =
+             pegium::ast_ptr_cast<TerminalValueNode<std::string_view>>(
+                 parsed.value);
+         row.typedNonNull = typed != nullptr;
+         if (typed != nullptr) {
+           row.value = std::string{typed->value};
+         }
+         return row;
+       }},
+      {"RecoveryProbeSeesExtendedDeleteScanMatchForLongPunctuationRun",
+       [] {
+         TerminalRule<std::string_view> semi{"Semi", ";"_kw};
+         const std::string text(9u, '*');
+         auto parsed =
+             parseTerminalRule(semi, text + ";", SkipperBuilder().build());
+         DeletedRecovery row;
+         row.hasValue = static_cast<bool>(parsed.value);
+         row.fullMatch = parsed.fullMatch;
+         row.diagnosticCount = parsed.parseDiagnostics.size();
+         row.kind = parsed.parseDiagnostics.front().kind;
+         row.beginOffset = parsed.parseDiagnostics.front().beginOffset;
+         row.endOffset = parsed.parseDiagnostics.front().endOffset;
+         // Original asserted endOffset == text.size() (9); the shared loop
+         // covers this via kExpected[2].endOffset == 9u.
+         auto *typed =
+             pegium::ast_ptr_cast<TerminalValueNode<std::string_view>>(
+                 parsed.value);
+         row.typedNonNull = typed != nullptr;
+         if (typed != nullptr) {
+           row.value = std::string{typed->value};
+         }
+         return row;
+       }},
+      {"RecoveryDeleteScanMatchesQuotedTerminalAfterDeletedPunctuationAndSkippedTrivia",
+       [] {
+         const auto whitespace = some(s);
+         const auto skipper = SkipperBuilder().ignore(whitespace).build();
+         TerminalRule<std::string> text{"TEXT", "\""_kw <=> "\""_kw};
+         auto parsed = parseTerminalRule(text, ": \"team\"", skipper);
+         DeletedRecovery row;
+         row.hasValue = static_cast<bool>(parsed.value);
+         row.fullMatch = parsed.fullMatch;
+         row.diagnosticCount = parsed.parseDiagnostics.size();
+         row.kind = parsed.parseDiagnostics.front().kind;
+         row.beginOffset = parsed.parseDiagnostics.front().beginOffset;
+         row.endOffset = parsed.parseDiagnostics.front().endOffset;
+         auto *typed = pegium::ast_ptr_cast<TerminalValueNode<std::string>>(
+             parsed.value);
+         row.typedNonNull = typed != nullptr;
+         if (typed != nullptr) {
+           row.value = std::string{typed->value};
+         }
+         return row;
+       }},
+  };
 
-  ASSERT_TRUE(parsed.value);
-  EXPECT_TRUE(parsed.fullMatch);
-  ASSERT_EQ(parsed.parseDiagnostics.size(), 1u);
-  EXPECT_EQ(parsed.parseDiagnostics.front().kind, ParseDiagnosticKind::Deleted);
-  EXPECT_EQ(parsed.parseDiagnostics.front().beginOffset, 0u);
-  EXPECT_EQ(parsed.parseDiagnostics.front().endOffset, 1u);
+  struct Expected {
+    pegium::TextOffset endOffset;
+    const char *value;
+  };
+  static const Expected kExpected[] = {
+      {1u, "qa"},
+      {3u, ";"},
+      {9u, ";"},
+      {1u, "\"team\""},
+  };
 
-  auto *typed = pegium::ast_ptr_cast<TerminalValueNode<std::string>>(parsed.value);
-  ASSERT_NE(typed, nullptr);
-  EXPECT_EQ(typed->value, "qa");
-}
-
-TEST(TerminalRuleTest,
-     RecoveryPrefersDeletingShortStrayPunctuationRunBeforeMatchingDelimiter) {
-  TerminalRule<std::string_view> semi{"Semi", ";"_kw};
-  auto parsed = parseTerminalRule(semi, "***;", SkipperBuilder().build());
-
-  ASSERT_TRUE(parsed.value);
-  EXPECT_TRUE(parsed.fullMatch);
-  ASSERT_EQ(parsed.parseDiagnostics.size(), 1u);
-  EXPECT_EQ(parsed.parseDiagnostics.front().kind, ParseDiagnosticKind::Deleted);
-  EXPECT_EQ(parsed.parseDiagnostics.front().beginOffset, 0u);
-  EXPECT_EQ(parsed.parseDiagnostics.front().endOffset, 3u);
-
-  auto *typed =
-      pegium::ast_ptr_cast<TerminalValueNode<std::string_view>>(parsed.value);
-  ASSERT_NE(typed, nullptr);
-  EXPECT_EQ(typed->value, ";");
-}
-
-TEST(TerminalRuleTest,
-     RecoveryProbeSeesExtendedDeleteScanMatchForLongPunctuationRun) {
-  TerminalRule<std::string_view> semi{"Semi", ";"_kw};
-  const std::string text(9u, '*');
-  auto parsed = parseTerminalRule(semi, text + ";", SkipperBuilder().build());
-
-  ASSERT_TRUE(parsed.value);
-  EXPECT_TRUE(parsed.fullMatch);
-  ASSERT_EQ(parsed.parseDiagnostics.size(), 1u);
-  EXPECT_EQ(parsed.parseDiagnostics.front().kind, ParseDiagnosticKind::Deleted);
-  EXPECT_EQ(parsed.parseDiagnostics.front().beginOffset, 0u);
-  EXPECT_EQ(parsed.parseDiagnostics.front().endOffset,
-            static_cast<pegium::TextOffset>(text.size()));
-
-  auto *typed =
-      pegium::ast_ptr_cast<TerminalValueNode<std::string_view>>(parsed.value);
-  ASSERT_NE(typed, nullptr);
-  EXPECT_EQ(typed->value, ";");
-}
-
-TEST(TerminalRuleTest,
-     RecoveryDeleteScanMatchesQuotedTerminalAfterDeletedPunctuationAndSkippedTrivia) {
-  const auto whitespace = some(s);
-  const auto skipper = SkipperBuilder().ignore(whitespace).build();
-  TerminalRule<std::string> text{"TEXT", "\""_kw <=> "\""_kw};
-
-  auto parsed = parseTerminalRule(text, ": \"team\"", skipper);
-
-  ASSERT_TRUE(parsed.value);
-  EXPECT_TRUE(parsed.fullMatch);
-  ASSERT_EQ(parsed.parseDiagnostics.size(), 1u);
-  EXPECT_EQ(parsed.parseDiagnostics.front().kind, ParseDiagnosticKind::Deleted);
-  EXPECT_EQ(parsed.parseDiagnostics.front().beginOffset, 0u);
-  EXPECT_EQ(parsed.parseDiagnostics.front().endOffset, 1u);
-
-  auto *typed = pegium::ast_ptr_cast<TerminalValueNode<std::string>>(parsed.value);
-  ASSERT_NE(typed, nullptr);
-  EXPECT_EQ(typed->value, "\"team\"");
+  for (std::size_t i = 0; i < std::size(kCases); ++i) {
+    SCOPED_TRACE(kCases[i].name);
+    const auto row = kCases[i].run();
+    ASSERT_TRUE(row.hasValue);
+    EXPECT_TRUE(row.fullMatch);
+    ASSERT_EQ(row.diagnosticCount, 1u);
+    EXPECT_EQ(row.kind, ParseDiagnosticKind::Deleted);
+    EXPECT_EQ(row.beginOffset, 0u);
+    EXPECT_EQ(row.endOffset, kExpected[i].endOffset);
+    ASSERT_TRUE(row.typedNonNull);
+    EXPECT_EQ(row.value, kExpected[i].value);
+  }
 }
 
 TEST(TerminalRuleTest,

@@ -1,21 +1,27 @@
 #include <pegium/core/documentation/DefaultCommentProvider.hpp>
 #include <pegium/core/grammar/TerminalRule.hpp>
 
+#include <utility>
+
 namespace pegium::documentation {
 
 namespace {
 
-bool is_multiline_comment(const CstNodeView &node) noexcept {
+bool is_multiline_comment(const CstNodeView &node,
+                          std::string_view mlCommentRuleName) noexcept {
   if (!node.isHidden()) {
     return false;
   }
   const auto *grammarElement = node.getGrammarElement();
   return grammarElement->getKind() == grammar::ElementKind::TerminalRule &&
          static_cast<const grammar::TerminalRule *>(grammarElement)->getName() ==
-             "ML_COMMENT";
+             mlCommentRuleName;
 }
 
 } // namespace
+
+DefaultCommentProvider::DefaultCommentProvider(std::string mlCommentRuleName)
+    : _mlCommentRuleName(std::move(mlCommentRuleName)) {}
 
 std::string_view
 DefaultCommentProvider::getComment(const AstNode &node) const noexcept {
@@ -32,7 +38,7 @@ DefaultCommentProvider::getComment(const AstNode &node) const noexcept {
     if (previous.getEnd() > begin) {
       continue;
     }
-    if (is_multiline_comment(previous)) {
+    if (is_multiline_comment(previous, _mlCommentRuleName)) {
       return previous.getText();
     }
     break;

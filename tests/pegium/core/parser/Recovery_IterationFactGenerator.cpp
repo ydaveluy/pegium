@@ -12,8 +12,11 @@
 #include "RecoveryTestSupport.hpp"
 #include <pegium/core/parser/ParseAttempt.hpp>
 
+#include <array>
+#include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 using namespace pegium::parser;
 
@@ -59,42 +62,70 @@ void expect_strict_implies_recoverable(Element &&element,
 } // namespace
 
 TEST(IterationFactGenerator,
-     keyword_recoverable_supersets_strict_across_canonical_inputs) {
-  static constexpr std::array kInputs = {
-      std::string_view{"hello world"},  // keyword strictly at cursor
-      std::string_view{"hellp world"},  // typo at cursor
-      std::string_view{"xyz unrelated"}, // unrelated at cursor
-      std::string_view{""},              // EOF
-  };
-  for (const auto input : kInputs) {
-    expect_strict_implies_recoverable(
-        "hello"_kw, input, std::string{"keyword_"} + std::string{input});
-  }
-}
-
-TEST(IterationFactGenerator,
-     long_keyword_recoverable_supersets_strict_across_canonical_inputs) {
-  static constexpr std::array kInputs = {
-      std::string_view{"service rest"},
-      std::string_view{"servce rest"},
-      std::string_view{"garbage rest"},
-  };
-  for (const auto input : kInputs) {
-    expect_strict_implies_recoverable(
-        "service"_kw, input, std::string{"long_keyword_"} + std::string{input});
-  }
-}
-
-TEST(IterationFactGenerator,
-     terminal_rule_recoverable_supersets_strict_across_canonical_inputs) {
+     recoverable_supersets_strict_across_canonical_inputs) {
+  // Table-driven fold of the per-element-shape monotonicity cases.
+  // Each row pairs an element-builder (run fresh per probe, so the
+  // builder is invoked twice inside the helper) with one input and a
+  // human-readable case label. Every distinct (element, input) pair
+  // from the former per-shape tests survives as one row.
   TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
-  static constexpr std::array kInputs = {
-      std::string_view{"alpha rest"},
-      std::string_view{"12345 rest"},
+
+  struct Row {
+    std::string label;
+    std::string_view input;
+    std::function<bool(RecoveryContext &)> strictProbe;
+    std::function<bool(RecoveryContext &)> recoverableProbe;
   };
-  for (const auto input : kInputs) {
-    expect_strict_implies_recoverable(
-        id, input, std::string{"terminal_"} + std::string{input});
+
+  const auto keywordRow = [](std::string label, std::string_view input,
+                             auto element) {
+    return Row{std::move(label), input,
+               [element](RecoveryContext &ctx) {
+                 return attempt_fast_probe(ctx, element);
+               },
+               [element](RecoveryContext &ctx) {
+                 return probe_recoverable_at_entry(element, ctx);
+               }};
+  };
+  const auto terminalRow = [&id](std::string label, std::string_view input) {
+    return Row{std::move(label), input,
+               [&id](RecoveryContext &ctx) {
+                 return attempt_fast_probe(ctx, id);
+               },
+               [&id](RecoveryContext &ctx) {
+                 return probe_recoverable_at_entry(id, ctx);
+               }};
+  };
+
+  const std::array rows = {
+      // keyword strictly at cursor / typo / unrelated / EOF
+      keywordRow("keyword_hello world", "hello world", "hello"_kw),
+      keywordRow("keyword_hellp world", "hellp world", "hello"_kw),
+      keywordRow("keyword_xyz unrelated", "xyz unrelated", "hello"_kw),
+      keywordRow("keyword_", "", "hello"_kw),
+      // long keyword: match / typo / garbage
+      keywordRow("long_keyword_service rest", "service rest", "service"_kw),
+      keywordRow("long_keyword_servce rest", "servce rest", "service"_kw),
+      keywordRow("long_keyword_garbage rest", "garbage rest", "service"_kw),
+      // terminal rule: identifier match / digits
+      terminalRow("terminal_alpha rest", "alpha rest"),
+      terminalRow("terminal_12345 rest", "12345 rest"),
+  };
+
+  for (const auto &row : rows) {
+    Fixture fixtureStrict{row.input};
+    const bool strict = row.strictProbe(fixtureStrict.ctx);
+    // Re-run from a fresh fixture: the strict probe may have left
+    // visible residue (rewind is not used here on purpose — we want
+    // to compare two probes from the same fresh state).
+    Fixture fixtureRecoverable{row.input};
+    const bool recoverable = row.recoverableProbe(fixtureRecoverable.ctx);
+
+    SCOPED_TRACE(testing::Message()
+                 << "case=" << row.label << " input=\"" << row.input
+                 << "\" strict=" << strict << " recoverable=" << recoverable);
+    // The implication: strict ⇒ recoverable.
+    EXPECT_TRUE(!strict || recoverable);
   }
 }
 

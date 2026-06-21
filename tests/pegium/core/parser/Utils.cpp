@@ -1,16 +1,18 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
-#include <pegium/core/utils/Collections.hpp>
 #include <pegium/core/utils/Cancellation.hpp>
+#include <pegium/core/utils/Disposable.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/Event.hpp>
-#include <pegium/core/utils/Index.hpp>
 
 namespace {
 
@@ -73,19 +75,37 @@ TEST(UtilsTest, EventEmitterPreservesRegistrationOrder) {
   third.dispose();
 }
 
-TEST(UtilsTest, CollectionHelpersExposeContainsKeysAndValues) {
-  const std::unordered_map<std::string, int> map{{"a", 1}, {"b", 2}};
-  EXPECT_TRUE(pegium::utils::contains(map, std::string("a")));
-  EXPECT_FALSE(pegium::utils::contains(map, std::string("z")));
+TEST(UtilsTest, EventEmitterSupportsConcurrentSubscriptionAndEmit) {
+  pegium::utils::EventEmitter<int> emitter;
+  std::atomic<int> calls = 0;
+  std::atomic<bool> start = false;
 
-  const std::vector<int> values{1, 2, 3};
-  EXPECT_TRUE(pegium::utils::contains_linear(values, 2));
-  EXPECT_FALSE(pegium::utils::contains_linear(values, 8));
+  constexpr std::size_t kWorkerCount = 4;
+  constexpr std::size_t kIterations = 64;
+  std::vector<std::jthread> workers;
+  workers.reserve(kWorkerCount);
 
-  const auto mapKeys = pegium::utils::keys(map);
-  const auto mapValues = pegium::utils::values(map);
-  EXPECT_EQ(mapKeys.size(), map.size());
-  EXPECT_EQ(mapValues.size(), map.size());
+  for (std::size_t worker = 0; worker < kWorkerCount; ++worker) {
+    workers.emplace_back([&]() {
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (std::size_t iteration = 0; iteration < kIterations; ++iteration) {
+        auto subscription = emitter.on([&calls](const int &value) {
+          calls.fetch_add(value, std::memory_order_relaxed);
+        });
+        emitter.emit(1);
+        if (iteration % 2 == 0) {
+          subscription.dispose();
+        }
+      }
+    });
+  }
+
+  start.store(true, std::memory_order_release);
+  workers.clear();
+
+  EXPECT_GT(calls.load(std::memory_order_relaxed), 0);
 }
 
 } // namespace

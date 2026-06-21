@@ -15,14 +15,14 @@ struct Document;
 /// node in a managed workspace document.
 [[nodiscard]] const AstNode &
 resolve_ast_node(const Documents &documents,
-                 const AstNodeDescription &description) noexcept;
+                 const AstNodeDescription &description);
 
 /// Resolves a symbol description to the current in-memory AST node, reusing
 /// `currentDocument` for same-document lookups.
 [[nodiscard]] const AstNode &
 resolve_ast_node(const Documents &documents,
                  const AstNodeDescription &description,
-                 const Document &currentDocument) noexcept;
+                 const Document &currentDocument);
 
 } // namespace workspace
 } // namespace pegium

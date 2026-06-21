@@ -1,6 +1,5 @@
 #include <pegium/converters/AstJsonConverter.hpp>
 
-#include <cassert>
 #include <limits>
 #include <optional>
 #include <string>

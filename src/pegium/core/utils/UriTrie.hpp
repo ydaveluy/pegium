@@ -16,7 +16,10 @@ namespace pegium::utils {
 /// Trie keyed by normalized URI path segments.
 template <typename T> class UriTrie {
 public:
-  void clear() { _root.children.clear(); }
+  void clear() {
+    _root.children.clear();
+    _root.element.reset();
+  }
 
   void insert(std::string_view uri, T element) {
     auto *node = getNode(normalize_uri(uri), true);

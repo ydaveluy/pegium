@@ -2,21 +2,8 @@
 
 namespace pegium::parser::detail {
 
-ReplayPrefixClass
-classify_editable_replay_prefix(std::uint32_t editCount,
-                                bool hasDestructiveEdit) noexcept {
-  if (editCount == 0u) {
-    return ReplayPrefixClass::Empty;
-  }
-  if (hasDestructiveEdit) {
-    return ReplayPrefixClass::ExtendedCommittedPrefix;
-  }
-  return ReplayPrefixClass::NewLocalPrefix;
-}
-
-ReplayPrefixClass
-classify_structural_replay_prefix(bool hadEdits,
-                                  bool hasDestructiveEdit) noexcept {
+ReplayPrefixClass classify_replay_prefix(bool hadEdits,
+                                         bool hasDestructiveEdit) noexcept {
   if (!hadEdits) {
     return ReplayPrefixClass::Empty;
   }
@@ -29,8 +16,7 @@ classify_structural_replay_prefix(bool hadEdits,
 bool continues_after_first_edit(
     const EditableRecoveryCandidate &candidate) noexcept {
   return candidate.firstEditOffset != std::numeric_limits<TextOffset>::max() &&
-         candidate.postSkipCursorOffset >
-             candidate.firstEditOffset + candidate.editSpan;
+         candidate.postSkipCursorOffset > candidate.lastEditEndOffset;
 }
 
 // Lexicographic comparison on (firstEditOffset, editCost) is not enough:
@@ -40,12 +26,9 @@ bool continues_after_first_edit(
 // that paid for `firstEditOffset` is only preferred when the gain dominates
 // the cost spread. Intentionally non-monotone in `firstEditOffset` alone.
 TextOffset recovery_key_first_edit_score(const RecoveryKey &key) noexcept {
-  constexpr std::uint32_t kDeleteCost =
-      default_edit_cost(ParseDiagnosticKind::Deleted);
-  const auto penalty = key.editCost > kDeleteCost
-                           ? (key.editCost - kDeleteCost) / kDeleteCost
-                           : 0u;
-  return key.firstEditOffset > penalty ? key.firstEditOffset - penalty : 0u;
+  const auto penalty = monus(key.editCost, kFirstEditPenaltyStep) /
+                       kFirstEditPenaltyStep;
+  return monus(key.firstEditOffset, penalty);
 }
 
 bool is_better_recovery_key(const RecoveryKey &lhs,
@@ -61,8 +44,12 @@ bool is_better_recovery_key(const RecoveryKey &lhs,
   if (lhsScore != rhsScore) {
     return lhsScore > rhsScore;
   }
-  if (lhs.editCost != rhs.editCost) {
-    return lhs.editCost < rhs.editCost;
+  // Operation-taxed edit cost: fuses the former separate `editCost` and
+  // `editCount` rungs into one scalar (`editCost + W * editCount`). Lower wins.
+  const auto lhsFaithfulness = faithfulness(lhs);
+  const auto rhsFaithfulness = faithfulness(rhs);
+  if (lhsFaithfulness != rhsFaithfulness) {
+    return lhsFaithfulness < rhsFaithfulness;
   }
   return lhs.progressAfterEdits > rhs.progressAfterEdits;
 }
@@ -78,26 +65,17 @@ terminal_recovery_key(const TerminalRecoveryCandidate &candidate) noexcept {
 
 RecoveryKey
 editable_recovery_key(const EditableRecoveryCandidate &candidate) noexcept {
-  const TextOffset effectiveEditOffset =
-      candidate.editCount == 0u ? candidate.postSkipCursorOffset
-                                : candidate.firstEditOffset;
+  // keyProgressOffset is producer-chosen: post-skip cursor for OrderedChoice /
+  // Group, raw iteration cursor for Repetition (Invariant 2).
+  const TextOffset effectiveEditOffset = effective_first_edit_offset(
+      candidate.editCount != 0u, candidate.firstEditOffset,
+      candidate.keyProgressOffset);
   return {
       .matched = candidate.matched,
       .firstEditOffset = effectiveEditOffset,
       .editCost = candidate.editCost,
-      .progressAfterEdits = candidate.postSkipCursorOffset,
-  };
-}
-
-RecoveryKey structural_progress_recovery_key(
-    const StructuralProgressRecoveryCandidate &candidate) noexcept {
-  const TextOffset effectiveEditOffset =
-      candidate.hadEdits ? candidate.firstEditOffset : candidate.cursorOffset;
-  return {
-      .matched = candidate.matched,
-      .firstEditOffset = effectiveEditOffset,
-      .editCost = candidate.editCost,
-      .progressAfterEdits = candidate.cursorOffset,
+      .editCount = candidate.editCount,
+      .progressAfterEdits = candidate.keyProgressOffset,
   };
 }
 

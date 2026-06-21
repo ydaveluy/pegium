@@ -6,7 +6,6 @@
 #include <pegium/core/parser/CompletionSupport.hpp>
 #include <pegium/core/parser/DataTypeRuleSupport.hpp>
 #include <pegium/core/parser/Introspection.hpp>
-#include <pegium/core/parser/NodeParseHelpers.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/RuleOptions.hpp>
@@ -78,8 +77,7 @@ private:
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     if constexpr (RecoveryParseModeContext<Context>) {
-      if (!ctx.isInRecoveryPhase() && !ctx.hasPendingRecoveryWindows() &&
-          !ctx.allowsCompletedWindowContinuationRecovery()) {
+      if (ctx.recoveryDescentInactive()) {
         return parse_impl(static_cast<TrackedParseContext &>(ctx));
       }
     }

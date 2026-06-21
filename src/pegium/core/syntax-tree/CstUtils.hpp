@@ -12,14 +12,6 @@
 
 namespace pegium {
 
-/// Returns `true` when `node` references an existing CST node.
-[[nodiscard]] bool is_valid(const CstNodeView &node) noexcept;
-
-/// Returns the begin offset of `node`, or `0` when the view is invalid.
-[[nodiscard]] TextOffset cst_begin(const CstNodeView &node) noexcept;
-/// Returns the end offset of `node`, or `0` when the view is invalid.
-[[nodiscard]] TextOffset cst_end(const CstNodeView &node) noexcept;
-
 /// Returns the terminal rule name that produced `node`, when applicable.
 ///
 /// Hidden trivia such as comments are typically backed by terminal rules.
@@ -53,10 +45,6 @@ find_node_for_keyword(const CstNodeView &node, std::string_view keyword,
 /// Literal matching respects the grammar literal's case-sensitivity.
 [[nodiscard]] std::vector<CstNodeView>
 find_nodes_for_keyword(const CstNodeView &node, std::string_view keyword);
-
-/// Returns the first visible leaf whose text equals `expectedText`.
-[[nodiscard]] std::optional<CstNodeView>
-find_name_like_node(const CstNodeView &node, std::string_view expectedText);
 
 /// Returns the deepest visible CST node under `node` that contains `offset`.
 [[nodiscard]] std::optional<CstNodeView>

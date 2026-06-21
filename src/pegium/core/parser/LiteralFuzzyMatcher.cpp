@@ -1,6 +1,7 @@
 #include <pegium/core/parser/LiteralFuzzyMatcher.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -46,6 +47,15 @@ struct DpState {
   DpCell noSubstitution;
 };
 
+/// Compact per-cell parent record (one `ParentOp` per lane, 2 bytes total)
+/// kept for the full DP grid so a candidate can be reconstructed, while the
+/// costly `operations`/`weightedCost` lanes only need a 3-row rolling window
+/// during the fill. Shrinks the full-grid footprint from ~24 to 2 bytes/cell.
+struct ParentTrace {
+  ParentOp anyEdit = ParentOp::None;
+  ParentOp noSubstitution = ParentOp::None;
+};
+
 enum class DpLane : std::uint8_t {
   AnyEdit,
   NoSubstitution,
@@ -80,40 +90,84 @@ ceil_div(std::uint32_t numerator, std::uint32_t denominator) noexcept {
                            : (numerator + denominator - 1u) / denominator;
 }
 
+/// A decoded UTF-8 sequence: one entry per codepoint, plus a trailing
+/// byte-offset table so a codepoint index can be mapped back to a byte offset
+/// (the contract callers rely on for `consumed`). `byteOffset[i]` is the byte
+/// offset of codepoint `i`; `byteOffset.back()` is the total byte length, so
+/// `byteOffset[k]` is the byte length of the first `k` codepoints. Decoding is
+/// lossy-tolerant: a truncated/invalid lead byte advances one byte and yields
+/// the lead byte as the codepoint (mirrors `decode_utf8_codepoint`'s fallback),
+/// so adversarial input still produces a well-formed, monotone offset table.
+struct DecodedText {
+  std::vector<std::uint32_t> codepoints;
+  std::vector<std::size_t> byteOffset; // size == codepoints.size() + 1
+};
+
+[[nodiscard]] DecodedText decode_text(std::string_view text) noexcept {
+  DecodedText decoded;
+  decoded.codepoints.reserve(text.size());
+  decoded.byteOffset.reserve(text.size() + 1u);
+  std::size_t index = 0u;
+  while (index < text.size()) {
+    decoded.byteOffset.push_back(index);
+    const char *const cursor = text.data() + index;
+    const auto length = utils::utf8_codepoint_length(*cursor);
+    if (length == 0u || length > text.size() - index) {
+      // Truncated / invalid: consume a single byte as its own codepoint so the
+      // offset table stays monotone and the byte<->codepoint mapping is exact.
+      decoded.codepoints.push_back(static_cast<unsigned char>(*cursor));
+      ++index;
+      continue;
+    }
+    decoded.codepoints.push_back(utils::decode_utf8_codepoint(cursor));
+    index += length;
+  }
+  decoded.byteOffset.push_back(text.size());
+  return decoded;
+}
+
 [[nodiscard]] constexpr RecoveryCost
-make_fuzzy_recovery_cost(std::size_t literalSize,
+make_fuzzy_recovery_cost(std::size_t literalCodepointCount,
                          std::uint32_t rawWeightedCost) noexcept {
+  // The denominator is the literal's CODEPOINT count (not its byte size): a
+  // multibyte keyword such as `café` (4 codepoints / 5 bytes) must be bucketed
+  // by its 4 codepoints so the cost-per-length normalisation matches the
+  // codepoint-granular DP. kReferenceLiteralLength is left untuned.
   return make_recovery_cost(
       rawWeightedCost,
       ceil_div(rawWeightedCost * kReferenceLiteralLength,
-               static_cast<std::uint32_t>(std::max<std::size_t>(literalSize, 1u))),
-      rawWeightedCost);
+               static_cast<std::uint32_t>(
+                   std::max<std::size_t>(literalCodepointCount, 1u))));
 }
 
 [[nodiscard]] LiteralFuzzyCandidate
-reconstruct_candidate(const std::vector<DpState> &cells, std::size_t cols,
-                      std::string_view literal, std::size_t consumed,
-                      const DpCell &cell, DpLane lane) noexcept {
-  const auto cell_at =
-      [&cells, cols, lane](std::size_t literalIndex,
-                           std::size_t consumedIndex) noexcept
-      -> const DpCell & {
-    const auto &state = cells[literalIndex * cols + consumedIndex];
-    return lane == DpLane::AnyEdit ? state.anyEdit : state.noSubstitution;
+reconstruct_candidate(const std::vector<ParentTrace> &parents, std::size_t cols,
+                      const DecodedText &literal, const DecodedText &input,
+                      std::size_t consumedCodepoints, const DpCell &cell,
+                      DpLane lane) noexcept {
+  const auto parent_at =
+      [&parents, cols, lane](std::size_t literalIndex,
+                             std::size_t consumedIndex) noexcept -> ParentOp {
+    const auto &trace = parents[literalIndex * cols + consumedIndex];
+    return lane == DpLane::AnyEdit ? trace.anyEdit : trace.noSubstitution;
   };
 
   LiteralFuzzyCandidate candidate{
-      .consumed = consumed,
+      // `consumed` is the BYTE length of the first `consumedCodepoints`
+      // codepoints of the input — callers advance the cursor by this byte span.
+      .consumed = input.byteOffset[consumedCodepoints],
+      .consumedCodepoints = consumedCodepoints,
       .distance = cell.operations,
-      .operationCount = cell.operations,
+      // .operationCount is recomputed from the reconstructed op counts below.
       .rawWeightedCost = cell.weightedCost,
-      .cost = make_fuzzy_recovery_cost(literal.size(), cell.weightedCost),
+      .cost = make_fuzzy_recovery_cost(literal.codepoints.size(),
+                                       cell.weightedCost),
   };
 
-  std::size_t literalIndex = literal.size();
-  std::size_t consumedIndex = consumed;
+  std::size_t literalIndex = literal.codepoints.size();
+  std::size_t consumedIndex = consumedCodepoints;
   while (literalIndex > 0u || consumedIndex > 0u) {
-    const auto parent = cell_at(literalIndex, consumedIndex).parent;
+    const auto parent = parent_at(literalIndex, consumedIndex);
     switch (parent) {
     case ParentOp::None:
       literalIndex = 0u;
@@ -153,12 +207,13 @@ reconstruct_candidate(const std::vector<DpState> &cells, std::size_t cols,
 [[nodiscard]] constexpr bool
 same_candidate(const LiteralFuzzyCandidate &lhs,
                const LiteralFuzzyCandidate &rhs) noexcept {
-  return lhs.consumed == rhs.consumed && lhs.distance == rhs.distance &&
+  return lhs.consumed == rhs.consumed &&
+         lhs.consumedCodepoints == rhs.consumedCodepoints &&
+         lhs.distance == rhs.distance &&
          lhs.operationCount == rhs.operationCount &&
          lhs.rawWeightedCost == rhs.rawWeightedCost &&
          lhs.cost.budgetCost == rhs.cost.budgetCost &&
          lhs.cost.primaryRankCost == rhs.cost.primaryRankCost &&
-         lhs.cost.secondaryRankCost == rhs.cost.secondaryRankCost &&
          lhs.insertionCount == rhs.insertionCount &&
          lhs.deletionCount == rhs.deletionCount &&
          lhs.substitutionCount == rhs.substitutionCount &&
@@ -176,7 +231,7 @@ dominates_candidate(const LiteralFuzzyCandidate &lhs,
                     const LiteralFuzzyCandidate &rhs) noexcept {
   const bool noWorse =
       lhs.cost.primaryRankCost <= rhs.cost.primaryRankCost &&
-      lhs.cost.secondaryRankCost <= rhs.cost.secondaryRankCost &&
+      lhs.rawWeightedCost <= rhs.rawWeightedCost &&
       lhs.distance <= rhs.distance &&
       lhs.substitutionCount <= rhs.substitutionCount &&
       lhs.consumed >= rhs.consumed;
@@ -184,7 +239,7 @@ dominates_candidate(const LiteralFuzzyCandidate &lhs,
     return false;
   }
   return lhs.cost.primaryRankCost < rhs.cost.primaryRankCost ||
-         lhs.cost.secondaryRankCost < rhs.cost.secondaryRankCost ||
+         lhs.rawWeightedCost < rhs.rawWeightedCost ||
          lhs.distance < rhs.distance ||
          lhs.substitutionCount < rhs.substitutionCount ||
          lhs.consumed > rhs.consumed;
@@ -219,7 +274,10 @@ prune_dominated_candidates(const LiteralFuzzyCandidates &candidates) {
   }
   for (std::size_t index = 0u; index < candidates.size(); ++index) {
     if (!dominated[index]) {
-      push_candidate(frontier, candidates[index]);
+      // The input is already duplicate-free (built solely via push_candidate)
+      // and we only emit non-dominated entries, so push_candidate's dedup scan
+      // could never short-circuit here — a plain push_back is equivalent.
+      frontier.push_back(candidates[index]);
     }
   }
   std::ranges::sort(frontier,
@@ -244,8 +302,24 @@ equal_codepoint(unsigned char lhs, unsigned char rhs,
          normalize_char(rhs, caseSensitive);
 }
 
-[[nodiscard]] bool is_word_like(std::string_view value) noexcept {
-  return is_word_like_terminal(value);
+/// Case-folds a decoded codepoint. Only ASCII A-Z are folded (matching the
+/// byte-level `utils::tolower`, which is a no-op outside A-Z); non-ASCII
+/// codepoints pass through unchanged so the codepoint DP preserves the exact
+/// ASCII case-insensitivity contract while comparing whole codepoints.
+[[nodiscard]] constexpr std::uint32_t
+normalize_codepoint(std::uint32_t value, bool caseSensitive) noexcept {
+  if (caseSensitive || value >= 0x80u) {
+    return value;
+  }
+  return static_cast<std::uint32_t>(
+      pegium::utils::tolower(static_cast<char>(value)));
+}
+
+[[nodiscard]] constexpr bool
+equal_decoded_codepoint(std::uint32_t lhs, std::uint32_t rhs,
+                        bool caseSensitive) noexcept {
+  return normalize_codepoint(lhs, caseSensitive) ==
+         normalize_codepoint(rhs, caseSensitive);
 }
 
 [[nodiscard]] bool
@@ -275,7 +349,7 @@ input_window_has_non_identifier_codepoint(std::string_view input,
 [[nodiscard]] bool
 has_word_like_local_anchor(std::string_view literal, std::string_view input,
                            bool caseSensitive) noexcept {
-  if (!is_word_like(literal)) {
+  if (!is_word_like_terminal(literal)) {
     return true;
   }
 
@@ -294,6 +368,13 @@ has_word_like_local_anchor(std::string_view literal, std::string_view input,
     return true;
   }
 
+  // The anchor walk below indexes both strings by BYTE (not codepoint). It is
+  // intentionally ASCII-only: a multibyte window that survives the guard above
+  // can still carry whole non-ASCII letters whose continuation bytes are
+  // compared here as raw bytes, so for such windows the loop may under-admit an
+  // anchor. That only declines to short-circuit (returning false runs the
+  // codepoint-granular recovery DP anyway), so the byte-level walk stays
+  // conservative; multibyte anchor parity is deferred to the DP.
   for (std::size_t literalIndex = 0u; literalIndex < literalWindow;
        ++literalIndex) {
     for (std::size_t inputIndex = 0u; inputIndex < inputWindow; ++inputIndex) {
@@ -345,13 +426,15 @@ LiteralFuzzyCandidatesCache::LiteralFuzzyCandidatesCache() {
 }
 
 LiteralFuzzyCandidatesCache::~LiteralFuzzyCandidatesCache() noexcept {
-  // Walk live entries and free their owned result data. Entries with
-  // `generation == 0` were never written: their `resultData` pointer is
-  // uninitialised garbage and must not be dereferenced.
-  for (auto &entry : *_entries) {
-    if (entry.generation != 0) {
-      ::operator delete(entry.resultData);
-    }
+  // Free only the slots that ever transitioned to live, recorded in
+  // `_liveSlots` (each live index appears exactly once — see header). Entries
+  // never written keep `generation == 0` and an uninitialised `resultData`
+  // that must not be dereferenced; skipping them avoids both the stride over
+  // all `kSlotCount` slots and any read of garbage. A live slot may legitimately
+  // hold `resultData == nullptr` (empty pruned result); `::operator delete`
+  // tolerates nullptr, so no extra guard is needed.
+  for (const auto index : _liveSlots) {
+    ::operator delete((*_entries)[index].resultData);
   }
 }
 
@@ -361,151 +444,139 @@ namespace {
 compute_pruned_literal_fuzzy_candidates(std::string_view literal,
                                         std::string_view input,
                                         bool caseSensitive) noexcept {
+  // Decode both strings to codepoint sequences. The Levenshtein DP is indexed
+  // by CODEPOINT — distance, operationCount and transposition are all counted
+  // in codepoints — so a multibyte typo (`café`->`cafe`) costs one edit, not
+  // two byte edits. `consumed` is mapped back to a byte offset at
+  // reconstruction time via the decoded input's byte-offset table, preserving
+  // the byte-offset contract callers depend on. For ASCII (codepoint == byte)
+  // this is bit-for-bit identical to the prior byte DP.
+  const DecodedText literalDecoded = decode_text(literal);
+  const DecodedText inputDecoded = decode_text(input);
+  const auto &literalCps = literalDecoded.codepoints;
+  const auto &inputCps = inputDecoded.codepoints;
+
   LiteralFuzzyCandidates candidates;
-  candidates.reserve(input.size() * 2u);
-  const auto rows = literal.size() + 1u;
-  const auto cols = input.size() + 1u;
-  std::vector<DpState> cells(rows * cols);
-  const auto cell_at =
-      [&cells, cols](std::size_t literalIndex,
-                     std::size_t consumedIndex) noexcept -> DpState & {
-    return cells[literalIndex * cols + consumedIndex];
-  };
-  const auto cell_at_const =
-      [&cells, cols](std::size_t literalIndex,
-                     std::size_t consumedIndex) noexcept -> const DpState & {
-    return cells[literalIndex * cols + consumedIndex];
+  candidates.reserve(inputCps.size() * 2u);
+  const auto rows = literalCps.size() + 1u;
+  const auto cols = inputCps.size() + 1u;
+  // Full parent trace (2 bytes/cell) for candidate reconstruction, plus a
+  // 3-row rolling window of costs. Cell (literalIndex, consumed) reads row
+  // literalIndex (delete, same row, prior column), literalIndex-1
+  // (match/substitute/insert) and literalIndex-2 (transposition), so three
+  // cost rows suffice while the parent grid stays full for the backtrace.
+  // Rows/cols are codepoint counts now, not byte counts.
+  std::vector<ParentTrace> parents(rows * cols);
+  std::array<std::vector<DpState>, 3u> rowRing{};
+  for (auto &row : rowRing) {
+    row.assign(cols, DpState{});
+  }
+  const auto row_for =
+      [&rowRing](std::size_t literalIndex) noexcept -> std::vector<DpState> & {
+    return rowRing[literalIndex % 3u];
   };
 
-  cell_at(0u, 0u) = {.anyEdit =
-                         {.operations = 0u,
-                          .weightedCost = 0u,
-                          .parent = ParentOp::None},
-                     .noSubstitution =
-                         {.operations = 0u,
-                          .weightedCost = 0u,
-                          .parent = ParentOp::None}};
-  for (std::size_t consumed = 1u; consumed <= input.size(); ++consumed) {
-    DpCell anyBest;
-    consider_transition(anyBest, cell_at_const(0u, consumed - 1u).anyEdit,
-                        ParentOp::DeleteUnexpectedInputCodepoint, 1u,
-                        kDeletionCost);
-    DpCell noSubBest;
-    consider_transition(noSubBest,
-                        cell_at_const(0u, consumed - 1u).noSubstitution,
-                        ParentOp::DeleteUnexpectedInputCodepoint, 1u,
-                        kDeletionCost);
-    cell_at(0u, consumed) = {.anyEdit = anyBest, .noSubstitution = noSubBest};
-  }
-  for (std::size_t literalIndex = 1u; literalIndex <= literal.size();
+  for (std::size_t literalIndex = 0u; literalIndex <= literalCps.size();
        ++literalIndex) {
-    DpCell anyBest;
-    consider_transition(anyBest,
-                        cell_at_const(literalIndex - 1u, 0u).anyEdit,
-                        ParentOp::InsertMissingInputCodepoint, 1u,
-                        kInsertionCost);
-    DpCell noSubBest;
-    consider_transition(noSubBest,
-                        cell_at_const(literalIndex - 1u, 0u).noSubstitution,
-                        ParentOp::InsertMissingInputCodepoint, 1u,
-                        kInsertionCost);
-    cell_at(literalIndex, 0u) = {.anyEdit = anyBest,
-                                 .noSubstitution = noSubBest};
-  }
-
-  for (std::size_t literalIndex = 1u; literalIndex <= literal.size();
-       ++literalIndex) {
-    for (std::size_t consumed = 1u; consumed <= input.size(); ++consumed) {
+    auto &currentRow = row_for(literalIndex);
+    for (std::size_t consumed = 0u; consumed <= inputCps.size(); ++consumed) {
       DpCell anyBest;
       DpCell noSubBest;
-      const auto literalChar =
-          static_cast<unsigned char>(literal[literalIndex - 1u]);
-      const auto inputChar =
-          static_cast<unsigned char>(input[consumed - 1u]);
+      if (literalIndex == 0u && consumed == 0u) {
+        anyBest = {.operations = 0u,
+                   .weightedCost = 0u,
+                   .parent = ParentOp::None};
+        noSubBest = anyBest;
+      } else if (literalIndex == 0u) {
+        consider_transition(anyBest, currentRow[consumed - 1u].anyEdit,
+                            ParentOp::DeleteUnexpectedInputCodepoint, 1u,
+                            kDeletionCost);
+        consider_transition(noSubBest, currentRow[consumed - 1u].noSubstitution,
+                            ParentOp::DeleteUnexpectedInputCodepoint, 1u,
+                            kDeletionCost);
+      } else if (consumed == 0u) {
+        const auto &prevRow = row_for(literalIndex - 1u);
+        consider_transition(anyBest, prevRow[0u].anyEdit,
+                            ParentOp::InsertMissingInputCodepoint, 1u,
+                            kInsertionCost);
+        consider_transition(noSubBest, prevRow[0u].noSubstitution,
+                            ParentOp::InsertMissingInputCodepoint, 1u,
+                            kInsertionCost);
+      } else {
+        const auto &prevRow = row_for(literalIndex - 1u);
+        const auto literalCp = literalCps[literalIndex - 1u];
+        const auto inputCp = inputCps[consumed - 1u];
 
-      if (equal_codepoint(literalChar, inputChar, caseSensitive)) {
-        consider_transition(anyBest,
-                            cell_at_const(literalIndex - 1u, consumed - 1u)
-                                .anyEdit,
-                            ParentOp::Match, 0u, 0u);
-        consider_transition(noSubBest,
-                            cell_at_const(literalIndex - 1u, consumed - 1u)
-                                .noSubstitution,
-                            ParentOp::Match, 0u, 0u);
+        if (equal_decoded_codepoint(literalCp, inputCp, caseSensitive)) {
+          consider_transition(anyBest, prevRow[consumed - 1u].anyEdit,
+                              ParentOp::Match, 0u, 0u);
+          consider_transition(noSubBest, prevRow[consumed - 1u].noSubstitution,
+                              ParentOp::Match, 0u, 0u);
+        }
+
+        consider_transition(anyBest, prevRow[consumed - 1u].anyEdit,
+                            ParentOp::Substitute, 1u, kSubstitutionCost);
+        consider_transition(anyBest, prevRow[consumed].anyEdit,
+                            ParentOp::InsertMissingInputCodepoint, 1u,
+                            kInsertionCost);
+        consider_transition(noSubBest, prevRow[consumed].noSubstitution,
+                            ParentOp::InsertMissingInputCodepoint, 1u,
+                            kInsertionCost);
+        consider_transition(anyBest, currentRow[consumed - 1u].anyEdit,
+                            ParentOp::DeleteUnexpectedInputCodepoint, 1u,
+                            kDeletionCost);
+        consider_transition(noSubBest, currentRow[consumed - 1u].noSubstitution,
+                            ParentOp::DeleteUnexpectedInputCodepoint, 1u,
+                            kDeletionCost);
+
+        if (literalIndex >= 2u && consumed >= 2u &&
+            equal_decoded_codepoint(literalCps[literalIndex - 1u],
+                                    inputCps[consumed - 2u], caseSensitive) &&
+            equal_decoded_codepoint(literalCps[literalIndex - 2u],
+                                    inputCps[consumed - 1u], caseSensitive)) {
+          const auto &prevPrevRow = row_for(literalIndex - 2u);
+          consider_transition(anyBest, prevPrevRow[consumed - 2u].anyEdit,
+                              ParentOp::TransposeAdjacentCodepoints, 1u,
+                              kTranspositionCost);
+          consider_transition(noSubBest,
+                              prevPrevRow[consumed - 2u].noSubstitution,
+                              ParentOp::TransposeAdjacentCodepoints, 1u,
+                              kTranspositionCost);
+        }
       }
 
-      consider_transition(anyBest,
-                          cell_at_const(literalIndex - 1u, consumed - 1u)
-                              .anyEdit,
-                          ParentOp::Substitute, 1u, kSubstitutionCost);
-      consider_transition(anyBest,
-                          cell_at_const(literalIndex - 1u, consumed).anyEdit,
-                          ParentOp::InsertMissingInputCodepoint, 1u,
-                          kInsertionCost);
-      consider_transition(noSubBest,
-                          cell_at_const(literalIndex - 1u, consumed)
-                              .noSubstitution,
-                          ParentOp::InsertMissingInputCodepoint, 1u,
-                          kInsertionCost);
-      consider_transition(anyBest,
-                          cell_at_const(literalIndex, consumed - 1u).anyEdit,
-                          ParentOp::DeleteUnexpectedInputCodepoint, 1u,
-                          kDeletionCost);
-      consider_transition(noSubBest,
-                          cell_at_const(literalIndex, consumed - 1u)
-                              .noSubstitution,
-                          ParentOp::DeleteUnexpectedInputCodepoint, 1u,
-                          kDeletionCost);
-
-      if (literalIndex >= 2u && consumed >= 2u &&
-          equal_codepoint(
-              static_cast<unsigned char>(literal[literalIndex - 1u]),
-              static_cast<unsigned char>(input[consumed - 2u]),
-              caseSensitive) &&
-          equal_codepoint(
-              static_cast<unsigned char>(literal[literalIndex - 2u]),
-              static_cast<unsigned char>(input[consumed - 1u]),
-              caseSensitive)) {
-        consider_transition(anyBest,
-                            cell_at_const(literalIndex - 2u, consumed - 2u)
-                                .anyEdit,
-                            ParentOp::TransposeAdjacentCodepoints, 1u,
-                            kTranspositionCost);
-        consider_transition(noSubBest,
-                            cell_at_const(literalIndex - 2u, consumed - 2u)
-                                .noSubstitution,
-                            ParentOp::TransposeAdjacentCodepoints, 1u,
-                            kTranspositionCost);
-      }
-
-      cell_at(literalIndex, consumed) = {.anyEdit = anyBest,
-                                         .noSubstitution = noSubBest};
+      currentRow[consumed] = {.anyEdit = anyBest, .noSubstitution = noSubBest};
+      parents[literalIndex * cols + consumed] = {
+          .anyEdit = anyBest.parent, .noSubstitution = noSubBest.parent};
     }
   }
 
   const bool wordLikeCandidateSpace =
-      is_word_like(literal) && is_word_like(input);
-  for (std::size_t consumed = 1u; consumed <= input.size(); ++consumed) {
+      is_word_like_terminal(literal) && is_word_like_terminal(input);
+  const auto &finalRow = row_for(literalCps.size());
+  for (std::size_t consumed = 1u; consumed <= inputCps.size(); ++consumed) {
     const auto collect_candidate =
         [&](const DpCell &cell, DpLane lane) noexcept {
           if (cell.operations == kNoMatch || cell.operations == 0u) {
             return;
           }
-          auto candidate =
-              reconstruct_candidate(cells, cols, literal, consumed, cell, lane);
-          if (wordLikeCandidateSpace && consumed < input.size()) {
+          auto candidate = reconstruct_candidate(
+              parents, cols, literalDecoded, inputDecoded, consumed, cell, lane);
+          if (wordLikeCandidateSpace && consumed < inputCps.size()) {
+            // Trailing unconsumed CODEPOINTS, charged as deletions — the
+            // codepoint analogue of the prior byte-count trailing penalty.
             const auto trailing =
-                static_cast<std::uint32_t>(input.size() - consumed);
+                static_cast<std::uint32_t>(inputCps.size() - consumed);
             candidate.distance += trailing;
             candidate.deletionCount += trailing;
             candidate.rawWeightedCost += trailing * kDeletionCost;
             candidate.operationCount += trailing;
-            candidate.cost =
-                make_fuzzy_recovery_cost(literal.size(), candidate.rawWeightedCost);
+            candidate.cost = make_fuzzy_recovery_cost(
+                literalCps.size(), candidate.rawWeightedCost);
           }
           push_candidate(candidates, candidate);
         };
-    const auto &state = cell_at_const(literal.size(), consumed);
+    const auto &state = finalRow[consumed];
     collect_candidate(state.anyEdit, DpLane::AnyEdit);
     collect_candidate(state.noSubstitution, DpLane::NoSubstitution);
   }
@@ -527,13 +598,18 @@ fuzzy_cache_slot_index(std::string_view literal, std::string_view input,
          (LiteralFuzzyCandidatesCache::kSlotCount - 1);
 }
 
-void store_pruned_into_slot(LiteralFuzzyCandidatesCache::Entry &slot,
-                            std::string_view literal,
+void store_pruned_into_slot(LiteralFuzzyCandidatesCache &cache,
+                            std::size_t slotIndex, std::string_view literal,
                             std::string_view input, bool caseSensitive,
                             const LiteralFuzzyCandidates &pruned) noexcept {
-  // Free any previous owner of this slot (collision eviction).
+  auto &slot = *cache.slotAt(slotIndex);
+  // Free any previous owner of this slot (collision eviction). On the first
+  // write the slot is still at generation 0 (never owned heap memory); record
+  // it as live exactly once on that 0->1 transition so the destructor frees it.
   if (slot.generation != 0) {
     ::operator delete(slot.resultData);
+  } else {
+    cache.markSlotLive(slotIndex);
   }
   slot.literalData = literal.data();
   slot.literalSize = literal.size();
@@ -556,28 +632,6 @@ void store_pruned_into_slot(LiteralFuzzyCandidatesCache::Entry &slot,
 
 } // namespace
 
-LiteralFuzzyCandidates
-find_literal_fuzzy_candidates(std::string_view literal,
-                              std::string_view input, bool caseSensitive,
-                              LiteralFuzzyCandidatesCache *cache) noexcept {
-  if (cache != nullptr) {
-    const auto view = find_literal_fuzzy_candidates_view(
-        literal, input, caseSensitive, *cache);
-    return LiteralFuzzyCandidates(view.begin(), view.end());
-  }
-
-  if (literal.empty() || input.empty()) {
-    return {};
-  }
-  if (equals_text(literal, input, caseSensitive)) {
-    return {};
-  }
-  if (!has_word_like_local_anchor(literal, input, caseSensitive)) {
-    return {};
-  }
-  return compute_pruned_literal_fuzzy_candidates(literal, input, caseSensitive);
-}
-
 std::span<const LiteralFuzzyCandidate>
 find_literal_fuzzy_candidates_view(std::string_view literal,
                                    std::string_view input,
@@ -589,7 +643,8 @@ find_literal_fuzzy_candidates_view(std::string_view literal,
 
   // Cache lookup must run before `equals_text` / `has_word_like_local_anchor`
   // so the dominant cache-hit path skips both per-call O(N) scans.
-  auto &slot = *cache.slotAt(fuzzy_cache_slot_index(literal, input, caseSensitive));
+  const auto slotIndex = fuzzy_cache_slot_index(literal, input, caseSensitive);
+  auto &slot = *cache.slotAt(slotIndex);
   if (slot.generation != 0 && slot.literalData == literal.data() &&
       slot.literalSize == literal.size() &&
       slot.inputData == input.data() && slot.inputSize == input.size() &&
@@ -606,20 +661,9 @@ find_literal_fuzzy_candidates_view(std::string_view literal,
     pruned = compute_pruned_literal_fuzzy_candidates(literal, input,
                                                      caseSensitive);
   }
-  store_pruned_into_slot(slot, literal, input, caseSensitive, pruned);
+  store_pruned_into_slot(cache, slotIndex, literal, input, caseSensitive,
+                         pruned);
   return {slot.resultData, slot.resultSize};
-}
-
-std::optional<LiteralFuzzyCandidate>
-find_best_literal_fuzzy_candidate(std::string_view literal,
-                                  std::string_view input,
-                                  bool caseSensitive) noexcept {
-  auto candidates =
-      find_literal_fuzzy_candidates(literal, input, caseSensitive);
-  if (candidates.empty()) {
-    return std::nullopt;
-  }
-  return candidates.front();
 }
 
 bool literal_has_single_edit_strict_match(std::string_view literal,

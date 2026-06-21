@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <pegium/core/services/DefaultCoreService.hpp>
 #include <pegium/core/references/NameProvider.hpp>
 #include <pegium/core/references/ScopeComputation.hpp>
@@ -50,6 +52,12 @@ protected:
                               const workspace::Document &document,
                               workspace::LocalSymbols &symbols) const;
 
+private:
+  /// Builds the indexable description of `node`, or `std::nullopt` when the
+  /// node is unnamed or not describable. Shared by the exported/local paths.
+  [[nodiscard]] std::optional<workspace::AstNodeDescription>
+  make_description(const AstNode &node,
+                   const workspace::Document &document) const;
 };
 
 } // namespace pegium::references

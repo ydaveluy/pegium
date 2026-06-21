@@ -1,7 +1,8 @@
 #include <pegium/core/validation/DefaultValidationRegistry.hpp>
 
 #include <algorithm>
-#include <cstddef>
+#include <atomic>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -24,7 +25,6 @@ struct CompiledValidationCheckEntry {
   std::type_index targetType = std::type_index(typeid(AstNode));
   ValidationCheck check;        // unwrapped: try/catch is hoisted to PreparedChecks::run
   std::string category;
-  std::size_t categoryId = 0;
 };
 
 using CompiledValidationCheckList =
@@ -35,7 +35,6 @@ using CompiledValidationCheckIndex =
 
 struct CompiledValidationRegistry {
   std::vector<std::string> knownCategories;
-  std::unordered_map<std::string, std::size_t> categoryIdsByName;
   std::vector<CompiledValidationCheckEntry> checks;
   CompiledValidationCheckIndex checksByType;
   std::vector<ValidationPreparation> checksBefore;
@@ -85,29 +84,11 @@ void publish_validation_observation(
       auto message = errorPrefix + error.what();
       publish_validation_observation(*sink, rootNode, code, message);
       acceptor.error(rootNode, message);
+    } catch (...) {
+      publish_validation_observation(*sink, rootNode, code, unknownErrorMessage);
+      acceptor.error(rootNode, unknownErrorMessage);
     }
   };
-}
-
-/// Returns a per-category bitmask sized to `compiled.knownCategories`.
-/// Empty `categories` enables every category. Unknown category names are
-/// silently ignored.
-[[nodiscard]] std::vector<bool> enabled_category_mask_for(
-    const detail::CompiledValidationRegistry &compiled,
-    std::span<const std::string> categories) noexcept {
-  const auto categoryCount = compiled.knownCategories.size();
-  if (categories.empty()) {
-    return std::vector<bool>(categoryCount, true);
-  }
-  std::vector<bool> mask(categoryCount, false);
-  for (const auto &category : categories) {
-    const auto categoryIt = compiled.categoryIdsByName.find(category);
-    if (categoryIt == compiled.categoryIdsByName.end()) {
-      continue;
-    }
-    mask[categoryIt->second] = true;
-  }
-  return mask;
 }
 
 } // namespace
@@ -121,8 +102,12 @@ void DefaultValidationRegistry::validate_category(std::string_view category) {
 
 std::shared_ptr<const detail::CompiledValidationRegistry>
 DefaultValidationRegistry::compiledRegistry() const {
-  if (!_compiledDirty) {
-    assert(_compiled != nullptr);
+  if (_compileClean.load(std::memory_order_acquire)) {
+    return _compiled;
+  }
+
+  std::scoped_lock lock(_compileMutex);
+  if (_compileClean.load(std::memory_order_relaxed)) {
     return _compiled;
   }
 
@@ -131,21 +116,12 @@ DefaultValidationRegistry::compiledRegistry() const {
   compiled->checksBefore = _registeredChecksBefore;
   compiled->checksAfter = _registeredChecksAfter;
 
-  compiled->categoryIdsByName.reserve(compiled->knownCategories.size());
-  for (std::size_t index = 0; index < compiled->knownCategories.size();
-       ++index) {
-    compiled->categoryIdsByName.try_emplace(compiled->knownCategories[index],
-                                            index);
-  }
-
   compiled->checks.reserve(_registeredChecks.size());
   for (const auto &entry : _registeredChecks) {
-    const auto categoryIt = compiled->categoryIdsByName.find(entry.category);
     compiled->checks.push_back(detail::CompiledValidationCheckEntry{
         .targetType = entry.targetType,
         .check = entry.check,
-        .category = entry.category,
-        .categoryId = categoryIt->second});
+        .category = entry.category});
   }
 
   const auto &reflection = *services.shared.astReflection;
@@ -162,7 +138,7 @@ DefaultValidationRegistry::compiledRegistry() const {
   compiled->sink = services.shared.observabilitySink;
 
   _compiled = std::move(compiled);
-  _compiledDirty = false;
+  _compileClean.store(true, std::memory_order_release);
 
   return _compiled;
 }
@@ -184,36 +160,18 @@ void DefaultValidationRegistry::registerTypedCheck(
       _knownCategories.end()) {
     _knownCategories.push_back(storedCategory);
   }
-  _compiledDirty = true;
-}
-
-const std::vector<bool> &DefaultValidationRegistry::enabled_category_mask(
-    const detail::CompiledValidationRegistry &compiled,
-    std::span<const std::string> categories) const {
-  // Identity-based caching: when the validator iterates an AST it passes the
-  // same `categories` span on every call to `runChecks`, so we recognise the
-  // pointer/size pair and skip the (compiled.knownCategories.size()) hashes.
-  if (_cachedMaskCompiled == &compiled &&
-      _cachedMaskCategoriesData == categories.data() &&
-      _cachedMaskCategoriesSize == categories.size()) {
-    return _cachedMask;
-  }
-  _cachedMask = enabled_category_mask_for(compiled, categories);
-  _cachedMaskCompiled = &compiled;
-  _cachedMaskCategoriesData = categories.data();
-  _cachedMaskCategoriesSize = categories.size();
-  return _cachedMask;
+  _compileClean.store(false, std::memory_order_relaxed);
 }
 
 void DefaultValidationRegistry::runChecks(
     const AstNode &node, const ValidationAcceptor &acceptor,
     std::span<const std::string> categories,
     const utils::CancellationToken &cancelToken) const {
-  // Refresh the compiled snapshot if dirty, then use a raw pointer to avoid
-  // an atomic refcount bump per call (50k nodes × 2 ops would be measurable).
-  // The snapshot is owned by `_compiled` and lives at least until the next
-  // mutating registry operation, which is forbidden during validation.
-  if (_compiledDirty) {
+  // Publish the compiled snapshot exactly once (compiledRegistry() is
+  // thread-safe), then read it lock-free. Registration — the only mutation — is
+  // done before any build, so `_compiled` is stable across the parallel
+  // validation phase and safe to dereference without a per-node refcount bump.
+  if (!_compileClean.load(std::memory_order_acquire)) {
     (void)compiledRegistry();
   }
   const auto &compiled = *_compiled;
@@ -223,14 +181,16 @@ void DefaultValidationRegistry::runChecks(
     return;
   }
 
-  const auto &mask = enabled_category_mask(compiled, categories);
-  if (mask.empty()) {
-    return;
-  }
+  // An empty `categories` span enables every category; otherwise a check runs
+  // only when its category was requested. Testing membership against the small
+  // `categories` span per call keeps the registry free of shared mutable state,
+  // so it is safe to share across documents validated in parallel.
+  const bool allCategories = categories.empty();
 
   for (const auto *entry : checksIt->second) {
     utils::throw_if_cancelled(cancelToken);
-    if (entry->categoryId >= mask.size() || !mask[entry->categoryId]) {
+    if (!allCategories &&
+        std::ranges::find(categories, entry->category) == categories.end()) {
       continue;
     }
     try {
@@ -241,6 +201,14 @@ void DefaultValidationRegistry::runChecks(
       }
       auto message = std::string("An error occurred during validation: ") +
                      error.what();
+      publish_validation_observation(
+          *compiled.sink, node,
+          observability::ObservationCode::ValidationCheckThrew, message,
+          entry->category);
+      acceptor.error(node, message);
+    } catch (...) {
+      const auto message =
+          std::string("An unknown error occurred during validation.");
       publish_validation_observation(
           *compiled.sink, node,
           observability::ObservationCode::ValidationCheckThrew, message,
@@ -276,7 +244,7 @@ void DefaultValidationRegistry::registerBeforeDocument(
       observability::ObservationCode::ValidationPreparationThrew,
       "An error occurred during set-up of the validation: ",
       "An error occurred during set-up of the validation"));
-  _compiledDirty = true;
+  _compileClean.store(false, std::memory_order_relaxed);
 }
 
 void DefaultValidationRegistry::registerAfterDocument(
@@ -290,7 +258,7 @@ void DefaultValidationRegistry::registerAfterDocument(
       observability::ObservationCode::ValidationFinalizationThrew,
       "An error occurred during tear-down of the validation: ",
       "An error occurred during tear-down of the validation"));
-  _compiledDirty = true;
+  _compileClean.store(false, std::memory_order_relaxed);
 }
 
 } // namespace pegium::validation

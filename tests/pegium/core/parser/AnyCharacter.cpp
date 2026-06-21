@@ -4,15 +4,22 @@
 
 using namespace pegium::parser;
 
-TEST(AnyCharacterTest, RejectsEmptyInput) {
-  auto result = dot.terminal(std::string{});
-  EXPECT_EQ(result, nullptr);
-}
-
-TEST(AnyCharacterTest, RejectsSentinelNul) {
-  std::string nulInput{"\0", 1};
-  auto result = dot.terminal(nulInput);
-  EXPECT_EQ(result, nullptr);
+TEST(AnyCharacterTest, RejectsInput) {
+  struct Case {
+    const char *name;
+    std::string input;
+  };
+  const Case kCases[] = {
+      {"RejectsEmptyInput", std::string{}},
+      {"RejectsSentinelNul", std::string{"\0", 1}},
+      {"RejectsTruncatedUtf8LeadByte", std::string{"\xC3"}},
+      {"RejectsInvalidUtf8LeadByte", std::string{"\x80"}},
+  };
+  for (const auto &c : kCases) {
+    SCOPED_TRACE(c.name);
+    auto result = dot.terminal(c.input);
+    EXPECT_EQ(result, nullptr);
+  }
 }
 
 TEST(AnyCharacterTest, ConsumesSingleAsciiCharacter) {
@@ -29,16 +36,6 @@ TEST(AnyCharacterTest, ConsumesSingleUtf8CodePoint) {
 
   EXPECT_NE(result, nullptr);
   EXPECT_EQ(result - input.c_str(), 2);
-}
-
-TEST(AnyCharacterTest, RejectsTruncatedAndInvalidUtf8LeadBytes) {
-  std::string truncated{"\xC3"};
-  auto truncatedResult = dot.terminal(truncated);
-  EXPECT_EQ(truncatedResult, nullptr);
-
-  std::string invalidLead{"\x80"};
-  auto invalidResult = dot.terminal(invalidLead);
-  EXPECT_EQ(invalidResult, nullptr);
 }
 
 TEST(AnyCharacterTest, ParseRuleAddsNodeAndKeepsCursorOnFailure) {

@@ -67,7 +67,47 @@ struct EnumInfixParser final : PegiumParser {
   }
 };
 
+// Regression guard for the InfixRule owner copy/move rebind bug. The Infix body
+// here is an inline TEMPORARY, so it is move-constructed into Root's wrapper and
+// the temporary is destroyed after Root is initialized. The wrapper's InfixRule
+// must rebind its Model's owner pointer to itself; otherwise `_owner` dangles at
+// the freed temporary and ctx.exit dereferences it while building the binary
+// expression (use-after-free, caught under ASan; latent garbage otherwise).
+struct InlineTemporaryInfixParser final : PegiumParser {
+  Terminal<std::string> ID{"ID", "a-z"_cr + many(w)};
+  Rule<Expr> Primary{
+      "Primary", create<LiteralExpr>() + assign<&LiteralExpr::name>(ID)};
+  Rule<Expr> Root{
+      "Root",
+      Infix<BinaryExpr, &BinaryExpr::left, &BinaryExpr::op, &BinaryExpr::right>{
+          "Binary", Primary, LeftAssociation("+"_kw | "-"_kw)}};
+
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return Root;
+  }
+};
+
 } // namespace
+
+TEST(InfixRuleTest, InlineTemporaryInfixBodyRebindsOwner) {
+  InlineTemporaryInfixParser parser;
+  auto result = pegium::test::Parse(parser, "a+b");
+
+  auto *binary = pegium::ast_ptr_cast<BinaryExpr>(result.value);
+  ASSERT_TRUE(binary != nullptr);
+  ASSERT_TRUE(binary->left != nullptr);
+  ASSERT_TRUE(binary->right != nullptr);
+  EXPECT_EQ(binary->op, "+");
+  EXPECT_EQ(binary->left->getContainer(), binary);
+  EXPECT_EQ(binary->right->getContainer(), binary);
+
+  auto *left = dynamic_cast<LiteralExpr *>(binary->left);
+  auto *right = dynamic_cast<LiteralExpr *>(binary->right);
+  ASSERT_TRUE(left != nullptr);
+  ASSERT_TRUE(right != nullptr);
+  EXPECT_EQ(left->name, "a");
+  EXPECT_EQ(right->name, "b");
+}
 
 TEST(InfixRuleTest, BuildsTypedBinaryExpressionAndSetsContainers) {
   InfixParser parser;

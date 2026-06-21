@@ -11,13 +11,11 @@
 #include <pegium/core/grammar/InfixRule.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/ExpectFrontier.hpp>
-#include <pegium/core/parser/Introspection.hpp>
 #include <pegium/core/parser/ParseAttempt.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/RawValueTraits.hpp>
-#include <pegium/core/parser/RuleValue.hpp>
 #include <pegium/core/parser/ValueBuildContext.hpp>
 #include <string>
 #include <tuple>
@@ -107,22 +105,10 @@ struct InfixRuleModelTraits {
 };
 
 template <typename Element> struct InfixOperatorValueSupport {
-  template <typename RawValue>
-  static grammar::RuleValue to_rule_value(RawValue &&rawValue) {
-    using RawType = std::remove_cvref_t<RawValue>;
-    if constexpr (detail::SupportedRuleValueType<RawType>) {
-      return detail::toRuleValue(std::forward<RawValue>(rawValue));
-    } else {
-      static_assert(opt::detail::DependentFalse_v<RawType>,
-                    "InfixOperator raw value must be convertible to grammar::RuleValue.");
-    }
-  }
-
   template <typename Visitor>
   static bool visit_raw_value(const Element &element, const CstNodeView &node,
                               const ValueBuildContext &context,
                               Visitor &&visitor) {
-    auto &&visitorRef = visitor;
     if constexpr (IsOrderedChoice<Element>::value) {
       for (const auto view : node) {
         const auto &child = view.node();
@@ -133,29 +119,13 @@ template <typename Element> struct InfixOperatorValueSupport {
         const auto *grammarElement = child.grammarElement;
         assert(grammarElement && "Node must have a grammar element");
         return detail::visit_selected_ordered_choice_raw_value(
-            element, grammarElement, view, context, visitorRef);
+            element, grammarElement, view, context, visitor);
       }
       return false;
     } else {
-      visitorRef(detail::extract_raw_value(element, node, context));
+      visitor(detail::extract_raw_value(element, node, context));
       return true;
     }
-  }
-
-  static grammar::RuleValue get_value(const Element &element,
-                                      const CstNodeView &node) {
-    ValueBuildContext context;
-    grammar::RuleValue value{std::int8_t{0}};
-    if (const bool visited =
-            visit_raw_value(element, node, context,
-                            [&value]<typename RawValue>(RawValue &&rawValue) {
-                              value = to_rule_value(
-                                  std::forward<RawValue>(rawValue));
-                            });
-        !visited) {
-      return grammar::RuleValue{std::int8_t{0}};
-    }
-    return value;
   }
 };
 

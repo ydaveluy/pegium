@@ -1,5 +1,8 @@
 #include "RecoveryTestSupport.hpp"
 
+#include <functional>
+#include <string>
+
 using namespace pegium::parser;
 using namespace pegium::test::recovery;
 
@@ -675,72 +678,247 @@ TEST(RecoveryTest,
   EXPECT_FALSE(call->args.empty()) << parseDump;
 }
 
-TEST(RecoveryTest, ArithmeticShapedModuleKeepsBrokenCallLocalWithoutComment) {
-  const auto whitespace = some(s);
-  TerminalRule<> slComment{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
-  const auto skipper = SkipperBuilder().ignore(whitespace).hide(slComment).build();
+// Table-driven fold of three arithmetic-shaped module recovery tests that share
+// the identical assertion sequence (only ASSERT_TRUE(value) +
+// EXPECT_TRUE(fullMatch)). Each row reproduces its original grammar/skipper/input
+// verbatim; the only differences are the grammar shape and the input.
+TEST(RecoveryTest, ArithmeticShapedModuleKeepsBrokenCallLocalFullMatch) {
+  struct FullMatchOutcome {
+    bool hasValue;
+    bool fullMatch;
+    std::string parseDump;
+  };
+  struct Case {
+    const char *name;
+    std::function<FullMatchOutcome()> run;
+  };
+  static const Case kCases[] = {
+      // Original test: ArithmeticShapedModuleKeepsBrokenCallLocalWithoutComment
+      {"WithoutComment",
+       [] {
+         const auto whitespace = some(s);
+         TerminalRule<> slComment{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
+         const auto skipper =
+             SkipperBuilder().ignore(whitespace).hide(slComment).build();
 
-  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
-  TerminalRule<int> number{"NUMBER", some(d)};
-  ParserRule<RecoveryParameter> parameter{
-      "Parameter", assign<&RecoveryParameter::name>(id)};
-  ParserRule<RecoveryExpression> expression{
-      "Expression", create<RecoveryNumberExpression>() +
-                        assign<&RecoveryNumberExpression::value>(number)};
-  ParserRule<RecoveryExpression> primaryExpression{
-      "PrimaryExpression", create<RecoveryNumberExpression>() +
+         TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+         TerminalRule<int> number{"NUMBER", some(d)};
+         ParserRule<RecoveryParameter> parameter{
+             "Parameter", assign<&RecoveryParameter::name>(id)};
+         ParserRule<RecoveryExpression> expression{
+             "Expression", create<RecoveryNumberExpression>() +
                                assign<&RecoveryNumberExpression::value>(number)};
-  InfixRule<RecoveryBinaryExpression, &RecoveryBinaryExpression::left,
-            &RecoveryBinaryExpression::op,
-            &RecoveryBinaryExpression::right>
-      binaryExpression{"BinaryExpression",
-                       primaryExpression,
-                       LeftAssociation("%"_kw),
-                       LeftAssociation("^"_kw),
-                       LeftAssociation("*"_kw | "/"_kw),
-                       LeftAssociation("+"_kw | "-"_kw)};
-  expression = binaryExpression;
-  primaryExpression =
-      create<RecoveryNode>() + "("_kw + assign<&RecoveryNode::token>(id) +
-              ")"_kw |
-      create<RecoveryNumberExpression>() +
-          assign<&RecoveryNumberExpression::value>(number) |
-      create<RecoveryFunctionCall>() + assign<&RecoveryFunctionCall::name>(id) +
-          option("("_kw +
-                 append<&RecoveryFunctionCall::args>(expression) +
-                 many(","_kw + append<&RecoveryFunctionCall::args>(expression)) +
-                 ")"_kw);
-  ParserRule<RecoveryDefinitionWithOptionalArgs> definition{
-      "Definition",
-      "def"_kw + assign<&RecoveryDefinitionWithOptionalArgs::name>(id) +
-          option("("_kw +
-                 append<&RecoveryDefinitionWithOptionalArgs::args>(parameter) +
-                 many(","_kw +
-                      append<&RecoveryDefinitionWithOptionalArgs::args>(
-                          parameter)) +
-                 ")"_kw) +
-          ":"_kw +
-          assign<&RecoveryDefinitionWithOptionalArgs::expr>(expression) +
-          ";"_kw};
-  ParserRule<RecoveryExpressionEvaluation> evaluation{
-      "Evaluation",
-      assign<&RecoveryExpressionEvaluation::expression>(expression) + ";"_kw};
-  ParserRule<pegium::AstNode> statement{"Statement", evaluation};
-  statement = definition | evaluation;
-  ParserRule<RecoveryModule> module{
-      "Module",
-      "module"_kw + assign<&RecoveryModule::name>(id) +
-          many(append<&RecoveryModule::statements>(statement))};
+         ParserRule<RecoveryExpression> primaryExpression{
+             "PrimaryExpression",
+             create<RecoveryNumberExpression>() +
+                 assign<&RecoveryNumberExpression::value>(number)};
+         InfixRule<RecoveryBinaryExpression, &RecoveryBinaryExpression::left,
+                   &RecoveryBinaryExpression::op,
+                   &RecoveryBinaryExpression::right>
+             binaryExpression{"BinaryExpression",
+                              primaryExpression,
+                              LeftAssociation("%"_kw),
+                              LeftAssociation("^"_kw),
+                              LeftAssociation("*"_kw | "/"_kw),
+                              LeftAssociation("+"_kw | "-"_kw)};
+         expression = binaryExpression;
+         primaryExpression =
+             create<RecoveryNode>() + "("_kw + assign<&RecoveryNode::token>(id) +
+                     ")"_kw |
+             create<RecoveryNumberExpression>() +
+                 assign<&RecoveryNumberExpression::value>(number) |
+             create<RecoveryFunctionCall>() +
+                 assign<&RecoveryFunctionCall::name>(id) +
+                 option("("_kw +
+                        append<&RecoveryFunctionCall::args>(expression) +
+                        many(","_kw +
+                             append<&RecoveryFunctionCall::args>(expression)) +
+                        ")"_kw);
+         ParserRule<RecoveryDefinitionWithOptionalArgs> definition{
+             "Definition",
+             "def"_kw + assign<&RecoveryDefinitionWithOptionalArgs::name>(id) +
+                 option("("_kw +
+                        append<&RecoveryDefinitionWithOptionalArgs::args>(
+                            parameter) +
+                        many(","_kw +
+                             append<&RecoveryDefinitionWithOptionalArgs::args>(
+                                 parameter)) +
+                        ")"_kw) +
+                 ":"_kw +
+                 assign<&RecoveryDefinitionWithOptionalArgs::expr>(expression) +
+                 ";"_kw};
+         ParserRule<RecoveryExpressionEvaluation> evaluation{
+             "Evaluation",
+             assign<&RecoveryExpressionEvaluation::expression>(expression) +
+                 ";"_kw};
+         ParserRule<pegium::AstNode> statement{"Statement", evaluation};
+         statement = definition | evaluation;
+         ParserRule<RecoveryModule> module{
+             "Module",
+             "module"_kw + assign<&RecoveryModule::name>(id) +
+                 many(append<&RecoveryModule::statements>(statement))};
 
-  const auto result = parseRule(module,
-                                "module basicMath\n"
-                                "\n"
-                                "Root(64 3/0);\n",
-                                skipper);
-  const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+         const auto result = parseRule(module,
+                                       "module basicMath\n"
+                                       "\n"
+                                       "Root(64 3/0);\n",
+                                       skipper);
+         const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+         return FullMatchOutcome{result.value != nullptr, result.fullMatch,
+                                 parseDump};
+       }},
+      // Original test:
+      // ArithmeticShapedModuleKeepsBrokenCallLocalWithTrailingCommentAndSlashOnly
+      {"WithTrailingCommentAndSlashOnly",
+       [] {
+         const auto whitespace = some(s);
+         TerminalRule<> slComment{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
+         const auto skipper =
+             SkipperBuilder().ignore(whitespace).hide(slComment).build();
 
-  ASSERT_TRUE(result.value) << parseDump;
-  EXPECT_TRUE(result.fullMatch) << parseDump;
+         TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+         TerminalRule<int> number{"NUMBER", some(d)};
+         ParserRule<RecoveryParameter> parameter{
+             "Parameter", assign<&RecoveryParameter::name>(id)};
+         ParserRule<RecoveryExpression> expression{
+             "Expression", create<RecoveryNumberExpression>() +
+                               assign<&RecoveryNumberExpression::value>(number)};
+         ParserRule<RecoveryExpression> primaryExpression{
+             "PrimaryExpression",
+             create<RecoveryNumberExpression>() +
+                 assign<&RecoveryNumberExpression::value>(number)};
+         InfixRule<RecoveryBinaryExpression, &RecoveryBinaryExpression::left,
+                   &RecoveryBinaryExpression::op,
+                   &RecoveryBinaryExpression::right>
+             binaryExpression{"BinaryExpression", primaryExpression,
+                              LeftAssociation("/"_kw)};
+         expression = binaryExpression;
+         primaryExpression =
+             create<RecoveryNode>() + "("_kw + assign<&RecoveryNode::token>(id) +
+                     ")"_kw |
+             create<RecoveryNumberExpression>() +
+                 assign<&RecoveryNumberExpression::value>(number) |
+             create<RecoveryFunctionCall>() +
+                 assign<&RecoveryFunctionCall::name>(id) +
+                 option("("_kw +
+                        append<&RecoveryFunctionCall::args>(expression) +
+                        many(","_kw +
+                             append<&RecoveryFunctionCall::args>(expression)) +
+                        ")"_kw);
+         ParserRule<RecoveryDefinitionWithOptionalArgs> definition{
+             "Definition",
+             "def"_kw + assign<&RecoveryDefinitionWithOptionalArgs::name>(id) +
+                 option("("_kw +
+                        append<&RecoveryDefinitionWithOptionalArgs::args>(
+                            parameter) +
+                        many(","_kw +
+                             append<&RecoveryDefinitionWithOptionalArgs::args>(
+                                 parameter)) +
+                        ")"_kw) +
+                 ":"_kw +
+                 assign<&RecoveryDefinitionWithOptionalArgs::expr>(expression) +
+                 ";"_kw};
+         ParserRule<RecoveryExpressionEvaluation> evaluation{
+             "Evaluation",
+             assign<&RecoveryExpressionEvaluation::expression>(expression) +
+                 ";"_kw};
+         ParserRule<pegium::AstNode> statement{"Statement", evaluation};
+         statement = definition | evaluation;
+         ParserRule<RecoveryModule> module{
+             "Module",
+             "module"_kw + assign<&RecoveryModule::name>(id) +
+                 many(append<&RecoveryModule::statements>(statement))};
+
+         const auto result = parseRule(module,
+                                       "module basicMath\n"
+                                       "\n"
+                                       "Root(64 3/0); // 4\n",
+                                       skipper);
+         const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+         return FullMatchOutcome{result.value != nullptr, result.fullMatch,
+                                 parseDump};
+       }},
+      // Original test:
+      // ArithmeticShapedModuleKeepsBrokenCallLocalWithTrailingCommentAndReferenceBranch
+      {"WithTrailingCommentAndReferenceBranch",
+       [] {
+         const auto whitespace = some(s);
+         TerminalRule<> slComment{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
+         const auto skipper =
+             SkipperBuilder().ignore(whitespace).hide(slComment).build();
+
+         TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+         TerminalRule<int> number{"NUMBER", some(d)};
+         ParserRule<RecoveryParameter> parameter{
+             "Parameter", assign<&RecoveryParameter::name>(id)};
+         ParserRule<RecoveryExpression> expression{
+             "Expression", create<RecoveryNumberExpression>() +
+                               assign<&RecoveryNumberExpression::value>(number)};
+         ParserRule<RecoveryExpression> primaryExpression{
+             "PrimaryExpression",
+             create<RecoveryNumberExpression>() +
+                 assign<&RecoveryNumberExpression::value>(number)};
+         InfixRule<RecoveryBinaryExpression, &RecoveryBinaryExpression::left,
+                   &RecoveryBinaryExpression::op,
+                   &RecoveryBinaryExpression::right>
+             binaryExpression{"BinaryExpression", primaryExpression,
+                              LeftAssociation("/"_kw)};
+         expression = binaryExpression;
+         primaryExpression =
+             create<RecoveryNode>() + "("_kw + assign<&RecoveryNode::token>(id) +
+                     ")"_kw |
+             create<RecoveryNumberExpression>() +
+                 assign<&RecoveryNumberExpression::value>(number) |
+             create<RecoveryFunctionCall>() +
+                 assign<&RecoveryFunctionCall::name>(id) +
+                 option("("_kw +
+                        append<&RecoveryFunctionCall::args>(expression) +
+                        many(","_kw +
+                             append<&RecoveryFunctionCall::args>(expression)) +
+                        ")"_kw) |
+             create<RecoveryReferenceExpression>() +
+                 assign<&RecoveryReferenceExpression::name>(id);
+         ParserRule<RecoveryDefinitionWithOptionalArgs> definition{
+             "Definition",
+             "def"_kw + assign<&RecoveryDefinitionWithOptionalArgs::name>(id) +
+                 option("("_kw +
+                        append<&RecoveryDefinitionWithOptionalArgs::args>(
+                            parameter) +
+                        many(","_kw +
+                             append<&RecoveryDefinitionWithOptionalArgs::args>(
+                                 parameter)) +
+                        ")"_kw) +
+                 ":"_kw +
+                 assign<&RecoveryDefinitionWithOptionalArgs::expr>(expression) +
+                 ";"_kw};
+         ParserRule<RecoveryExpressionEvaluation> evaluation{
+             "Evaluation",
+             assign<&RecoveryExpressionEvaluation::expression>(expression) +
+                 ";"_kw};
+         ParserRule<pegium::AstNode> statement{"Statement", evaluation};
+         statement = definition | evaluation;
+         ParserRule<RecoveryModule> module{
+             "Module",
+             "module"_kw + assign<&RecoveryModule::name>(id) +
+                 many(append<&RecoveryModule::statements>(statement))};
+
+         const auto result = parseRule(module,
+                                       "module basicMath\n"
+                                       "\n"
+                                       "Root(64 3/0); // 4\n",
+                                       skipper);
+         const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+         return FullMatchOutcome{result.value != nullptr, result.fullMatch,
+                                 parseDump};
+       }},
+  };
+
+  for (const auto &c : kCases) {
+    SCOPED_TRACE(c.name);
+    const auto outcome = c.run();
+    ASSERT_TRUE(outcome.hasValue) << outcome.parseDump;
+    EXPECT_TRUE(outcome.fullMatch) << outcome.parseDump;
+  }
 }
 
 TEST(RecoveryTest,
@@ -938,135 +1116,4 @@ TEST(RecoveryTest,
   EXPECT_EQ(b2Definition->name, "b2") << parseDump;
 }
 
-TEST(RecoveryTest,
-     ArithmeticShapedModuleKeepsBrokenCallLocalWithTrailingCommentAndSlashOnly) {
-  const auto whitespace = some(s);
-  TerminalRule<> slComment{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
-  const auto skipper = SkipperBuilder().ignore(whitespace).hide(slComment).build();
-
-  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
-  TerminalRule<int> number{"NUMBER", some(d)};
-  ParserRule<RecoveryParameter> parameter{
-      "Parameter", assign<&RecoveryParameter::name>(id)};
-  ParserRule<RecoveryExpression> expression{
-      "Expression", create<RecoveryNumberExpression>() +
-                        assign<&RecoveryNumberExpression::value>(number)};
-  ParserRule<RecoveryExpression> primaryExpression{
-      "PrimaryExpression", create<RecoveryNumberExpression>() +
-                               assign<&RecoveryNumberExpression::value>(number)};
-  InfixRule<RecoveryBinaryExpression, &RecoveryBinaryExpression::left,
-            &RecoveryBinaryExpression::op,
-            &RecoveryBinaryExpression::right>
-      binaryExpression{"BinaryExpression", primaryExpression,
-                       LeftAssociation("/"_kw)};
-  expression = binaryExpression;
-  primaryExpression =
-      create<RecoveryNode>() + "("_kw + assign<&RecoveryNode::token>(id) +
-              ")"_kw |
-      create<RecoveryNumberExpression>() +
-          assign<&RecoveryNumberExpression::value>(number) |
-      create<RecoveryFunctionCall>() + assign<&RecoveryFunctionCall::name>(id) +
-          option("("_kw +
-                 append<&RecoveryFunctionCall::args>(expression) +
-                 many(","_kw + append<&RecoveryFunctionCall::args>(expression)) +
-                 ")"_kw);
-  ParserRule<RecoveryDefinitionWithOptionalArgs> definition{
-      "Definition",
-      "def"_kw + assign<&RecoveryDefinitionWithOptionalArgs::name>(id) +
-          option("("_kw +
-                 append<&RecoveryDefinitionWithOptionalArgs::args>(parameter) +
-                 many(","_kw +
-                      append<&RecoveryDefinitionWithOptionalArgs::args>(
-                          parameter)) +
-                 ")"_kw) +
-          ":"_kw +
-          assign<&RecoveryDefinitionWithOptionalArgs::expr>(expression) +
-          ";"_kw};
-  ParserRule<RecoveryExpressionEvaluation> evaluation{
-      "Evaluation",
-      assign<&RecoveryExpressionEvaluation::expression>(expression) + ";"_kw};
-  ParserRule<pegium::AstNode> statement{"Statement", evaluation};
-  statement = definition | evaluation;
-  ParserRule<RecoveryModule> module{
-      "Module",
-      "module"_kw + assign<&RecoveryModule::name>(id) +
-          many(append<&RecoveryModule::statements>(statement))};
-
-  const auto result = parseRule(module,
-                                "module basicMath\n"
-                                "\n"
-                                "Root(64 3/0); // 4\n",
-                                skipper);
-  const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
-
-  ASSERT_TRUE(result.value) << parseDump;
-  EXPECT_TRUE(result.fullMatch) << parseDump;
-}
-
-TEST(RecoveryTest,
-     ArithmeticShapedModuleKeepsBrokenCallLocalWithTrailingCommentAndReferenceBranch) {
-  const auto whitespace = some(s);
-  TerminalRule<> slComment{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
-  const auto skipper = SkipperBuilder().ignore(whitespace).hide(slComment).build();
-
-  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
-  TerminalRule<int> number{"NUMBER", some(d)};
-  ParserRule<RecoveryParameter> parameter{
-      "Parameter", assign<&RecoveryParameter::name>(id)};
-  ParserRule<RecoveryExpression> expression{
-      "Expression", create<RecoveryNumberExpression>() +
-                        assign<&RecoveryNumberExpression::value>(number)};
-  ParserRule<RecoveryExpression> primaryExpression{
-      "PrimaryExpression", create<RecoveryNumberExpression>() +
-                               assign<&RecoveryNumberExpression::value>(number)};
-  InfixRule<RecoveryBinaryExpression, &RecoveryBinaryExpression::left,
-            &RecoveryBinaryExpression::op,
-            &RecoveryBinaryExpression::right>
-      binaryExpression{"BinaryExpression", primaryExpression,
-                       LeftAssociation("/"_kw)};
-  expression = binaryExpression;
-  primaryExpression =
-      create<RecoveryNode>() + "("_kw + assign<&RecoveryNode::token>(id) +
-              ")"_kw |
-      create<RecoveryNumberExpression>() +
-          assign<&RecoveryNumberExpression::value>(number) |
-      create<RecoveryFunctionCall>() + assign<&RecoveryFunctionCall::name>(id) +
-          option("("_kw +
-                 append<&RecoveryFunctionCall::args>(expression) +
-                 many(","_kw + append<&RecoveryFunctionCall::args>(expression)) +
-                 ")"_kw) |
-      create<RecoveryReferenceExpression>() +
-          assign<&RecoveryReferenceExpression::name>(id);
-  ParserRule<RecoveryDefinitionWithOptionalArgs> definition{
-      "Definition",
-      "def"_kw + assign<&RecoveryDefinitionWithOptionalArgs::name>(id) +
-          option("("_kw +
-                 append<&RecoveryDefinitionWithOptionalArgs::args>(parameter) +
-                 many(","_kw +
-                      append<&RecoveryDefinitionWithOptionalArgs::args>(
-                          parameter)) +
-                 ")"_kw) +
-          ":"_kw +
-          assign<&RecoveryDefinitionWithOptionalArgs::expr>(expression) +
-          ";"_kw};
-  ParserRule<RecoveryExpressionEvaluation> evaluation{
-      "Evaluation",
-      assign<&RecoveryExpressionEvaluation::expression>(expression) + ";"_kw};
-  ParserRule<pegium::AstNode> statement{"Statement", evaluation};
-  statement = definition | evaluation;
-  ParserRule<RecoveryModule> module{
-      "Module",
-      "module"_kw + assign<&RecoveryModule::name>(id) +
-          many(append<&RecoveryModule::statements>(statement))};
-
-  const auto result = parseRule(module,
-                                "module basicMath\n"
-                                "\n"
-                                "Root(64 3/0); // 4\n",
-                                skipper);
-  const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
-
-  ASSERT_TRUE(result.value) << parseDump;
-  EXPECT_TRUE(result.fullMatch) << parseDump;
-}
 

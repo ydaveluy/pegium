@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <functional>
+#include <optional>
 
 #include <pegium/core/ParseJsonTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
@@ -222,42 +224,6 @@ struct RecoveryDataTypeNode : pegium::AstNode {
 struct RecoveryTypeListNode : pegium::AstNode {
   vector<pointer<pegium::AstNode>> elements;
 };
-
-struct RecoveryAttemptHarness {
-  detail::RecoveryAttempt attempt;
-};
-
-template <typename RuleType>
-RecoveryAttemptHarness
-bestRecoveryAttempt(const RuleType &entryRule, std::string_view text,
-                    const Skipper &skipper, ParseOptions options = {}) {
-  RecoveryAttemptHarness harness;
-  const auto snapshot = pegium::text::TextSnapshot::copy(text);
-
-  const auto failureAnalysis = inspect_failure(entryRule, skipper, snapshot);
-  const auto &strictSummary = failureAnalysis.strictResult.summary;
-  const auto editFloorOffset =
-      strictSummary.parsedLength != 0 ||
-              !failureAnalysis.snapshot.hasFailureToken
-          ? strictSummary.parsedLength
-          : failureAnalysis.snapshot
-                .failureLeafHistory[failureAnalysis.snapshot.failureTokenIndex]
-                .beginOffset;
-  const auto window = detail::compute_recovery_window(
-      failureAnalysis.snapshot,
-      std::max<std::uint32_t>(1u, options.recoveryWindowTokenCount),
-      std::max<std::uint32_t>(1u, options.recoveryWindowTokenCount),
-      editFloorOffset);
-  const auto spec = build_attempt_spec({}, window);
-  auto attempt =
-      detail::execute_recovery_parse(entryRule, skipper, options, snapshot, spec);
-  detail::classify_recovery_attempt(attempt);
-  if (!harness.attempt.cst ||
-      detail::is_better_recovery_attempt(attempt, harness.attempt)) {
-    harness.attempt = std::move(attempt);
-  }
-  return harness;
-}
 
 std::string summarize_statement_names(const RecoveryStatementListNode &root) {
   std::string summary;
@@ -571,7 +537,6 @@ TEST(RecoverySearchTest,
      InitialWindowFloorStopsBeforeFailureLeafThatEndsAtFurthestCursor) {
   ParseOptions options;
   options.recoveryWindowTokenCount = 8;
-  detail::WindowPlanner planner{options};
 
   detail::FailureSnapshot snapshot{
       .maxCursorOffset = 4,
@@ -587,138 +552,465 @@ TEST(RecoverySearchTest,
   };
   detail::RecoveryAttempt selectedAttempt;
 
-  planner.begin(snapshot, selectedAttempt);
-  const auto planned = planner.plan();
+  const auto window = detail::plan_recovery_window(
+      snapshot, selectedAttempt, options,
+      std::max<std::uint32_t>(1u, options.recoveryWindowTokenCount));
 
-  EXPECT_EQ(planned.window.beginOffset, 0u);
-  EXPECT_EQ(planned.window.editFloorOffset, 3u);
-  EXPECT_EQ(planned.window.stablePrefixOffset, 3u);
-  EXPECT_TRUE(planned.window.hasStablePrefix);
+  EXPECT_EQ(window.beginOffset, 0u);
+  EXPECT_EQ(window.editFloorOffset, 3u);
+  EXPECT_EQ(window.stablePrefixOffset, 3u);
+  EXPECT_TRUE(window.hasStablePrefix);
 }
 
-TEST(RecoverySearchTest,
-     BudgetOverflowFullMatchAtStablePrefixBoundaryDeleteOnlyIsFallback) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.stablePrefixOffset = 10;
-  attempt.hasStablePrefix = true;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 112;
-  attempt.fullMatch = true;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                .offset = 10,
-                                .beginOffset = 10,
-                                .endOffset = 24,
-                                .element = nullptr,
-                                .message = {}}});
+TEST(RecoverySearchTest, ClassifiesRecoveryAttemptSelectability) {
+  struct Case {
+    const char *name;
+    std::function<detail::RecoveryAttempt()> build;
+    std::optional<detail::RecoveryAttemptStatus> expectedStatus;
+    std::optional<bool> expectedSelectable;
+    std::optional<bool> expectedFallbackContract;
+  };
+  static const Case kCases[] = {
+      {"BudgetOverflowFullMatchAtStablePrefixBoundaryDeleteOnlyIsFallback",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.stablePrefixOffset = 10;
+         attempt.hasStablePrefix = true;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 112;
+         attempt.fullMatch = true;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
+                                       .offset = 10,
+                                       .beginOffset = 10,
+                                       .endOffset = 24,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, false,
+       std::nullopt},
+      {"BudgetOverflowAcrossLaterReplayWindowStaysSelectableOnFullMatch",
+       [] {
+         // Over-budget attempts that nevertheless reach a full match with
+         // genuine continuation past the first edit are trusted under the
+         // 4-axis ranking: the budget is a cap on exploration, not a veto on
+         // completed parses.
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.stablePrefixOffset = 22;
+         attempt.hasStablePrefix = true;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 107;
+         attempt.parsedLength = 113;
+         attempt.maxCursorOffset = 113;
+         attempt.fullMatch = true;
+         attempt.stableAfterRecovery = true;
+         attempt.reachedRecoveryTarget = true;
+         attempt.replayWindow =
+             detail::RecoveryWindow{.beginOffset = 3,
+                                    .editFloorOffset = 22,
+                                    .maxCursorOffset = 32,
+                                    .tokenCount = 8,
+                                    .forwardTokenCount = 8,
+                                    .visibleLeafBeginIndex = 0,
+                                    .stablePrefixOffset = 22,
+                                    .hasStablePrefix = true};
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 32,
+                                       .beginOffset = 32,
+                                       .endOffset = 32,
+                                       .element = nullptr,
+                                       .message = {}},
+                                      {.kind = ParseDiagnosticKind::Deleted,
+                                       .offset = 73,
+                                       .beginOffset = 73,
+                                       .endOffset = 94,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::Selectable, true, std::nullopt},
+      {"BudgetOverflowFullMatchWithoutStablePrefixAtEditFloorIsNotSelectable",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.stablePrefixOffset = 0;
+         attempt.hasStablePrefix = false;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 112;
+         attempt.fullMatch = true;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
+                                       .offset = 10,
+                                       .beginOffset = 10,
+                                       .endOffset = 24,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, false,
+       std::nullopt},
+      {"BudgetOverflowFullMatchDeletingInputPrefixWithoutStablePrefixRemainsSelectable",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.fullMatch = true;
+         attempt.parsedLength = 53;
+         attempt.lastVisibleCursorOffset = 53;
+         attempt.maxCursorOffset = 53;
+         attempt.stablePrefixOffset = 0;
+         attempt.hasStablePrefix = false;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 112;
+         attempt.replayWindow =
+             detail::RecoveryWindow{.beginOffset = 0,
+                                    .editFloorOffset = 0,
+                                    .maxCursorOffset = 0,
+                                    .tokenCount = 1,
+                                    .forwardTokenCount = 1,
+                                    .visibleLeafBeginIndex = 0,
+                                    .stablePrefixOffset = 0,
+                                    .hasStablePrefix = false};
+         attempt.cst = make_attempt_cst("req login", {{24u, 27u}, {28u, 33u}});
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
+                                       .offset = 0,
+                                       .beginOffset = 0,
+                                       .endOffset = 24,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::Selectable, true, std::nullopt},
+      {"RecoveredButNotCredibleAttemptWithinBudgetIsNotSelectable",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 12;
+         attempt.completedRecoveryWindows = 1;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 12,
+                                       .beginOffset = 12,
+                                       .endOffset = 12,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, false,
+       std::nullopt},
+      {"NarrowLocalGapInsertionWithoutStablePrefixCanBypassBudgetDowngrade",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.reachedRecoveryTarget = true;
+         attempt.parsedLength = 28;
+         attempt.lastVisibleCursorOffset = 28;
+         attempt.maxCursorOffset = 31;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 96;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 12,
+                                       .beginOffset = 12,
+                                       .endOffset = 12,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::Selectable, std::nullopt, std::nullopt},
+      {"FullMatchLocalGapInsertionWithContinuationBypassesBudget",
+       [] {
+         // A local gap insert that still produces a full match with visible
+         // continuation past the edit is accepted even when the edit cost
+         // exceeds the configured budget. The budget caps exploratory work,
+         // not completed parses.
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.fullMatch = true;
+         attempt.reachedRecoveryTarget = true;
+         attempt.parsedLength = 28;
+         attempt.lastVisibleCursorOffset = 28;
+         attempt.maxCursorOffset = 31;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 96;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 12,
+                                       .beginOffset = 12,
+                                       .endOffset = 12,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::Selectable, true, std::nullopt},
+      {"StableLocalGapInsertionWithoutStablePrefixDoesNotBypassBudgetDowngrade",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.stableAfterRecovery = true;
+         attempt.reachedRecoveryTarget = true;
+         attempt.parsedLength = 28;
+         attempt.lastVisibleCursorOffset = 28;
+         attempt.maxCursorOffset = 31;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 96;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 12,
+                                       .beginOffset = 12,
+                                       .endOffset = 12,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, false,
+       std::nullopt},
+      {"MultiInsertWithoutStablePrefixDoesNotUseLocalGapBudgetExemption",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.reachedRecoveryTarget = true;
+         attempt.parsedLength = 28;
+         attempt.lastVisibleCursorOffset = 28;
+         attempt.maxCursorOffset = 31;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 96;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 12,
+                                       .beginOffset = 12,
+                                       .endOffset = 12,
+                                       .element = nullptr,
+                                       .message = {}},
+                                      {.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 18,
+                                       .beginOffset = 18,
+                                       .endOffset = 18,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, std::nullopt,
+       std::nullopt},
+      {"DeleteOnlyFullMatchDeletingInputPrefixIsSelectableWithoutFallback",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.fullMatch = true;
+         attempt.parsedLength = 53;
+         attempt.lastVisibleCursorOffset = 53;
+         attempt.maxCursorOffset = 53;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 96;
+         attempt.replayWindow =
+             detail::RecoveryWindow{.beginOffset = 0,
+                                    .editFloorOffset = 0,
+                                    .maxCursorOffset = 0,
+                                    .tokenCount = 1,
+                                    .forwardTokenCount = 1,
+                                    .visibleLeafBeginIndex = 0,
+                                    .stablePrefixOffset = 0,
+                                    .hasStablePrefix = false};
+         attempt.cst = make_attempt_cst("req login", {{24u, 27u}, {28u, 33u}});
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
+                                       .offset = 0,
+                                       .beginOffset = 0,
+                                       .endOffset = 24,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::Selectable, true, false},
+      {"DeleteOnlyPrefixProgressWithoutFullMatchCannotUseFallbackSelection",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.fullMatch = false;
+         attempt.parsedLength = 41;
+         attempt.lastVisibleCursorOffset = 41;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 48;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
+                                       .offset = 0,
+                                       .beginOffset = 0,
+                                       .endOffset = 12,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, std::nullopt,
+       false},
+      {"DeleteOnlyLocalGapProgressWithoutStablePrefixCanUseFallbackSelection",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.fullMatch = false;
+         attempt.parsedLength = 17;
+         attempt.lastVisibleCursorOffset = 17;
+         attempt.maxCursorOffset = 34;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 1;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
+                                       .offset = 8,
+                                       .beginOffset = 8,
+                                       .endOffset = 9,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, std::nullopt,
+       true},
+      {"InsertedPrefixProgressWithoutTailParseCanUseFallbackSelection",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.hasStablePrefix = true;
+         attempt.stablePrefixOffset = 2;
+         attempt.parsedLength = 21;
+         attempt.lastVisibleCursorOffset = 21;
+         attempt.maxCursorOffset = 29;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 2;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 3,
+                                       .beginOffset = 3,
+                                       .endOffset = 3,
+                                       .element = nullptr,
+                                       .message = {}},
+                                      {.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 21,
+                                       .beginOffset = 21,
+                                       .endOffset = 21,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, std::nullopt,
+       true},
+      {"StablePrefixBoundaryClosingInsertionsNeedTailProgressForFallbackSelection",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.hasStablePrefix = true;
+         attempt.stablePrefixOffset = 10;
+         attempt.parsedLength = 34;
+         attempt.lastVisibleCursorOffset = 33;
+         attempt.maxCursorOffset = 34;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 2;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 16,
+                                       .beginOffset = 16,
+                                       .endOffset = 16,
+                                       .element = nullptr,
+                                       .message = {}},
+                                      {.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 34,
+                                       .beginOffset = 34,
+                                       .endOffset = 34,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, std::nullopt,
+       false},
+      {"SingleBoundaryClosingInsertionNeedsTailProgressForFallbackSelection",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.hasStablePrefix = true;
+         attempt.stablePrefixOffset = 22;
+         attempt.parsedLength = 25;
+         attempt.lastVisibleCursorOffset = 25;
+         attempt.maxCursorOffset = 25;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 1;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 25,
+                                       .beginOffset = 25,
+                                       .endOffset = 25,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, std::nullopt,
+       false},
+      {"BoundaryClosingInsertionCanUseFallbackSelectionAfterSpeculativeForwardExploration",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.hasStablePrefix = true;
+         attempt.stablePrefixOffset = 22;
+         attempt.parsedLength = 25;
+         attempt.lastVisibleCursorOffset = 25;
+         attempt.maxCursorOffset = 34;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 1;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
+                                       .offset = 25,
+                                       .beginOffset = 25,
+                                       .endOffset = 25,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, std::nullopt,
+       true},
+      {"NonPrefixDeleteOnlyFullMatchIsSelectableOnGenuineContinuation",
+       [] {
+         // A non-prefix delete that still reaches a full match with visible
+         // continuation past the deleted span is accepted under the 4-axis
+         // ranking: the fallback-contract path is bypassed because the primary
+         // path already classifies the attempt as Stable.
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.fullMatch = true;
+         attempt.parsedLength = 53;
+         attempt.lastVisibleCursorOffset = 53;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 96;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
+                                       .offset = 12,
+                                       .beginOffset = 12,
+                                       .endOffset = 24,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::Selectable, true, std::nullopt},
+      {"DeleteOnlyFullMatchWithoutVisibleContinuationCannotUseFallbackSelection",
+       [] {
+         detail::RecoveryAttempt attempt;
+         attempt.entryRuleMatched = true;
+         attempt.fullMatch = true;
+         attempt.parsedLength = 24;
+         attempt.lastVisibleCursorOffset = 0;
+         attempt.configuredMaxEditCost = 64;
+         attempt.editCost = 96;
+         set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
+                                       .offset = 0,
+                                       .beginOffset = 0,
+                                       .endOffset = 24,
+                                       .element = nullptr,
+                                       .message = {}}});
+         return attempt;
+       },
+       detail::RecoveryAttemptStatus::RecoveredButNotCredible, std::nullopt,
+       false},
+  };
 
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(detail::is_selectable_recovery_attempt(attempt));
-}
-
-TEST(RecoverySearchTest,
-     BudgetOverflowAcrossLaterReplayWindowStaysSelectableOnFullMatch) {
-  // Over-budget attempts that nevertheless reach a full match with genuine
-  // continuation past the first edit are trusted under the 4-axis ranking:
-  // the budget is a cap on exploration, not a veto on completed parses.
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.stablePrefixOffset = 22;
-  attempt.hasStablePrefix = true;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 107;
-  attempt.parsedLength = 113;
-  attempt.maxCursorOffset = 113;
-  attempt.fullMatch = true;
-  attempt.stableAfterRecovery = true;
-  attempt.reachedRecoveryTarget = true;
-  attempt.replayWindow =
-      detail::RecoveryWindow{.beginOffset = 3,
-                             .editFloorOffset = 22,
-                             .maxCursorOffset = 32,
-                             .tokenCount = 8,
-                             .forwardTokenCount = 8,
-                             .visibleLeafBeginIndex = 0,
-                             .stablePrefixOffset = 22,
-                             .hasStablePrefix = true};
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 32,
-                                .beginOffset = 32,
-                                .endOffset = 32,
-                                .element = nullptr,
-                                .message = {}},
-                               {.kind = ParseDiagnosticKind::Deleted,
-                                .offset = 73,
-                                .beginOffset = 73,
-                                .endOffset = 94,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Stable);
-  EXPECT_TRUE(detail::is_selectable_recovery_attempt(attempt));
-}
-
-TEST(RecoverySearchTest,
-     BudgetOverflowFullMatchWithoutStablePrefixAtEditFloorIsNotSelectable) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.stablePrefixOffset = 0;
-  attempt.hasStablePrefix = false;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 112;
-  attempt.fullMatch = true;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                .offset = 10,
-                                .beginOffset = 10,
-                                .endOffset = 24,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(detail::is_selectable_recovery_attempt(attempt));
-}
-
-TEST(RecoverySearchTest,
-     BudgetOverflowFullMatchDeletingInputPrefixWithoutStablePrefixRemainsSelectable) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.fullMatch = true;
-  attempt.parsedLength = 53;
-  attempt.lastVisibleCursorOffset = 53;
-  attempt.maxCursorOffset = 53;
-  attempt.stablePrefixOffset = 0;
-  attempt.hasStablePrefix = false;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 112;
-  attempt.replayWindow =
-      detail::RecoveryWindow{.beginOffset = 0,
-                             .editFloorOffset = 0,
-                             .maxCursorOffset = 0,
-                             .tokenCount = 1,
-                             .forwardTokenCount = 1,
-                             .visibleLeafBeginIndex = 0,
-                             .stablePrefixOffset = 0,
-                             .hasStablePrefix = false};
-  attempt.cst = make_attempt_cst("req login", {{24u, 27u}, {28u, 33u}});
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                .offset = 0,
-                                .beginOffset = 0,
-                                .endOffset = 24,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Stable);
-  EXPECT_TRUE(detail::is_selectable_recovery_attempt(attempt));
+  for (const auto &c : kCases) {
+    SCOPED_TRACE(c.name);
+    detail::RecoveryAttempt attempt = c.build();
+    detail::classify_recovery_attempt(attempt);
+    if (c.expectedStatus) {
+      EXPECT_EQ(attempt.status, *c.expectedStatus);
+    }
+    if (c.expectedSelectable) {
+      EXPECT_EQ(detail::is_selectable_recovery_attempt(attempt),
+                *c.expectedSelectable);
+    }
+    if (c.expectedFallbackContract) {
+      EXPECT_EQ(detail::satisfies_non_credible_fallback_contract(attempt, {}),
+                *c.expectedFallbackContract);
+    }
+  }
 }
 
 TEST(RecoverySearchTest,
@@ -864,17 +1156,17 @@ TEST(RecoverySearchTest, ParserResultMatchesGlobalRecoverySearchRunResult) {
   }
 }
 
-// Phase C rebaseline: global recovery-attempt ranking is the 4-axis RecoveryKey
+// Global recovery-attempt ranking is the 4-axis RecoveryKey
 // (matched > firstEditOffset higher > editCost lower > progressAfterEdits
 // higher). Old heuristics that preferred farther progress over later edits or
 // penalized cost-vs-span asymmetries are intentionally gone.
 
 TEST(RecoverySearchTest,
      GlobalRecoveryRankingPrefersLaterEditOverFartherParse) {
-  const auto farther = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+  const auto farther = make_ranked_attempt(detail::RecoveryAttemptStatus::Selectable,
                                            false, 24u, 24u, 1u, 10u, 0u, 1u);
   const auto laterEdit = make_ranked_attempt(
-      detail::RecoveryAttemptStatus::Stable, false, 20u, 20u, 1u, 18u, 0u, 1u);
+      detail::RecoveryAttemptStatus::Selectable, false, 20u, 20u, 1u, 18u, 0u, 1u);
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(laterEdit, farther));
   EXPECT_FALSE(detail::is_better_recovery_attempt(farther, laterEdit));
@@ -882,9 +1174,9 @@ TEST(RecoverySearchTest,
 
 TEST(RecoverySearchTest,
      GlobalRecoveryRankingPrefersLaterEditWhenAttemptsOtherwiseTie) {
-  const auto earlier = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+  const auto earlier = make_ranked_attempt(detail::RecoveryAttemptStatus::Selectable,
                                            true, 24u, 24u, 1u, 8u, 0u, 1u);
-  const auto later = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+  const auto later = make_ranked_attempt(detail::RecoveryAttemptStatus::Selectable,
                                          true, 24u, 24u, 1u, 12u, 0u, 1u);
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(later, earlier));
@@ -894,9 +1186,9 @@ TEST(RecoverySearchTest,
 TEST(RecoverySearchTest,
      GlobalRecoveryRankingLetsLaterLocalRepairBeatSameCostSingleDelete) {
   const auto wholeLineDelete = make_ranked_attempt(
-      detail::RecoveryAttemptStatus::Stable, true, 80u, 80u, 8u, 40u, 12u, 1u);
+      detail::RecoveryAttemptStatus::Selectable, true, 80u, 80u, 8u, 40u, 12u, 1u);
   const auto localRepair = make_ranked_attempt(
-      detail::RecoveryAttemptStatus::Stable, true, 80u, 80u, 8u, 41u, 12u, 2u);
+      detail::RecoveryAttemptStatus::Selectable, true, 80u, 80u, 8u, 41u, 12u, 2u);
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(localRepair, wholeLineDelete));
   EXPECT_FALSE(
@@ -905,76 +1197,153 @@ TEST(RecoverySearchTest,
 
 TEST(RecoverySearchTest,
      GlobalRecoveryRankingPrefersFullerRecoveryBeforeCheaperPartialAttempt) {
-  const auto full = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+  const auto full = make_ranked_attempt(detail::RecoveryAttemptStatus::Selectable,
                                         true, 24u, 24u, 12u, 8u, 0u, 2u);
-  const auto partial = make_ranked_attempt(detail::RecoveryAttemptStatus::Stable,
+  const auto partial = make_ranked_attempt(detail::RecoveryAttemptStatus::Selectable,
                                            false, 20u, 20u, 1u, 12u, 0u, 1u);
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(full, partial));
   EXPECT_FALSE(detail::is_better_recovery_attempt(partial, full));
 }
 
-TEST(RecoverySearchTest, RecoveryKeyPrefersMatchedOverUnmatched) {
-  const detail::RecoveryKey matched{.matched = true,
-                                    .firstEditOffset = 0,
-                                    .editCost = 100,
-                                    .progressAfterEdits = 0};
-  const detail::RecoveryKey unmatched{.matched = false,
-                                      .firstEditOffset = 100,
-                                      .editCost = 0,
-                                      .progressAfterEdits = 100};
+TEST(RecoverySearchTest, RecoveryKeyRanksByAxisPriority) {
+  // Each row isolates one comparator axis: `better` must beat `worse` and the
+  // reverse must not hold. The matched-axis row keeps adversarial losing fields
+  // (worse offset/cost/progress) to prove the matched axis dominates them all.
+  struct Row {
+    const char *axis;
+    detail::RecoveryKey better;
+    detail::RecoveryKey worse;
+  };
+  const Row rows[] = {
+      {"matched beats unmatched despite worse offset/cost/progress",
+       {.matched = true,
+        .firstEditOffset = 0,
+        .editCost = 100,
+        .progressAfterEdits = 0},
+       {.matched = false,
+        .firstEditOffset = 100,
+        .editCost = 0,
+        .progressAfterEdits = 100}},
+      {"later first edit offset wins",
+       {.matched = true,
+        .firstEditOffset = 20,
+        .editCost = 5,
+        .progressAfterEdits = 40},
+       {.matched = true,
+        .firstEditOffset = 10,
+        .editCost = 5,
+        .progressAfterEdits = 40}},
+      {"lower edit cost wins at same offset",
+       {.matched = true,
+        .firstEditOffset = 10,
+        .editCost = 1,
+        .progressAfterEdits = 20},
+       {.matched = true,
+        .firstEditOffset = 10,
+        .editCost = 5,
+        .progressAfterEdits = 40}},
+      // Axis 4 fuses cost+count into faithfulness = editCost + W*editCount
+      // (W = kFirstEditPenaltyStep = 4). The next three rows pin its behavior.
+      // (a) Exact-cost tie resolves by parsimony: fewer operations win.
+      //     faithfulness 128+4*1 = 132 BEATS 128+4*2 = 136.
+      {"exact-cost tie: fewer edit operations win (parsimony)",
+       {.matched = true,
+        .firstEditOffset = 10,
+        .editCost = 128,
+        .editCount = 1,
+        .progressAfterEdits = 40},
+       {.matched = true,
+        .firstEditOffset = 10,
+        .editCost = 128,
+        .editCount = 2,
+        .progressAfterEdits = 40}},
+      // (b) Near-tie: a strictly cheaper-but-larger fold still loses to the
+      //     parsimonious single operation once the per-operation tax applies.
+      //     faithfulness 128+4*1 = 132 BEATS 126+4*2 = 134, even though the
+      //     fold's raw editCost (126) is the cheaper of the two.
+      {"near-tie: single faithful edit beats a slightly cheaper two-edit fold",
+       {.matched = true,
+        .firstEditOffset = 10,
+        .editCost = 128,
+        .editCount = 1,
+        .progressAfterEdits = 40},
+       {.matched = true,
+        .firstEditOffset = 10,
+        .editCost = 126,
+        .editCount = 2,
+        .progressAfterEdits = 40}},
+      // (c) Count-dominant trap avoided: a genuinely cheaper many-op recovery
+      //     still wins, because the tax is additive on top of cost, never a
+      //     standalone count tiebreak. faithfulness 2+4*2 = 10 BEATS 8+4*1 = 12.
+      //     Offsets are picked so axis 3 (first-edit score) ties first — the
+      //     cost-2 cand pays no offset penalty (score 10) and the cost-8 cand
+      //     pays one step at offset 11 (monus(11, 1) = 10) — so axis 4 decides.
+      {"count-dominant trap: genuinely cheaper many-op recovery still wins",
+       {.matched = true,
+        .firstEditOffset = 10,
+        .editCost = 2,
+        .editCount = 2,
+        .progressAfterEdits = 40},
+       {.matched = true,
+        .firstEditOffset = 11,
+        .editCost = 8,
+        .editCount = 1,
+        .progressAfterEdits = 40}},
+      {"more progress after edits breaks the tie",
+       {.matched = true,
+        .firstEditOffset = 10,
+        .editCost = 2,
+        .progressAfterEdits = 40},
+       {.matched = true,
+        .firstEditOffset = 10,
+        .editCost = 2,
+        .progressAfterEdits = 30}},
+  };
 
-  EXPECT_TRUE(detail::is_better_recovery_key(matched, unmatched));
-  EXPECT_FALSE(detail::is_better_recovery_key(unmatched, matched));
+  for (const auto &row : rows) {
+    SCOPED_TRACE(row.axis);
+    EXPECT_TRUE(detail::is_better_recovery_key(row.better, row.worse));
+    EXPECT_FALSE(detail::is_better_recovery_key(row.worse, row.better));
+  }
 }
 
-TEST(RecoverySearchTest, RecoveryKeyPrefersLaterFirstEditOffset) {
-  const detail::RecoveryKey later{.matched = true,
-                                  .firstEditOffset = 20,
-                                  .editCost = 5,
-                                  .progressAfterEdits = 40};
-  const detail::RecoveryKey earlier{.matched = true,
-                                    .firstEditOffset = 10,
-                                    .editCost = 5,
-                                    .progressAfterEdits = 40};
-
-  EXPECT_TRUE(detail::is_better_recovery_key(later, earlier));
-  EXPECT_FALSE(detail::is_better_recovery_key(earlier, later));
+TEST(RecoverySearchTest, EffectiveFirstEditOffsetFoldsNoEditToProgress) {
+  // Single-sourced rule shared by every RecoveryKey builder: a candidate that
+  // made edits ranks on its first edit offset; one that made none ranks on its
+  // own forward progress so a UINT_MAX "no edit" sentinel never wins axis 2.
+  EXPECT_EQ(detail::effective_first_edit_offset(true, 9u, 20u), 9u);
+  EXPECT_EQ(detail::effective_first_edit_offset(false, 9u, 20u), 20u);
+  static_assert(detail::effective_first_edit_offset(true, 5u, 7u) == 5u);
+  static_assert(detail::effective_first_edit_offset(false, 5u, 7u) == 7u);
 }
 
-TEST(RecoverySearchTest, RecoveryKeyPrefersLowerEditCostAtSameOffset) {
-  const detail::RecoveryKey cheap{.matched = true,
-                                  .firstEditOffset = 10,
-                                  .editCost = 1,
-                                  .progressAfterEdits = 20};
-  const detail::RecoveryKey expensive{.matched = true,
-                                      .firstEditOffset = 10,
-                                      .editCost = 5,
-                                      .progressAfterEdits = 40};
-
-  EXPECT_TRUE(detail::is_better_recovery_key(cheap, expensive));
-  EXPECT_FALSE(detail::is_better_recovery_key(expensive, cheap));
-}
-
-TEST(RecoverySearchTest, RecoveryKeyBreaksTiesWithProgressAfterEdits) {
-  const detail::RecoveryKey farther{.matched = true,
-                                    .firstEditOffset = 10,
-                                    .editCost = 2,
-                                    .progressAfterEdits = 40};
-  const detail::RecoveryKey nearer{.matched = true,
-                                   .firstEditOffset = 10,
-                                   .editCost = 2,
-                                   .progressAfterEdits = 30};
-
-  EXPECT_TRUE(detail::is_better_recovery_key(farther, nearer));
-  EXPECT_FALSE(detail::is_better_recovery_key(nearer, farther));
+TEST(RecoverySearchTest, FirstEditScorePenaltyCurveStaysDecoupledFromCostTable) {
+  using detail::recovery_key_first_edit_score;
+  // Edit cost up to one penalty step pays no offset penalty.
+  EXPECT_EQ(recovery_key_first_edit_score({.firstEditOffset = 100, .editCost = 0}),
+            100u);
+  EXPECT_EQ(recovery_key_first_edit_score({.firstEditOffset = 100, .editCost = 4}),
+            100u);
+  // Each additional penalty step subtracts one offset unit.
+  EXPECT_EQ(recovery_key_first_edit_score({.firstEditOffset = 100, .editCost = 8}),
+            99u);
+  EXPECT_EQ(
+      recovery_key_first_edit_score({.firstEditOffset = 100, .editCost = 12}),
+      98u);
+  // The penalty saturates at zero and never underflows the offset.
+  EXPECT_EQ(recovery_key_first_edit_score({.firstEditOffset = 1, .editCost = 100}),
+            0u);
 }
 
 TEST(RecoverySearchTest, EditableRecoveryKeyProjectsAxesFromCandidate) {
+  // The ranking key reads the producer-chosen keyProgressOffset for
+  // progressAfterEdits (here distinct from postSkipCursorOffset to pin which
+  // field drives the axis).
   const detail::EditableRecoveryCandidate candidate{
       .matched = true,
-      .cursorOffset = 18,
-      .postSkipCursorOffset = 20,
+      .postSkipCursorOffset = 18,
+      .keyProgressOffset = 20,
       .editCost = 3u,
       .editCount = 2u,
       .firstEditOffset = 9u,
@@ -1008,11 +1377,10 @@ TEST(RecoverySearchTest,
      EditableCandidateContinuationUsesVisiblePostSkipAfterZeroWidthEdit) {
   const detail::EditableRecoveryCandidate candidate{
       .matched = true,
-      .cursorOffset = 17,
       .postSkipCursorOffset = 18,
       .editCost = 1,
       .editCount = 1,
-      .editSpan = 0,
+      .lastEditEndOffset = 17,
       .firstEditOffset = 17,
   };
 
@@ -1020,7 +1388,7 @@ TEST(RecoverySearchTest,
 }
 
 // Obsolete axis-projection and per-profile comparator tests were removed in
-// Phase C of the recovery rewrite (single 4-axis RecoveryKey replaces the
+// the recovery rewrite (a single 4-axis RecoveryKey replaced the
 // former 24-axis / 3-profile normalized key). The surviving behavior is
 // exercised by the RecoveryKey* tests above and by the end-to-end recovery
 // sample tests elsewhere.
@@ -1028,7 +1396,7 @@ TEST(RecoverySearchTest,
 TEST(RecoverySearchTest, RecoveryAttemptDebugJsonTracksEditedSourceSpan) {
   detail::RecoveryAttempt attempt;
   attempt.entryRuleMatched = true;
-  attempt.status = detail::RecoveryAttemptStatus::Stable;
+  attempt.status = detail::RecoveryAttemptStatus::Selectable;
   attempt.parsedLength = 40u;
   attempt.maxCursorOffset = 40u;
   attempt.editCost = 9u;
@@ -1049,13 +1417,10 @@ TEST(RecoverySearchTest, RecoveryAttemptDebugJsonTracksEditedSourceSpan) {
   const auto json = detail::recovery_attempt_to_json(attempt);
   const auto &object = json.object();
   const auto &editTrace = object.at("editTrace").object();
-  const auto &score = object.at("score").object();
 
   EXPECT_EQ(editTrace.at("firstEditOffset").integer(), 9);
   EXPECT_EQ(editTrace.at("lastEditOffset").integer(), 31);
   EXPECT_EQ(editTrace.at("editSpan").integer(), 22);
-  EXPECT_EQ(score.at("firstEditOffset").integer(), 9);
-  EXPECT_EQ(score.at("editSpan").integer(), 22);
 }
 
 TEST(RecoverySearchTest, WordLiteralSingleSubstitutionCanRecoverGenerically) {
@@ -1093,7 +1458,7 @@ TEST(RecoverySearchTest,
 
   EXPECT_TRUE(run.selectedAttempt.entryRuleMatched) << json;
   EXPECT_TRUE(run.selectedAttempt.fullMatch) << json;
-  EXPECT_EQ(run.selectedAttempt.status, detail::RecoveryAttemptStatus::Stable)
+  EXPECT_EQ(run.selectedAttempt.status, detail::RecoveryAttemptStatus::Selectable)
       << json;
   ASSERT_EQ(run.selectedAttempt.recoveryEdits.size(), 1u) << json;
   EXPECT_EQ(run.selectedAttempt.recoveryEdits.front().kind,
@@ -1152,326 +1517,6 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(result.recoveryReport.fullRecovered);
   EXPECT_EQ(result.recoveryReport.recoveryCount, 2u);
   EXPECT_EQ(result.recoveryReport.recoveryEdits, 2u);
-}
-
-TEST(RecoverySearchTest,
-     RecoveredButNotCredibleAttemptWithinBudgetIsNotSelectable) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 12;
-  attempt.completedRecoveryWindows = 1;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 12,
-                                .beginOffset = 12,
-                                .endOffset = 12,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(detail::is_selectable_recovery_attempt(attempt));
-}
-
-TEST(RecoverySearchTest,
-     NarrowLocalGapInsertionWithoutStablePrefixCanBypassBudgetDowngrade) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.reachedRecoveryTarget = true;
-  attempt.parsedLength = 28;
-  attempt.lastVisibleCursorOffset = 28;
-  attempt.maxCursorOffset = 31;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 96;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 12,
-                                .beginOffset = 12,
-                                .endOffset = 12,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Credible);
-}
-
-TEST(RecoverySearchTest,
-     FullMatchLocalGapInsertionWithContinuationBypassesBudget) {
-  // A local gap insert that still produces a full match with visible
-  // continuation past the edit is accepted even when the edit cost exceeds
-  // the configured budget. The budget caps exploratory work, not completed
-  // parses.
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.fullMatch = true;
-  attempt.reachedRecoveryTarget = true;
-  attempt.parsedLength = 28;
-  attempt.lastVisibleCursorOffset = 28;
-  attempt.maxCursorOffset = 31;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 96;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 12,
-                                .beginOffset = 12,
-                                .endOffset = 12,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Stable);
-  EXPECT_TRUE(detail::is_selectable_recovery_attempt(attempt));
-}
-
-TEST(RecoverySearchTest,
-     StableLocalGapInsertionWithoutStablePrefixDoesNotBypassBudgetDowngrade) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.stableAfterRecovery = true;
-  attempt.reachedRecoveryTarget = true;
-  attempt.parsedLength = 28;
-  attempt.lastVisibleCursorOffset = 28;
-  attempt.maxCursorOffset = 31;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 96;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 12,
-                                .beginOffset = 12,
-                                .endOffset = 12,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(detail::is_selectable_recovery_attempt(attempt));
-}
-
-TEST(RecoverySearchTest,
-     MultiInsertWithoutStablePrefixDoesNotUseLocalGapBudgetExemption) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.reachedRecoveryTarget = true;
-  attempt.parsedLength = 28;
-  attempt.lastVisibleCursorOffset = 28;
-  attempt.maxCursorOffset = 31;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 96;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 12,
-                                .beginOffset = 12,
-                                .endOffset = 12,
-                                .element = nullptr,
-                                .message = {}},
-                               {.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 18,
-                                .beginOffset = 18,
-                                .endOffset = 18,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-}
-
-TEST(RecoverySearchTest,
-     DeleteOnlyFullMatchDeletingInputPrefixIsSelectableWithoutFallback) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.fullMatch = true;
-  attempt.parsedLength = 53;
-  attempt.lastVisibleCursorOffset = 53;
-  attempt.maxCursorOffset = 53;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 96;
-  attempt.replayWindow =
-      detail::RecoveryWindow{.beginOffset = 0,
-                             .editFloorOffset = 0,
-                             .maxCursorOffset = 0,
-                             .tokenCount = 1,
-                             .forwardTokenCount = 1,
-                             .visibleLeafBeginIndex = 0,
-                             .stablePrefixOffset = 0,
-                             .hasStablePrefix = false};
-  attempt.cst = make_attempt_cst("req login", {{24u, 27u}, {28u, 33u}});
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                .offset = 0,
-                                .beginOffset = 0,
-                                .endOffset = 24,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Stable);
-  EXPECT_TRUE(detail::is_selectable_recovery_attempt(attempt));
-  EXPECT_FALSE(
-      detail::satisfies_non_credible_fallback_contract(attempt, {}));
-}
-
-TEST(RecoverySearchTest,
-     DeleteOnlyPrefixProgressWithoutFullMatchCannotUseFallbackSelection) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.fullMatch = false;
-  attempt.parsedLength = 41;
-  attempt.lastVisibleCursorOffset = 41;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 48;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                .offset = 0,
-                                .beginOffset = 0,
-                                .endOffset = 12,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(
-      detail::satisfies_non_credible_fallback_contract(attempt, {}));
-}
-
-TEST(RecoverySearchTest,
-     DeleteOnlyLocalGapProgressWithoutStablePrefixCanUseFallbackSelection) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.fullMatch = false;
-  attempt.parsedLength = 17;
-  attempt.lastVisibleCursorOffset = 17;
-  attempt.maxCursorOffset = 34;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 1;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                .offset = 8,
-                                .beginOffset = 8,
-                                .endOffset = 9,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_TRUE(detail::satisfies_non_credible_fallback_contract(attempt, {}));
-}
-
-TEST(RecoverySearchTest,
-     InsertedPrefixProgressWithoutTailParseCanUseFallbackSelection) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.hasStablePrefix = true;
-  attempt.stablePrefixOffset = 2;
-  attempt.parsedLength = 21;
-  attempt.lastVisibleCursorOffset = 21;
-  attempt.maxCursorOffset = 29;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 2;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 3,
-                                .beginOffset = 3,
-                                .endOffset = 3,
-                                .element = nullptr,
-                                .message = {}},
-                               {.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 21,
-                                .beginOffset = 21,
-                                .endOffset = 21,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_TRUE(detail::satisfies_non_credible_fallback_contract(attempt, {}));
-}
-
-TEST(RecoverySearchTest,
-     StablePrefixBoundaryClosingInsertionsNeedTailProgressForFallbackSelection) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.hasStablePrefix = true;
-  attempt.stablePrefixOffset = 10;
-  attempt.parsedLength = 34;
-  attempt.lastVisibleCursorOffset = 33;
-  attempt.maxCursorOffset = 34;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 2;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 16,
-                                .beginOffset = 16,
-                                .endOffset = 16,
-                                .element = nullptr,
-                                .message = {}},
-                               {.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 34,
-                                .beginOffset = 34,
-                                .endOffset = 34,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(detail::satisfies_non_credible_fallback_contract(attempt, {}));
-}
-
-TEST(RecoverySearchTest,
-     SingleBoundaryClosingInsertionNeedsTailProgressForFallbackSelection) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.hasStablePrefix = true;
-  attempt.stablePrefixOffset = 22;
-  attempt.parsedLength = 25;
-  attempt.lastVisibleCursorOffset = 25;
-  attempt.maxCursorOffset = 25;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 1;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 25,
-                                .beginOffset = 25,
-                                .endOffset = 25,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(detail::satisfies_non_credible_fallback_contract(attempt, {}));
-}
-
-TEST(RecoverySearchTest,
-     BoundaryClosingInsertionCanUseFallbackSelectionAfterSpeculativeForwardExploration) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.hasStablePrefix = true;
-  attempt.stablePrefixOffset = 22;
-  attempt.parsedLength = 25;
-  attempt.lastVisibleCursorOffset = 25;
-  attempt.maxCursorOffset = 34;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 1;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Inserted,
-                                .offset = 25,
-                                .beginOffset = 25,
-                                .endOffset = 25,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_TRUE(detail::satisfies_non_credible_fallback_contract(attempt, {}));
 }
 
 TEST(RecoverySearchTest,
@@ -1556,7 +1601,7 @@ TEST(RecoverySearchTest,
                                         .element = nullptr,
                                         .message = {}}});
   detail::classify_recovery_attempt(selectedAttempt);
-  ASSERT_EQ(selectedAttempt.status, detail::RecoveryAttemptStatus::Stable);
+  ASSERT_EQ(selectedAttempt.status, detail::RecoveryAttemptStatus::Selectable);
 
   detail::RecoveryAttempt candidate;
   candidate.entryRuleMatched = true;
@@ -1612,7 +1657,7 @@ TEST(RecoverySearchTest,
                                         .element = nullptr,
                                         .message = {}}});
   detail::classify_recovery_attempt(selectedAttempt);
-  ASSERT_EQ(selectedAttempt.status, detail::RecoveryAttemptStatus::Stable);
+  ASSERT_EQ(selectedAttempt.status, detail::RecoveryAttemptStatus::Selectable);
 
   detail::RecoveryAttempt candidate;
   candidate.entryRuleMatched = true;
@@ -1716,56 +1761,6 @@ TEST(RecoverySearchTest,
   EXPECT_TRUE(detail::satisfies_non_credible_fallback_contract(candidate, {}));
   EXPECT_FALSE(detail::satisfies_non_credible_fallback_contract(
       candidate, selectedAttempt));
-}
-
-TEST(RecoverySearchTest,
-     NonPrefixDeleteOnlyFullMatchIsSelectableOnGenuineContinuation) {
-  // A non-prefix delete that still reaches a full match with visible
-  // continuation past the deleted span is accepted under the 4-axis ranking:
-  // the fallback-contract path is bypassed because the primary path already
-  // classifies the attempt as Stable.
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.fullMatch = true;
-  attempt.parsedLength = 53;
-  attempt.lastVisibleCursorOffset = 53;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 96;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                .offset = 12,
-                                .beginOffset = 12,
-                                .endOffset = 24,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status, detail::RecoveryAttemptStatus::Stable);
-  EXPECT_TRUE(detail::is_selectable_recovery_attempt(attempt));
-}
-
-TEST(RecoverySearchTest,
-     DeleteOnlyFullMatchWithoutVisibleContinuationCannotUseFallbackSelection) {
-  detail::RecoveryAttempt attempt;
-  attempt.entryRuleMatched = true;
-  attempt.fullMatch = true;
-  attempt.parsedLength = 24;
-  attempt.lastVisibleCursorOffset = 0;
-  attempt.configuredMaxEditCost = 64;
-  attempt.editCost = 96;
-  set_recovery_edits(attempt, {{.kind = ParseDiagnosticKind::Deleted,
-                                .offset = 0,
-                                .beginOffset = 0,
-                                .endOffset = 24,
-                                .element = nullptr,
-                                .message = {}}});
-
-  detail::classify_recovery_attempt(attempt);
-
-  EXPECT_EQ(attempt.status,
-            detail::RecoveryAttemptStatus::RecoveredButNotCredible);
-  EXPECT_FALSE(
-      detail::satisfies_non_credible_fallback_contract(attempt, {}));
 }
 
 TEST(RecoverySearchTest, EditBudgetCanDisableRecoveryAttempts) {
@@ -2255,7 +2250,7 @@ TEST(RecoverySearchTest, RecoveryAttemptKeyDoesNotDependOnCachedFacts) {
   attempt.fullMatch = true;
   attempt.parsedLength = 24;
   attempt.editCost = 8;
-  attempt.status = detail::RecoveryAttemptStatus::Stable;
+  attempt.status = detail::RecoveryAttemptStatus::Selectable;
   attempt.recoveryEdits.push_back({.kind = ParseDiagnosticKind::Deleted,
                                    .offset = 12,
                                    .beginOffset = 12,
@@ -2280,7 +2275,7 @@ TEST(RecoverySearchTest,
   attempt.fullMatch = true;
   attempt.parsedLength = 32;
   attempt.editCost = 0;
-  attempt.status = detail::RecoveryAttemptStatus::Stable;
+  attempt.status = detail::RecoveryAttemptStatus::Selectable;
   // No recovery edits. `firstEditOffset` should fall back to parsedLength.
 
   const auto key = detail::recovery_attempt_key(attempt);

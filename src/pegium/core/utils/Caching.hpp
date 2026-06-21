@@ -36,6 +36,15 @@ public:
       }
     }
 
+    // Rendezvous with any in-flight builder callback before tearing down. Once
+    // alive is false (set under the guard mutex, which a running callback
+    // holds), no callback will touch this cache again. The guard outlives the
+    // cache, so a callback fired from a stale listener snapshot is a safe no-op.
+    {
+      std::scoped_lock lock(_callbackGuard->mutex);
+      _callbackGuard->alive = false;
+    }
+
     clear();
 
     {
@@ -60,10 +69,31 @@ protected:
     }
   }
 
+  // Wraps a document-builder event callback so it (1) never runs concurrently
+  // with dispose() and (2) becomes a no-op once this cache is disposed. The
+  // builder may fire from a listener snapshot taken before this cache was
+  // disposed or destroyed; the captured guard outlives the cache, so the
+  // wrapper can decline to touch it instead of dereferencing a dangling `this`.
+  template <typename Fn> [[nodiscard]] auto guardCallback(Fn fn) const {
+    return [guard = _callbackGuard, fn = std::move(fn)](auto &&...args) {
+      std::scoped_lock lock(guard->mutex);
+      if (guard->alive) {
+        fn(std::forward<decltype(args)>(args)...);
+      }
+    };
+  }
+
 private:
+  struct CallbackGuard {
+    std::mutex mutex;
+    bool alive = true;
+  };
+
   mutable std::mutex _disposeMutex;
   bool _disposed = false;
   DisposableStore _toDispose;
+  std::shared_ptr<CallbackGuard> _callbackGuard =
+      std::make_shared<CallbackGuard>();
 };
 
 template <typename K, typename V, typename Hash = std::hash<K>,
@@ -268,7 +298,7 @@ class DocumentCache final : public DisposableCache {
 public:
   explicit DocumentCache(const pegium::SharedCoreServices &sharedServices) {
     auto *documentBuilder = sharedServices.workspace.documentBuilder.get();
-    this->onDispose(documentBuilder->onUpdate(
+    this->onDispose(documentBuilder->onUpdate(this->guardCallback(
         [this](std::span<const workspace::DocumentId> changedDocumentIds,
                std::span<const workspace::DocumentId> deletedDocumentIds) {
           for (const auto documentId : changedDocumentIds) {
@@ -277,7 +307,7 @@ public:
           for (const auto documentId : deletedDocumentIds) {
             clear(documentId);
           }
-        }));
+        })));
   }
 
   ~DocumentCache() noexcept override {
@@ -425,21 +455,22 @@ public:
     auto *documentBuilder = sharedServices.workspace.documentBuilder.get();
     if (state.has_value()) {
       this->onDispose(documentBuilder->onBuildPhase(
-          *state, [this](std::span<const std::shared_ptr<workspace::Document>>,
-                         utils::CancellationToken) { this->clear(); }));
-      this->onDispose(documentBuilder->onUpdate(
+          *state, this->guardCallback(
+                      [this](std::span<const std::shared_ptr<workspace::Document>>,
+                             utils::CancellationToken) { this->clear(); })));
+      this->onDispose(documentBuilder->onUpdate(this->guardCallback(
           [this](std::span<const workspace::DocumentId>,
                  std::span<const workspace::DocumentId> deletedDocumentIds) {
             if (!deletedDocumentIds.empty()) {
               this->clear();
             }
-          }));
+          })));
       return;
     }
 
-    this->onDispose(documentBuilder->onUpdate(
+    this->onDispose(documentBuilder->onUpdate(this->guardCallback(
         [this](std::span<const workspace::DocumentId>,
-               std::span<const workspace::DocumentId>) { this->clear(); }));
+               std::span<const workspace::DocumentId>) { this->clear(); })));
   }
 };
 

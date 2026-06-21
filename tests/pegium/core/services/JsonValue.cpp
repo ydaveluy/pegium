@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <sstream>
+#include <stdexcept>
 
 #include <pegium/core/services/JsonValue.hpp>
 
@@ -42,6 +44,25 @@ TEST(JsonValueSerializationTest, StreamsAsJson) {
   EXPECT_EQ(stream.str(), R"({
   "a": 1
 })");
+}
+
+TEST(JsonValueSerializationTest, NonFiniteDoublesBecomeNull) {
+  const JsonValue nan{std::numeric_limits<double>::quiet_NaN()};
+  const JsonValue infinity{std::numeric_limits<double>::infinity()};
+  const JsonValue negativeInfinity{-std::numeric_limits<double>::infinity()};
+
+  EXPECT_TRUE(nan.isNull());
+  EXPECT_TRUE(infinity.isNull());
+  EXPECT_TRUE(negativeInfinity.isNull());
+  EXPECT_EQ(infinity.toJsonString({.pretty = false}), "null");
+}
+
+TEST(JsonValueSerializationTest, IntegerRejectsOutOfRangeDoubles) {
+  EXPECT_THROW((void)JsonValue(std::numeric_limits<double>::max()).integer(),
+               std::out_of_range);
+  EXPECT_THROW((void)JsonValue(-std::numeric_limits<double>::max()).integer(),
+               std::out_of_range);
+  EXPECT_EQ(JsonValue(42.75).integer(), 42);
 }
 
 } // namespace

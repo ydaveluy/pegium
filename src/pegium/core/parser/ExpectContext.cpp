@@ -52,9 +52,9 @@ bool ExpectContext::insertSyntheticGapAt(const char *position,
 }
 
 bool ExpectContext::deleteOneCodepoint() noexcept {
-  if (_cursor >= anchor) {
-    return false;
-  }
+  // The `_cursor >= anchor` guard is subsumed by canDelete() below, which
+  // begins with the same check (and, unlike RecoveryContext, this context has
+  // no clearPendingDeleteHiddenTriviaBridge side effect to run at the anchor).
   if (!trackEditState || !canDelete() ||
       !canAffordEdit(ParseDiagnosticKind::Deleted)) {
     return false;
@@ -76,7 +76,9 @@ bool ExpectContext::deleteOneCodepoint() noexcept {
 
 bool ExpectContext::replaceLeaf(const char *endPtr,
                                 const grammar::AbstractElement *element,
-                                std::uint32_t replacementCost, bool hidden) {
+                                std::uint32_t replacementCost, bool hidden,
+                                std::uint32_t fuzzyOperationDistance) {
+  (void)fuzzyOperationDistance;
   if (!trackEditState || endPtr <= cursor() || endPtr > anchor ||
       !canEdit() || !canAffordEdit(replacementCost)) {
     return false;
@@ -101,10 +103,6 @@ void ExpectContext::addReference(const grammar::Assignment *assignment) {
 
 void ExpectContext::mergeFrontier(std::span<const ExpectPath> items) {
   if (items.empty()) {
-    return;
-  }
-  if (items.size() == 1) {
-    addFrontier(items.front());
     return;
   }
   for (const auto &item : items) {

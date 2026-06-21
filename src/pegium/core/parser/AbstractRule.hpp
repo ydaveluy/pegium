@@ -16,7 +16,7 @@ struct AbstractRule : GrammarRule {
   // Rule body's nullability must match the rule's declared kind.
   // The SFINAE constraint is what makes `requires { Rule{...} }` probes
   // (used by the compile-time guard tests) report `false` for a mismatched
-  // body, exactly as they did before NullableRule existed.
+  // body.
   // Hint to users hitting the resulting "no matching constructor" error:
   // use NullableRule<T> for a nullable body, Rule<T> for a non-nullable one.
   template <Expression Element>
@@ -42,6 +42,18 @@ struct AbstractRule : GrammarRule {
 
   const grammar::AbstractElement *getElement() const noexcept override {
     return _wrapper.element();
+  }
+
+  // Forward the negative-lookahead "match at the cursor" probe through the
+  // rule reference to its body. Without this a `!SomeRule` guard falls back to
+  // the strict probe and cannot fuzzy-reject a truncated/typoed keyword the
+  // way an inline `!"kw"_kw` / `!(a | b)` guard does. Only reached from the
+  // recovery/tracked NotPredicate path, so the nominal parse path is unaffected.
+  template <typename Context>
+    requires(std::same_as<std::remove_cvref_t<Context>, TrackedParseContext> ||
+             RecoveryParseModeContext<Context>)
+  bool probeMatchHere(Context &ctx) const {
+    return _wrapper.probe_match_here(ctx);
   }
 
   constexpr bool isNullable() const noexcept override {

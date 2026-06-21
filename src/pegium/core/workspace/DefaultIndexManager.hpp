@@ -48,7 +48,7 @@ private:
   getFileDescriptionsLocked(DocumentId documentId,
                             std::optional<std::type_index> type) const;
   [[nodiscard]] std::vector<AstNodeDescription>
-  filterDescriptionsByTypeLocked(DocumentId documentId,
+  filterDescriptionsByTypeLocked(const std::vector<AstNodeDescription> &exports,
                                  std::type_index type) const;
 
   mutable std::mutex _mutex;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <type_traits>
+
 #include <pegium/core/services/DefaultCoreService.hpp>
 #include <pegium/core/references/Linker.hpp>
 #include <pegium/core/references/NameProvider.hpp>
@@ -27,11 +29,11 @@ public:
   /// Clears every cached resolution for `document`.
   void unlink(workspace::Document &document) const override;
 
-  /// Returns the first visible candidate description for `reference`.
+  /// Returns the index-stable candidate description for `reference`.
   workspace::AstNodeDescriptionOrError
   getCandidate(const ReferenceInfo &reference) const override;
 
-  /// Returns every visible candidate description for `reference`.
+  /// Returns every index-stable candidate description for `reference`.
   workspace::AstNodeDescriptionsOrError
   getCandidates(const ReferenceInfo &reference) const override;
 
@@ -44,6 +46,14 @@ public:
   resolveAll(const AbstractMultiReference &reference) const override;
 
 private:
+  /// Wraps the shared resolution envelope (build the `ReferenceInfo`, locate the
+  /// current document, translate a cyclic/standard exception into a
+  /// `LinkingError`) around `body`, which performs the actual single/multi link.
+  template <typename Fn>
+  auto withReferenceInfo(const AbstractReference &reference, Fn &&body) const
+      -> std::invoke_result_t<Fn &, const ReferenceInfo &,
+                              const workspace::Document &>;
+
   [[nodiscard]] workspace::LinkingError
   createLinkingError(const ReferenceInfo &reference) const;
   [[nodiscard]] workspace::LinkingError

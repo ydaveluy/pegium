@@ -10,6 +10,7 @@
 #include <ranges>
 #include <string>
 #include <type_traits>
+#include <typeindex>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -373,7 +374,11 @@ template <typename T>
 [[nodiscard]] bool is_a(const AstNode &node) noexcept {
   if (const auto *reflection = ast_reflection_of(node);
       reflection != nullptr) {
-    return reflection->isInstance(node, typeid(T));
+    // Call isSubtype directly (rather than the out-of-line isInstance) so the
+    // whole type check inlines on this hot path; typeid(node) is resolved here,
+    // where AstNode is a complete type.
+    return reflection->isSubtype(std::type_index(typeid(node)),
+                                 std::type_index(typeid(T)));
   }
   return dynamic_cast<const T *>(&node) != nullptr;
 }
@@ -396,8 +401,10 @@ template <typename T, typename U>
   }
   if (const auto *reflection = ast_reflection_of(*ptr);
       reflection != nullptr) {
-    return reflection->isInstance(*ptr, typeid(T)) ? static_cast<T *>(ptr)
-                                                   : nullptr;
+    return reflection->isSubtype(std::type_index(typeid(*ptr)),
+                                 std::type_index(typeid(T)))
+               ? static_cast<T *>(ptr)
+               : nullptr;
   }
   return dynamic_cast<T *>(ptr);
 }

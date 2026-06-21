@@ -8,6 +8,7 @@
 #include <pegium/core/syntax-tree/AstNode.hpp>
 #include <pegium/core/syntax-tree/AstFeatures.hpp>
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
+#include <pegium/core/syntax-tree/CstUtils.hpp>
 
 namespace pegium::validation {
 
@@ -30,33 +31,19 @@ range_for_feature_impl(const Node &node,
   }
   const auto cstNode = node.getCstNode();
 
-  std::size_t featureIndex = 0;
-  for (const auto child : cstNode) {
-    const auto *grammarElement = child.getGrammarElement();
-    if (grammarElement->getKind() != grammar::ElementKind::Assignment) {
-      continue;
-    }
-
-    const auto *assignment =
-        static_cast<const grammar::Assignment *>(grammarElement);
-    if (assignment->getFeature() != parser::detail::member_name_v<Feature>) {
-      continue;
-    }
-
-    if (!index.has_value() || featureIndex == *index) {
-      return range_of(child);
-    }
-    ++featureIndex;
+  // Delegate to the single runtime implementation so the hidden-node skip and
+  // assignment matching live in one place (the hand-rolled loop here had drifted
+  // and skipped no hidden children).
+  if (const auto featureNode = find_node_for_feature(
+          cstNode, parser::detail::member_name_v<Feature>, index.value_or(0));
+      featureNode.has_value()) {
+    return range_of(*featureNode);
   }
 
   return {cstNode.getBegin(), cstNode.getEnd()};
 }
 
 } // namespace detail
-
-/// Returns the range assigned to `feature`, falling back to the node range.
-[[nodiscard]] std::pair<TextOffset, TextOffset>
-range_for_feature(const AstNode &node, std::string_view feature) noexcept;
 
 /// Returns the range of the `index`-th occurrence assigned to `feature`.
 [[nodiscard]] std::pair<TextOffset, TextOffset>
@@ -76,9 +63,5 @@ template <auto Feature, typename Node>
 range_for_feature(const Node &node, std::size_t index) noexcept {
   return detail::range_for_feature_impl<Feature>(node, index);
 }
-
-/// Returns the range of a name-like occurrence inside `node`.
-[[nodiscard]] std::pair<TextOffset, TextOffset>
-range_for_name_like(const AstNode &node, std::string_view name) noexcept;
 
 } // namespace pegium::validation

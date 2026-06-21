@@ -423,6 +423,214 @@ TEST(
 }
 
 TEST(RecoveryTest,
+     InfixGluedOperatorNoiseAbuttingPrimaryKeepsTheRhs) {
+  const auto whitespace = some(s);
+  const auto skipper = SkipperBuilder().ignore(whitespace).build();
+
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  TerminalRule<int> number{"NUMBER", some(d)};
+  ParserRule<RecoveryExpression> primary{
+      "Primary", create<RecoveryNumberExpression>() +
+                         assign<&RecoveryNumberExpression::value>(number) |
+                     create<RecoveryReferenceExpression>() +
+                         assign<&RecoveryReferenceExpression::name>(id)};
+  InfixRule<RecoveryBinaryExpression, &RecoveryBinaryExpression::left,
+            &RecoveryBinaryExpression::op, &RecoveryBinaryExpression::right>
+      expression{"Expression", primary, LeftAssociation("*"_kw | "/"_kw),
+                 LeftAssociation("+"_kw | "-"_kw), LeftAssociation("%"_kw)};
+  ParserRule<RecoveryExpression> expressionRule{"Expression", expression};
+  ParserRule<RecoveryExpressionEvaluation> evaluationRule{
+      "Evaluation",
+      assign<&RecoveryExpressionEvaluation::expression>(expressionRule) +
+          ";"_kw};
+  ParserRule<RecoveryModule> module{
+      "Module", "module"_kw + assign<&RecoveryModule::name>(id) +
+                    many(append<&RecoveryModule::statements>(evaluationRule))};
+
+  // `2 +++++++++c` — one real `+` operator then EIGHT stray `+` glued directly
+  // to the operand `c` (no skipper trivia between the noise and `c`). The
+  // faithful repair keeps `2 + c` by deleting the eight stray operators. The
+  // pre-fix cap (maxConsecutiveCodepointDeletes - 1 = 7) misses the operand by
+  // exactly one and instead deletes the whole run + fabricates the RHS. The
+  // operand abuts the noise, so absorbing it cannot merge a following
+  // statement (contrast LongOperatorRun..., where a newline guards the operand).
+  const std::string text = "module m\n2 +++++++++c;\n";
+  const auto result = parseRule(module, text, skipper);
+  const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+
+  ASSERT_TRUE(result.value) << parseDump;
+  EXPECT_TRUE(result.fullMatch) << parseDump;
+
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
+  ASSERT_NE(parsedModule, nullptr) << parseDump;
+  ASSERT_EQ(parsedModule->statements.size(), 1u) << parseDump;
+  auto *evaluationNode = dynamic_cast<RecoveryExpressionEvaluation *>(
+      parsedModule->statements[0]);
+  ASSERT_NE(evaluationNode, nullptr) << parseDump;
+  auto *binary =
+      dynamic_cast<RecoveryBinaryExpression *>(evaluationNode->expression);
+  ASSERT_NE(binary, nullptr) << parseDump;
+  auto *left = dynamic_cast<RecoveryNumberExpression *>(binary->left);
+  auto *right =
+      dynamic_cast<RecoveryReferenceExpression *>(binary->right);
+  ASSERT_NE(left, nullptr) << parseDump;
+  ASSERT_NE(right, nullptr) << parseDump;
+  EXPECT_EQ(left->value, 2) << parseDump;
+  EXPECT_EQ(binary->op, "+") << parseDump;
+  EXPECT_EQ(right->name, "c") << parseDump;
+}
+
+TEST(RecoveryTest,
+     InfixNonOperatorNoiseBeforePrimaryKeepsTheRhs) {
+  const auto whitespace = some(s);
+  const auto skipper = SkipperBuilder().ignore(whitespace).build();
+
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  TerminalRule<int> number{"NUMBER", some(d)};
+  ParserRule<RecoveryExpression> primary{
+      "Primary", create<RecoveryNumberExpression>() +
+                         assign<&RecoveryNumberExpression::value>(number) |
+                     create<RecoveryReferenceExpression>() +
+                         assign<&RecoveryReferenceExpression::name>(id)};
+  InfixRule<RecoveryBinaryExpression, &RecoveryBinaryExpression::left,
+            &RecoveryBinaryExpression::op, &RecoveryBinaryExpression::right>
+      expression{"Expression", primary, LeftAssociation("*"_kw | "/"_kw),
+                 LeftAssociation("+"_kw | "-"_kw), LeftAssociation("%"_kw)};
+  ParserRule<RecoveryExpression> expressionRule{"Expression", expression};
+  ParserRule<RecoveryExpressionEvaluation> evaluationRule{
+      "Evaluation",
+      assign<&RecoveryExpressionEvaluation::expression>(expressionRule) +
+          ";"_kw};
+  ParserRule<RecoveryModule> module{
+      "Module", "module"_kw + assign<&RecoveryModule::name>(id) +
+                    many(append<&RecoveryModule::statements>(evaluationRule))};
+
+  // `2 * ... c` — non-operator garbage (`.` is no operator and no primary) sits
+  // between the operator `*` and its operand `c`, separated by trivia. The same
+  // garbage is deleted everywhere else (before a keyword, a statement, a def
+  // body, or the infix LHS), so the infix RHS must delete it too and keep
+  // `2 * c` rather than abandon the operator.
+  const std::string text = "module m\n2 * ... c;\n";
+  const auto result = parseRule(module, text, skipper);
+  const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+
+  ASSERT_TRUE(result.value) << parseDump;
+  EXPECT_TRUE(result.fullMatch) << parseDump;
+
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
+  ASSERT_NE(parsedModule, nullptr) << parseDump;
+  ASSERT_EQ(parsedModule->statements.size(), 1u) << parseDump;
+  auto *evaluationNode = dynamic_cast<RecoveryExpressionEvaluation *>(
+      parsedModule->statements[0]);
+  ASSERT_NE(evaluationNode, nullptr) << parseDump;
+  auto *binary =
+      dynamic_cast<RecoveryBinaryExpression *>(evaluationNode->expression);
+  ASSERT_NE(binary, nullptr) << parseDump;
+  auto *left = dynamic_cast<RecoveryNumberExpression *>(binary->left);
+  auto *right =
+      dynamic_cast<RecoveryReferenceExpression *>(binary->right);
+  ASSERT_NE(left, nullptr) << parseDump;
+  ASSERT_NE(right, nullptr) << parseDump;
+  EXPECT_EQ(left->value, 2) << parseDump;
+  EXPECT_EQ(binary->op, "*") << parseDump;
+  EXPECT_EQ(right->name, "c") << parseDump;
+}
+
+TEST(RecoveryTest,
+     InfixNonOperatorPunctNoiseBeforePrimaryKeepsTheRhs) {
+  const auto whitespace = some(s);
+  const auto skipper = SkipperBuilder().ignore(whitespace).build();
+
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  TerminalRule<int> number{"NUMBER", some(d)};
+  ParserRule<RecoveryExpression> primary{
+      "Primary", create<RecoveryNumberExpression>() +
+                         assign<&RecoveryNumberExpression::value>(number) |
+                     create<RecoveryReferenceExpression>() +
+                         assign<&RecoveryReferenceExpression::name>(id)};
+  InfixRule<RecoveryBinaryExpression, &RecoveryBinaryExpression::left,
+            &RecoveryBinaryExpression::op, &RecoveryBinaryExpression::right>
+      expression{"Expression", primary, LeftAssociation("*"_kw | "/"_kw),
+                 LeftAssociation("+"_kw | "-"_kw), LeftAssociation("%"_kw)};
+  ParserRule<RecoveryExpression> expressionRule{"Expression", expression};
+  ParserRule<RecoveryExpressionEvaluation> evaluationRule{
+      "Evaluation",
+      assign<&RecoveryExpressionEvaluation::expression>(expressionRule) +
+          ";"_kw};
+  ParserRule<RecoveryModule> module{
+      "Module", "module"_kw + assign<&RecoveryModule::name>(id) +
+                    many(append<&RecoveryModule::statements>(evaluationRule))};
+
+  // Same gap as the `...` case but with different garbage codepoints — the
+  // cleanup must be grammar-agnostic, not tuned to any specific noise byte.
+  const std::string text = "module m\n2 * ?? c;\n";
+  const auto result = parseRule(module, text, skipper);
+  const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+
+  ASSERT_TRUE(result.value) << parseDump;
+  EXPECT_TRUE(result.fullMatch) << parseDump;
+
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
+  ASSERT_NE(parsedModule, nullptr) << parseDump;
+  ASSERT_EQ(parsedModule->statements.size(), 1u) << parseDump;
+  auto *evaluationNode = dynamic_cast<RecoveryExpressionEvaluation *>(
+      parsedModule->statements[0]);
+  ASSERT_NE(evaluationNode, nullptr) << parseDump;
+  auto *binary =
+      dynamic_cast<RecoveryBinaryExpression *>(evaluationNode->expression);
+  ASSERT_NE(binary, nullptr) << parseDump;
+  auto *right =
+      dynamic_cast<RecoveryReferenceExpression *>(binary->right);
+  ASSERT_NE(right, nullptr) << parseDump;
+  EXPECT_EQ(binary->op, "*") << parseDump;
+  EXPECT_EQ(right->name, "c") << parseDump;
+}
+
+TEST(RecoveryTest,
+     InfixNoiseCleanupDoesNotSwallowStatementTerminator) {
+  const auto whitespace = some(s);
+  const auto skipper = SkipperBuilder().ignore(whitespace).build();
+
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  TerminalRule<int> number{"NUMBER", some(d)};
+  ParserRule<RecoveryExpression> primary{
+      "Primary", create<RecoveryNumberExpression>() +
+                         assign<&RecoveryNumberExpression::value>(number) |
+                     create<RecoveryReferenceExpression>() +
+                         assign<&RecoveryReferenceExpression::name>(id)};
+  InfixRule<RecoveryBinaryExpression, &RecoveryBinaryExpression::left,
+            &RecoveryBinaryExpression::op, &RecoveryBinaryExpression::right>
+      expression{"Expression", primary, LeftAssociation("*"_kw | "/"_kw),
+                 LeftAssociation("+"_kw | "-"_kw), LeftAssociation("%"_kw)};
+  ParserRule<RecoveryExpression> expressionRule{"Expression", expression};
+  ParserRule<RecoveryExpressionEvaluation> evaluationRule{
+      "Evaluation",
+      assign<&RecoveryExpressionEvaluation::expression>(expressionRule) +
+          ";"_kw};
+  ParserRule<RecoveryModule> module{
+      "Module", "module"_kw + assign<&RecoveryModule::name>(id) +
+                    many(append<&RecoveryModule::statements>(evaluationRule))};
+
+  // SAFETY: `2 * ... ; b` — the `;` terminates the first (broken) statement.
+  // The RHS noise cleanup must NOT delete the `;` and fold `b` into the first
+  // expression. `b` must survive as its own statement.
+  const std::string text = "module m\n2 * ... ; b;\n";
+  const auto result = parseRule(module, text, skipper);
+  const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+
+  auto *parsedModule = dynamic_cast<RecoveryModule *>(result.value);
+  ASSERT_NE(parsedModule, nullptr) << parseDump;
+  ASSERT_EQ(parsedModule->statements.size(), 2u) << parseDump;
+  auto *bStatement = dynamic_cast<RecoveryExpressionEvaluation *>(
+      parsedModule->statements[1]);
+  ASSERT_NE(bStatement, nullptr) << parseDump;
+  auto *bRef =
+      dynamic_cast<RecoveryReferenceExpression *>(bStatement->expression);
+  ASSERT_NE(bRef, nullptr) << parseDump;
+  EXPECT_EQ(bRef->name, "b") << parseDump;
+}
+
+TEST(RecoveryTest,
      IncompleteDiagnosticAfterInfixOperatorUsesFailureTokenAnchor) {
   const auto whitespace = some(s);
   const auto skipper = SkipperBuilder().ignore(whitespace).build();

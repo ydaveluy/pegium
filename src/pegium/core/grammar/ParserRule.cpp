@@ -5,10 +5,6 @@
 
 namespace pegium::grammar {
 
-void ParserRule::print(std::ostream &os) const {
-  os << getName() << " returns " << getTypeName() << ": ";
-  detail::print_element_reference(os, *getElement());
-  os << ';';
-}
+void ParserRule::print(std::ostream &os) const { detail::print_rule(os, *this); }
 
 } // namespace pegium::grammar

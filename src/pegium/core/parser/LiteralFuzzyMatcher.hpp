@@ -16,7 +16,15 @@
 namespace pegium::parser::detail {
 
 struct LiteralFuzzyCandidate {
+  /// Number of input BYTES this candidate consumes. Kept as a byte offset so
+  /// callers can advance the cursor directly (`cursorStart + consumed`). The
+  /// Levenshtein DP is codepoint-granular internally; `consumed` is the byte
+  /// length of the consumed codepoint prefix of the input.
   std::size_t consumed = 0;
+  /// Number of input CODEPOINTS this candidate consumes. Used by codepoint-
+  /// granular admission gates (e.g. the half-length floor) that must reason
+  /// about codepoints, not bytes. Equals `consumed` for ASCII input.
+  std::size_t consumedCodepoints = 0;
   std::uint32_t distance = 0;
   std::uint32_t operationCount = 0;
   std::uint32_t rawWeightedCost = 0;
@@ -85,41 +93,50 @@ public:
     return &(*_entries)[index];
   }
 
+  /// Records `index` as holding a live (heap-owning) entry so the destructor
+  /// can free only live slots instead of striding all `kSlotCount`. Must be
+  /// called exactly once per slot, on its first 0->1 generation transition.
+  /// A slot is only ever (re)stored at the same index — `store_pruned_into_slot`
+  /// frees the previous owner in place before overwriting — so its index never
+  /// needs to be recorded twice and never leaves the live set. This keeps the
+  /// vector duplicate-free without any scan.
+  void markSlotLive(std::size_t index) { _liveSlots.push_back(index); }
+
 private:
   // Raw owning storage. Default-constructed `std::array<Entry, N>` would
   // value-initialise every Entry; we allocate uninitialised memory and
   // only zero the `generation` field.
   std::unique_ptr<std::array<Entry, kSlotCount>> _entries;
+  // Indices of slots that currently own heap-allocated result data. Populated
+  // on each slot's first transition to live. Because a slot is reused in place
+  // (freed then re-stored at the same index, never reset to generation 0), each
+  // live index appears at most once here, so the destructor frees each owned
+  // allocation exactly once.
+  std::vector<std::size_t> _liveSlots;
 };
 
-[[nodiscard]] LiteralFuzzyCandidates
-find_literal_fuzzy_candidates(std::string_view literal, std::string_view input,
-                              bool caseSensitive,
-                              LiteralFuzzyCandidatesCache *cache = nullptr) noexcept;
-
-/// Like `find_literal_fuzzy_candidates` but returns a non-owning view into
-/// the cache slot. Used on the recovery hot path so a cache hit is
-/// allocation-free; the view stays valid until the next call that targets
-/// the same slot (which is the caller's `RecoveryContext` cache anyway).
-/// On miss the result is computed, written into the slot, and the
+/// Computes the locally-pruned fuzzy candidates for `literal` against `input`,
+/// returned as a non-owning view into the cache slot. Used on the recovery hot
+/// path so a cache hit is allocation-free; the view stays valid until the next
+/// call that targets the same slot (which is the caller's `RecoveryContext`
+/// cache anyway). On miss the result is computed, written into the slot, and the
 /// returned view points at the freshly populated slot storage.
 [[nodiscard]] std::span<const LiteralFuzzyCandidate>
 find_literal_fuzzy_candidates_view(std::string_view literal,
                                    std::string_view input, bool caseSensitive,
                                    LiteralFuzzyCandidatesCache &cache) noexcept;
 
-[[nodiscard]] std::optional<LiteralFuzzyCandidate>
-find_best_literal_fuzzy_candidate(std::string_view literal,
-                                  std::string_view input,
-                                  bool caseSensitive) noexcept;
-
 /// Strict-pass single-edit detector. Returns true iff `literal` matches a
 /// prefix of `window` of length L = N (substitute / transpose), L = N+1
 /// (insert in window) or L = N-1 (delete from window) with exactly one
-/// edit operation. Equivalent to the strict-path DP probe
-/// (`find_best_literal_fuzzy_candidate(...).distance == 1 && |consumed-N|
-/// <= 1`) but runs in O(N) without the Levenshtein DP — keeps the
-/// failure-tracking strict pass free of recovery DP cost.
+/// edit operation. For single-byte (ASCII) codepoints this acceptance set is
+/// equivalent to a best fuzzy candidate with
+/// `distance == 1 && |consumed - N| <= 1`, but runs in O(N) without the
+/// Levenshtein DP — keeps the failure-tracking strict pass free of recovery
+/// DP cost. The alignment walk indexes both strings by BYTE, so multibyte
+/// single-edit cases (e.g. `café` vs `cafe`) are conservatively missed here
+/// and deferred to the codepoint-granular recovery DP
+/// (`compute_pruned_literal_fuzzy_candidates`), which still finds them.
 [[nodiscard]] bool
 literal_has_single_edit_strict_match(std::string_view literal,
                                      std::string_view window,

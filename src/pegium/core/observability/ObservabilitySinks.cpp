@@ -22,7 +22,12 @@ FanoutObservabilitySink::FanoutObservabilitySink(
     : _sinks(std::move(sinks)) {}
 
 void FanoutObservabilitySink::publish(const Observation &observation) noexcept {
-  const auto sinks = snapshot();
+  std::vector<std::shared_ptr<ObservabilitySink>> sinks;
+  try {
+    sinks = snapshot();
+  } catch (...) {
+    return;
+  }
   for (const auto &sink : sinks) {
     if (sink == nullptr) {
       continue;

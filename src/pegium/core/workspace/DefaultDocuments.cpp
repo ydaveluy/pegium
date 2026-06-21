@@ -161,6 +161,9 @@ std::shared_ptr<Document> DefaultDocuments::deleteDocument(DocumentId id) {
 std::vector<std::shared_ptr<Document>> DefaultDocuments::deleteDocuments(
     std::string_view uri) {
   const auto normalizedUri = utils::normalize_uri(uri);
+  if (normalizedUri.empty()) {
+    return {};
+  }
   std::scoped_lock lock(_mutex);
   auto documents = _documents.findAll(normalizedUri);
   for (const auto &document : documents) {
@@ -203,6 +206,7 @@ DefaultDocuments::deleteDocumentLocked(std::string_view normalizedUri) {
     return nullptr;
   }
   auto document = *existing;
+  assert(_documents.findAll(normalizedUri).size() == 1);
   document->state = DocumentState::Changed;
   _documentsById.erase(document->id);
   _documents.erase(normalizedUri);

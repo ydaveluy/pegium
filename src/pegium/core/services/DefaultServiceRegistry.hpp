@@ -26,7 +26,7 @@ public:
   [[nodiscard]] const CoreServices &
   getServices(std::string_view uri) const override;
   [[nodiscard]] const CoreServices *
-  findServices(std::string_view uri) const noexcept override;
+  findServices(std::string_view uri) const override;
   [[nodiscard]] std::vector<const CoreServices *> all() const override;
 
 private:

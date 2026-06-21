@@ -29,7 +29,6 @@ public:
   explicit FeatureValue(RuleValue value) noexcept;
   explicit FeatureValue(const AstNode *value) noexcept;
   explicit FeatureValue(const AbstractReference *value) noexcept;
-  explicit FeatureValue(ReferenceValue value) noexcept;
   explicit FeatureValue(Array value) noexcept;
 
   [[nodiscard]] bool isRuleValue() const noexcept;

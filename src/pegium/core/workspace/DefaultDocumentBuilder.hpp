@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <ranges>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -29,11 +30,13 @@ public:
 
   void build(std::span<const std::shared_ptr<Document>> documents,
              const BuildOptions &options = {},
-             utils::CancellationToken cancelToken = {}) const override;
+             utils::CancellationToken cancelToken = {},
+             const std::function<void()> &downgradeLock = {}) const override;
 
   void update(std::span<const DocumentId> changedDocumentIds,
               std::span<const DocumentId> deletedDocumentIds,
-              utils::CancellationToken cancelToken = {}) const override;
+              utils::CancellationToken cancelToken = {},
+              const std::function<void()> &downgradeLock = {}) const override;
 
   utils::ScopedDisposable
   onUpdate(std::function<void(std::span<const DocumentId> changedDocumentIds,
@@ -103,11 +106,6 @@ private:
   sortDocuments(std::vector<std::shared_ptr<Document>> documents) const;
   void prepareBuild(std::span<const std::shared_ptr<Document>> documents,
                     const BuildOptions &options) const;
-  template <typename Callback>
-  void runCancelable(std::vector<std::shared_ptr<Document>> &documents,
-                     DocumentState targetState,
-                     utils::CancellationToken cancelToken,
-                     Callback &&callback) const;
   void notifyBuildPhase(std::span<const std::shared_ptr<Document>> documents,
                         DocumentState targetState,
                         utils::CancellationToken cancelToken) const;
@@ -115,9 +113,25 @@ private:
                            DocumentState targetState,
                            utils::CancellationToken cancelToken) const;
   void publishWorkspaceState(DocumentState targetState) const;
+  // Advances one document to @p targetState and notifies its per-document phase
+  // listeners. Called per document from inside a build phase's parallel body, so
+  // listeners may run concurrently for distinct documents.
+  void advance(const std::shared_ptr<Document> &document,
+               DocumentState targetState,
+               utils::CancellationToken cancelToken) const;
+  // Runs @p body once per document whose state is below @p phaseEnd, in
+  // parallel, then publishes each workspace state in @p publishStates (in order)
+  // once the whole phase has drained. body advances each document through its
+  // sub-states itself (via advance), gated on the document's entry state.
+  template <typename Body>
+  void runMergedPhase(std::vector<std::shared_ptr<Document>> &documents,
+                      DocumentState phaseEnd,
+                      std::initializer_list<DocumentState> publishStates,
+                      utils::CancellationToken cancelToken, Body &&body) const;
   void buildDocuments(std::span<const std::shared_ptr<Document>> documents,
                       const BuildOptions &options,
-                      utils::CancellationToken cancelToken) const;
+                      utils::CancellationToken cancelToken,
+                      const std::function<void()> &downgradeLock) const;
   void markAsCompleted(const Document &document) const;
   void validate(Document &document, utils::CancellationToken cancelToken) const;
   void awaitBuilderState(DocumentState state,
@@ -159,51 +173,69 @@ private:
       _documentPhaseListeners = makeListenerStates<DocumentPhaseListener>();
 };
 
-template <typename Callback>
-void DefaultDocumentBuilder::runCancelable(
-    std::vector<std::shared_ptr<Document>> &documents,
-    DocumentState targetState, utils::CancellationToken cancelToken,
-    Callback &&callback) const {
-  auto callbackFn = std::forward<Callback>(callback);
+template <typename Body>
+void DefaultDocumentBuilder::runMergedPhase(
+    std::vector<std::shared_ptr<Document>> &documents, DocumentState phaseEnd,
+    std::initializer_list<DocumentState> publishStates,
+    utils::CancellationToken cancelToken, Body &&body) const {
+  auto bodyFn = std::forward<Body>(body);
   auto *taskScheduler = shared.execution.taskScheduler.get();
+
   std::vector<std::size_t> pendingIndexes;
+  std::vector<DocumentState> entryStates;
   pendingIndexes.reserve(documents.size());
+  entryStates.reserve(documents.size());
   for (std::size_t index = 0; index < documents.size(); ++index) {
-    if (documents[index]->state < targetState) {
+    if (documents[index]->state < phaseEnd) {
       pendingIndexes.push_back(index);
+      entryStates.push_back(documents[index]->state);
     }
   }
 
+  // Run the per-document work in parallel; each document is touched by exactly
+  // one task (single writer), so advancing document->state inside body is safe.
+  const auto runOne = [&](std::size_t pos) {
+    bodyFn(documents[pendingIndexes[pos]], entryStates[pos], cancelToken);
+  };
+
   if (taskScheduler == nullptr || pendingIndexes.size() <= 1) {
-    for (const auto index : pendingIndexes) {
+    for (std::size_t pos = 0; pos < pendingIndexes.size(); ++pos) {
       utils::throw_if_cancelled(cancelToken);
-      callbackFn(*documents[index], cancelToken);
-      documents[index]->state = targetState;
-      notifyDocumentPhase(documents[index], targetState, cancelToken);
+      runOne(pos);
     }
   } else {
     taskScheduler->parallelFor(
-        cancelToken, pendingIndexes,
-        [&documents, &callbackFn](execution::TaskScheduler::Scope &scope,
-                                  std::size_t index) {
-          callbackFn(*documents[index], scope.cancellationToken());
-        });
-    for (const auto index : pendingIndexes) {
-      documents[index]->state = targetState;
-      notifyDocumentPhase(documents[index], targetState, cancelToken);
+        cancelToken, std::views::iota(std::size_t{0}, pendingIndexes.size()),
+        [&runOne](std::size_t pos) { runOne(pos); });
+  }
+
+  // Notify per-document phase listeners serially and in document order (which
+  // prioritizes open documents), for every state each document newly reached
+  // this phase. Doing this after the barrier keeps listeners single-threaded and
+  // the notification order deterministic.
+  for (std::size_t pos = 0; pos < pendingIndexes.size(); ++pos) {
+    const auto &document = documents[pendingIndexes[pos]];
+    for (const auto state : publishStates) {
+      if (entryStates[pos] < state && state <= document->state) {
+        notifyDocumentPhase(document, state, cancelToken);
+      }
     }
   }
 
-  std::vector<std::shared_ptr<Document>> targetDocuments;
-  targetDocuments.reserve(documents.size());
-  for (const auto &document : documents) {
-    if (document->state == targetState) {
-      targetDocuments.push_back(document);
+  // Publish the workspace-level milestones once the phase has drained: each
+  // state still advances _currentState (so awaitBuilderState keeps working),
+  // batched into one burst per phase instead of one per state transition.
+  for (const auto state : publishStates) {
+    std::vector<std::shared_ptr<Document>> reached;
+    reached.reserve(documents.size());
+    for (const auto &document : documents) {
+      if (document->state >= state) {
+        reached.push_back(document);
+      }
     }
+    notifyBuildPhase(reached, state, cancelToken);
+    publishWorkspaceState(state);
   }
-
-  notifyBuildPhase(targetDocuments, targetState, cancelToken);
-  publishWorkspaceState(targetState);
 }
 
 template <typename Listener>

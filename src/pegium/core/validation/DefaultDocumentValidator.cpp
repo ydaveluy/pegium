@@ -14,6 +14,7 @@
 #include <pegium/core/grammar/Assignment.hpp>
 #include <pegium/core/grammar/Literal.hpp>
 #include <pegium/core/parser/ContextShared.hpp>
+#include <pegium/core/parser/Introspection.hpp>
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
 #include <pegium/core/syntax-tree/CstUtils.hpp>
@@ -378,6 +379,15 @@ previous_visible_leaf_end(const workspace::Document &document,
       text.size(), static_cast<std::size_t>(next - text.data())));
 }
 
+// Clamps a [begin, end) offset span to `text` and keeps end >= begin.
+[[nodiscard]] std::pair<TextOffset, TextOffset>
+clamp_span(std::string_view text, TextOffset begin, TextOffset end) {
+  const auto textSize = static_cast<TextOffset>(text.size());
+  const auto safeBegin = std::min(begin, textSize);
+  const auto safeEnd = std::min(std::max(safeBegin, end), textSize);
+  return {safeBegin, safeEnd};
+}
+
 [[nodiscard]] pegium::Diagnostic
 make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
   pegium::Diagnostic diagnostic;
@@ -389,15 +399,34 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
   return diagnostic;
 }
 
+// The recurring "Expecting <X> but found `<tok>`." / "Expecting <X>" message,
+// with the explicit parse message taking precedence and a per-kind fallback used
+// when nothing is expected.
+[[nodiscard]] std::string
+parse_expectation_message(std::string_view message, const std::string &expected,
+                          std::string_view foundImage,
+                          std::string_view emptyExpectedFallback) {
+  if (!message.empty()) {
+    return std::string(message);
+  }
+  if (expected.empty()) {
+    return std::string(emptyExpectedFallback);
+  }
+  if (!foundImage.empty()) {
+    return "Expecting " + expected + " but found `" + std::string(foundImage) +
+           "`.";
+  }
+  return "Expecting " + expected;
+}
+
 [[nodiscard]] pegium::Diagnostic from_parse_diagnostic(
     const workspace::Document &document, const parser::Parser &parserImpl,
     const parser::ParseDiagnostic &parseDiagnostic,
     const utils::CancellationToken &cancelToken) {
   if (parseDiagnostic.kind == parser::ParseDiagnosticKind::ConversionError) {
-    const auto textSize =
-        static_cast<TextOffset>(document.textDocument().getText().size());
-    const auto begin = std::min(parseDiagnostic.beginOffset, textSize);
-    const auto end = std::min(std::max(begin, parseDiagnostic.endOffset), textSize);
+    const auto [begin, end] =
+        clamp_span(document.textDocument().getText(),
+                   parseDiagnostic.beginOffset, parseDiagnostic.endOffset);
     auto diagnostic = make_base_diagnostic(begin, end, "parse.conversion");
     diagnostic.message = parseDiagnostic.message.empty()
                              ? "Value conversion failed."
@@ -430,16 +459,8 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
   switch (parseDiagnostic.kind) {
   case Inserted:
     diagnostic.code = pegium::DiagnosticCode(std::string("parse.inserted"));
-    if (!parseDiagnostic.message.empty()) {
-      diagnostic.message = parseDiagnostic.message;
-    } else if (expected.empty()) {
-      diagnostic.message = "Unexpected input.";
-    } else if (!foundToken.image.empty()) {
-      diagnostic.message = "Expecting " + expected + " but found `" +
-                           std::string(foundToken.image) + "`.";
-    } else {
-      diagnostic.message = "Expecting " + expected;
-    }
+    diagnostic.message = parse_expectation_message(
+        parseDiagnostic.message, expected, foundToken.image, "Unexpected input.");
     if (parseDiagnostic.element == nullptr && !parseDiagnostic.message.empty()) {
       diagnostic.end = gap_insert_diagnostic_end(document, diagnostic.begin,
                                                  foundToken);
@@ -449,10 +470,8 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
   case Deleted:
     if (parseDiagnostic.endOffset > parseDiagnostic.beginOffset) {
       const auto text = std::string_view{document.textDocument().getText()};
-      const auto safeBegin = std::min(parseDiagnostic.beginOffset,
-                                      static_cast<TextOffset>(text.size()));
-      const auto safeEnd = std::min(std::max(safeBegin, parseDiagnostic.endOffset),
-                                    static_cast<TextOffset>(text.size()));
+      const auto [safeBegin, safeEnd] =
+          clamp_span(text, parseDiagnostic.beginOffset, parseDiagnostic.endOffset);
       diagnostic = make_base_diagnostic(safeBegin, safeEnd, "parse.deleted");
       const auto deletedText =
           safeBegin < safeEnd
@@ -473,10 +492,8 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
   case Replaced:
     if (parseDiagnostic.endOffset > parseDiagnostic.beginOffset) {
       const auto text = std::string_view{document.textDocument().getText()};
-      const auto safeBegin = std::min(parseDiagnostic.beginOffset,
-                                      static_cast<TextOffset>(text.size()));
-      const auto safeEnd = std::min(std::max(safeBegin, parseDiagnostic.endOffset),
-                                    static_cast<TextOffset>(text.size()));
+      const auto [safeBegin, safeEnd] =
+          clamp_span(text, parseDiagnostic.beginOffset, parseDiagnostic.endOffset);
       diagnostic =
           make_base_diagnostic(safeBegin, safeEnd, "parse.replaced");
       const auto replacedText =
@@ -503,40 +520,21 @@ make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
     }
     diagnostic =
         make_base_diagnostic(foundToken.begin, foundToken.end, "parse.replaced");
-    if (!parseDiagnostic.message.empty()) {
-      diagnostic.message = parseDiagnostic.message;
-    } else if (!expected.empty() && !foundToken.image.empty()) {
-      diagnostic.message = "Expecting " + expected + " but found `" +
-                           std::string(foundToken.image) + "`.";
-    } else if (!expected.empty()) {
-      diagnostic.message = "Expecting " + expected;
-    } else {
-      diagnostic.message = unexpectedMessage;
-    }
+    diagnostic.message = parse_expectation_message(
+        parseDiagnostic.message, expected, foundToken.image, unexpectedMessage);
     maybe_attach_replace_code_action(diagnostic, parseDiagnostic, foundToken.begin,
                                      foundToken.end);
     break;
   case Incomplete:
     if (parseDiagnostic.endOffset > parseDiagnostic.beginOffset) {
-      const auto text = std::string_view{document.textDocument().getText()};
-      const auto safeBegin = std::min(parseDiagnostic.beginOffset,
-                                      static_cast<TextOffset>(text.size()));
-      const auto safeEnd = std::min(std::max(safeBegin, parseDiagnostic.endOffset),
-                                    static_cast<TextOffset>(text.size()));
+      const auto [safeBegin, safeEnd] =
+          clamp_span(document.textDocument().getText(),
+                     parseDiagnostic.beginOffset, parseDiagnostic.endOffset);
       diagnostic =
           make_base_diagnostic(safeBegin, safeEnd, "parse.incomplete");
     }
-    diagnostic.code = pegium::DiagnosticCode(std::string("parse.incomplete"));
-    if (!parseDiagnostic.message.empty()) {
-      diagnostic.message = parseDiagnostic.message;
-    } else if (expected.empty()) {
-      diagnostic.message = unexpectedMessage;
-    } else if (!foundToken.image.empty()) {
-      diagnostic.message = "Expecting " + expected + " but found `" +
-                           std::string(foundToken.image) + "`.";
-    } else {
-      diagnostic.message = "Expecting " + expected;
-    }
+    diagnostic.message = parse_expectation_message(
+        parseDiagnostic.message, expected, foundToken.image, unexpectedMessage);
     break;
   case Recovered:
     diagnostic.code = pegium::DiagnosticCode(std::string("parse.recovered"));
@@ -628,13 +626,24 @@ void DefaultDocumentValidator::processLinkingErrors(
       end = refNode.getEnd();
     }
 
+    // Carry the structured linking-error data so clients (e.g. quick-fixes) can
+    // act on the failing reference without re-parsing the message.
+    pegium::JsonValue::Object data;
+    data.try_emplace("code", std::string("linking-error"));
+    if (const auto *container = reference.getContainer(); container != nullptr) {
+      data.try_emplace("containerType",
+                       parser::detail::runtime_type_name(typeid(*container)));
+    }
+    data.try_emplace("property", std::string(reference.getFeature()));
+    data.try_emplace("refText", refText);
+
     diagnostics.push_back(pegium::Diagnostic{
         .severity = pegium::DiagnosticSeverity::Error,
         .message = reference.getErrorMessage(),
         .source = source,
         .code = pegium::DiagnosticCode(
             std::string("linking.unresolved-reference")),
-        .data = std::nullopt,
+        .data = pegium::JsonValue(std::move(data)),
         .begin = begin,
         .end = end});
   }

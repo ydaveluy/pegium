@@ -395,10 +395,23 @@ struct RecoveryContext : TrackedParseContext {
   bool trackEditState = true;
   std::uint32_t maxConsecutiveCodepointDeletes =
       kDefaultMaxConsecutiveCodepointDeletes;
-  std::uint32_t stabilityTokenCount = 2;
+  std::uint32_t stabilityTokenCount = kDefaultRecoveryStabilityTokenCount;
   std::uint32_t maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
   std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
-  std::uint32_t maxResyncSkipBytes = 4096;
+  std::uint32_t maxResyncSkipCodepoints = kDefaultMaxResyncSkipCodepoints;
+  /// When set, the out-of-window single-fuzzy-edit keyword Replace carve-out in
+  /// `replaceLeaf` is forced OFF (mirror of
+  /// `RecoveryAttemptSpec::probeAxes.forbidOutOfWindowFuzzyFold`, set only by
+  /// the no-fold sibling probe). Threaded in `execute_recovery_parse`; read in
+  /// the `replaceLeaf` carve-out below.
+  bool forbidOutOfWindowFuzzyFold = false;
+  /// When set, the fuzzy whole-keyword Replace candidate is suppressed in
+  /// `Literal::selectLocalRecoveryChoice` whenever a boundary split-Insert is
+  /// also enumerable (mirror of
+  /// `RecoveryAttemptSpec::probeAxes.forbidWholeKeywordFuzzyReplace`, set only
+  /// by the forbid-Replace sibling probe). Threaded in `execute_recovery_parse`;
+  /// read in `selectLocalRecoveryChoice`.
+  bool forbidWholeKeywordFuzzyReplace = false;
   /// Hard cap on the cumulative number of `ParserRule` recovery entries
   /// during a single recovery window. A pathological grammar shape (e.g.
   /// unclosed nested call expressions) can drive `evaluate_editable_recovery_candidate`
@@ -431,16 +444,55 @@ struct RecoveryContext : TrackedParseContext {
   bool allowLeadingTerminalInsertScope = false;
   DeleteBridgeState _deleteBridge{};
 
-  detail::ChoiceRecoverCache choiceRecoverCache{};
+  // Recovery memoization caches (ordered-choice attempts + fuzzy-keyword DP
+  // results). Owned lazily so a context that never reaches choice/fuzzy
+  // recovery allocates neither, and so the recovery driver can install pooled
+  // instances via `usePooledRecoveryCaches` that are shared across the several
+  // re-parses of one window — otherwise each ~1.4 MB choice cache and ~256 KB
+  // fuzzy cache is allocated cold on every probe (primary + minimize + minimal
+  // + alternative). The accessors lazily build an owned cache when none is
+  // installed; pooled callers bind shared instances instead. Lifetimes still
+  // track one parse exactly (stable grammar-literal / text-snapshot pointers),
+  // so these must never be promoted to a global or thread-local — see
+  // `LiteralFuzzyCandidatesCache` documentation.
+  std::unique_ptr<detail::ChoiceRecoverCache> ownedChoiceRecoverCache;
+  std::unique_ptr<detail::LiteralFuzzyCandidatesCache>
+      ownedLiteralFuzzyCandidatesCache;
+  detail::ChoiceRecoverCache *pooledChoiceRecoverCache = nullptr;
+  detail::LiteralFuzzyCandidatesCache *pooledLiteralFuzzyCandidatesCache =
+      nullptr;
 
-  /// Per-parse cache memoizing fuzzy-keyword DP results. Lives on the
-  /// recovery context so its lifetime tracks one parse exactly: stable
-  /// pointers (grammar literal storage, immutable text snapshot) make
-  /// identity-based lookup safe within that scope, and resetting the parse
-  /// context clears the cache for free. See
-  /// `LiteralFuzzyCandidatesCache` documentation for why this must not be
-  /// promoted to a global or thread-local.
-  detail::LiteralFuzzyCandidatesCache literalFuzzyCandidatesCache{};
+  /// Binds externally-owned, pooled recovery caches to this context so a single
+  /// allocation is reused across one window's re-parses. A null argument leaves
+  /// that cache lazily owned. Must be called before the first cache access.
+  void usePooledRecoveryCaches(
+      detail::ChoiceRecoverCache *choice,
+      detail::LiteralFuzzyCandidatesCache *fuzzy) noexcept {
+    pooledChoiceRecoverCache = choice;
+    pooledLiteralFuzzyCandidatesCache = fuzzy;
+  }
+
+  [[nodiscard]] detail::ChoiceRecoverCache &choiceRecoverCache() {
+    if (pooledChoiceRecoverCache != nullptr) {
+      return *pooledChoiceRecoverCache;
+    }
+    if (!ownedChoiceRecoverCache) {
+      ownedChoiceRecoverCache = std::make_unique<detail::ChoiceRecoverCache>();
+    }
+    return *ownedChoiceRecoverCache;
+  }
+
+  [[nodiscard]] detail::LiteralFuzzyCandidatesCache &
+  literalFuzzyCandidatesCache() {
+    if (pooledLiteralFuzzyCandidatesCache != nullptr) {
+      return *pooledLiteralFuzzyCandidatesCache;
+    }
+    if (!ownedLiteralFuzzyCandidatesCache) {
+      ownedLiteralFuzzyCandidatesCache =
+          std::make_unique<detail::LiteralFuzzyCandidatesCache>();
+    }
+    return *ownedLiteralFuzzyCandidatesCache;
+  }
 
   using FollowProbeFn = bool (*)(RecoveryContext &, const void *);
   FollowProbeFn _followProbeFn = nullptr;
@@ -481,30 +533,19 @@ struct RecoveryContext : TrackedParseContext {
         *this, _recoverableFollowConsumesVisibleProbeData);
   }
 
-  // Two install modes for the follow probe guard:
-  //   - Local: the new probe replaces the outer probe; queries do not
-  //     chain. Use for non-last Group elements where the immediate
-  //     successor is the only valid follow (chaining to the OUTER
-  //     would let outer-scope continuations mask in-group failures).
-  //   - PassThroughOuter: the new probe is null; queries fall through
-  //     to the previously-installed (outer) probe. Use for the LAST
-  //     element of a Group, where the semantic follow is the OUTER
-  //     scope's follow — without this chain, the Group's tail-probe
-  //     returns "past end -> false" and a repeated tail nested inside
-  //     an optional parent cannot see the parent's next structural
-  //     element, cascading into a panic-mode delete.
-  enum class FollowProbeMode : std::uint8_t {
-    Local,
-    PassThroughOuter,
-  };
-
+  // The follow probe guard always installs a LOCAL probe: the new probe
+  // replaces the outer probe for its scope; queries do not chain. Used for
+  // non-last Group elements where the immediate successor is the only valid
+  // follow (chaining to the OUTER would let outer-scope continuations mask
+  // in-group failures). The LAST element of a Group installs NO guard at all
+  // (Group::with_current_follow_probe) so the enclosing scope's follow stays
+  // live — which is exactly the semantic follow the last element needs.
   struct [[nodiscard]] FollowProbeGuard {
     FollowProbeGuard(RecoveryContext &c, FollowProbeFn fn, const void *data,
                      FollowProbeFn recoverableFn = nullptr,
                      const void *recoverableData = nullptr,
                      FollowProbeFn recoverableConsumesVisibleFn = nullptr,
-                     const void *recoverableConsumesVisibleData = nullptr,
-                     FollowProbeMode mode = FollowProbeMode::Local) noexcept
+                     const void *recoverableConsumesVisibleData = nullptr) noexcept
         : ctx(&c), prevFn(c._followProbeFn),
           prevData(c._followProbeData),
           prevRecoverableFn(c._recoverableFollowProbeFn),
@@ -513,33 +554,13 @@ struct RecoveryContext : TrackedParseContext {
               c._recoverableFollowConsumesVisibleProbeFn),
           prevRecoverableConsumesVisibleData(
               c._recoverableFollowConsumesVisibleProbeData) {
-      if (mode == FollowProbeMode::PassThroughOuter) {
-        // Pass-through: queries skip the (always-false) local probe
-        // and go straight to the outer one. The newFn slot is unused.
-        c._followProbeFn =
-            prevFn == nullptr ? nullptr : &passThroughStrictWrapper;
-        c._followProbeData = prevFn == nullptr ? nullptr : this;
-        c._recoverableFollowProbeFn = prevRecoverableFn == nullptr
-                                          ? nullptr
-                                          : &passThroughRecoverableWrapper;
-        c._recoverableFollowProbeData =
-            prevRecoverableFn == nullptr ? nullptr : this;
-        c._recoverableFollowConsumesVisibleProbeFn =
-            prevRecoverableConsumesVisibleFn == nullptr
-                ? nullptr
-                : &passThroughRecoverableConsumesVisibleWrapper;
-        c._recoverableFollowConsumesVisibleProbeData =
-            prevRecoverableConsumesVisibleFn == nullptr ? nullptr : this;
-      } else {
-        c._followProbeFn = fn;
-        c._followProbeData = data;
-        c._recoverableFollowProbeFn = recoverableFn;
-        c._recoverableFollowProbeData = recoverableData;
-        c._recoverableFollowConsumesVisibleProbeFn =
-            recoverableConsumesVisibleFn;
-        c._recoverableFollowConsumesVisibleProbeData =
-            recoverableConsumesVisibleData;
-      }
+      c._followProbeFn = fn;
+      c._followProbeData = data;
+      c._recoverableFollowProbeFn = recoverableFn;
+      c._recoverableFollowProbeData = recoverableData;
+      c._recoverableFollowConsumesVisibleProbeFn = recoverableConsumesVisibleFn;
+      c._recoverableFollowConsumesVisibleProbeData =
+          recoverableConsumesVisibleData;
     }
     FollowProbeGuard(const FollowProbeGuard &) = delete;
     FollowProbeGuard &operator=(const FollowProbeGuard &) = delete;
@@ -559,28 +580,6 @@ struct RecoveryContext : TrackedParseContext {
     }
 
   private:
-    static bool passThroughStrictWrapper(RecoveryContext &c,
-                                         const void *data) noexcept {
-      const auto *self = static_cast<const FollowProbeGuard *>(data);
-      return self->prevFn != nullptr && self->prevFn(c, self->prevData);
-    }
-
-    static bool passThroughRecoverableWrapper(RecoveryContext &c,
-                                              const void *data) noexcept {
-      const auto *self = static_cast<const FollowProbeGuard *>(data);
-      return self->prevRecoverableFn != nullptr &&
-             self->prevRecoverableFn(c, self->prevRecoverableData);
-    }
-
-    static bool
-    passThroughRecoverableConsumesVisibleWrapper(RecoveryContext &c,
-                                                 const void *data) noexcept {
-      const auto *self = static_cast<const FollowProbeGuard *>(data);
-      return self->prevRecoverableConsumesVisibleFn != nullptr &&
-             self->prevRecoverableConsumesVisibleFn(
-                 c, self->prevRecoverableConsumesVisibleData);
-    }
-
     RecoveryContext *ctx;
     FollowProbeFn prevFn;
     const void *prevData;
@@ -595,46 +594,22 @@ struct RecoveryContext : TrackedParseContext {
                   FollowProbeFn recoverableFn = nullptr,
                   const void *recoverableData = nullptr,
                   FollowProbeFn recoverableConsumesVisibleFn = nullptr,
-                  const void *recoverableConsumesVisibleData = nullptr,
-                  FollowProbeMode mode = FollowProbeMode::Local) noexcept {
+                  const void *recoverableConsumesVisibleData = nullptr) noexcept {
     return FollowProbeGuard{*this,
                             fn,
                             data,
                             recoverableFn,
                             recoverableData,
                             recoverableConsumesVisibleFn,
-                            recoverableConsumesVisibleData,
-                            mode};
+                            recoverableConsumesVisibleData};
   }
 
-  [[nodiscard]] FollowProbeGuard
-  withPassThroughOuterFollowProbe() noexcept {
-    return FollowProbeGuard{
-        *this,   nullptr, nullptr, nullptr,
-        nullptr, nullptr, nullptr, FollowProbeMode::PassThroughOuter};
-  }
-
-  [[nodiscard]] constexpr const char *furthestExploredCursor() const noexcept {
-    return maxCursor();
-  }
-
-  [[nodiscard]] constexpr TextOffset furthestExploredOffset() const noexcept {
-    return maxCursorOffset();
-  }
-
-  constexpr void restoreFurthestExploredCursor(const char *cursor) noexcept {
-    restoreMaxCursor(cursor);
-  }
-
-  /// Monotonic restore: only lift the furthest-explored cursor back up to
-  /// `cursor` when the current value has fallen below it (e.g. after a
-  /// rewind). Work that legitimately progressed the frontier further is
-  /// preserved.
-  constexpr void
-  bumpFurthestExploredCursor(const char *cursor) noexcept {
-    if (cursor > maxCursor()) {
-      restoreMaxCursor(cursor);
-    }
+  /// Installs a fully-null follow probe, clearing every follow query
+  /// for the scope of the returned guard. Equivalent to passing all-null
+  /// arguments to `withFollowProbe` (the remaining arguments default to
+  /// nullptr).
+  [[nodiscard]] FollowProbeGuard withNoFollowProbe() noexcept {
+    return withFollowProbe(nullptr, nullptr);
   }
 
   inline void refreshRecoveryPhase() noexcept {
@@ -700,19 +675,9 @@ public:
     return recoveryState.frontierBlocked;
   }
 
-  void clearFrontierBlock() noexcept {
-    if (!recoveryState.frontierBlocked) {
-      return;
-    }
-    recoveryState.frontierBlocked = false;
-  }
+  void clearFrontierBlock() noexcept { recoveryState.frontierBlocked = false; }
 
-  void blockFrontier() noexcept {
-    if (recoveryState.frontierBlocked) {
-      return;
-    }
-    recoveryState.frontierBlocked = true;
-  }
+  void blockFrontier() noexcept { recoveryState.frontierBlocked = true; }
 
   void setEditWindow(std::optional<EditWindow> window) noexcept {
     editWindow = std::move(window);
@@ -765,13 +730,6 @@ public:
                : 0;
   }
   [[nodiscard]] constexpr TextOffset
-  pendingRecoveryWindowActivationOffset() const noexcept {
-    if (!hasPendingRecoveryWindows()) {
-      return 0;
-    }
-    return pendingRecoveryWindowBeginOffset();
-  }
-  [[nodiscard]] constexpr TextOffset
   pendingRecoveryWindowMaxCursorOffset() const noexcept {
     return hasPendingRecoveryWindows() ? editWindow->maxCursorOffset : 0;
   }
@@ -784,14 +742,6 @@ public:
   [[nodiscard]] constexpr bool hasPendingCommittedRecoveryEdits() const
       noexcept {
     return committedRecoveryEditIndex < committedRecoveryEdits.size();
-  }
-  [[nodiscard]] constexpr bool hasPendingCommittedRecoveryEditWithin(
-      TextOffset beginOffset, TextOffset endOffset) const noexcept {
-    const auto *entry = nextCommittedRecoveryEdit();
-    if (entry == nullptr || endOffset < beginOffset) {
-      return false;
-    }
-    return entry->beginOffset <= endOffset && entry->endOffset >= beginOffset;
   }
   [[nodiscard]] constexpr std::uint32_t
   completedRecoveryWindowCount() const noexcept {
@@ -816,8 +766,8 @@ public:
 
   [[nodiscard]] EditStateGuard
   withEditPermissions(bool nextAllowInsert, bool nextAllowDelete) noexcept {
-    return detail::make_edit_permissions_guard(*this, nextAllowInsert,
-                                               nextAllowDelete);
+    return EditStateGuard(*this, nextAllowInsert, nextAllowDelete,
+                          trackEditState);
   }
 
   /// Disable insert/delete and edit-state tracking together for the scope
@@ -826,7 +776,7 @@ public:
   /// context without committing edits or bumping any edit-budget
   /// counters.
   [[nodiscard]] EditStateGuard withEditTrackingDisabled() noexcept {
-    return detail::make_edit_state_guard(*this, false, false, false);
+    return EditStateGuard(*this, false, false, false);
   }
 
   [[nodiscard]] constexpr bool
@@ -840,6 +790,27 @@ public:
            recoveryState.editBudget.hadEdits &&
            recoveryState.windowReplay.activeEditWindowCompleted &&
            !hasPendingCommittedRecoveryEdits();
+  }
+
+  /// True when no recovery descent is currently active and none is pending:
+  /// the recovery-mode combinators use this to short-circuit straight into
+  /// the strict parse path. Centralises the verbatim 3-term guard that
+  /// Group/OrderedChoice/Repetition/ParserRule/DataTypeRule replicate.
+  [[nodiscard]] constexpr bool recoveryDescentInactive() const noexcept {
+    return !isInRecoveryPhase() && !hasPendingRecoveryWindows() &&
+           !allowsCompletedWindowContinuationRecovery();
+  }
+
+  /// True when the current element committed observable progress relative to
+  /// the supplied checkpoint: the live cursor advanced, or the edit count or
+  /// edit cost grew. Captures the triple-disjunction that Group replicates
+  /// around its sequence-element parse.
+  [[nodiscard]] constexpr bool
+  committedProgressSince(const Checkpoint &checkpoint) const noexcept {
+    return cursor() != checkpoint.parseCheckpoint.parseCheckpoint.cursor ||
+           currentEditCount() !=
+               checkpoint.recoveryState.editBudget.editCount ||
+           currentEditCost() != checkpoint.recoveryState.editBudget.editCost;
   }
 
   [[nodiscard]] bool
@@ -873,6 +844,22 @@ public:
 
   [[nodiscard]] constexpr bool canInsert() const noexcept {
     return detail::can_insert(allowInsert, canEdit());
+  }
+
+  /// Shared guard for replace/delete edits: refuse a destructive edit that
+  /// lands past the active recovery window's max cursor once the window has
+  /// already made edits, unless the edit continues the current local edit
+  /// cluster or the caller opens `windowContinuationHatch` (a per-edit-kind
+  /// escape: a single-edit fuzzy keyword replace, or the first delete of a
+  /// run).
+  [[nodiscard]] constexpr bool
+  destructiveEditOutsideActiveWindow(const EditWindow *window,
+                                     bool windowContinuationHatch) const noexcept {
+    return recoveryState.windowReplay.inRecoveryPhase && window != nullptr &&
+           cursorOffset() > window->maxCursorOffset &&
+           recoveryState.editBudget.hadEdits &&
+           !allowDestructiveWindowContinuation &&
+           !continues_local_edit_cluster_at_cursor() && windowContinuationHatch;
   }
 
   [[nodiscard]] constexpr bool canDelete() const noexcept {
@@ -934,48 +921,21 @@ public:
     return std::move(recoveryEdits);
   }
 
-  [[nodiscard]] std::vector<std::uint32_t>
-  replayForwardTokenCounts() const {
-    std::vector<std::uint32_t> replayCounts;
-    if (editWindow.has_value()) {
-      replayCounts.push_back(
-          std::max(editWindow->forwardTokenCount,
-                   editWindow->replayForwardTokenCount));
+  [[nodiscard]] std::optional<std::uint32_t>
+  replayForwardTokenCount() const {
+    if (!editWindow.has_value()) {
+      return std::nullopt;
     }
-    return replayCounts;
+    return active_window_forward_token_budget(*editWindow);
   }
 
   [[nodiscard]] constexpr bool
   canAffordEdit(ParseDiagnosticKind kind) const noexcept {
-    if (recoveryState.editBudget.allowBudgetOverflowEdits) {
-      return true;
-    }
-    if (recoveryState.windowReplay.inRecoveryPhase &&
-        currentEditWindow() != nullptr) {
-      return detail::can_afford_edit(currentWindowEditCount(),
-                                     currentWindowEditCost(),
-                                     maxEditsPerAttempt, maxEditCost, kind);
-    }
-    return detail::can_afford_edit(recoveryState.editBudget.editCount,
-                                   recoveryState.editBudget.editCost,
-                                   maxEditsPerAttempt, maxEditCost, kind);
+    return canAffordEditImpl(kind);
   }
   [[nodiscard]] constexpr bool
   canAffordEdit(std::uint32_t customCost) const noexcept {
-    if (recoveryState.editBudget.allowBudgetOverflowEdits) {
-      return true;
-    }
-    if (recoveryState.windowReplay.inRecoveryPhase &&
-        currentEditWindow() != nullptr) {
-      return detail::can_afford_edit(currentWindowEditCount(),
-                                     currentWindowEditCost(),
-                                     maxEditsPerAttempt, maxEditCost,
-                                     customCost);
-    }
-    return detail::can_afford_edit(recoveryState.editBudget.editCount,
-                                   recoveryState.editBudget.editCost,
-                                   maxEditsPerAttempt, maxEditCost,
-                                   customCost);
+    return canAffordEditImpl(customCost);
   }
 
   inline void allowBudgetOverflowEdits() noexcept {
@@ -994,7 +954,9 @@ public:
   bool extendLastDeleteThroughHiddenTrivia() noexcept;
 
   bool replaceLeaf(const char *endPtr, const grammar::AbstractElement *element,
-                   std::uint32_t replacementCost, bool hidden = false) {
+                   std::uint32_t replacementCost, bool hidden = false,
+                   std::uint32_t fuzzyOperationDistance =
+                       std::numeric_limits<std::uint32_t>::max()) {
     if (!trackEditState) {
       return false;
     }
@@ -1021,12 +983,19 @@ public:
     // falls back to a synthetic Insert at a higher rule level which
     // leaves the typoed token unconsumed.
     //
-    // Thresholds: cost ≤ 1 (single-codepoint edit), and the target literal
-    // must be a word (≥ 3 codepoints). The literal gate is what keeps the
-    // symbolic-literal guards in place — `>` → `=>` (literal length 2)
-    // stays gated, `re` → `req` (length 3) and `initialStat` →
-    // `initialState` (length 12) go through.
-    constexpr std::uint32_t kSingleEditReplaceCostLimit = 1u;
+    // Thresholds: a SINGLE fuzzy edit operation (Damerau-Levenshtein
+    // operation distance == 1, e.g. one substitution / transposition / extra
+    // or missing codepoint), and the target literal must be a word (≥ 3
+    // codepoints). Gating on the operation distance rather than the weighted
+    // `replacementCost` admits single-operation repairs whose weighted cost is
+    // > 1 (a transposition or extra-codepoint Replace costs 2), while still
+    // keeping the symbolic-literal guards in place via the word-length floor —
+    // `>` → `=>` (literal length 2) stays gated, `re` → `req` (length 3) and
+    // `initialStat` → `initialState` (length 12) go through.
+    //
+    // `forbidOutOfWindowFuzzyFold` (mirror of the ParseOptions axis) forces the
+    // carve-out OFF for the no-fold sibling probe, which re-descends the same
+    // window to expose a competing pure-delete candidate to the ranker.
     constexpr std::size_t kWordLiteralLengthFloor = 3u;
     const TextOffset replaceSpan =
         endOffset > cursorOffset() ? endOffset - cursorOffset() : 0;
@@ -1039,16 +1008,10 @@ public:
         literalElement != nullptr &&
         literalElement->getValue().size() >= kWordLiteralLengthFloor;
     const bool singleEditFuzzyKeywordReplace =
-        targetsWordKeyword &&
-        replacementCost <= kSingleEditReplaceCostLimit && replaceSpan > 0;
-    const bool destructiveEditOutsideActiveWindow =
-        recoveryState.windowReplay.inRecoveryPhase && window != nullptr &&
-        cursorOffset() > window->maxCursorOffset &&
-        recoveryState.editBudget.hadEdits &&
-        !allowDestructiveWindowContinuation &&
-        !continues_local_edit_cluster_at_cursor() &&
-        !singleEditFuzzyKeywordReplace;
-    if (!canEdit() || destructiveEditOutsideActiveWindow ||
+        !forbidOutOfWindowFuzzyFold && targetsWordKeyword &&
+        fuzzyOperationDistance == 1u && replaceSpan > 0;
+    if (!canEdit() ||
+        destructiveEditOutsideActiveWindow(window, !singleEditFuzzyKeywordReplace) ||
         !canEditAtOffset(endOffset) ||
         !canAffordEdit(replacementCost)) {
       PEGIUM_RECOVERY_TRACE("[rule] replace blocked offset=", cursorOffset(),
@@ -1081,6 +1044,27 @@ public:
 
 private:
   friend struct TrackedParseContext;
+
+  /// Shared body for both `canAffordEdit` overloads. The only difference
+  /// between the kind- and cost-based forms is the final argument forwarded
+  /// to the overloaded `detail::can_afford_edit`; everything else (the
+  /// budget-overflow early-out, the window-scoped vs global counter
+  /// selection) is identical.
+  template <class Cost>
+  [[nodiscard]] constexpr bool canAffordEditImpl(Cost cost) const noexcept {
+    if (recoveryState.editBudget.allowBudgetOverflowEdits) {
+      return true;
+    }
+    if (recoveryState.windowReplay.inRecoveryPhase &&
+        currentEditWindow() != nullptr) {
+      return detail::can_afford_edit(currentWindowEditCount(),
+                                     currentWindowEditCost(),
+                                     maxEditsPerAttempt, maxEditCost, cost);
+    }
+    return detail::can_afford_edit(recoveryState.editBudget.editCount,
+                                   recoveryState.editBudget.editCost,
+                                   maxEditsPerAttempt, maxEditCost, cost);
+  }
 
   inline void afterTrackedSkip() noexcept {
     clearPendingDeleteHiddenTriviaBridge();
@@ -1134,6 +1118,11 @@ private:
       // predicate guards the actual replay site.)
       return offset < entry->endOffset;
     case ParseDiagnosticKind::Replaced:
+      // The upper bound is INCLUSIVE (`<= endOffset`) and load-bearing: a
+      // committed Replace replay validates its span END via
+      // canEditAtOffset(endOffset) at replaceLeaf, so the end position itself
+      // must be replayable. An exclusive `<` would reject the legal replay and
+      // break the cross-window Replace cascade (e.g. statemachine/initialStat).
       return offset >= entry->beginOffset && offset <= entry->endOffset;
     case ParseDiagnosticKind::Incomplete:
     case ParseDiagnosticKind::Recovered:

@@ -10,9 +10,23 @@ endif()
 
 option(PEGIUM_PROFILE_BUILD "Enable profiling-friendly flags (no LTO, visible symbols, frame pointers)" OFF)
 option(PEGIUM_ENABLE_ASAN "Enable AddressSanitizer for supported toolchains" OFF)
+option(PEGIUM_ENABLE_TSAN "Enable ThreadSanitizer for supported toolchains" OFF)
 option(PEGIUM_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer for supported toolchains" OFF)
 option(PEGIUM_BUILD_FUZZ_TARGETS "Build FuzzTest-based Pegium fuzz targets" OFF)
-option(PEGIUM_ENABLE_FUZZ_CORPUS "Register exhaustive language-specific fuzz corpus tests" OFF)
+# The exhaustive language fuzz corpus sweeps (the deterministic *KeywordFuzzTest
+# / *SemicolonColonFuzzTest mutation sweeps) are cheap in optimized builds
+# (~6s total) but slow under sanitizers or unoptimized Debug builds. Default
+# them ON only where they are cheap so a plain `cmake` build still exercises
+# recovery on every mutation; override with -DPEGIUM_ENABLE_FUZZ_CORPUS=ON/OFF.
+if(PEGIUM_ENABLE_ASAN OR PEGIUM_ENABLE_TSAN OR PEGIUM_ENABLE_UBSAN
+   OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(PEGIUM_FUZZ_CORPUS_DEFAULT OFF)
+else()
+    set(PEGIUM_FUZZ_CORPUS_DEFAULT ON)
+endif()
+option(PEGIUM_ENABLE_FUZZ_CORPUS
+    "Register exhaustive language-specific fuzz corpus tests (default ON for optimized non-sanitizer builds; cheap there, slow under Debug/ASan)"
+    ${PEGIUM_FUZZ_CORPUS_DEFAULT})
 option(PEGIUM_BUILD_EXAMPLES "Build pegium examples" ${PEGIUM_MASTER_PROJECT})
 
 if(NOT PEGIUM_MASTER_PROJECT AND NOT DEFINED BUILD_TESTING)
@@ -88,8 +102,15 @@ set(PEGIUM_INTERNAL_OPTION_TARGETS
 )
 
 set(PEGIUM_SANITIZER_FLAGS)
+if(PEGIUM_ENABLE_ASAN AND PEGIUM_ENABLE_TSAN)
+    message(FATAL_ERROR
+        "PEGIUM_ENABLE_ASAN and PEGIUM_ENABLE_TSAN cannot be enabled together.")
+endif()
 if(PEGIUM_ENABLE_ASAN)
     list(APPEND PEGIUM_SANITIZER_FLAGS -fsanitize=address)
+endif()
+if(PEGIUM_ENABLE_TSAN)
+    list(APPEND PEGIUM_SANITIZER_FLAGS -fsanitize=thread)
 endif()
 if(PEGIUM_ENABLE_UBSAN)
     list(APPEND PEGIUM_SANITIZER_FLAGS -fsanitize=undefined)
@@ -97,7 +118,7 @@ endif()
 if(PEGIUM_SANITIZER_FLAGS)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         message(FATAL_ERROR
-            "PEGIUM_ENABLE_ASAN/PEGIUM_ENABLE_UBSAN require GCC or Clang.")
+            "PEGIUM_ENABLE_ASAN/PEGIUM_ENABLE_TSAN/PEGIUM_ENABLE_UBSAN require GCC or Clang.")
     endif()
     target_compile_options(pegium_internal_build_options INTERFACE
         ${PEGIUM_SANITIZER_FLAGS}
@@ -114,6 +135,12 @@ if(PEGIUM_ENABLE_ASAN)
     )
 endif()
 
+if(PEGIUM_ENABLE_TSAN)
+    target_compile_definitions(pegium_internal_build_options INTERFACE
+        THREAD_SANITIZER
+    )
+endif()
+
 if(PEGIUM_PROFILE_BUILD)
     target_compile_options(pegium_internal_build_options INTERFACE
         $<$<CXX_COMPILER_ID:GNU,Clang>:-fno-omit-frame-pointer>
@@ -124,7 +151,7 @@ endif()
 
 option(PEGIUM_ENABLE_CODECOVERAGE   "Enable code coverage testing support"            OFF)
 option(PEGIUM_ENABLE_RECOVERY_TRACE "Enable verbose recovery traces"                   OFF)
-option(PEGIUM_ENABLE_STEP_TRACE     "Enable step counters for Phase 8 instrumentation" OFF)
+option(PEGIUM_ENABLE_STEP_TRACE     "Enable step counters for recovery instrumentation" OFF)
 
 if(PEGIUM_ENABLE_RECOVERY_TRACE)
     target_compile_definitions(pegium_internal_build_options INTERFACE
@@ -211,33 +238,4 @@ if(PEGIUM_BUILD_EXAMPLES)
 endif()
 if(BUILD_TESTING)
     add_subdirectory(tests)
-endif()
-
-# Recovery refactor lints (Phase 0 charge B). The lint scripts live in
-# tools/lints/ and are scaffolds for several upcoming concepts; the
-# `pegium_recovery_lints` target lets CI invoke them with a single
-# command. As phases activate semantically (Phase 1: strict path,
-# Phase 2: evidence + axis orthogonality, etc.), the scripts grow but
-# the CMake wiring remains stable.
-find_package(Python3 COMPONENTS Interpreter QUIET)
-if(Python3_Interpreter_FOUND)
-    add_custom_target(pegium_recovery_lints
-        COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tools/lints/run_all.py
-            ${CMAKE_CURRENT_SOURCE_DIR}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Running recovery refactor lints"
-        VERBATIM
-    )
-    if(BUILD_TESTING)
-        add_test(
-            NAME PegiumRecoveryLints
-            COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_CURRENT_SOURCE_DIR}/tools/lints/run_all.py
-                ${CMAKE_CURRENT_SOURCE_DIR}
-        )
-        set_tests_properties(PegiumRecoveryLints PROPERTIES
-            LABELS "lints;core"
-        )
-    endif()
 endif()

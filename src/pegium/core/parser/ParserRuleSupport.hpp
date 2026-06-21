@@ -93,7 +93,9 @@ template <typename T> struct ParserRuleBuildSupport {
     if (node.isLeaf()) {
       auto *leafNode = arena.template create<T>();
       leafNode->setCstNode(node);
-      applyPendingAssignments(leafNode);
+      // A leaf node carries no pending assignments by construction: the only
+      // addPendingAssignment calls happen inside the child loop below, which
+      // this branch returns before reaching.
       return leafNode;
     }
 
