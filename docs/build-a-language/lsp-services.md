@@ -33,6 +33,11 @@ Shared runtime services under `sharedServices.lsp` also get a default baseline:
 
 For most languages, this baseline is enough to get an editor session running.
 
+The default hover provider (`MultilineCommentHoverProvider`, built on the
+`AstNodeHoverProvider` base) shows the doc-comment of the declaration under the
+cursor — and, when the cursor sits on a keyword, its
+[`.doc("…")` documentation](grammar.md#document-keywords-for-hover).
+
 ## Customization strategy
 
 Start from `makeDefaultServices(...)`, then replace only the language-specific providers. This keeps the baseline behavior while you override completion, formatting, hover, or navigation logic where needed.

@@ -44,7 +44,7 @@ Scaffold a new language with a single command — no cloning required:
 ```bash
 curl -fsSLO https://ydaveluy.github.io/pegium/pegium-new.cmake && \
   cmake -DNAME=MyLang -DEXT=.ml -P pegium-new.cmake
-cd mylang && cmake -B build && cmake --build build
+cd mylang && cmake -B build && cmake --build build -j
 ./build/mylang-cli example/hello.ml
 ```
 
