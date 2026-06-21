@@ -1,0 +1,53 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Configure (CMake)",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["-B", "build", "-DCMAKE_BUILD_TYPE=Debug"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build language server (C++)",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "build", "--target", "@PEGIUM_NEW_LANGUAGE_ID@-lsp", "-j"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "dependsOn": "Configure (CMake)",
+            "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Install extension deps (npm)",
+            "type": "shell",
+            "command": "npm",
+            "args": ["install"],
+            "options": { "cwd": "${workspaceFolder}/vscode" },
+            "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build extension (TypeScript)",
+            "type": "shell",
+            "command": "npm",
+            "args": ["run", "compile"],
+            "options": { "cwd": "${workspaceFolder}/vscode" },
+            "dependsOn": "Install extension deps (npm)",
+            "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
+            "problemMatcher": "$tsc"
+        },
+        {
+            "label": "Build all",
+            "dependsOn": [
+                "Build language server (C++)",
+                "Build extension (TypeScript)"
+            ],
+            "dependsOrder": "parallel",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": []
+        }
+    ]
+}
