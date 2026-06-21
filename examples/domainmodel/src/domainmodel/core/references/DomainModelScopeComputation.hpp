@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include <domainmodel/ast.hpp>
+#include <domainmodel/core/ast.hpp>
 #include <domainmodel/core/references/QualifiedNameProvider.hpp>
 
 #include <pegium/core/references/DefaultScopeComputation.hpp>

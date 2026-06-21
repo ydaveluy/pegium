@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include <arithmetics/parser/Parser.hpp>
+#include <arithmetics/core/Parser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>

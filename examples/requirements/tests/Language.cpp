@@ -1,35 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <requirements/core/Module.hpp>
-#include <requirements/parser/Parser.hpp>
+#include <requirements/core/Parser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
-
-#include <sstream>
+#include <pegium/examples/RecoverySampleTestSupport.hpp>
 
 namespace requirements::tests {
 namespace {
-
-std::string dump_parse_diagnostics(
-    const std::vector<pegium::parser::ParseDiagnostic> &diagnostics) {
-  std::string dump;
-  for (const auto &diagnostic : diagnostics) {
-    if (!dump.empty()) {
-      dump += " | ";
-    }
-    std::ostringstream current;
-    current << diagnostic.kind;
-    if (diagnostic.element != nullptr) {
-      current << ":" << *diagnostic.element;
-    }
-    if (!diagnostic.message.empty()) {
-      current << ":" << diagnostic.message;
-    }
-    current << "@" << diagnostic.beginOffset << "-" << diagnostic.endOffset;
-    dump += current.str();
-  }
-  return dump;
-}
 
 TEST(RequirementsLanguageTest, ParsesRequirementModel) {
   parser::RequirementsParser parser;
@@ -62,7 +40,8 @@ TEST(RequirementsLanguageTest, LinksEnvironmentMultiReferencesAndReportsUnresolv
 
   ASSERT_NE(document, nullptr);
   const auto &parsed = document->parseResult;
-  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
+  const auto parseDump =
+      pegium::test::dump_parse_diagnostics(parsed.parseDiagnostics);
   auto *model =
       dynamic_cast<ast::RequirementModel *>(parsed.value);
   ASSERT_NE(model, nullptr) << "fullMatch=" << parsed.fullMatch

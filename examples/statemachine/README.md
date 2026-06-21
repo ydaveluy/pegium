@@ -34,7 +34,7 @@ cmake --build build
 
 ```sh
 ./build/examples/statemachine/pegium-example-statemachine-cli \
-  examples/statemachine/example/trafficlight.statemachine
+  generate examples/statemachine/example/trafficlight.statemachine
 ```
 
 ## Run the LSP server

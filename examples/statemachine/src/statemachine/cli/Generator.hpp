@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-#include <statemachine/ast.hpp>
+#include <statemachine/core/ast.hpp>
 
 namespace statemachine::cli {
 

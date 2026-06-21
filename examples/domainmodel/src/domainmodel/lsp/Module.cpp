@@ -7,7 +7,7 @@
 #include <domainmodel/core/validation/DomainModelValidator.hpp>
 #include <domainmodel/lsp/DomainModelFormatter.hpp>
 #include <domainmodel/lsp/DomainModelRenameProvider.hpp>
-#include <domainmodel/parser/Parser.hpp>
+#include <domainmodel/core/Parser.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace domainmodel {

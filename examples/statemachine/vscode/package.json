@@ -1,5 +1,6 @@
 {
   "name": "pegium-statemachine-dsl",
+  "publisher": "pegium",
   "displayName": "Pegium Statemachine DSL",
   "version": "0.1.0",
   "description": "Statemachine example language powered by Pegium",
@@ -13,7 +14,7 @@
   "activationEvents": [
     "onLanguage:statemachine"
   ],
-  "main": "./vscode/out/extension.js",
+  "main": "./out/extension.js",
   "contributes": {
     "languages": [
       {
@@ -25,14 +26,14 @@
         "extensions": [
           ".statemachine"
         ],
-        "configuration": "./vscode/language-configuration.json"
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
         "language": "statemachine",
         "scopeName": "source.statemachine",
-        "path": "./vscode/syntaxes/statemachine.tmLanguage.json"
+        "path": "./syntaxes/statemachine.tmLanguage.json"
       }
     ],
     "configuration": {
@@ -47,27 +48,32 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./vscode/tsconfig.json",
-    "test": "npm run compile && node ./vscode/out/test/runTest.js",
-    "watch": "tsc -p ./vscode/tsconfig.json -w",
-    "vscode:prepublish": "npm run compile"
+    "compile": "tsc -p ./tsconfig.json",
+    "bundle": "node esbuild.mjs --production",
+    "watch": "tsc -p ./tsconfig.json -w",
+    "test": "npm run compile && node ./out/test/runTest.js",
+    "vscode:prepublish": "npm run bundle",
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies"
   },
   "files": [
     "package.json",
-    "README.md",
-    "example",
-    "vscode/out",
-    "vscode/src",
-    "vscode/language-configuration.json",
-    "vscode/syntaxes"
+    "out",
+    "language-configuration.json",
+    "syntaxes"
   ],
   "dependencies": {
     "vscode-languageclient": "~9.0.1"
   },
   "devDependencies": {
-    "@vscode/test-electron": "^2.4.1",
     "@types/node": "^20.17.17",
     "@types/vscode": "^1.86.0",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.24.0",
     "typescript": "^5.7.2"
+  },
+  "vsce": {
+    "dependencies": false
   }
 }

@@ -4,7 +4,7 @@
 
 #include <requirements/core/validation/RequirementsValidator.hpp>
 #include <requirements/core/validation/TestsValidator.hpp>
-#include <requirements/parser/Parser.hpp>
+#include <requirements/core/Parser.hpp>
 
 namespace requirements {
 
@@ -14,7 +14,8 @@ void applyRequirementsCoreModule(Services &services) {
   services.parser =
       std::make_unique<const parser::RequirementsParser>(services);
   services.languageMetaData.fileExtensions = {".req"};
-  services.validator = std::make_unique<validation::RequirementsValidator>();
+  services.validator =
+      std::make_unique<validation::RequirementsValidator>(services.shared);
   validation::registerRequirementsValidationChecks(services);
 }
 

@@ -54,7 +54,7 @@ target_link_libraries(pegium_example_statemachine_cli
 )
 
 add_executable(pegium-example-statemachine-cli
-    src/statemachine/cli_main.cpp
+    src/statemachine/cli/main.cpp
 )
 target_compile_features(pegium-example-statemachine-cli PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-statemachine-cli PRIVATE
@@ -64,7 +64,7 @@ target_link_libraries(pegium-example-statemachine-cli PRIVATE
 )
 
 add_executable(pegium-example-statemachine-lsp
-    src/statemachine/lsp_main.cpp
+    src/statemachine/lsp/main.cpp
 )
 target_compile_features(pegium-example-statemachine-lsp PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-statemachine-lsp PRIVATE

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/parser/Parser.hpp>
+#include <arithmetics/core/Parser.hpp>
 
 #include "LanguageTestSupport.hpp"
 

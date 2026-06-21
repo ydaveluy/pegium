@@ -12,7 +12,7 @@
 #include <variant>
 #include <vector>
 
-#include <arithmetics/ast.hpp>
+#include <arithmetics/core/ast.hpp>
 #include <arithmetics/lsp/Module.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
@@ -118,7 +118,7 @@ protected:
   void TearDown() override {
     if (shared != nullptr && shared->workspace.workspaceLock != nullptr) {
       auto drain = shared->workspace.workspaceLock->write(
-          [](const utils::CancellationToken &) {});
+          [](const utils::CancellationToken &, const auto &) {});
       if (drain.valid()) {
         drain.get();
       }

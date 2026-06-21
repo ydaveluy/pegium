@@ -3,7 +3,7 @@
 #include <utility>
 
 #include <statemachine/core/validation/StatemachineValidator.hpp>
-#include <statemachine/parser/Parser.hpp>
+#include <statemachine/core/Parser.hpp>
 
 namespace statemachine {
 

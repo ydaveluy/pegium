@@ -57,7 +57,7 @@ target_link_libraries(pegium_example_requirements_cli
 )
 
 add_executable(pegium-example-requirements-cli
-    src/requirements/cli_main.cpp
+    src/requirements/cli/main.cpp
 )
 target_compile_features(pegium-example-requirements-cli PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-requirements-cli PRIVATE
@@ -67,7 +67,7 @@ target_link_libraries(pegium-example-requirements-cli PRIVATE
 )
 
 add_executable(pegium-example-requirements-lsp
-    src/requirements/lsp_main.cpp
+    src/requirements/lsp/main.cpp
 )
 target_compile_features(pegium-example-requirements-lsp PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-requirements-lsp PRIVATE

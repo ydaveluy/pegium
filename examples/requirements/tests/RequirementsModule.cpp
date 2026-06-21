@@ -253,74 +253,43 @@ TEST(RequirementsModuleTest, GoodFixturePublishesNoDiagnosticsAcrossDocuments) {
   EXPECT_TRUE(documents.testsPart2->diagnostics.empty());
 }
 
-TEST(RequirementsModuleTest,
-     BadRequirementIdentifierFixturePublishesExpectedWarning) {
-  auto shared = pegium::test::make_empty_shared_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  pegium::installDefaultSharedLspServices(*shared);
-  pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(requirements::lsp::registerRequirementsServices(*shared));
+TEST(RequirementsModuleTest, Bad1FixturePublishesExpectedSingleWarnings) {
+  struct Case {
+    const char *name;
+    std::shared_ptr<pegium::workspace::Document> FixtureDocuments::*document;
+    std::string_view needle;
+    unsigned expectedLine;
+  };
+  static const std::array cases{
+      Case{"BadRequirementIdentifier", &FixtureDocuments::requirements,
+           "Requirement name ReqIdABC_reqID should contain a number.", 2u},
+      Case{"BadTestIdentifier", &FixtureDocuments::testsPart1,
+           "Test name TA should contain a number.", 1u},
+      Case{"UncoveredRequirement", &FixtureDocuments::requirements,
+           "Requirement ReqId004_unicorn not covered by a test.", 4u},
+  };
 
-  auto documents = open_fixture_set(*shared, "bad1");
+  for (const auto &testCase : cases) {
+    SCOPED_TRACE(testCase.name);
+    auto shared = pegium::test::make_empty_shared_services();
+    pegium::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedLspServices(*shared);
+    pegium::test::initialize_shared_workspace_for_tests(*shared);
+    ASSERT_TRUE(requirements::lsp::registerRequirementsServices(*shared));
 
-  ASSERT_NE(documents.requirements, nullptr);
-  ASSERT_NE(documents.testsPart1, nullptr);
-  ASSERT_NE(documents.testsPart2, nullptr);
+    auto documents = open_fixture_set(*shared, "bad1");
 
-  const auto *diagnostic = find_diagnostic_containing(
-      *documents.requirements,
-      "Requirement name ReqIdABC_reqID should contain a number.");
-  ASSERT_NE(diagnostic, nullptr);
-  EXPECT_EQ(documents.requirements->textDocument().positionAt(
-                diagnostic->begin)
-                .line,
-            2u);
-}
+    ASSERT_NE(documents.requirements, nullptr);
+    ASSERT_NE(documents.testsPart1, nullptr);
+    ASSERT_NE(documents.testsPart2, nullptr);
 
-TEST(RequirementsModuleTest, BadTestIdentifierFixturePublishesExpectedWarning) {
-  auto shared = pegium::test::make_empty_shared_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  pegium::installDefaultSharedLspServices(*shared);
-  pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(requirements::lsp::registerRequirementsServices(*shared));
-
-  auto documents = open_fixture_set(*shared, "bad1");
-
-  ASSERT_NE(documents.requirements, nullptr);
-  ASSERT_NE(documents.testsPart1, nullptr);
-  ASSERT_NE(documents.testsPart2, nullptr);
-
-  const auto *diagnostic =
-      find_diagnostic_containing(*documents.testsPart1,
-                                 "Test name TA should contain a number.");
-  ASSERT_NE(diagnostic, nullptr);
-  EXPECT_EQ(documents.testsPart1->textDocument().positionAt(
-                diagnostic->begin)
-                .line,
-            1u);
-}
-
-TEST(RequirementsModuleTest, UncoveredRequirementFixturePublishesExpectedWarning) {
-  auto shared = pegium::test::make_empty_shared_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  pegium::installDefaultSharedLspServices(*shared);
-  pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(requirements::lsp::registerRequirementsServices(*shared));
-
-  auto documents = open_fixture_set(*shared, "bad1");
-
-  ASSERT_NE(documents.requirements, nullptr);
-  ASSERT_NE(documents.testsPart1, nullptr);
-  ASSERT_NE(documents.testsPart2, nullptr);
-
-  const auto *diagnostic = find_diagnostic_containing(
-      *documents.requirements,
-      "Requirement ReqId004_unicorn not covered by a test.");
-  ASSERT_NE(diagnostic, nullptr);
-  EXPECT_EQ(documents.requirements->textDocument().positionAt(
-                diagnostic->begin)
-                .line,
-            4u);
+    const auto &document = documents.*(testCase.document);
+    const auto *diagnostic =
+        find_diagnostic_containing(*document, testCase.needle);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(document->textDocument().positionAt(diagnostic->begin).line,
+              testCase.expectedLine);
+  }
 }
 
 TEST(RequirementsModuleTest,

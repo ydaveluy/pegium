@@ -1,6 +1,6 @@
 #include <requirements/core/validation/RequirementsValidator.hpp>
 
-#include <requirements/ast.hpp>
+#include <requirements/core/ast.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -22,6 +22,10 @@ bool has_digit(std::string_view value) {
 
 } // namespace
 
+RequirementsValidator::RequirementsValidator(
+    const pegium::SharedCoreServices &sharedServices)
+    : _coveredCache(sharedServices) {}
+
 void RequirementsValidator::checkRequirementNameContainsANumber(
     const Requirement &requirement,
     const pegium::validation::ValidationAcceptor &accept) const {
@@ -36,32 +40,31 @@ void RequirementsValidator::checkRequirementIsCoveredByATest(
     const Requirement &requirement,
     const pegium::validation::ValidationAcceptor &accept,
     const pegium::workspace::Documents &documents) const {
-  bool covered = false;
-  for (const auto &document : documents.all()) {
-    const auto *model = pegium::ast_ptr_cast<TestModel>(document->parseResult.value);
-    if (model == nullptr) {
-      continue;
-    }
-    for (const auto &test : model->tests) {
-      if (!test) {
+  // Collect every requirement referenced by a test once per build (the same set
+  // for every requirement), then answer each check with a constant-time lookup.
+  const auto covered = _coveredCache.get(0, [&documents] {
+    auto referenced = std::make_shared<CoveredRequirements>();
+    for (const auto &document : documents.all()) {
+      const auto *model =
+          pegium::ast_ptr_cast<TestModel>(document->parseResult.value);
+      if (model == nullptr) {
         continue;
       }
-      for (const auto &reference : test->requirements) {
-        if (reference.get() == &requirement) {
-          covered = true;
-          break;
+      for (const auto &test : model->tests) {
+        if (!test) {
+          continue;
+        }
+        for (const auto &reference : test->requirements) {
+          if (const auto *target = reference.get()) {
+            referenced->insert(target);
+          }
         }
       }
-      if (covered) {
-        break;
-      }
     }
-    if (covered) {
-      break;
-    }
-  }
+    return std::shared_ptr<const CoveredRequirements>(std::move(referenced));
+  });
 
-  if (!covered) {
+  if (!covered->contains(&requirement)) {
     accept.warning(requirement,
                    "Requirement " + requirement.name + " not covered by a test.");
   }

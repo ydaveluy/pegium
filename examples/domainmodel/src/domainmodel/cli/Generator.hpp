@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-#include <domainmodel/ast.hpp>
+#include <domainmodel/core/ast.hpp>
 #include <domainmodel/cli/CliUtils.hpp>
 
 namespace domainmodel::cli {

@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-#include <domainmodel/ast.hpp>
+#include <domainmodel/core/ast.hpp>
 #include <pegium/core/services/CoreServices.hpp>
 
 namespace pegium::workspace {

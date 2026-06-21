@@ -1,6 +1,6 @@
 #include <domainmodel/lsp/DomainModelRenameProvider.hpp>
 
-#include <domainmodel/ast.hpp>
+#include <domainmodel/core/ast.hpp>
 
 #include <algorithm>
 #include <cassert>

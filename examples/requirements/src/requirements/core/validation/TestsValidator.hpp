@@ -1,6 +1,6 @@
 #pragma once
 
-#include <requirements/ast.hpp>
+#include <requirements/core/ast.hpp>
 
 #include <pegium/core/validation/ValidationAcceptor.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>

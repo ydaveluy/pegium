@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-#include <requirements/ast.hpp>
+#include <requirements/core/ast.hpp>
 
 #include <requirements/cli/CliUtils.hpp>
 

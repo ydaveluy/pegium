@@ -7,7 +7,7 @@
             "runtimeExecutable": "${execPath}",
             "args": [
                 "--new-window",
-                "--extensionDevelopmentPath=${workspaceFolder}/examples/arithmetics",
+                "--extensionDevelopmentPath=${workspaceFolder}/examples/arithmetics/vscode",
                 "${workspaceFolder}/examples/arithmetics/example"
             ],
             "outFiles": [
@@ -22,7 +22,7 @@
             "runtimeExecutable": "${execPath}",
             "args": [
                 "--new-window",
-                "--extensionDevelopmentPath=${workspaceFolder}/examples/domainmodel",
+                "--extensionDevelopmentPath=${workspaceFolder}/examples/domainmodel/vscode",
                 "${workspaceFolder}/examples/domainmodel/example"
             ],
             "outFiles": [
@@ -37,7 +37,7 @@
             "runtimeExecutable": "${execPath}",
             "args": [
                 "--new-window",
-                "--extensionDevelopmentPath=${workspaceFolder}/examples/requirements",
+                "--extensionDevelopmentPath=${workspaceFolder}/examples/requirements/vscode",
                 "${workspaceFolder}/examples/requirements/example"
             ],
             "outFiles": [
@@ -52,7 +52,7 @@
             "runtimeExecutable": "${execPath}",
             "args": [
                 "--new-window",
-                "--extensionDevelopmentPath=${workspaceFolder}/examples/statemachine",
+                "--extensionDevelopmentPath=${workspaceFolder}/examples/statemachine/vscode",
                 "${workspaceFolder}/examples/statemachine/example"
             ],
             "outFiles": [

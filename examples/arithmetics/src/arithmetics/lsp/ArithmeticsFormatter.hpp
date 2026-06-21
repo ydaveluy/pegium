@@ -1,6 +1,6 @@
 #pragma once
 
-#include <arithmetics/ast.hpp>
+#include <arithmetics/core/ast.hpp>
 
 #include <pegium/lsp/formatting/AbstractFormatter.hpp>
 

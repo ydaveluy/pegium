@@ -44,7 +44,7 @@
                 "if [ ! -d node_modules ]; then npm install; fi"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/examples/arithmetics"
+                "cwd": "${workspaceFolder}/examples/arithmetics/vscode"
             },
             "problemMatcher": []
         },
@@ -60,7 +60,7 @@
                 "Compile Arithmetics VSCode Extension"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/examples/arithmetics"
+                "cwd": "${workspaceFolder}/examples/arithmetics/vscode"
             },
             "problemMatcher": "$tsc"
         },
@@ -101,7 +101,7 @@
                 "if [ ! -d node_modules ]; then npm install; fi"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/examples/domainmodel"
+                "cwd": "${workspaceFolder}/examples/domainmodel/vscode"
             },
             "problemMatcher": []
         },
@@ -117,7 +117,7 @@
                 "Compile DomainModel VSCode Extension"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/examples/domainmodel"
+                "cwd": "${workspaceFolder}/examples/domainmodel/vscode"
             },
             "problemMatcher": "$tsc"
         },
@@ -158,7 +158,7 @@
                 "if [ ! -d node_modules ]; then npm install; fi"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/examples/requirements"
+                "cwd": "${workspaceFolder}/examples/requirements/vscode"
             },
             "problemMatcher": []
         },
@@ -174,7 +174,7 @@
                 "Compile Requirements VSCode Extension"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/examples/requirements"
+                "cwd": "${workspaceFolder}/examples/requirements/vscode"
             },
             "problemMatcher": "$tsc"
         },
@@ -215,7 +215,7 @@
                 "if [ ! -d node_modules ]; then npm install; fi"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/examples/statemachine"
+                "cwd": "${workspaceFolder}/examples/statemachine/vscode"
             },
             "problemMatcher": []
         },
@@ -231,7 +231,7 @@
                 "Compile Statemachine VSCode Extension"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/examples/statemachine"
+                "cwd": "${workspaceFolder}/examples/statemachine/vscode"
             },
             "problemMatcher": "$tsc"
         },
