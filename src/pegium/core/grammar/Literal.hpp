@@ -17,6 +17,10 @@ struct Literal : AbstractElement {
   virtual std::string_view getValue() const noexcept = 0;
   virtual std::string_view getValue(const CstNodeView &node) const noexcept;
   virtual bool isCaseSensitive() const noexcept = 0;
+  /// Optional human-readable documentation attached to this keyword (e.g. via
+  /// `"class"_kw.doc("…")`). Empty when none was provided; surfaced on hover
+  /// through the DocumentationProvider.
+  virtual std::string_view getDocumentation() const noexcept { return {}; }
   void print(std::ostream &os) const override;
 };
 
