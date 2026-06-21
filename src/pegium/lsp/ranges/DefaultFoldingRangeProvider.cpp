@@ -41,6 +41,7 @@ DefaultFoldingRangeProvider::getFoldingRanges(
     return left.begin < right.begin;
   });
 
+  const auto &text = textDocument.getText();
   std::vector<::lsp::FoldingRange> ranges;
   ranges.reserve(rawRanges.size());
   for (const auto &range : rawRanges) {
@@ -50,15 +51,43 @@ DefaultFoldingRangeProvider::getFoldingRanges(
       continue;
     }
 
+    auto endLine = end.line;
+    auto endCharacter = end.character;
+    const char lastCharacter =
+        range.end > 0 && range.end <= text.size() ? text[range.end - 1] : '\0';
+    if (!includeLastFoldingLine(range.kind, lastCharacter)) {
+      // Keep the closing line visible by ending the range at the end of the
+      // previous line.
+      const auto lineStart = textDocument.offsetAt(
+          ::lsp::Position{.line = end.line, .character = 0});
+      if (lineStart == 0) {
+        continue;
+      }
+      const auto trimmed = textDocument.positionAt(lineStart - 1);
+      if (trimmed.line <= start.line) {
+        continue;
+      }
+      endLine = trimmed.line;
+      endCharacter = trimmed.character;
+    }
+
     ::lsp::FoldingRange folding{};
     folding.startLine = start.line;
-    folding.endLine = end.line;
+    folding.endLine = endLine;
     folding.startCharacter = start.character;
-    folding.endCharacter = end.character;
+    folding.endCharacter = endCharacter;
     folding.kind = range.kind;
     ranges.push_back(std::move(folding));
   }
   return ranges;
+}
+
+bool DefaultFoldingRangeProvider::includeLastFoldingLine(
+    const ::lsp::FoldingRangeKindEnum &kind, char lastCharacter) const {
+  if (kind == ::lsp::FoldingRangeKind::Comment) {
+    return false;
+  }
+  return lastCharacter != '}' && lastCharacter != ')' && lastCharacter != ']';
 }
 
 } // namespace pegium

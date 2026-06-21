@@ -17,11 +17,23 @@ AbstractGoToImplementationProvider::getImplementation(
   const auto declarations = provider_detail::find_declarations_at_offset(
       document, document.textDocument().offsetAt(params.position),
       references);
-  if (declarations.empty()) {
+  // Collect links for every resolved declaration (a position can resolve to
+  // several, e.g. a multi-reference), instead of using only the first.
+  std::vector<::lsp::LocationLink> links;
+  for (const auto *declaration : declarations) {
+    utils::throw_if_cancelled(cancelToken);
+    if (auto sublinks =
+            collectGoToImplementationLocationLinks(*declaration, cancelToken);
+        sublinks.has_value()) {
+      for (auto &link : *sublinks) {
+        links.push_back(std::move(link));
+      }
+    }
+  }
+  if (links.empty()) {
     return std::nullopt;
   }
-  return collectGoToImplementationLocationLinks(*declarations.front(),
-                                                cancelToken);
+  return links;
 }
 
 } // namespace pegium

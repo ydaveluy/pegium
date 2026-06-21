@@ -6,6 +6,9 @@
 #include <pegium/core/utils/Event.hpp>
 
 #include <lsp/types.h>
+#include <future>
+#include <memory>
+#include <mutex>
 #include <vector>
 
 namespace pegium {
@@ -17,6 +20,8 @@ public:
   /// Binds the handler to the shared LSP services.
   explicit DefaultDocumentUpdateHandler(pegium::SharedServices &sharedServices);
   ~DefaultDocumentUpdateHandler() override;
+
+  void quiesce() override;
 
   [[nodiscard]] bool supportsDidSaveDocument() const noexcept override {
     return false;
@@ -48,17 +53,25 @@ private:
   void registerFileWatcher();
   void fireDocumentUpdate(
       std::vector<workspace::DocumentId> changedDocumentIds,
-      std::vector<workspace::DocumentId> deletedDocumentIds);
+      std::vector<workspace::DocumentId> deletedDocumentIds,
+      std::shared_ptr<const workspace::TextDocument> redundantWhenUnchanged =
+          nullptr);
   void applyDocumentUpdate(
       std::vector<workspace::DocumentId> changedDocumentIds,
       std::vector<workspace::DocumentId> deletedDocumentIds,
-      const utils::CancellationToken &cancelToken);
+      const utils::CancellationToken &cancelToken,
+      const std::function<void()> &downgrade = {});
 
   utils::EventEmitter<::lsp::DidChangeWatchedFilesParams>
       _onWatchedFilesChange;
   bool _canRegisterWatchedFiles = false;
   utils::ScopedDisposable _onInitializeSubscription;
   utils::ScopedDisposable _onInitializedSubscription;
+  // In-flight async update dispatches. The destructor waits on these (after
+  // cancelling any pending write) so no dispatch can resume on a destroyed
+  // handler or workspace lock.
+  std::mutex _dispatchMutex;
+  std::vector<std::future<void>> _dispatches;
 };
 
 } // namespace pegium

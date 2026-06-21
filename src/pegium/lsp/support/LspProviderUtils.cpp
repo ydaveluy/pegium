@@ -2,9 +2,7 @@
 
 #include <cassert>
 #include <algorithm>
-#include <cctype>
 #include <format>
-#include <limits>
 
 #include <pegium/core/grammar/AbstractRule.hpp>
 #include <pegium/core/grammar/Assignment.hpp>
@@ -14,18 +12,16 @@
 #include <pegium/core/parser/Introspection.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 #include <pegium/core/references/NameProvider.hpp>
+#include <pegium/core/syntax-tree/AbstractReference.hpp>
+#include <pegium/core/syntax-tree/AstUtils.hpp>
 #include <pegium/core/syntax-tree/CstUtils.hpp>
+#include <pegium/core/utils/TextUtils.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 #include <pegium/core/workspace/AstDescriptions.hpp>
 
 namespace pegium::provider_detail {
 
 namespace {
-
-bool is_word_char(char c) noexcept {
-  const unsigned char uc = static_cast<unsigned char>(c);
-  return std::isalnum(uc) != 0 || c == '_';
-}
 
 ::lsp::Range offset_to_range(const workspace::TextDocument &document,
                              TextOffset begin, TextOffset end) {
@@ -81,101 +77,44 @@ bool collect_node_chain_for_offset(const CstNodeView &node, TextOffset offset,
   return true;
 }
 
-LocationData location_from_target_description(
-    const workspace::Document &document,
-    const workspace::AstNodeDescription &targetDescription,
-    const references::NameProvider &nameProvider,
-    const pegium::Services &services) {
-  const auto &targetNode = workspace::resolve_ast_node(
-      *services.shared.workspace.documents, targetDescription, document);
-  const auto declarationNode =
-      references::required_declaration_site_node(targetNode, nameProvider);
-  return {
-      .documentId = targetDescription.documentId,
-      .begin = declarationNode.getBegin(),
-      .end = declarationNode.getEnd(),
-  };
-}
-
 } // namespace
 
 TokenSpan token_at(std::string_view text, TextOffset offset) {
   const auto size = static_cast<TextOffset>(text.size());
-  TextOffset cursor = std::ranges::min(offset, size);
+  const char *const data = text.data();
+  const char *const textEnd = data + size;
+  const auto isWordAt = [&](TextOffset position) noexcept {
+    return position < size &&
+           utils::is_identifier_like_codepoint_at(data + position, textEnd);
+  };
+  const auto previousStart = [&](TextOffset position) noexcept {
+    return static_cast<TextOffset>(utils::previous_codepoint_start(text, position));
+  };
+  const auto afterCodepoint = [&](TextOffset position) noexcept {
+    return position +
+           static_cast<TextOffset>(utils::utf8_codepoint_length(text[position]));
+  };
 
-  if (cursor == size && cursor > 0 && is_word_char(text[cursor - 1])) {
-    --cursor;
-  } else if (cursor < size && !is_word_char(text[cursor]) && cursor > 0 &&
-             is_word_char(text[cursor - 1])) {
-    --cursor;
+  TextOffset cursor = std::ranges::min(offset, size);
+  // When the cursor sits just past an identifier (at the buffer end or on a
+  // non-identifier codepoint), step back onto the last identifier codepoint.
+  if (!isWordAt(cursor) && cursor > 0 && isWordAt(previousStart(cursor))) {
+    cursor = previousStart(cursor);
   }
-  if (cursor >= size || !is_word_char(text[cursor])) {
+  if (!isWordAt(cursor)) {
     return {};
   }
 
   TextOffset begin = cursor;
-  TextOffset end = cursor + 1;
-  while (begin > 0 && is_word_char(text[begin - 1])) {
-    --begin;
+  while (begin > 0 && isWordAt(previousStart(begin))) {
+    begin = previousStart(begin);
   }
-  while (end < size && is_word_char(text[end])) {
-    ++end;
+  TextOffset end = afterCodepoint(cursor);
+  while (isWordAt(end)) {
+    end = afterCodepoint(end);
   }
 
   return {begin, end, text.substr(begin, end - begin)};
-}
-
-std::string grammar_label(const grammar::AbstractElement *element) {
-  if (element == nullptr) {
-    return {};
-  }
-  using enum grammar::ElementKind;
-  switch (element->getKind()) {
-  case ParserRule:
-  case DataTypeRule:
-  case TerminalRule:
-  case InfixRule: {
-    const auto *rule = static_cast<const grammar::AbstractRule *>(element);
-    if (const auto name = rule->getName(); !name.empty()) {
-      return std::string(name);
-    }
-    return std::string(rule->getTypeName());
-  }
-  case Literal:
-    return std::string(
-        static_cast<const grammar::Literal *>(element)->getValue());
-  case Assignment: {
-    const auto *assignment = static_cast<const grammar::Assignment *>(element);
-    return "assign " + std::string(assignment->getFeature());
-  }
-  case Create:
-    return "create " +
-           std::string(static_cast<const grammar::Create *>(element)
-                           ->getTypeName());
-  case Nest:
-    return "nest " + std::string(
-                        static_cast<const grammar::Nest *>(element)
-                            ->getFeature());
-  case Group:
-    return "group";
-  case OrderedChoice:
-    return "ordered-choice";
-  case UnorderedGroup:
-    return "unordered-group";
-  case Repetition:
-    return "repetition";
-  case CharacterRange:
-    return "character-range";
-  case AnyCharacter:
-    return "any-character";
-  case AndPredicate:
-    return "and-predicate";
-  case NotPredicate:
-    return "not-predicate";
-  case InfixOperator:
-    return "infix-operator";
-  }
-  return "grammar-element";
 }
 
 std::string display_type_name(std::type_index type) {
@@ -188,14 +127,6 @@ std::string display_type_name(std::type_index type) {
 std::string location_key(const LocationData &location) {
   return std::format("{}#{}:{}", location.documentId, location.begin,
                      location.end);
-}
-
-LocationData to_location(const workspace::AstNodeDescription &symbol) {
-  assert(symbol.nameLength > 0);
-  const auto nameLength = symbol.nameLength;
-  return {.documentId = symbol.documentId,
-          .begin = symbol.offset,
-          .end = symbol.offset + nameLength};
 }
 
 LocationData to_location(const workspace::ReferenceDescription &reference) {
@@ -217,26 +148,11 @@ find_declarations_at_offset(const workspace::Document &document,
   return {};
 }
 
-std::vector<CstNodeView>
-find_declaration_nodes_at_offset(const workspace::Document &document,
-                                 TextOffset offset,
-                                 const references::References &references) {
-  assert(document.parseResult.cst != nullptr);
-  if (const auto selectedNode =
-          find_declaration_node_at_offset(*document.parseResult.cst, offset);
-      selectedNode.has_value()) {
-    return references.findDeclarationNodes(*selectedNode);
-  }
-  return {};
-}
-
-std::optional<LocationData> resolve_reference_target_location(
-    const workspace::Document &document, TextOffset offset,
-    const pegium::Services &services) {
-  const auto *nameProvider = services.references.nameProvider.get();
-  const AbstractReference *selectedReference = nullptr;
-  TextOffset selectedWidth = std::numeric_limits<TextOffset>::max();
-
+const AbstractReference *
+find_reference_at_offset(const workspace::Document &document,
+                         TextOffset offset) {
+  const AbstractReference *best = nullptr;
+  TextOffset bestSpan = std::numeric_limits<TextOffset>::max();
   for (const auto &handle : document.parseResult.references) {
     const auto &reference = *handle.getConst();
     const auto refNode = reference.getRefNode();
@@ -246,63 +162,44 @@ std::optional<LocationData> resolve_reference_target_location(
     if (offset < refNode.getBegin() || offset > refNode.getEnd()) {
       continue;
     }
-
-    const auto width = refNode.getEnd() - refNode.getBegin();
-    if (selectedReference == nullptr || width < selectedWidth) {
-      selectedReference = &reference;
-      selectedWidth = width;
+    if (const auto span = refNode.getEnd() - refNode.getBegin();
+        best == nullptr || span < bestSpan) {
+      best = &reference;
+      bestSpan = span;
     }
   }
-
-  if (selectedReference == nullptr || !selectedReference->isResolved()) {
-    return std::nullopt;
-  }
-
-  if (selectedReference->isMultiReference()) {
-    const auto &multi =
-        static_cast<const AbstractMultiReference &>(*selectedReference);
-    if (multi.resolvedDescriptionCount() == 0) {
-      return std::nullopt;
-    }
-    const auto &targetDescription = multi.resolvedDescriptionAt(0);
-    return location_from_target_description(document, targetDescription,
-                                            *nameProvider, services);
-  }
-  const auto &single =
-      static_cast<const AbstractSingleReference &>(*selectedReference);
-  return location_from_target_description(document, single.resolvedDescription(),
-                                          *nameProvider, services);
+  return best;
 }
 
 ::lsp::LocationLink to_location_link(
-    const workspace::Document &sourceDocument, TextOffset sourceOffset,
-    const LocationData &targetLocation,
-    const pegium::SharedServices &sharedServices) {
-  const auto sourceTextDocument = sourceDocument.textDocument();
-  const auto *targetWorkspaceDocument =
-      targetLocation.documentId == sourceDocument.id
-          ? std::addressof(sourceDocument)
-          : sharedServices.workspace.documents
-                ->getDocument(targetLocation.documentId)
-                .get();
-  assert(targetWorkspaceDocument != nullptr);
-  const auto targetTextDocument = targetWorkspaceDocument->textDocument();
+    const workspace::Document &sourceDocument, const CstNodeView &originNode,
+    const AstNode &targetDeclaration,
+    const references::NameProvider &nameProvider) {
+  const auto &sourceTextDocument = sourceDocument.textDocument();
 
-  const auto sourceToken =
-      token_at(sourceDocument.textDocument().getText(), sourceOffset);
   const auto originSelectionRange =
-      sourceToken.text.empty()
-          ? offset_to_range(sourceTextDocument, sourceOffset, sourceOffset)
-          : offset_to_range(sourceTextDocument, sourceToken.begin,
-                            sourceToken.end);
-  const auto targetRange =
-      offset_to_range(targetTextDocument, targetLocation.begin,
-                      targetLocation.end);
+      offset_to_range(sourceTextDocument, originNode.getBegin(),
+                      originNode.getEnd());
+
+  const auto &targetDocument = getDocument(targetDeclaration);
+  const auto &targetTextDocument = targetDocument.textDocument();
+
+  // Target selection range: the declaration name; target range: the full
+  // declaration node so a peek preview shows the whole declaration.
+  const auto nameNode =
+      required_declaration_site_node(targetDeclaration, nameProvider);
+  const auto fullNode = targetDeclaration.hasCstNode()
+                            ? targetDeclaration.getCstNode()
+                            : nameNode;
 
   ::lsp::LocationLink link{};
-  link.targetUri = ::lsp::Uri::parse(targetWorkspaceDocument->uri);
-  link.targetRange = targetRange;
-  link.targetSelectionRange = targetRange;
+  link.targetUri = ::lsp::Uri::parse(targetDocument.uri);
+  link.targetRange =
+      offset_to_range(targetTextDocument, fullNode.getBegin(),
+                      fullNode.getEnd());
+  link.targetSelectionRange =
+      offset_to_range(targetTextDocument, nameNode.getBegin(),
+                      nameNode.getEnd());
   link.originSelectionRange = originSelectionRange;
   return link;
 }
@@ -318,7 +215,7 @@ to_lsp_workspace_edit(const WorkspaceEditData &workspaceEdit,
     utils::throw_if_cancelled(cancelToken);
     const auto document = sharedServices.workspace.documents->getDocument(documentId);
     assert(document != nullptr);
-    const auto textDocument = document->textDocument();
+    const auto &textDocument = document->textDocument();
 
     auto &lspEdits = changes[::lsp::Uri::parse(document->uri)];
     lspEdits.reserve(edits.size());
@@ -346,47 +243,32 @@ std::string document_highlight_key(const DocumentHighlightData &highlight) {
 void collect_folding_ranges(const CstNodeView &node, std::string_view text,
                             std::vector<FoldingRangeData> &ranges,
                             utils::TransparentStringSet &seen) {
+  const auto push = [&](TextOffset begin, TextOffset end,
+                        const ::lsp::FoldingRangeKindEnum &kind) {
+    if (end <= begin || !has_newline_between(text, begin, end)) {
+      return;
+    }
+    const auto key = std::format("{}:{}", begin, end);
+    if (seen.insert(key).second) {
+      ranges.push_back({.begin = begin, .end = end, .kind = kind});
+    }
+  };
+
   if (node.isHidden()) {
+    // Ignored trivia (whitespace) never reaches the CST, so a hidden terminal
+    // is a comment; one that spans several lines folds as a comment range.
+    if (const auto *grammarElement = node.getGrammarElement();
+        grammarElement != nullptr &&
+        grammarElement->getKind() == grammar::ElementKind::TerminalRule) {
+      push(node.getBegin(), node.getEnd(), ::lsp::FoldingRangeKind::Comment);
+    }
     return;
   }
 
-  if (node.getEnd() > node.getBegin() &&
-      has_newline_between(text, node.getBegin(), node.getEnd())) {
-    FoldingRangeData range{
-        .begin = node.getBegin(),
-        .end = node.getEnd(),
-        .kind = ::lsp::FoldingRangeKind::Region,
-    };
-    const auto key = std::format("{}:{}", range.begin, range.end);
-    if (seen.insert(key).second) {
-      ranges.push_back(std::move(range));
-    }
-  }
+  push(node.getBegin(), node.getEnd(), ::lsp::FoldingRangeKind::Region);
 
   for (const auto &child : node) {
     collect_folding_ranges(child, text, ranges, seen);
-  }
-}
-
-bool is_link_end_char(char c) noexcept {
-  switch (c) {
-  case ' ':
-  case '\t':
-  case '\r':
-  case '\n':
-  case '"':
-  case '\'':
-  case '<':
-  case '>':
-  case '(':
-  case ')':
-  case '[':
-  case ']':
-  case '{':
-  case '}':
-    return true;
-  default:
-    return false;
   }
 }
 

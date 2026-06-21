@@ -20,9 +20,14 @@ struct NavigationUse : AstNode {
   reference<NavigationEntry> target;
 };
 
+struct NavigationMultiUse : AstNode {
+  multi_reference<NavigationEntry> targets;
+};
+
 struct NavigationModel : AstNode {
   vector<pointer<NavigationEntry>> entries;
   vector<pointer<NavigationUse>> uses;
+  vector<pointer<NavigationMultiUse>> multiUses;
 };
 
 class NavigationParser final : public PegiumParser {
@@ -47,10 +52,13 @@ protected:
       "Entry", "entry"_kw + assign<&NavigationEntry::name>(ID)};
   Rule<NavigationUse> UseRule{"Use",
                               "use"_kw + assign<&NavigationUse::target>(ID)};
+  Rule<NavigationMultiUse> MultiUseRule{
+      "MultiUse", "link"_kw + assign<&NavigationMultiUse::targets>(ID)};
   Rule<NavigationModel> ModelRule{
       "Model",
       some(append<&NavigationModel::entries>(EntryRule) |
-           append<&NavigationModel::uses>(UseRule))};
+           append<&NavigationModel::uses>(UseRule) |
+           append<&NavigationModel::multiUses>(MultiUseRule))};
 #pragma clang diagnostic pop
 };
 

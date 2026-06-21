@@ -99,67 +99,56 @@ TEST(CliUtilsTest, BuildDocumentFromPathReusesExistingDocumentForSameUri) {
   std::filesystem::remove_all(tempDirectory);
 }
 
-TEST(CliUtilsTest, BuildDocumentFromPathRejectsMissingFilesClearly) {
-  auto shared = cli::make_shared_services();
-  const auto language =
-      register_language(shared, "cli-language", {".cli"});
+TEST(CliUtilsTest, BuildDocumentFromPathRejectsBadInputsClearly) {
+  struct Case {
+    const char *name;
+    std::vector<std::string> fileExtensions;
+    std::vector<std::string> fileNames;
+    const char *fileToCreate; // nullptr: do not create the file on disk.
+    const char *inputFileName;
+    const char *expectedMessageFragment;
+  };
 
-  const auto tempDirectory = make_temp_directory();
-  const auto missingPath = tempDirectory / "missing.cli";
+  static const Case kCases[] = {
+      {"MissingFiles", {".cli"}, {}, nullptr, "missing.cli", "does not exist."},
+      {"UnexpectedExtensions",
+       {".cli"},
+       {},
+       "demo.txt",
+       "demo.txt",
+       "Please choose a file with one of these extensions: .cli."},
+      {"UnexpectedFileNames",
+       {},
+       {"pegium.config"},
+       "other.config",
+       "other.config",
+       "Please choose a file with one of these names: pegium.config."},
+  };
 
-  try {
-    (void)cli::build_document_from_path(missingPath.string(), *language.services);
-    FAIL() << "Expected invalid_argument";
-  } catch (const std::invalid_argument &error) {
-    EXPECT_NE(std::string(error.what()).find("does not exist."),
-              std::string::npos);
+  for (const auto &testCase : kCases) {
+    SCOPED_TRACE(testCase.name);
+
+    auto shared = cli::make_shared_services();
+    const auto language = register_language(
+        shared, "cli-language", testCase.fileExtensions, testCase.fileNames);
+
+    const auto tempDirectory = make_temp_directory();
+    if (testCase.fileToCreate != nullptr) {
+      write_file(tempDirectory / testCase.fileToCreate, "content");
+    }
+    const auto inputPath = tempDirectory / testCase.inputFileName;
+
+    try {
+      (void)cli::build_document_from_path(inputPath.string(),
+                                          *language.services);
+      FAIL() << "Expected invalid_argument";
+    } catch (const std::invalid_argument &error) {
+      EXPECT_NE(std::string(error.what()).find(testCase.expectedMessageFragment),
+                std::string::npos);
+    }
+
+    std::filesystem::remove_all(tempDirectory);
   }
-
-  std::filesystem::remove_all(tempDirectory);
-}
-
-TEST(CliUtilsTest, BuildDocumentFromPathRejectsUnexpectedExtensionsClearly) {
-  auto shared = cli::make_shared_services();
-  const auto language =
-      register_language(shared, "cli-language", {".cli"});
-
-  const auto tempDirectory = make_temp_directory();
-  const auto inputPath =
-      write_file(tempDirectory / "demo.txt", "content");
-
-  try {
-    (void)cli::build_document_from_path(inputPath.string(), *language.services);
-    FAIL() << "Expected invalid_argument";
-  } catch (const std::invalid_argument &error) {
-    EXPECT_NE(
-        std::string(error.what()).find(
-            "Please choose a file with one of these extensions: .cli."),
-        std::string::npos);
-  }
-
-  std::filesystem::remove_all(tempDirectory);
-}
-
-TEST(CliUtilsTest, BuildDocumentFromPathRejectsUnexpectedFileNamesClearly) {
-  auto shared = cli::make_shared_services();
-  const auto language =
-      register_language(shared, "cli-language", {}, {"pegium.config"});
-
-  const auto tempDirectory = make_temp_directory();
-  const auto inputPath =
-      write_file(tempDirectory / "other.config", "content");
-
-  try {
-    (void)cli::build_document_from_path(inputPath.string(), *language.services);
-    FAIL() << "Expected invalid_argument";
-  } catch (const std::invalid_argument &error) {
-    EXPECT_NE(
-        std::string(error.what()).find(
-            "Please choose a file with one of these names: pegium.config."),
-        std::string::npos);
-  }
-
-  std::filesystem::remove_all(tempDirectory);
 }
 
 TEST(CliUtilsTest, BuildDocumentFromPathSkipsValidationWhenRequested) {

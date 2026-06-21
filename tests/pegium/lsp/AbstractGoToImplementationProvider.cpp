@@ -68,5 +68,43 @@ TEST(AbstractGoToImplementationProviderTest,
   EXPECT_EQ((*links)[0].targetUri.toString(), document->uri);
 }
 
+TEST(AbstractGoToImplementationProviderTest,
+     CollectsLinksForEveryResolvedDeclaration) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices =
+      test::make_uninstalled_services<NavigationParser>(*shared, "nav", {".nav"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  // `link Alpha` is a multi-reference resolving to BOTH `entry Alpha`
+  // declarations, so the provider must return a link for each.
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("implementation-multi.nav"), "nav",
+      "entry Alpha\n"
+      "entry Alpha\n"
+      "link Alpha");
+  ASSERT_NE(document, nullptr);
+
+  const auto *services = lookup_services(*shared, "nav");
+  ASSERT_NE(services, nullptr);
+
+  TestImplementationProvider provider(*services);
+
+  ::lsp::ImplementationParams params{};
+  params.position =
+      document->textDocument().positionAt(use_name_offset(*document) + 1);
+
+  const auto links =
+      provider.getImplementation(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(links.has_value());
+  EXPECT_EQ(links->size(), 2u);
+}
+
 } // namespace
 } // namespace pegium

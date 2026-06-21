@@ -13,9 +13,8 @@
 #include <string_view>
 #include <chrono>
 #include <type_traits>
-#include <utility>
-#include <vector>
 
+#include <pegium/lsp/runtime/internal/WorkspaceReadLock.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
@@ -25,27 +24,6 @@ namespace pegium {
 namespace {
 
 std::atomic<std::uint64_t> g_anonymousRequestCounter{0};
-
-template <typename F>
-decltype(auto)
-with_workspace_read_lock(const pegium::SharedServices &sharedServices,
-                         F &&action) {
-  auto *lock = sharedServices.workspace.workspaceLock.get();
-  assert(lock != nullptr);
-
-  using Result = std::invoke_result_t<F>;
-  if constexpr (std::is_void_v<Result>) {
-    lock->read([task = std::forward<F>(action)]() mutable { task(); }).get();
-    return;
-  } else {
-    std::optional<Result> result;
-    lock->read([&result, task = std::forward<F>(action)]() mutable {
-      result.emplace(task());
-    }).get();
-    Result value = std::move(result).value();
-    return value;
-  }
-}
 
 } // namespace
 
@@ -136,8 +114,20 @@ ensure_document_loaded(pegium::SharedServices &sharedServices,
   }
 
   const std::array<std::shared_ptr<workspace::Document>, 1> documents{created};
-  sharedServices.workspace.documentBuilder->build(documents, options,
-                                                  cancelToken);
+  // Serialize this on-demand build against concurrent workspace writes (e.g. a
+  // file-watch update mutating the same Document) by running it under the write
+  // lock. No workspace lock is held here — the read lock above was already
+  // released — so acquiring the write lock cannot deadlock. The build keeps the
+  // request's cancellation token; the lock reports a cancelled write as a normal
+  // completion, so re-check the token afterwards to surface the cancellation.
+  sharedServices.workspace.workspaceLock
+      ->write([&](const utils::CancellationToken &,
+                  const workspace::WorkspaceLock::Downgrade &downgrade) {
+        sharedServices.workspace.documentBuilder->build(documents, options,
+                                                        cancelToken, downgrade);
+      })
+      .get();
+  utils::throw_if_cancelled(cancelToken);
   return created;
 }
 

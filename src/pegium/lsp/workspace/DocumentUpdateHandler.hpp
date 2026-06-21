@@ -22,6 +22,14 @@ class DocumentUpdateHandler {
 public:
   virtual ~DocumentUpdateHandler() noexcept = default;
 
+  /// Drains any in-flight asynchronous work this handler started (e.g. document
+  /// update dispatches) so it cannot resume on state that is about to be torn
+  /// down. Owners must call this — or destroy the handler — before destroying
+  /// anything the handler's async work captures (such as the LSP message
+  /// handler the diagnostics listeners publish into). Idempotent; the default
+  /// implementation does nothing.
+  virtual void quiesce() {}
+
   /// Returns whether the handler expects `didSave` notifications.
   [[nodiscard]] virtual bool supportsDidSaveDocument() const noexcept {
     return false;

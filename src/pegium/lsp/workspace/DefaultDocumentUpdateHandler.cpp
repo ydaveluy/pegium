@@ -1,8 +1,8 @@
 #include <pegium/lsp/workspace/DefaultDocumentUpdateHandler.hpp>
 
-#include <cassert>
+#include <chrono>
 #include <future>
-#include <optional>
+#include <mutex>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -14,10 +14,30 @@
 #include <pegium/lsp/services/SharedServices.hpp>
 #include <pegium/core/utils/Cancellation.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
+#include <pegium/core/workspace/FileSystemProvider.hpp>
+#include <pegium/core/workspace/TextDocumentProvider.hpp>
+#include <pegium/core/workspace/WorkspaceManager.hpp>
 
 namespace pegium {
 
 namespace {
+
+// Compares the new client snapshot against the last built text. MUST be called
+// while holding the workspace write lock (it reads the Document's
+// parseResult/textDocument, which a build reassigns), i.e. from inside the write
+// action — never off-lock and never via a separate read lock, which would
+// deadlock behind an in-flight build that only this write supersedes.
+bool is_redundant_text_snapshot(const workspace::Documents &documents,
+                                const workspace::TextDocument &textDocument) {
+  const auto document = documents.getDocument(textDocument.uri());
+  if (document == nullptr) {
+    return false;
+  }
+  if (document->parseResult.cst != nullptr) {
+    return document->parseResult.cst->getText() == textDocument.getText();
+  }
+  return document->textDocument().getText() == textDocument.getText();
+}
 
 bool merge_validation_options_for_language(
     const pegium::SharedServices &sharedServices, std::string_view languageId,
@@ -65,14 +85,11 @@ bool merge_validation_options_for_document(
 
 void publish_document_update_dispatch_failed(
     const pegium::SharedServices &sharedServices,
-    std::span<const workspace::DocumentId> changedDocumentIds,
-    std::span<const workspace::DocumentId> deletedDocumentIds, std::string message) {
+    workspace::DocumentId documentId, std::string message) {
   observability::Observation observation{
       .severity = observability::ObservationSeverity::Error,
       .code = observability::ObservationCode::DocumentUpdateDispatchFailed,
       .message = std::move(message)};
-  const auto documentId =
-      select_update_document_id(changedDocumentIds, deletedDocumentIds);
   observation.documentId = documentId;
   if (const auto document =
           sharedServices.workspace.documents->getDocument(documentId);
@@ -86,6 +103,41 @@ void publish_document_update_dispatch_failed(
     observation.uri = uri;
   }
   sharedServices.observabilitySink->publish(observation);
+}
+
+// Expands one changed URI into the concrete source files it affects. A URI that
+// already backs a managed document or an open text document maps to itself; an
+// unknown URI is stat'd so a directory fans out to the source files it contains
+// and a stray non-source entry is dropped.
+std::vector<std::string>
+find_changed_uris(const pegium::SharedServices &sharedServices,
+                  const std::string &changedUri) {
+  const auto &documents = *sharedServices.workspace.documents;
+  const auto *textDocuments = sharedServices.workspace.textDocuments.get();
+  if (documents.hasDocument(changedUri) ||
+      (textDocuments != nullptr &&
+       textDocuments->getNormalized(changedUri) != nullptr)) {
+    return {changedUri};
+  }
+
+  const auto *fileSystemProvider =
+      sharedServices.workspace.fileSystemProvider.get();
+  const auto *workspaceManager = sharedServices.workspace.workspaceManager.get();
+  if (fileSystemProvider == nullptr || workspaceManager == nullptr) {
+    return {};
+  }
+  try {
+    const auto stat = fileSystemProvider->stat(changedUri);
+    if (stat.isDirectory) {
+      return workspaceManager->searchFolder(changedUri);
+    }
+    if (workspaceManager->shouldIncludeEntry(stat)) {
+      return {changedUri};
+    }
+  } catch (const std::exception &) {
+    // The file type cannot be determined, so the change is discarded.
+  }
+  return {};
 }
 
 ::lsp::RegistrationParams make_watched_files_registration(
@@ -130,7 +182,31 @@ DefaultDocumentUpdateHandler::DefaultDocumentUpdateHandler(
           });
 }
 
-DefaultDocumentUpdateHandler::~DefaultDocumentUpdateHandler() = default;
+void DefaultDocumentUpdateHandler::quiesce() {
+  // Quiesce in-flight update dispatches before whatever they capture is torn
+  // down: our members and, through the shared services, the workspace lock — and
+  // at LSP teardown the message handler the diagnostics listeners publish into,
+  // since those listeners run on these dispatch threads. The WorkspaceLock
+  // requires owners to quiesce their handlers before destruction; a dispatch
+  // resuming from write()/ready() on destroyed state would be a use-after-free.
+  // Cancel any pending/in-progress write so a dispatch blocked in write()
+  // unblocks, then wait for every dispatch to finish. Idempotent.
+  if (shared.workspace.workspaceLock != nullptr) {
+    shared.workspace.workspaceLock->cancelWrite();
+  }
+  std::vector<std::future<void>> dispatches;
+  {
+    std::scoped_lock lock(_dispatchMutex);
+    dispatches = std::move(_dispatches);
+  }
+  for (auto &dispatch : dispatches) {
+    if (dispatch.valid()) {
+      dispatch.wait();
+    }
+  }
+}
+
+DefaultDocumentUpdateHandler::~DefaultDocumentUpdateHandler() { quiesce(); }
 
 std::vector<::lsp::FileSystemWatcher>
 DefaultDocumentUpdateHandler::getWatchers() const {
@@ -156,39 +232,32 @@ void DefaultDocumentUpdateHandler::registerFileWatcher() {
           make_watched_files_registration(std::move(watchers))));
 }
 
-namespace {
-
-bool is_redundant_text_snapshot(
-    const workspace::Documents &documents,
-    const workspace::TextDocument &textDocument) {
-  if (const auto document = documents.getDocument(textDocument.uri());
-      document != nullptr) {
-    if (document->parseResult.cst != nullptr) {
-      return document->parseResult.cst->getText() == textDocument.getText();
-    }
-    return document->textDocument().getText() == textDocument.getText();
-  }
-  return false;
-}
-
-} // namespace
-
 void DefaultDocumentUpdateHandler::didChangeContent(
     const TextDocumentChangeEvent &event) {
+  // event.document is an immutable snapshot of the new client text. Pass it as
+  // the redundancy snapshot so the rebuild can be skipped when the text is
+  // unchanged — checked under the write lock inside the async task, instead of
+  // racing the build off-lock on the message thread.
   auto &documents = *shared.workspace.documents;
-  if (is_redundant_text_snapshot(documents, *event.document)) {
-    return;
-  }
-  fireDocumentUpdate({documents.getOrCreateDocumentId(event.document->uri())}, {});
+  fireDocumentUpdate({documents.getOrCreateDocumentId(event.document->uri())}, {},
+                     event.document);
 }
 
 void DefaultDocumentUpdateHandler::fireDocumentUpdate(
     std::vector<workspace::DocumentId> changedDocumentIds,
-    std::vector<workspace::DocumentId> deletedDocumentIds) {
+    std::vector<workspace::DocumentId> deletedDocumentIds,
+    std::shared_ptr<const workspace::TextDocument> redundantWhenUnchanged) {
+  // Capture the reporting document id before the id vectors are moved into the
+  // worker (and then the write action), so a failure can still identify the
+  // document instead of reporting on moved-from (empty) vectors.
+  const auto reportDocumentId =
+      select_update_document_id(changedDocumentIds, deletedDocumentIds);
   auto future = std::async(
       std::launch::async,
-      [this, changedDocumentIds = std::move(changedDocumentIds),
-       deletedDocumentIds = std::move(deletedDocumentIds)]() mutable {
+      [this, reportDocumentId,
+       changedDocumentIds = std::move(changedDocumentIds),
+       deletedDocumentIds = std::move(deletedDocumentIds),
+       redundantWhenUnchanged = std::move(redundantWhenUnchanged)]() mutable {
         try {
           // `ready()` only guarantees that startup documents were discovered
           // and materialized. The tail of the initial build may still be
@@ -197,34 +266,55 @@ void DefaultDocumentUpdateHandler::fireDocumentUpdate(
           ready.get();
           auto writeFuture = shared.workspace.workspaceLock->write(
               [this, changedDocumentIds = std::move(changedDocumentIds),
-               deletedDocumentIds = std::move(deletedDocumentIds)](
-                  const utils::CancellationToken &cancelToken) mutable {
+               deletedDocumentIds = std::move(deletedDocumentIds),
+               redundantWhenUnchanged = std::move(redundantWhenUnchanged)](
+                  const utils::CancellationToken &cancelToken,
+                  const workspace::WorkspaceLock::Downgrade &downgrade) mutable {
+                // Under the write lock the workspace Document is exclusive, so
+                // this redundancy check cannot race the build. It runs here —
+                // after this write supersedes any in-flight build — rather than
+                // before the write, which would deadlock behind a build that
+                // only this write supersedes.
+                if (redundantWhenUnchanged != nullptr &&
+                    is_redundant_text_snapshot(*shared.workspace.documents,
+                                               *redundantWhenUnchanged)) {
+                  return;
+                }
                 applyDocumentUpdate(std::move(changedDocumentIds),
-                                    std::move(deletedDocumentIds), cancelToken);
+                                    std::move(deletedDocumentIds), cancelToken,
+                                    downgrade);
               });
           writeFuture.get();
         } catch (const utils::OperationCancelled &) {
         } catch (const std::exception &error) {
           publish_document_update_dispatch_failed(
-              shared, changedDocumentIds, deletedDocumentIds,
+              shared, reportDocumentId,
               "Workspace initialization failed. Could not perform document "
               "update: " +
                   std::string(error.what()));
         } catch (...) {
           publish_document_update_dispatch_failed(
-              shared, changedDocumentIds, deletedDocumentIds,
+              shared, reportDocumentId,
               "Workspace initialization failed. Could not perform document "
               "update.");
         }
       });
-  observe_background_task(shared, "DocumentUpdateHandler.fireDocumentUpdate",
-                          std::move(future));
+  // Keep the dispatch future so the destructor can wait for it; prune the
+  // already-finished ones. The task reports its own failures internally, so it
+  // does not need observe_background_task here.
+  std::scoped_lock lock(_dispatchMutex);
+  std::erase_if(_dispatches, [](std::future<void> &dispatch) {
+    return dispatch.wait_for(std::chrono::seconds(0)) ==
+           std::future_status::ready;
+  });
+  _dispatches.push_back(std::move(future));
 }
 
 void DefaultDocumentUpdateHandler::applyDocumentUpdate(
     std::vector<workspace::DocumentId> changedDocumentIds,
     std::vector<workspace::DocumentId> deletedDocumentIds,
-    const utils::CancellationToken &cancelToken) {
+    const utils::CancellationToken &cancelToken,
+    const std::function<void()> &downgrade) {
   utils::throw_if_cancelled(cancelToken);
 
   auto &documentBuilder = *shared.workspace.documentBuilder;
@@ -233,14 +323,23 @@ void DefaultDocumentUpdateHandler::applyDocumentUpdate(
       select_update_document_id(changedDocumentIds, deletedDocumentIds);
   auto originalOptions = documentBuilder.updateBuildOptions();
   auto effectiveOptions = originalOptions;
+  // The override swaps a single BuildOptions for the whole batch, so it is only
+  // correct for a single-document batch (didChangeContent). A multi-document
+  // batch (didChangeWatchedFiles) can span languages, where the first
+  // document's validation config must not be forced onto the others; fall back
+  // to the builder defaults there.
+  const bool singleDocumentBatch =
+      changedDocumentIds.size() + deletedDocumentIds.size() == 1;
   const bool hasValidationOverride =
+      singleDocumentBatch &&
       merge_validation_options_for_document(shared, documentId, effectiveOptions);
   if (hasValidationOverride) {
     documentBuilder.updateBuildOptions() = effectiveOptions;
   }
 
   try {
-    documentBuilder.update(changedDocumentIds, deletedDocumentIds, cancelToken);
+    documentBuilder.update(changedDocumentIds, deletedDocumentIds, cancelToken,
+                           downgrade);
   } catch (...) {
     if (hasValidationOverride) {
       documentBuilder.updateBuildOptions() = std::move(originalOptions);
@@ -264,25 +363,41 @@ void DefaultDocumentUpdateHandler::didChangeWatchedFiles(
   std::unordered_set<workspace::DocumentId> seenDeleted;
   auto &documents = *shared.workspace.documents;
 
+  // A deleted URI can point at a directory, so every managed document within
+  // its subtree must be removed.
   for (const auto &change : params.changes) {
+    if (change.type != ::lsp::FileChangeType::Deleted) {
+      continue;
+    }
     const auto uri = utils::normalize_uri(change.uri.toString());
     if (uri.empty()) {
       continue;
     }
-
-    if (change.type == ::lsp::FileChangeType::Deleted) {
-      if (const auto documentId = documents.getDocumentId(uri);
-          documentId != workspace::InvalidDocumentId &&
-          seenDeleted.insert(documentId).second) {
-        deletedDocumentIds.push_back(documentId);
+    for (const auto &document : documents.getDocuments(uri)) {
+      if (document != nullptr &&
+          document->id != workspace::InvalidDocumentId &&
+          seenDeleted.insert(document->id).second) {
+        deletedDocumentIds.push_back(document->id);
       }
+    }
+  }
+
+  // A changed URI can point at a directory or a not-yet-known file, so expand
+  // it to the concrete source files it affects before scheduling a rebuild.
+  for (const auto &change : params.changes) {
+    if (change.type == ::lsp::FileChangeType::Deleted) {
       continue;
     }
-
-    if (const auto documentId = documents.getOrCreateDocumentId(uri);
-        !seenDeleted.contains(documentId) &&
-        seenChanged.insert(documentId).second) {
-      changedDocumentIds.push_back(documentId);
+    const auto uri = utils::normalize_uri(change.uri.toString());
+    if (uri.empty()) {
+      continue;
+    }
+    for (const auto &fileUri : find_changed_uris(shared, uri)) {
+      const auto documentId = documents.getOrCreateDocumentId(fileUri);
+      if (!seenDeleted.contains(documentId) &&
+          seenChanged.insert(documentId).second) {
+        changedDocumentIds.push_back(documentId);
+      }
     }
   }
 

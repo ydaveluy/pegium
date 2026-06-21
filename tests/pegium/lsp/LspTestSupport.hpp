@@ -37,8 +37,16 @@ class MemoryStream final : public ::lsp::io::Stream {
 public:
   void pushInput(std::string message) { _input += std::move(message); }
 
-  [[nodiscard]] const std::string &written() const noexcept { return _written; }
-  void clearWritten() { _written.clear(); }
+  // Returns a snapshot under the lock: the LSP runtime may write a response
+  // from a worker thread while the test reads it on the main thread.
+  [[nodiscard]] std::string written() const {
+    std::scoped_lock lock(_writtenMutex);
+    return _written;
+  }
+  void clearWritten() {
+    std::scoped_lock lock(_writtenMutex);
+    _written.clear();
+  }
 
   void read(char *buffer, std::size_t size) override {
     for (std::size_t index = 0; index < size; ++index) {
@@ -51,12 +59,14 @@ public:
   }
 
   void write(const char *buffer, std::size_t size) override {
+    std::scoped_lock lock(_writtenMutex);
     _written.append(buffer, size);
   }
 
 private:
   std::string _input;
   std::size_t _readOffset = 0;
+  mutable std::mutex _writtenMutex;
   std::string _written;
 };
 
@@ -238,7 +248,8 @@ public:
 
   void build(std::span<const std::shared_ptr<workspace::Document>> documents,
              const workspace::BuildOptions &options = {},
-             utils::CancellationToken cancelToken = {}) const override {
+             utils::CancellationToken cancelToken = {},
+             const std::function<void()> & = {}) const override {
     utils::throw_if_cancelled(cancelToken);
 
     BuildCall call;
@@ -258,7 +269,8 @@ public:
 
   void update(std::span<const workspace::DocumentId> changedDocumentIds,
               std::span<const workspace::DocumentId> deletedDocumentIds,
-              utils::CancellationToken cancelToken = {}) const override {
+              utils::CancellationToken cancelToken = {},
+              const std::function<void()> & = {}) const override {
     utils::throw_if_cancelled(cancelToken);
 
     UpdateCall call{

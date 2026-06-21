@@ -28,7 +28,9 @@ struct CompletionContext {
   TextOffset offset = 0;
   /// Offset of the current token start. Equals `offset` between tokens.
   TextOffset tokenOffset = 0;
-  /// Offset of the current token end. Equals `offset` between tokens.
+  /// End offset of the replaced range. Widened to the full reference for
+  /// datatype-rule references (mirroring `tokenOffset`'s widening), so this is
+  /// the end of the edited range rather than the raw token end.
   TextOffset tokenEndOffset = 0;
   /// Full token text under the cursor, if any.
   std::string_view tokenText{};

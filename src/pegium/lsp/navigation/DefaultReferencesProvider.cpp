@@ -2,14 +2,7 @@
 #include <pegium/lsp/support/LspProviderUtils.hpp>
 #include <pegium/core/syntax-tree/CstUtils.hpp>
 
-#include <algorithm>
-#include <array>
 #include <cassert>
-#include <cstdint>
-#include <memory>
-#include <sstream>
-#include <string>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -42,7 +35,7 @@ std::vector<::lsp::Location> DefaultReferencesProvider::findReferences(
       const auto targetDocument =
           services.shared.workspace.documents->getDocument(location.documentId);
       assert(targetDocument != nullptr);
-      const auto textDocument = targetDocument->textDocument();
+      const auto &textDocument = targetDocument->textDocument();
 
       ::lsp::Location result{};
       result.uri = ::lsp::Uri::parse(targetDocument->uri);

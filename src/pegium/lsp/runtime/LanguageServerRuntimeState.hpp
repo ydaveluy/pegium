@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -43,9 +44,11 @@ public:
   void waitForPendingRequests();
 
 private:
-  bool _initialized = false;
-  bool _shutdownRequested = false;
-  bool _exitRequested = false;
+  // Lifecycle flags are written on the main message loop and read from
+  // worker-pool threads in feature handlers; atomic with acquire/release.
+  std::atomic<bool> _initialized = false;
+  std::atomic<bool> _shutdownRequested = false;
+  std::atomic<bool> _exitRequested = false;
   workspace::InitializeCapabilities _initializeCapabilities;
   std::mutex _requestCancellationMutex;
   std::condition_variable _requestCancellationCv;

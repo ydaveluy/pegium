@@ -18,9 +18,14 @@ struct HoverEntry : AstNode {
   string name;
 };
 
+struct HoverUse : AstNode {
+  multi_reference<HoverEntry> targets;
+};
+
 struct HoverModel : AstNode {
   string name;
   vector<pointer<HoverEntry>> entries;
+  vector<pointer<HoverUse>> uses;
 };
 
 class HoverParser final : public PegiumParser {
@@ -47,10 +52,12 @@ protected:
 
   Rule<HoverEntry> EntryRule{"Entry",
                              "entry"_kw + assign<&HoverEntry::name>(ID)};
+  Rule<HoverUse> UseRule{"Use", "use"_kw + assign<&HoverUse::targets>(ID)};
   Rule<HoverModel> ModelRule{
       "Model",
       option("module"_kw + assign<&HoverModel::name>(ID)) +
-          some(append<&HoverModel::entries>(EntryRule))};
+          some(append<&HoverModel::entries>(EntryRule) |
+               append<&HoverModel::uses>(UseRule))};
 #pragma clang diagnostic pop
 };
 
@@ -173,6 +180,49 @@ TEST(MultilineCommentHoverProviderTest, HoverMarkupWithControlCharactersSerializ
 
   const auto json = ::lsp::json::stringify(::lsp::toJson(std::move(result)));
   EXPECT_NO_THROW((void)::lsp::json::parse(json));
+}
+
+TEST(MultilineCommentHoverProviderTest,
+     JoinsDocumentationOfAllResolvedDeclarations) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices =
+      test::make_uninstalled_services<HoverParser>(*shared, "docs", {".docs"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  // `use Alpha` is a multi-reference resolving to BOTH `entry Alpha`
+  // declarations; the hover must join the documentation of each.
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("hover-multi.docs"), "docs",
+      "/** Doc A1. */\n"
+      "entry Alpha\n"
+      "/** Doc A2. */\n"
+      "entry Alpha\n"
+      "use Alpha\n");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  ::lsp::HoverParams params{};
+  const auto useOffset = document->textDocument().getText().rfind("Alpha");
+  params.position =
+      document->textDocument().positionAt(static_cast<TextOffset>(useOffset + 1));
+
+  const auto hover = services->lsp.hoverProvider->getHoverContent(
+      *document, params, utils::default_cancel_token);
+  ASSERT_TRUE(hover.has_value());
+  ASSERT_TRUE(std::holds_alternative<::lsp::MarkupContent>(hover->contents));
+  const auto &content = std::get<::lsp::MarkupContent>(hover->contents);
+  EXPECT_NE(content.value.find("Doc A1."), std::string::npos);
+  EXPECT_NE(content.value.find("Doc A2."), std::string::npos);
 }
 
 } // namespace

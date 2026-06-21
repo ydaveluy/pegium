@@ -113,5 +113,81 @@ TEST(AbstractCallHierarchyProviderTest,
   EXPECT_EQ(provider.outgoingName, "Alpha");
 }
 
+TEST(AbstractCallHierarchyProviderTest, PrepareEmitsItemPerResolvedDeclaration) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices =
+      test::make_uninstalled_services<NavigationParser>(*shared, "nav", {".nav"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  // `link Alpha` is a multi-reference resolving to BOTH `entry Alpha`
+  // declarations, so prepare must emit one item per declaration.
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("call-hierarchy-multi.nav"), "nav",
+      "entry Alpha\n"
+      "entry Alpha\n"
+      "link Alpha");
+  ASSERT_NE(document, nullptr);
+
+  const auto *services = lookup_services(*shared, "nav");
+  ASSERT_NE(services, nullptr);
+
+  TestCallHierarchyProvider provider(*services);
+
+  ::lsp::CallHierarchyPrepareParams prepareParams{};
+  prepareParams.position =
+      document->textDocument().positionAt(use_name_offset(*document) + 1);
+
+  const auto items = provider.prepareCallHierarchy(
+      *document, prepareParams, utils::default_cancel_token);
+  EXPECT_EQ(items.size(), 2u);
+}
+
+TEST(AbstractCallHierarchyProviderTest, SkipsEdgesWhenItemDocumentIsNotLoadable) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  // Guarantee the unknown document cannot be materialized from disk.
+  shared->workspace.fileSystemProvider =
+      std::make_shared<workspace::EmptyFileSystemProvider>();
+  {
+    auto registeredServices =
+      test::make_uninstalled_services<NavigationParser>(*shared, "nav", {".nav"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  const auto *services = lookup_services(*shared, "nav");
+  ASSERT_NE(services, nullptr);
+
+  TestCallHierarchyProvider provider(*services);
+
+  // The item points at a document that is neither loaded nor loadable. The edge
+  // flow must skip it gracefully instead of asserting on the missing document.
+  ::lsp::CallHierarchyItem item{};
+  item.name = "Ghost";
+  item.kind = ::lsp::SymbolKind::Method;
+  item.uri =
+      ::lsp::DocumentUri(::lsp::Uri::parse(test::make_file_uri("missing.nav")));
+
+  ::lsp::CallHierarchyIncomingCallsParams incomingParams{};
+  incomingParams.item = item;
+  EXPECT_TRUE(
+      provider.incomingCalls(incomingParams, utils::default_cancel_token).empty());
+
+  ::lsp::CallHierarchyOutgoingCallsParams outgoingParams{};
+  outgoingParams.item = item;
+  EXPECT_TRUE(
+      provider.outgoingCalls(outgoingParams, utils::default_cancel_token).empty());
+}
+
 } // namespace
 } // namespace pegium

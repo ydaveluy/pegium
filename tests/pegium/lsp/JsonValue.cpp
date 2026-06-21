@@ -61,21 +61,15 @@ TEST(JsonValueTest, ClampsIntegersToLspIntegerRange) {
   EXPECT_EQ(smallest.integer(), std::numeric_limits<::lsp::json::Integer>::min());
 }
 
-TEST(JsonValueTest, ConvertsDiagnosticSeverityBothWays) {
-  constexpr std::array severities{
-      pegium::DiagnosticSeverity::Error,
-      pegium::DiagnosticSeverity::Warning,
-      pegium::DiagnosticSeverity::Information,
-      pegium::DiagnosticSeverity::Hint,
-  };
-
-  for (const auto severity : severities) {
-    EXPECT_EQ(from_lsp_diagnostic_severity(to_lsp_diagnostic_severity(severity)),
-              severity);
-  }
-
-  EXPECT_EQ(from_lsp_diagnostic_severity(::lsp::DiagnosticSeverity::MAX_VALUE),
-            pegium::DiagnosticSeverity::Error);
+TEST(JsonValueTest, ConvertsDiagnosticSeverityToLsp) {
+  EXPECT_EQ(to_lsp_diagnostic_severity(pegium::DiagnosticSeverity::Error),
+            ::lsp::DiagnosticSeverity::Error);
+  EXPECT_EQ(to_lsp_diagnostic_severity(pegium::DiagnosticSeverity::Warning),
+            ::lsp::DiagnosticSeverity::Warning);
+  EXPECT_EQ(to_lsp_diagnostic_severity(pegium::DiagnosticSeverity::Information),
+            ::lsp::DiagnosticSeverity::Information);
+  EXPECT_EQ(to_lsp_diagnostic_severity(pegium::DiagnosticSeverity::Hint),
+            ::lsp::DiagnosticSeverity::Hint);
 }
 
 } // namespace

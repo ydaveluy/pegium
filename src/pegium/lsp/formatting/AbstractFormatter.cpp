@@ -204,7 +204,7 @@ effective_tab_size(const ::lsp::FormattingOptions &options) noexcept {
   return range;
 }
 
-[[nodiscard]] bool contains_range(const ::lsp::Range &inside,
+[[nodiscard]] bool ranges_overlap(const ::lsp::Range &inside,
                                   const ::lsp::Range &total) noexcept {
   if ((inside.start.line <= total.start.line &&
        inside.end.line >= total.end.line) ||
@@ -223,7 +223,7 @@ effective_tab_size(const ::lsp::FormattingOptions &options) noexcept {
   if (!range.has_value()) {
     return true;
   }
-  return contains_range(to_lsp_range(document, edit.begin, edit.end), *range);
+  return ranges_overlap(to_lsp_range(document, edit.begin, edit.end), *range);
 }
 
 [[nodiscard]] bool node_inside_range(const workspace::Document &document,
@@ -232,7 +232,7 @@ effective_tab_size(const ::lsp::FormattingOptions &options) noexcept {
   if (!range.has_value()) {
     return true;
   }
-  return contains_range(
+  return ranges_overlap(
       to_lsp_range(document, node.getBegin(), node.getEnd()), *range);
 }
 
@@ -348,16 +348,8 @@ find_fitting_move(const ::lsp::Range &range, const FormattingAction &formatting)
       static_cast<std::int32_t>(range.end.line) -
       static_cast<std::int32_t>(range.start.line);
   lines = fit_into_options(lines, existingLines, options);
-  const auto indentUnit =
-      context.options.insertSpaces
-          ? std::string(static_cast<std::size_t>(
-                            effective_tab_size(context.options)),
-                        ' ')
-          : std::string("\t");
   std::string newText(static_cast<std::size_t>(std::max(lines, 0)), '\n');
-  for (std::int32_t index = 0; index < context.indentation; ++index) {
-    newText += indentUnit;
-  }
+  newText += indentation_text(context.indentation, context.options);
   return PendingEdit{.begin = begin, .end = end, .newText = std::move(newText)};
 }
 
@@ -371,16 +363,8 @@ find_fitting_move(const ::lsp::Range &range, const FormattingAction &formatting)
       static_cast<std::int32_t>(range.end.line) -
           static_cast<std::int32_t>(range.start.line),
       minimumLines);
-  const auto indentUnit =
-      context.options.insertSpaces
-          ? std::string(static_cast<std::size_t>(
-                            effective_tab_size(context.options)),
-                        ' ')
-          : std::string("\t");
   std::string newText(static_cast<std::size_t>(lines), '\n');
-  for (std::int32_t index = 0; index < context.indentation; ++index) {
-    newText += indentUnit;
-  }
+  newText += indentation_text(context.indentation, context.options);
   return PendingEdit{.begin = begin, .end = end, .newText = std::move(newText)};
 }
 
@@ -625,7 +609,7 @@ void collect_cst_edits(
     hiddenFormatter(node, hiddenContext);
   }
 
-  if (prependIt != formattings.end()) {
+  if (prependIt != formattings.end() && !node.isHidden()) {
     append_filtered_edits(
         context.document, create_text_edits(lastLeaf, node, prependIt->second, context),
         requestedRange, edits);
@@ -1088,11 +1072,6 @@ AbstractFormatter::formatDocumentOnType(
     return {};
   }
   return doDocumentFormat(document, params.options, range, cancelToken);
-}
-
-std::optional<::lsp::DocumentOnTypeFormattingOptions>
-AbstractFormatter::formatOnTypeOptions() const noexcept {
-  return std::nullopt;
 }
 
 bool AbstractFormatter::isFormatRangeErrorFree(

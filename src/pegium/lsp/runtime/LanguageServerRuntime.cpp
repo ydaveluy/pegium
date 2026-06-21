@@ -159,7 +159,7 @@ void addDiagnosticsHandler(::lsp::MessageHandler &messageHandler,
           utils::CancellationToken) {
         assert(document != nullptr);
         if (textDocuments != nullptr) {
-          if (const auto latest = textDocuments->get(document->uri);
+          if (const auto latest = textDocuments->getNormalized(document->uri);
               latest != nullptr &&
               latest->version() != document->textDocument().version()) {
             return;
@@ -335,15 +335,21 @@ int startLanguageServer(pegium::SharedServices &sharedServices,
 
   ignore_sigpipe_process_wide();
 
-  ::lsp::MessageHandler messageHandler(connection);
-  sharedServices.lsp.languageClient = make_message_handler_language_client(
-      messageHandler, *sharedServices.observabilitySink);
   LanguageServerRuntimeState runtimeState;
   runtimeState.reset();
   LanguageServerHandlerContext handlerContext(
       *sharedServices.lsp.languageServer, sharedServices, runtimeState);
 
   utils::DisposableStore runtimeDisposables;
+
+  // Declared last so it is destroyed first: ~MessageHandler drains and joins
+  // its worker thread pool (running any in-flight request task to completion)
+  // while handlerContext and runtimeState — captured by reference by those
+  // tasks — are still alive. A request still executing on a worker at teardown
+  // would otherwise call back into already-destroyed state (use-after-free).
+  ::lsp::MessageHandler messageHandler(connection);
+  sharedServices.lsp.languageClient = make_message_handler_language_client(
+      messageHandler, *sharedServices.observabilitySink);
 
   addConfigurationChangeHandler(
       messageHandler, sharedServices,
@@ -378,6 +384,18 @@ int startLanguageServer(pegium::SharedServices &sharedServices,
   const bool shutdownRequested = runtimeState.shutdownRequested();
   if (shutdownRequested) {
     runtimeState.waitForPendingRequests();
+  }
+
+  // Quiesce in-flight document-update dispatches before tearing down the
+  // diagnostics listeners and the messageHandler they capture by reference. The
+  // document builder invokes those listeners from the update-dispatch threads
+  // off a snapshot copy, so disposing them below does not stop an emission
+  // already in flight; a build still running when the connection drops would
+  // otherwise publish into a messageHandler that is about to be destroyed
+  // (use-after-free). waitForPendingRequests only drains the request worker
+  // pool, not these builder dispatches.
+  if (sharedServices.lsp.documentUpdateHandler != nullptr) {
+    sharedServices.lsp.documentUpdateHandler->quiesce();
   }
 
   runtimeDisposables.dispose();

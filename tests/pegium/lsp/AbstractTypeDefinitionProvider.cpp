@@ -66,5 +66,42 @@ TEST(AbstractTypeDefinitionProviderTest, DelegatesResolvedDeclarationNode) {
   EXPECT_EQ((*links)[0].targetUri.toString(), document->uri);
 }
 
+TEST(AbstractTypeDefinitionProviderTest,
+     CollectsLinksForEveryResolvedDeclaration) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices =
+      test::make_uninstalled_services<NavigationParser>(*shared, "nav", {".nav"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  // `link Alpha` resolves (multi-reference) to BOTH `entry Alpha` declarations.
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("type-definition-multi.nav"), "nav",
+      "entry Alpha\n"
+      "entry Alpha\n"
+      "link Alpha");
+  ASSERT_NE(document, nullptr);
+
+  const auto *services = lookup_services(*shared, "nav");
+  ASSERT_NE(services, nullptr);
+
+  TestTypeDefinitionProvider provider(*services);
+
+  ::lsp::TypeDefinitionParams params{};
+  params.position =
+      document->textDocument().positionAt(use_name_offset(*document) + 1);
+
+  const auto links =
+      provider.getTypeDefinition(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(links.has_value());
+  EXPECT_EQ(links->size(), 2u);
+}
+
 } // namespace
 } // namespace pegium

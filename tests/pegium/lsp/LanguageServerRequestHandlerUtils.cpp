@@ -55,7 +55,8 @@ public:
 
   void build(std::span<const std::shared_ptr<workspace::Document>>,
              const workspace::BuildOptions & = {},
-             utils::CancellationToken cancelToken = {}) const override {
+             utils::CancellationToken cancelToken = {},
+             const std::function<void()> & = {}) const override {
     {
       std::scoped_lock lock(_mutex);
       _started = true;
@@ -80,7 +81,8 @@ public:
 
   void update(std::span<const workspace::DocumentId>,
               std::span<const workspace::DocumentId>,
-              utils::CancellationToken cancelToken = {}) const override {
+              utils::CancellationToken cancelToken = {},
+              const std::function<void()> & = {}) const override {
     utils::throw_if_cancelled(cancelToken);
   }
 
