@@ -176,228 +176,118 @@ void AdversarialWorkspaceRelinkAndRecovery(int scenarioIndex, int targetIndex,
 
 } // namespace
 
-TEST(PegiumWorkspaceRegressionTest, TruncatedEofLegacyIncrementalUpdate) {
+TEST(PegiumWorkspaceRegressionTest, StressScenarioRoundTrip) {
+  struct Case {
+    const char *name;
+    const char *scenarioName;
+    std::string mutation;
+  };
+  const Case kCases[] = {
+      {"TruncatedEofLegacyIncrementalUpdate", "stress/truncated-eof.stress",
+       byte_string({0x00, 0x00, 0x00, 0x00, 0x01, 0x07, 0x00, 0x33, 0x00, 0x00,
+                    0x00, 0x06, 0x00, 0x11, 0x04, 0x23, 0x4c, 0x65, 0x3a,
+                    0x00})},
+      {"TruncatedEofWindowSpliceRoundTripRemainsStable",
+       "stress/truncated-eof.stress", byte_string({0x0d, 0x00, 0x15})},
+      {"CommentStringDelimiterCascadeRoundTripRemainsStable",
+       "stress/comment-string-delimiter-cascade.stress",
+       byte_string({0x00, 0x41, 0x3b, 0xf5, 0xf5})},
+      {"CoverageChoiceRestartRoundTripRemainsStable", "stress/coverage.stress",
+       byte_string({0x07, 0x01, 0x10, 0x08, 0x1f, 0x20, 0x0d, 0x02, 0x22})},
+      {"CoverageSingleDeleteRoundTripRemainsStable", "stress/coverage.stress",
+       std::string("\0A;", 3)},
+      {"CoverageRecoveryBurstRoundTripRemainsStable", "stress/coverage.stress",
+       byte_string({0x06, 0x00, 0x00, 0x07, 0x01, 0x0d, 0x07, 0x01, 0x0e})},
+      {"CoveragePrefixSliceDeleteRoundTripRemainsStable",
+       "stress/coverage.stress", byte_string({0x04, 0x00, 0x07})},
+      {"CoverageSuffixSliceDeleteRoundTripRemainsStable",
+       "stress/coverage.stress", byte_string({0x04, 0x01, 0x07})},
+      {"CoverageDeleteTrailingOpenGroupRoundTripRemainsStable",
+       "stress/coverage.stress", byte_string({0x06, 0x01, 0x04})},
+      {"CoverageMismatchedOpenGroupBurstRoundTripRemainsStable",
+       "stress/coverage.stress",
+       byte_string({0x06, 0x00, 0x04, 0x08, 0x05, 0x04})},
+      {"CoverageBracePairDeleteBurstRoundTripRemainsStable",
+       "stress/coverage.stress",
+       byte_string({0x06, 0x00, 0x06, 0x06, 0x01, 0x07})},
+      {"RecoveryDenseContextualSwapRoundTripRemainsStable",
+       "stress/recovery-dense.stress", byte_string({0x09, 0x03, 0x06})},
+      {"RecoveryDenseEmptyMutationRoundTripRemainsStable",
+       "stress/recovery-dense.stress", std::string{}},
+  };
+
   const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/truncated-eof.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
+  for (const auto &c : kCases) {
+    SCOPED_TRACE(c.name);
+    const auto it = std::ranges::find_if(
+        scenarios, [&](const WorkspaceScenarioSpec &scenario) {
+          return scenario.name == c.scenarioName;
+        });
+    ASSERT_NE(it, scenarios.end());
 
-  expect_workspace_round_trip(
-      *it, 0u,
-      byte_string({0x00, 0x00, 0x00, 0x00, 0x01, 0x07, 0x00, 0x33, 0x00, 0x00,
-                   0x00, 0x06, 0x00, 0x11, 0x04, 0x23, 0x4c, 0x65, 0x3a, 0x00}));
+    expect_workspace_round_trip(*it, 0u, c.mutation);
+  }
 }
 
-TEST(PegiumWorkspaceRegressionTest,
-     TruncatedEofWindowSpliceRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/truncated-eof.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
+TEST(PegiumWorkspaceRegressionTest, StressDirectBuild) {
+  struct Case {
+    const char *name;
+    const char *source;
+  };
+  const Case kCases[] = {
+      {"TruncatedEofWindowSpliceDirectBuildRemainsStable",
+       "module Cut\n"
+       "decl Alpha {\n"
+       "  ref: Alpha;\n"
+       "}\n"
+       "use Alpha fallback Alpha;\n"
+       "bag alpha beta gamma;\n"
+       "peek gamma;\n"
+       "guard trailing;\n"
+       "path cut.inner.Path;\n"
+       "tuple(one, two, three);\n"
+       "expr (Alpha(1, 2) +(+ 3\n"
+       "lega 3\n"
+       " 4 *\n"},
+      {"CommentStringDelimiterCascadeDirectBuildRemainsStable",
+       "module StringCommentMix\n"
+       "decl Ref {\n"
+       "  self: Ref;\n"
+       "}\n"
+       "doc \"open slash \\\\\";\n"
+       "doc 'single value';\n"
+       "tuple(one, /* comment */, two);\n"
+       "expr Ref(1, Ref(2, \"text\"), (3 + 4));\n"
+       "expr Ref(1 /* gap */, Ref(2, 3 + ));\n"
+       "legacy Ref /* gap */ + /* hole */\n"
+       "/* unterminated comment after dense prefix\n"},
+      {"RecoveryDenseDirectBuildRemainsStable",
+       "module Recovery\n"
+       "decl Base {\n"
+       "  self: Base;\n"
+       "}\n"
+       "decl Derived extends Base {\n"
+       "  many items: Base\n"
+       "  child: Missing;\n"
+       "}\n"
+       "use Base, Derived fallback Missing;\n"
+       "choose entity\n"
+       "bag beta alpha;\n"
+       "peek delta;\n"
+       "guard =;\n"
+       "path broken.;\n"
+       "setting unsafe = ;\n"
+       "tuple(one,\n"
+       "  two, three);\n"
+       "expr 1 + * 2;\n"
+       "legacy 3 + ;\n"
+       "doc \"still closed\";\n"},
+  };
 
-  expect_workspace_round_trip(*it, 0u, byte_string({0x0d, 0x00, 0x15}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     TruncatedEofWindowSpliceDirectBuildRemainsStable) {
-  expect_stress_document_build(
-      "module Cut\n"
-      "decl Alpha {\n"
-      "  ref: Alpha;\n"
-      "}\n"
-      "use Alpha fallback Alpha;\n"
-      "bag alpha beta gamma;\n"
-      "peek gamma;\n"
-      "guard trailing;\n"
-      "path cut.inner.Path;\n"
-      "tuple(one, two, three);\n"
-      "expr (Alpha(1, 2) +(+ 3\n"
-      "lega 3\n"
-      " 4 *\n");
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     CommentStringDelimiterCascadeRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/comment-string-delimiter-cascade.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(*it, 0u,
-                              byte_string({0x00, 0x41, 0x3b, 0xf5, 0xf5}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     CommentStringDelimiterCascadeDirectBuildRemainsStable) {
-  expect_stress_document_build(
-      "module StringCommentMix\n"
-      "decl Ref {\n"
-      "  self: Ref;\n"
-      "}\n"
-      "doc \"open slash \\\\\";\n"
-      "doc 'single value';\n"
-      "tuple(one, /* comment */, two);\n"
-      "expr Ref(1, Ref(2, \"text\"), (3 + 4));\n"
-      "expr Ref(1 /* gap */, Ref(2, 3 + ));\n"
-      "legacy Ref /* gap */ + /* hole */\n"
-      "/* unterminated comment after dense prefix\n");
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     CoverageChoiceRestartRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/coverage.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(
-      *it, 0u,
-      byte_string({0x07, 0x01, 0x10, 0x08, 0x1f, 0x20, 0x0d, 0x02, 0x22}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     CoverageSingleDeleteRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/coverage.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(*it, 0u, std::string("\0A;", 3));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     CoverageRecoveryBurstRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/coverage.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(
-      *it, 0u, byte_string({0x06, 0x00, 0x00, 0x07, 0x01, 0x0d, 0x07, 0x01,
-                            0x0e}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     CoveragePrefixSliceDeleteRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/coverage.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(*it, 0u, byte_string({0x04, 0x00, 0x07}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     CoverageSuffixSliceDeleteRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/coverage.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(*it, 0u, byte_string({0x04, 0x01, 0x07}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     CoverageDeleteTrailingOpenGroupRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/coverage.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(*it, 0u, byte_string({0x06, 0x01, 0x04}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     CoverageMismatchedOpenGroupBurstRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/coverage.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(*it, 0u,
-                              byte_string({0x06, 0x00, 0x04, 0x08, 0x05, 0x04}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     CoverageBracePairDeleteBurstRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/coverage.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(*it, 0u,
-                              byte_string({0x06, 0x00, 0x06, 0x06, 0x01, 0x07}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     RecoveryDenseContextualSwapRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/recovery-dense.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(*it, 0u, byte_string({0x09, 0x03, 0x06}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     RecoveryDenseDirectBuildRemainsStable) {
-  expect_stress_document_build(
-      "module Recovery\n"
-      "decl Base {\n"
-      "  self: Base;\n"
-      "}\n"
-      "decl Derived extends Base {\n"
-      "  many items: Base\n"
-      "  child: Missing;\n"
-      "}\n"
-      "use Base, Derived fallback Missing;\n"
-      "choose entity\n"
-      "bag beta alpha;\n"
-      "peek delta;\n"
-      "guard =;\n"
-      "path broken.;\n"
-      "setting unsafe = ;\n"
-      "tuple(one,\n"
-      "  two, three);\n"
-      "expr 1 + * 2;\n"
-      "legacy 3 + ;\n"
-      "doc \"still closed\";\n");
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     RecoveryDenseEmptyMutationRoundTripRemainsStable) {
-  const auto &scenarios = stress_single_document_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "stress/recovery-dense.stress";
-      });
-  ASSERT_NE(it, scenarios.end());
-
-  expect_workspace_round_trip(*it, 0u, std::string_view{});
+  for (const auto &c : kCases) {
+    SCOPED_TRACE(c.name);
+    expect_stress_document_build(c.source);
+  }
 }
 
 TEST(PegiumWorkspaceRegressionTest, AdversarialCoverageIncrementalRoundTrip) {
@@ -438,48 +328,33 @@ TEST(PegiumWorkspaceRegressionTest, AdversarialWorkspaceRelinkRoundTrip) {
 }
 
 TEST(PegiumWorkspaceRegressionTest,
-     AdversarialWorkspaceRelinkRecoversMissingEntryKeywordPrefix) {
-  const auto &scenarios = adversarial_workspace_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "adversarial/workspace-relink-basic";
-      });
-  ASSERT_NE(it, scenarios.end());
-  expect_workspace_round_trip(*it, 0u, byte_string({0x00, 0x00, 0x00}));
-}
+     AdversarialWorkspaceRelinkBasicRecovery) {
+  struct Case {
+    const char *name;
+    std::string mutation;
+  };
+  const Case kCases[] = {
+      {"AdversarialWorkspaceRelinkRecoversMissingEntryKeywordPrefix",
+       byte_string({0x00, 0x00, 0x00})},
+      {"AdversarialWorkspaceRelinkRecoversEntryKeywordDamageWithTruncatedTail",
+       byte_string({0x02, 0x00, 0x00, 0x04, 0x01, 0x02})},
+      {"AdversarialWorkspaceRelinkRecoversMissingInnerStatementDelimiter",
+       byte_string({0x06, 0x00, 0x00})},
+      {"AdversarialWorkspaceRelinkRecoversContextualMultiBurstDamage",
+       byte_string({0x0e, 0x02, 0x10})},
+  };
 
-TEST(PegiumWorkspaceRegressionTest,
-     AdversarialWorkspaceRelinkRecoversEntryKeywordDamageWithTruncatedTail) {
   const auto &scenarios = adversarial_workspace_scenarios();
   const auto it = std::ranges::find_if(
       scenarios, [](const WorkspaceScenarioSpec &scenario) {
         return scenario.name == "adversarial/workspace-relink-basic";
       });
   ASSERT_NE(it, scenarios.end());
-  expect_workspace_round_trip(*it, 0u,
-                              byte_string({0x02, 0x00, 0x00, 0x04, 0x01, 0x02}));
-}
 
-TEST(PegiumWorkspaceRegressionTest,
-     AdversarialWorkspaceRelinkRecoversMissingInnerStatementDelimiter) {
-  const auto &scenarios = adversarial_workspace_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "adversarial/workspace-relink-basic";
-      });
-  ASSERT_NE(it, scenarios.end());
-  expect_workspace_round_trip(*it, 0u, byte_string({0x06, 0x00, 0x00}));
-}
-
-TEST(PegiumWorkspaceRegressionTest,
-     AdversarialWorkspaceRelinkRecoversContextualMultiBurstDamage) {
-  const auto &scenarios = adversarial_workspace_scenarios();
-  const auto it = std::ranges::find_if(
-      scenarios, [](const WorkspaceScenarioSpec &scenario) {
-        return scenario.name == "adversarial/workspace-relink-basic";
-      });
-  ASSERT_NE(it, scenarios.end());
-  expect_workspace_round_trip(*it, 0u, byte_string({0x0e, 0x02, 0x10}));
+  for (const auto &c : kCases) {
+    SCOPED_TRACE(c.name);
+    expect_workspace_round_trip(*it, 0u, c.mutation);
+  }
 }
 
 TEST(PegiumWorkspaceRegressionTest, AdversarialThreeHopWorkspaceRelinkRoundTrip) {

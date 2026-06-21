@@ -23,10 +23,10 @@
 
 #include <pegium/examples/KeywordFuzzHarness.hpp>
 
-#include <arithmetics/parser/Parser.hpp>
-#include <domainmodel/parser/Parser.hpp>
-#include <requirements/parser/Parser.hpp>
-#include <statemachine/parser/Parser.hpp>
+#include <arithmetics/core/Parser.hpp>
+#include <domainmodel/core/Parser.hpp>
+#include <requirements/core/Parser.hpp>
+#include <statemachine/core/Parser.hpp>
 
 #include <pegium/core/text/TextSnapshot.hpp>
 

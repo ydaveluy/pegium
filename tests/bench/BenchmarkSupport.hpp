@@ -59,13 +59,14 @@ inline std::size_t benchmark_target_bytes() {
   return get_env_size("PEGIUM_BENCH_BYTES", 64 * 1024, 16 * 1024);
 }
 
+// The builder runs three merged phases, each publishing its constituent document
+// states in one post-barrier burst. Timing the individual sub-states would report
+// ~0 for every state but the last of each phase, so the benchmark reports the
+// three real phases instead, each at its boundary state.
 enum class BenchmarkStep : std::size_t {
-  Parsing,
-  IndexContent,
-  LocalSymbols,
-  Linking,
-  IndexReferences,
-  Validation,
+  ParseIndex,  // phase A: parse + index exported content (-> IndexedContent)
+  ScopeLink,   // phase B: local scopes + link + index references (-> IndexedReferences)
+  Validation,  // phase C: validate (-> Validated)
   FullBuild,
   Count,
 };
@@ -76,18 +77,12 @@ constexpr std::size_t benchmark_step_count() {
 
 inline std::string_view benchmark_step_name(BenchmarkStep step) {
   switch (step) {
-  case BenchmarkStep::Parsing:
-    return "parsing";
-  case BenchmarkStep::IndexContent:
-    return "index-content";
-  case BenchmarkStep::LocalSymbols:
-    return "local-symbols";
-  case BenchmarkStep::Linking:
-    return "linking";
-  case BenchmarkStep::IndexReferences:
-    return "index-references";
+  case BenchmarkStep::ParseIndex:
+    return "parse+index";
+  case BenchmarkStep::ScopeLink:
+    return "scope+link";
   case BenchmarkStep::Validation:
-    return "validation";
+    return "validate";
   case BenchmarkStep::FullBuild:
     return "full-build";
   case BenchmarkStep::Count:
@@ -103,13 +98,18 @@ struct BenchmarkCase {
   std::string name;
   std::size_t bytes = 0;
   BenchmarkIteration run;
+  // Workspace benchmarks only report the full build (time + throughput).
+  bool fullBuildOnly = false;
 };
 
 class BenchmarkRegistry {
 public:
-  void add(std::string name, std::size_t bytes, BenchmarkIteration run) {
-    _cases.push_back(
-        {.name = std::move(name), .bytes = bytes, .run = std::move(run)});
+  void add(std::string name, std::size_t bytes, BenchmarkIteration run,
+           bool fullBuildOnly = false) {
+    _cases.push_back({.name = std::move(name),
+                      .bytes = bytes,
+                      .run = std::move(run),
+                      .fullBuildOnly = fullBuildOnly});
   }
 
   int runAll(std::string_view filter = {}) const {
@@ -121,6 +121,11 @@ public:
         continue;
       }
       ++executed;
+
+      // Progress trace on stderr (results go to stdout): a long benchmark would
+      // otherwise look like the run had hung.
+      std::cerr << "  running " << benchCase.name << " (" << iterations
+                << " iter)\n";
 
       BenchmarkTimings totals{};
       for (int iterationIndex = 0; iterationIndex < iterations;
@@ -137,6 +142,10 @@ public:
       std::cout << "[bench] " << benchCase.name << " size=" << benchCase.bytes
                 << "B iterations=" << iterations << '\n';
       for (std::size_t step = 0; step < benchmark_step_count(); ++step) {
+        if (benchCase.fullBuildOnly &&
+            static_cast<BenchmarkStep>(step) != BenchmarkStep::FullBuild) {
+          continue;
+        }
         const auto averageMs = totals[step];
         const auto averageSeconds = averageMs / 1000.0;
         const auto mibPerSecond = averageSeconds > 0.0
@@ -224,11 +233,13 @@ create_changed_document(BenchmarkFixture &fixture) {
 
 inline BenchmarkTimings
 measure_full_build_iteration(const std::shared_ptr<BenchmarkFixture> &fixture) {
+  // One boundary state per merged phase (each phase publishes its states in a
+  // single post-barrier burst, so the last state of each is its end time):
+  //   A parse + index content          -> IndexedContent
+  //   B local scopes + link + index refs -> IndexedReferences
+  //   C validate                       -> Validated
   constexpr std::array phaseStates{
-      workspace::DocumentState::Parsed,
       workspace::DocumentState::IndexedContent,
-      workspace::DocumentState::ComputedScopes,
-      workspace::DocumentState::Linked,
       workspace::DocumentState::IndexedReferences,
       workspace::DocumentState::Validated,
   };
@@ -242,7 +253,7 @@ measure_full_build_iteration(const std::shared_ptr<BenchmarkFixture> &fixture) {
             phaseStates[index],
             [&phaseTimes,
              index](std::span<const std::shared_ptr<workspace::Document>>,
-                    utils::CancellationToken) {
+                    const utils::CancellationToken &) {
               phaseTimes[index] = Clock::now();
             }));
   }
@@ -267,21 +278,30 @@ measure_full_build_iteration(const std::shared_ptr<BenchmarkFixture> &fixture) {
     }
   }
 
+  const auto millis = [](Clock::time_point from, Clock::time_point to) {
+    return std::chrono::duration<double, std::milli>(to - from).count();
+  };
+
   BenchmarkTimings timings{};
-  timings[static_cast<std::size_t>(BenchmarkStep::Parsing)] =
-      std::chrono::duration<double, std::milli>(*phaseTimes[0] - start).count();
-  for (std::size_t index = 1; index < phaseTimes.size(); ++index) {
-    timings[index] = std::chrono::duration<double, std::milli>(
-                         *phaseTimes[index] - *phaseTimes[index - 1])
-                         .count();
-  }
+  timings[static_cast<std::size_t>(BenchmarkStep::ParseIndex)] =
+      millis(start, *phaseTimes[0]);
+  timings[static_cast<std::size_t>(BenchmarkStep::ScopeLink)] =
+      millis(*phaseTimes[0], *phaseTimes[1]);
+  timings[static_cast<std::size_t>(BenchmarkStep::Validation)] =
+      millis(*phaseTimes[1], *phaseTimes[2]);
   timings[static_cast<std::size_t>(BenchmarkStep::FullBuild)] =
-      std::chrono::duration<double, std::milli>(end - start).count();
+      millis(start, end);
   return timings;
 }
 
 inline void register_full_build_benchmark(BenchmarkRegistry &registry,
                                           const ExampleBenchSpec &spec) {
+  // Skip generating (and holding) inputs the active filter excludes, so a
+  // single-config run's peak RSS reflects only that benchmark's input.
+  const auto filter = get_env_string("PEGIUM_BENCH_FILTER");
+  if (!filter.empty() && spec.name.find(filter) == std::string::npos) {
+    return;
+  }
   const auto source = spec.makeSource(benchmark_target_bytes());
   const auto bytes = source.size();
 

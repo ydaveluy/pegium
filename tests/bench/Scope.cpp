@@ -143,7 +143,7 @@ void register_scope_benchmarks(BenchmarkRegistry &registry) {
       }
       return total;
     });
-  });
+  }, /*fullBuildOnly=*/true);
 
   registry.add("scope-global", bytes, [source] {
     auto fixture = build_scope_fixture(source.text);
@@ -167,7 +167,7 @@ void register_scope_benchmarks(BenchmarkRegistry &registry) {
       }
       return total;
     });
-  });
+  }, /*fullBuildOnly=*/true);
 
   registry.add("scope-all-elements", bytes, [source] {
     auto fixture = build_scope_fixture(source.text);
@@ -198,7 +198,7 @@ void register_scope_benchmarks(BenchmarkRegistry &registry) {
       }
       return total;
     });
-  });
+  }, /*fullBuildOnly=*/true);
 }
 
 } // namespace pegium::bench
