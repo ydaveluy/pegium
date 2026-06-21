@@ -60,12 +60,10 @@ nav:
       - Pegium Mental Model: introduction/mental-model.md
   - Learn:
       - learn/index.md
+      - Create a Project: learn/workflow/scaffold.md
       - Build a Language End-to-End: learn/walkthrough.md
       - Test Your Language: learn/test-your-language.md
       - Run a Language Headlessly: learn/consume-the-ast.md
-      - Set Up:
-          - Build the Repository: learn/workflow/install.md
-          - Choose a Starting Point: learn/workflow/scaffold.md
       - Build a Language:
           - build-a-language/index.md
           - Grammar Essentials: build-a-language/grammar.md

@@ -22,8 +22,8 @@ A custom name provider overrides the single primary lookup:
   declaration (the `getName` / `getNameNode` helpers delegate to it)
 
 When your AST already stores declaration names in a shared base type, prefer
-the recommended naming pattern described in
-[References and Scoping](../build-a-language/references-and-scoping.md#recommended-naming-pattern).
+the default naming pattern described in
+[References and Scoping](../build-a-language/references-and-scoping.md#start-with-the-default-naming-pattern).
 
 ## Scope provider contract
 

@@ -95,6 +95,23 @@ Skipper skipper = skip(ignored(WS), hidden(ML_COMMENT, SL_COMMENT));
 - Use `ignored(...)` for text that should disappear from the CST entirely.
 - Use `hidden(...)` for text that should remain available to source-aware features such as formatting or hover.
 
+## Document keywords for hover
+
+Attach documentation to a keyword with `.doc("…")`; it renders on hover over
+that keyword in the editor, just like declaration doc-comments do:
+
+```cpp
+Rule<Component> ComponentRule{
+    "Component", "class"_kw.doc("A class component declares typed members.") +
+                     assign<&Component::name>(ID)};
+```
+
+`.doc(...)` leaves the keyword otherwise unchanged, so it composes with `+` and
+`|` like any keyword. The text is a non-owning view — pass a string literal (or
+a string that outlives the grammar). Hover is served by the
+`DocumentationProvider`, so a language can override how the text is rendered.
+See [LSP Services](lsp-services.md).
+
 ## Reach for `Infix` only when precedence matters
 
 Expression-heavy languages often need operator precedence and associativity. That is what `Infix<...>` is for.

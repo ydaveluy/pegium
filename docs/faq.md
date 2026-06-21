@@ -41,7 +41,7 @@ services are hand-written C++. There is no external grammar DSL or scaffolding s
 (the optional project template just renames a starter project).
 
 **Do I need to clone Pegium to build my language?** No — pull it in via
-`FetchContent` (see [Build the Repository](learn/workflow/install.md)). Clone it
+`FetchContent` (see [Create a Project](learn/workflow/scaffold.md)). Clone it
 only to run the examples or to contribute.
 
 **How do I test my language?** Build a document with the `pegium::test::*` helpers

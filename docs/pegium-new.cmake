@@ -69,7 +69,7 @@ endfunction()
 
 function(_pegium_new_finish)
   message(STATUS "Created ${PEGIUM_NEW_LANGUAGE_ID} in ${_target}")
-  message(STATUS "Next: cd ${DIR} && cmake -B build && cmake --build build")
+  message(STATUS "Next: cd ${DIR} && cmake -B build && cmake --build build -j")
 endfunction()
 
 message(STATUS "Scaffolding ${NAME} (id=${PEGIUM_NEW_LANGUAGE_ID}, ext=${EXT})")

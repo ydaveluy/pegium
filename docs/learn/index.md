@@ -14,7 +14,7 @@ Prefer a slower, concept-by-concept tour? Read the [Build a Language](../build-a
 - LSP services
 - the workspace lifecycle
 
-To set up first, see [Build the Repository](workflow/install.md) and [Choose a Starting Point](workflow/scaffold.md).
+To start from a working skeleton, see [Create a Project](workflow/scaffold.md).
 
 If you learn best from a concrete codebase, keep the [examples overview](../examples/index.md) open as you work through the steps.
 
