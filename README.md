@@ -34,24 +34,34 @@ parser stack.
   linking, diagnostics, formatting, completion, rename, references, and other
   editor features.
 
-## Get Started
+## Installation
 
-### Build your own language
+**Prerequisites:** a C++20 compiler, CMake 3.14 or later. Node.js is only
+needed if you want to build the VS Code extension (`-DVSCODE=ON`, the default).
 
-Use the
-[`pegium-language-template`](https://github.com/ydaveluy/pegium-language-template)
-GitHub template repository. Click **Use this template → Create a new
-repository**, clone the result, then:
+Scaffold a new language with a single command — no cloning required:
 
 ```bash
-cd my-language
-cmake -P scripts/new-language.cmake -DLANGUAGE_NAME=mylang
-cmake -S . -B build && cmake --build build -j
-./build/mylang-cli example/sample.mylang
+curl -fsSLO https://ydaveluy.github.io/pegium/pegium-new.cmake && \
+  cmake -DNAME=MyLang -DEXT=.ml -P pegium-new.cmake
+cd mylang && cmake -B build && cmake --build build
+./build/mylang-cli example/hello.ml
 ```
 
-The template ships a working "Hello world" DSL with CLI + LSP and pulls
-Pegium in via `FetchContent`. See its README for the full walkthrough.
+The script creates a `mylang/` directory with a working "Hello world" grammar,
+CLI, LSP server, and VS Code extension, pulling Pegium in via `FetchContent`.
+
+### Scaffolding flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `NAME` | *(required)* | PascalCase C++ identifier for your language (e.g. `MyLang`) |
+| `EXT` | `.<lowercased-name>` | File extension, must start with `.` (e.g. `-DEXT=.ml`) |
+| `DIR` | `<lowercased-name>` | Output directory (e.g. `-DDIR=my-project`) |
+| `LSP` | `ON` | Build the LSP server; pass `-DLSP=OFF` to skip |
+| `VSCODE` | `ON` | Scaffold the VS Code extension; pass `-DVSCODE=OFF` to skip |
+| `CLI` | `ON` | Build the CLI tool; pass `-DCLI=OFF` to skip |
+| `PEGIUM_TAG` | `main` | Pegium tag/commit to pin (e.g. `-DPEGIUM_TAG=v1.2.0`) |
 
 ### Try the shipped examples
 
@@ -109,6 +119,66 @@ Pegium ships several end-to-end examples in this repository:
   showing shared workspace behavior and cross-language references
 - **[statemachine](examples/statemachine/README.md)**: a modeling language that
   emphasizes validation and editor integration
+
+## Benchmarks
+
+Pegium and [Langium](https://github.com/eclipse-langium/langium) ship the same
+four example languages, so they can be compared directly. Each language is built
+through the full document pipeline (parse → index → scope → link → validate) from
+**byte-identical** generated inputs, averaged over 3 iterations. The workspace
+benchmarks hand many self-contained files of one language to the framework's
+document builder **at once**, as a single small (~250 KB) and large (~12 MB)
+startup build — Pegium parallelizes those builds across all cores.
+
+Each table reports the full build time and the throughput (MiB/s) for both
+engines, plus the Langium-over-Pegium speedup; the workspace tables also report
+the peak resident memory (RSS) of each build. Lower time / higher throughput /
+lower memory is better. RSS includes each runtime's baseline — Node/V8 carries a
+fixed multi-tens-of-MiB heap Pegium's native process does not — so read it
+alongside how it grows with input size. Langium 4.3.0 / Node.js 26.
+
+Single-file full build (64 KiB):
+
+| language | pegium | pegium MiB/s | langium | langium MiB/s | speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| arithmetics | 3.28 ms | 19.1 | 272 ms | 0.2 | ~83× |
+| domainmodel | 1.12 ms | 55.8 | 151 ms | 0.4 | ~134× |
+| requirements | 1.00 ms | 62.6 | 39 ms | 1.6 | ~39× |
+| statemachine | 1.29 ms | 48.5 | 78 ms | 0.8 | ~61× |
+
+Workspace full build, ~250 KB (all files built simultaneously at startup):
+
+| language | pegium | pegium MiB/s | langium | langium MiB/s | speedup | pegium RSS | langium RSS | RSS ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| arithmetics | 1.66 ms | 150.8 | 491 ms | 0.5 | ~296× | 18 MiB | 209 MiB | ~12× |
+| domainmodel | 1.12 ms | 223.9 | 230 ms | 1.1 | ~206× | 18 MiB | 185 MiB | ~10× |
+| statemachine | 1.18 ms | 214.9 | 209 ms | 1.2 | ~177× | 18 MiB | 186 MiB | ~10× |
+| requirements | 2.21 ms | 113.6 | 133 ms | 1.9 | ~60× | 18 MiB | 174 MiB | ~10× |
+
+Workspace full build, ~12 MB (all files built simultaneously at startup):
+
+| language | pegium | pegium MiB/s | langium | langium MiB/s | speedup | pegium RSS | langium RSS | RSS ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| arithmetics | 48 ms | 247.9 | 24.3 s | 0.5 | ~502× | 602 MiB | 3.1 GiB | ~5× |
+| domainmodel | 33 ms | 365.0 | 10.1 s | 1.2 | ~308× | 346 MiB | 2.1 GiB | ~6× |
+| statemachine | 38 ms | 312.4 | 10.2 s | 1.2 | ~265× | 390 MiB | 2.2 GiB | ~6× |
+| requirements | 103 ms | 116.5 | 51.8 s | 0.2 | ~503× | 328 MiB | 1.8 GiB | ~6× |
+
+Numbers are indicative and hardware-dependent; reproduce them on your own machine
+with:
+
+```bash
+cmake --build build -j --target PegiumBench
+# Uses a sibling ../langium checkout; pass --setup to clone + build the latest
+# Langium and install the bench harness automatically.
+python3 tools/compare_langium_bench.py --setup
+```
+
+`PegiumBench` (under [`tests/bench/`](tests/bench/)) and the Langium harness
+([`tools/langium-bench/bench-examples.mjs`](tools/langium-bench/bench-examples.mjs))
+generate the same inputs and report the same format, which
+[`tools/compare_langium_bench.py`](tools/compare_langium_bench.py) diffs into the
+tables above.
 
 ## License
 

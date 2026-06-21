@@ -1,9 +1,6 @@
 # Performance
 
-Performance recipes are about keeping expensive language services responsive as
-the workspace grows.
-
-In Pegium, the first performance tool to reach for is usually caching.
+Keep expensive language services responsive as the workspace grows. The first tool to reach for is usually caching.
 
 ## Typical cases
 
@@ -12,6 +9,7 @@ In Pegium, the first performance tool to reach for is usually caching.
 - reusing per-type index views
 - avoiding repeated whole-workspace scans
 
-Start with [Caches](caches.md), then return to the
-[Document Lifecycle](../../reference/document-lifecycle.md) page if you need to
-reason about when cached data becomes stale.
+## Related pages
+
+- [Caches](caches.md) — start here
+- [Document Lifecycle](../../reference/document-lifecycle.md) — reason about when cached data becomes stale

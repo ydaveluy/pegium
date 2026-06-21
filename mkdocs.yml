@@ -57,27 +57,26 @@ nav:
       - Features: introduction/features.md
       - Showcases: introduction/showcases.md
       - Why Pegium: introduction/why-pegium.md
-      - Choose Your Path: introduction/choose-your-path.md
       - Pegium Mental Model: introduction/mental-model.md
   - Learn:
       - learn/index.md
-      - Workflow:
-          - learn/workflow/index.md
-          - 1. Build the Repository: learn/workflow/install.md
-          - 2. Choose a Starting Point: learn/workflow/scaffold.md
-          - 3. Write the Grammar: learn/workflow/write_grammar.md
-          - 4. Shape the AST and CST: learn/workflow/generate_ast.md
-          - 5. Resolve Cross-References: learn/workflow/resolve_cross_references.md
-          - 6. Create Validations: learn/workflow/create_validations.md
-          - 7. Add Formatting and LSP Services: learn/workflow/generate_everything.md
+      - Build a Language End-to-End: learn/walkthrough.md
+      - Test Your Language: learn/test-your-language.md
+      - Run a Language Headlessly: learn/consume-the-ast.md
+      - Set Up:
+          - Build the Repository: learn/workflow/install.md
+          - Choose a Starting Point: learn/workflow/scaffold.md
       - Build a Language:
           - build-a-language/index.md
           - Grammar Essentials: build-a-language/grammar.md
+          - Debugging a Grammar: build-a-language/debugging-grammar.md
           - AST and CST: build-a-language/ast-and-cst.md
           - References and Scoping: build-a-language/references-and-scoping.md
           - Validation: build-a-language/validation.md
+          - Error Recovery: build-a-language/error-recovery.md
           - Formatting: build-a-language/formatting.md
           - LSP Services: build-a-language/lsp-services.md
+          - Integrate with an Editor: build-a-language/editor-integration.md
           - Workspace Lifecycle: build-a-language/workspace.md
   - Recipes:
       - recipes/index.md
@@ -104,6 +103,7 @@ nav:
       - Semantic Model: reference/semantic-model.md
       - Grammar Reference: reference/grammar-reference.md
       - Formatter DSL: reference/formatter-dsl.md
+  - FAQ: faq.md
   - Examples:
       - examples/index.md
       - Arithmetics: examples/arithmetics.md

@@ -1,15 +1,30 @@
-# 2. Choose a Starting Point
+# Choose a Starting Point
 
-The recommended way to start a new Pegium language is the
-[**`pegium-language-template`**](https://github.com/ydaveluy/pegium-language-template)
-GitHub template repository. It ships a working "Hello world" DSL,
-pulls Pegium in via `FetchContent`, and includes a one-shot CMake
-script that renames every identifier to your own.
+Scaffold a new Pegium language with a single command — no cloning or GitHub
+account required:
 
-## What the template ships
+```bash
+curl -fsSLO https://ydaveluy.github.io/pegium/pegium-new.cmake && \
+  cmake -DNAME=MyLang -DEXT=.ml -P pegium-new.cmake
+cd mylang && cmake -B build && cmake --build build
+./build/mylang-cli example/hello.ml
+```
 
-A working DSL for a tiny grammar that declares persons and greets
-them by name:
+The script creates a `mylang/` directory, pulls Pegium in via `FetchContent`,
+and gives you a working "Hello world" grammar, CLI, LSP server, and VS Code
+extension in one step. No extra runtime beyond CMake is required to scaffold.
+Node.js is only needed if you keep the VS Code extension enabled (the default).
+
+!!! tip "Prefer to start from an existing example?"
+    The four working examples under `examples/` demonstrate every concept in
+    this workflow, so copying the closest one is a fully in-repo, verifiable
+    starting point. `statemachine` is the smallest complete language (AST +
+    grammar + validation + formatter); `arithmetics` is the smallest full
+    parser-to-editor path. See [Examples](../../examples/index.md).
+
+## What the scaffolder creates
+
+A working DSL for a tiny grammar that declares persons and greets them by name:
 
 ```text
 person John
@@ -21,66 +36,39 @@ Hello Jane!
 
 You get:
 
-- `src/mydsl/` — AST, parser (grammar), core/LSP services
-- `example/sample.mydsl` — sample input the smoke test parses
-- `cmake/pegium.cmake` — `FetchContent_Declare(pegium ...)` (one place
-  to bump the pinned tag)
-- `scripts/new-language.cmake` — the rename script (no extra runtime,
-  pure CMake)
-- `tests/ParseSmoke.cpp` — CTest smoke test
-- `.vscode/launch.json` + `tasks.json` — F5 builds and runs the CLI on
-  the sample
+- `src/mylang/` — AST, parser (grammar), core services, LSP services
+- `example/hello.<ext>` — sample input the smoke test parses
+- `CMakeLists.txt` — `FetchContent_Declare(pegium ...)` (one place to bump
+  the pinned tag)
+- `test/parsing_test.cpp` — CTest smoke test
+- `.vscode/launch.json` — F5 launches the language extension in an Extension Development Host
+- `vscode/` — VS Code extension (omitted when `-DVSCODE=OFF`)
 
-## Bootstrap your project
+## Scaffolding flags
 
-On
-[GitHub](https://github.com/ydaveluy/pegium-language-template),
-click **Use this template → Create a new repository** to create a copy
-under your own account. Then clone it locally:
-
-```bash
-git clone https://github.com/<your-account>/<your-repo>.git my-language
-cd my-language
-```
-
-Rename the default identifiers (`mydsl`, `MyDsl`, `MYDSL`, `.mydsl`) to
-your own:
-
-```bash
-cmake -P scripts/new-language.cmake -DLANGUAGE_NAME=mylang
-```
-
-Optional flags:
-
-- `-DLANGUAGE_CLASS=MyLang` — PascalCase for class names. Defaults to
-  the lowercase name with the first letter capitalized.
-- `-DFILE_EXT=.ml` — file extension. Defaults to `.${LANGUAGE_NAME}`.
-
-Then build and test:
-
-```bash
-cmake -S . -B build
-cmake --build build -j
-ctest --test-dir build --output-on-failure
-./build/mylang-cli example/sample.mylang
-```
-
-The first build pulls Pegium via `FetchContent` and produces a CLI and
-an LSP server for your language. Open the folder in VS Code and press
-**F5** to debug the CLI on the sample.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `NAME` | *(required)* | PascalCase C++ identifier for your language (e.g. `MyLang`) |
+| `EXT` | `.<lowercased-name>` | File extension, must start with `.` (e.g. `-DEXT=.ml`) |
+| `DIR` | `<lowercased-name>` | Output directory (e.g. `-DDIR=my-project`) |
+| `LSP` | `ON` | Build the LSP server; pass `-DLSP=OFF` to skip |
+| `VSCODE` | `ON` | Scaffold the VS Code extension; pass `-DVSCODE=OFF` to skip |
+| `CLI` | `ON` | Build the CLI tool; pass `-DCLI=OFF` to skip |
+| `PEGIUM_TAG` | `main` | Pegium tag/commit to pin (e.g. `-DPEGIUM_TAG=v1.2.0`) |
 
 ## What to edit next
 
 | File                                    | Role                                       |
 |-----------------------------------------|--------------------------------------------|
-| `src/mylang/parser/Parser.hpp`          | grammar rules and terminals                |
-| `src/mylang/ast.hpp`                    | AST types and reference fields             |
+| `src/mylang/core/Parser.hpp`          | grammar rules and terminals                |
+| `src/mylang/core/ast.hpp`                    | AST types and reference fields             |
 | `src/mylang/core/Module.cpp`            | core service wiring (parser, validator…)   |
 | `src/mylang/lsp/Module.cpp`             | LSP feature wiring (formatter, hover…)     |
-| `example/sample.mylang`                 | sample input the smoke test parses         |
-| `cmake/pegium.cmake`                    | the Pegium tag this project pins           |
+| `example/hello.<ext>`                   | sample input the smoke test parses         |
+| `CMakeLists.txt`                        | the Pegium tag this project pins           |
 
-## Recommended next step
+## Related pages
 
-Once you have a renamed project that builds, continue with
-[Write the Grammar](write_grammar.md).
+- [End-to-end walkthrough](../walkthrough.md) — fill in the grammar, AST,
+  validation, and services
+- [Examples](../../examples/index.md) — four working in-repo languages

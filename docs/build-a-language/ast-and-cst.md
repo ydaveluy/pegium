@@ -5,16 +5,14 @@ Pegium keeps two complementary views of a document:
 - the AST for language semantics
 - the CST for source structure
 
-Most language work starts with the AST. Most source-aware tooling eventually
-needs the CST too.
+Start with the AST. Reach for the CST once your tooling needs the exact source.
 
 ## Treat the AST as your language model
 
-AST nodes are ordinary C++ types derived from `pegium::AstNode`:
+AST nodes are ordinary C++ types derived from `pegium::AstNode`. Declarations with a name derive from `pegium::NamedAstNode`, which supplies the `name` field so the default naming and linking services pick them up:
 
 ```cpp
-struct Entity : pegium::AstNode {
-  string name;
+struct Entity : pegium::NamedAstNode {
   optional<reference<Entity>> superType;
   vector<pointer<Feature>> features;
 };
@@ -22,41 +20,35 @@ struct Entity : pegium::AstNode {
 
 That one type already says a lot:
 
-- `name` is plain data
+- `name` (from `NamedAstNode`) is the declared symbol name
 - `superType` is a link to another declaration
 - `features` are owned children
 
-If the AST is shaped well, validation, scoping, navigation, and formatting all
-become easier later.
+A well-shaped AST makes validation, scoping, navigation, and formatting easier later.
 
 ## Use a small set of field shapes
 
-Most languages only need a few recurring patterns.
+Most languages need only a few recurring patterns.
 
 - Use scalar values for names, numbers, booleans, enums, and other plain data.
 - Use `pointer<T>` for one contained child.
 - Use `vector<pointer<T>>` for repeated contained children.
 - Use `reference<T>` for one link to another node.
-- Use `vector<reference<T>>` for several independent links written in the
-  source.
-- Use `multi_reference<T>` only when one reference occurrence is expected to
-  resolve to several targets.
+- Use `vector<reference<T>>` for several independent links written in the source.
+- Use `multi_reference<T>` only when one reference occurrence resolves to several targets.
 - Use `optional<T>` only when absence is part of the language semantics.
 
 This keeps the model predictable for both users of the AST and Pegium itself.
 
 ## Keep parser-managed nodes simple
 
-Pegium parses directly into your AST types. That means AST nodes created by the
-parser should stay lightweight and default-constructible.
+Pegium parses directly into your AST types, so parser-created nodes should stay lightweight and default-constructible.
 
-A good rule of thumb is:
+- Keep parser-managed nodes as the technical model of the source text.
+- Enforce semantic rules in validation and linking.
+- Build a stricter application model afterwards only if you need one.
 
-- keep parser-managed nodes as the technical model of the source text
-- enforce semantic rules in validation and linking
-- build a stricter application model afterwards only if you really need one
-
-This avoids fighting the parser while still keeping your domain logic clean.
+This avoids fighting the parser while keeping your domain logic clean.
 
 ## The CST is about source structure
 
@@ -67,7 +59,7 @@ The CST preserves what the user actually wrote:
 - exact keyword positions
 - recovered structure after syntax errors
 
-That is why CST access matters for:
+That makes CST access matter for:
 
 - formatting
 - hover over comments
@@ -76,10 +68,8 @@ That is why CST access matters for:
 
 ## Use the AST first, then drop to the CST when needed
 
-A useful decision rule is simple:
-
-- if the feature is semantic, start from the AST
-- if the feature depends on exact text layout, use the CST
+- If the feature is semantic, start from the AST.
+- If the feature depends on exact text layout, use the CST.
 
 For example:
 
@@ -97,6 +87,6 @@ When a model starts feeling awkward, check these points:
 
 ## Related pages
 
-- [4. Shape the AST and CST](../learn/workflow/generate_ast.md)
+- [Build a Language End-to-End](../learn/walkthrough.md)
 - [Semantic Model](../reference/semantic-model.md)
 - [References and Scoping](references-and-scoping.md)

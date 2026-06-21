@@ -2,47 +2,27 @@
 
 Source: [examples/requirements](https://github.com/ydaveluy/pegium/tree/main/examples/requirements)
 
-`requirements` is the example to study once one language is no longer enough.
-It shows how Pegium behaves when several related file types belong to the same
-workspace and are served by the same runtime.
+Study `requirements` once one language is no longer enough. It shows how Pegium serves several related file types from one workspace and runtime: two languages, cross-file and cross-language references, scoping beyond a single document, and a shared LSP server for `.req` and `.tst`.
 
-## What it shows
-
-- two related languages served by one workspace
-- cross-file and cross-language behavior
-- references and scoping beyond a single document
-- a shared LSP server for `.req` and `.tst`
-
-## Useful entry points
+## Entry points
 
 - CLI: `./build/examples/requirements/pegium-example-requirements-cli`
 - LSP: `./build/examples/requirements/pegium-example-requirements-lsp`
 
 ## What to read first
 
-The clearest reading path is:
-
-- `examples/requirements/src/requirements/core/Module.cpp` for multi-language
-  registration
-- `examples/requirements/src/requirements/core/Language.cpp` for the language definitions
-- `examples/requirements/src/requirements/core/validation/RequirementsValidator.cpp` and
-  `examples/requirements/src/requirements/core/validation/TestsValidator.cpp` for
-  language-specific validation on both sides of the workspace
-- `examples/requirements/src/requirements/lsp/RequirementsFormatter.cpp` for shared
-  editor-facing behavior
-
-## Why start here
-
-Use this example when your real project spans several related grammars or file
-types.
+- `examples/requirements/src/requirements/core/Module.cpp` — multi-language registration
+- `examples/requirements/src/requirements/core/Language.cpp` — the language definitions
+- `examples/requirements/src/requirements/core/validation/RequirementsValidator.cpp` and `examples/requirements/src/requirements/core/validation/TestsValidator.cpp` — language-specific validation on both sides of the workspace
+- `examples/requirements/src/requirements/lsp/RequirementsFormatter.cpp` — shared editor-facing behavior
 
 ## Use this example when
 
-- several file types belong to one logical workspace
-- references cross file or language boundaries
-- you need a more realistic document/index pipeline than a single-file example
+- Several file types belong to one logical workspace.
+- References cross file or language boundaries.
+- You need a more realistic document/index pipeline than a single-file example.
 
-## Continue with
+## Related pages
 
 - [Multiple Languages](../recipes/multiple-languages.md)
 - [Workspace Lifecycle](../build-a-language/workspace.md)

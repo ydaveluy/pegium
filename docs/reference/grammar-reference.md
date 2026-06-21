@@ -1,9 +1,6 @@
 # Grammar Reference
 
-This page summarizes the user-facing grammar surface of Pegium.
-
-If you want the guided explanation first, start with
-[3. Write the Grammar](../learn/workflow/write_grammar.md).
+The user-facing grammar surface of Pegium, in one place. For the guided walkthrough, start with [Grammar Essentials](../build-a-language/grammar.md).
 
 All snippets assume:
 
@@ -36,24 +33,21 @@ protected:
 };
 ```
 
-Inside that class, prefer the user-facing aliases:
+Inside the class, prefer the user-facing aliases:
 
 - `Terminal<T>`
 - `Rule<T>`
 - `Infix<T, Left, Op, Right>`
 
-`Rule<T>` becomes a parser rule when `T` derives from `AstNode`, and a
-data-type rule otherwise.
+`Rule<T>` is a parser rule when `T` derives from `AstNode`, and a data-type rule otherwise.
 
 ## Matching primitives
 
-The common low-level building blocks are:
+The low-level building blocks:
 
-- `"_kw"` for literals such as keywords, punctuation, and operators
+- `"_kw"` for literals: keywords, punctuation, operators
 - `"_cr"` for character ranges
 - `dot` for any single character
-
-Examples:
 
 ```cpp
 "entity"_kw.i()
@@ -63,7 +57,7 @@ Examples:
 dot
 ```
 
-Use `.i()` on a literal when the keyword should be case-insensitive.
+Add `.i()` to a literal to make the keyword case-insensitive.
 
 ## Terminals and rules
 
@@ -83,7 +77,7 @@ Rule<ast::Entity> EntityRule{
     "entity"_kw.i() + assign<&ast::Entity::name>(ID)};
 ```
 
-The important behavior difference is:
+The key difference:
 
 - terminals are contiguous
 - rules use the current skipper
@@ -92,18 +86,18 @@ The important behavior difference is:
 
 Pegium uses a PEG-style expression language.
 
-- sequence: `+`
-- ordered choice: `|`
-- unordered group: `&`
-- optional: `option(...)`
-- zero or many: `many(...)`
-- one or many: `some(...)`
-- bounded repetition: `repeat<...>(...)`
-- positive lookahead: unary `&`
-- negative lookahead: unary `!`
-- non-greedy range: `<=>`
-
-Examples:
+| Operator | Syntax |
+| --- | --- |
+| sequence | `+` |
+| ordered choice | `\|` |
+| unordered group | `&` |
+| optional | `option(...)` |
+| zero or many | `many(...)` |
+| one or many | `some(...)` |
+| bounded repetition | `repeat<...>(...)` |
+| positive lookahead | unary `&` |
+| negative lookahead | unary `!` |
+| non-greedy range | `<=>` |
 
 ```cpp
 some(ID, "."_kw)
@@ -114,19 +108,16 @@ option("extends"_kw + assign<&ast::Entity::superType>(QualifiedName))
 
 ## Assignments and actions
 
-Assignments are how the grammar fills the AST:
+Assignments fill the AST:
 
 - `assign<&T::member>(...)`
 - `append<&T::vectorMember>(...)`
 - `enable_if<&T::flag>(...)`
 
-Actions are how the grammar makes the tree shape more explicit:
+Actions shape the tree explicitly:
 
 - `create<T>()`
-- `action<T>()`
 - `nest<&T::member>()`
-
-Example:
 
 ```cpp
 Rule<ast::Feature> FeatureRule{
@@ -149,15 +140,11 @@ Infix<ast::BinaryExpression, &ast::BinaryExpression::left,
                      LeftAssociation("+"_kw | "-"_kw)};
 ```
 
-Operators are declared from highest precedence to lowest precedence. Use
-`LeftAssociation(...)` or `RightAssociation(...)` depending on the grouping you
-want.
+Declare operators from highest to lowest precedence. Wrap each level in `LeftAssociation(...)` or `RightAssociation(...)` for the grouping you want.
 
 ## Skippers
 
 The skipper decides what may appear automatically between parser elements.
-
-Typical setup:
 
 ```cpp
 static constexpr auto WS = some(s);
@@ -170,10 +157,9 @@ Skipper skipper = skip(ignored(WS), hidden(ML_COMMENT, SL_COMMENT));
 - `ignored(...)` removes tokens entirely from the CST
 - `hidden(...)` preserves tokens as hidden CST nodes
 
-You can also apply a local skipper to a rule or expression with `.skip(...)`
-when one part of the grammar needs different whitespace behavior.
+Apply a local skipper to a rule or expression with `.skip(...)` when one part of the grammar needs different whitespace behavior.
 
-## Choosing the right abstraction
+## Practical advice
 
 When in doubt:
 

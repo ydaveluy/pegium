@@ -1,20 +1,12 @@
 # Formatting
 
-This is the subsystem walkthrough for the formatter. If you only need a
-short task-oriented checklist, jump to
-[Recipes — Formatting](../recipes/custom-formatter.md). For the full API
-surface (every selector, every action), see the
-[Formatter DSL reference](../reference/formatter-dsl.md).
+Lay out your language's source code by deriving from `pegium::AbstractFormatter`. The formatter lives in `services->lsp.formatter` and works on top of the CST, so it's usually one of the last core features you add — after the grammar and AST shape are stable.
 
-Formatting is implemented by deriving from `pegium::AbstractFormatter`.
-
-The formatter lives in `services->lsp.formatter` and works on top of the CST.
-That is why formatting is usually one of the last core features to add, after
-the grammar and AST shape are already stable enough.
+For a task-oriented checklist, see [Recipes — Formatting](../recipes/custom-formatter.md). For the full API surface, see the [Formatter DSL reference](../reference/formatter-dsl.md).
 
 ## Creating a formatter
 
-Typical header:
+A typical header:
 
 ```cpp
 class DomainModelFormatter : public pegium::AbstractFormatter {
@@ -28,7 +20,7 @@ protected:
 };
 ```
 
-Typical implementation:
+The constructor registers the formatting methods for the node types and hidden tokens your language cares about:
 
 ```cpp
 DomainModelFormatter::DomainModelFormatter(
@@ -39,18 +31,13 @@ DomainModelFormatter::DomainModelFormatter(
 }
 ```
 
-This constructor is where you register the formatting methods for the node types
-and hidden tokens your language cares about.
-
 ## Formatting one node
 
-Inside a formatting method, the usual flow is:
+Inside a formatting method:
 
 1. get a node-scoped formatter from the builder
 2. select the CST-backed regions you care about
 3. attach spacing, line-break, or indentation actions to those regions
-
-Example:
 
 ```cpp
 void DomainModelFormatter::formatEntity(
@@ -69,12 +56,11 @@ void DomainModelFormatter::formatEntity(
 }
 ```
 
-This is the basic Pegium formatting pattern: select a region, then describe the
-layout you want around it.
+The pattern: select a region, then describe the layout you want around it.
 
 ## Registering several rules
 
-The preferred style is one method per exact AST type:
+Use one method per exact AST type:
 
 ```cpp
 on<ast::DomainModel>(&MyFormatter::formatDomainModel);
@@ -92,10 +78,7 @@ onHidden("SL_COMMENT", &MyFormatter::formatLineComment);
 
 ## Selecting regions
 
-`builder.getNodeFormatter(node)` returns a `NodeFormatter<T>` scoped to the CST
-subtree of that AST node.
-
-Common selections:
+`builder.getNodeFormatter(node)` returns a `NodeFormatter<T>` scoped to the CST subtree of that AST node. Common selections:
 
 - `property<&T::member>()`
 - `property<&T::vectorMember>(index)`
@@ -106,8 +89,6 @@ Common selections:
 - `hiddens("RULE")`
 - `interior(start, end)`
 
-Example:
-
 ```cpp
 auto formatter = builder.getNodeFormatter(feature);
 formatter.keyword(":").prepend(noSpace).append(oneSpace);
@@ -115,7 +96,7 @@ formatter.keyword(":").prepend(noSpace).append(oneSpace);
 
 ## Built-in actions
 
-Inside `AbstractFormatter`, the main layout actions are:
+`AbstractFormatter` exposes these layout actions as protected members:
 
 - `noSpace`
 - `oneSpace`
@@ -126,8 +107,7 @@ Inside `AbstractFormatter`, the main layout actions are:
 - `noIndent`
 - `fit(...)`
 
-These are protected members, so they can be used directly inside your
-formatter methods:
+Use them directly inside your formatter methods:
 
 ```cpp
 formatter.keyword("entity").append(oneSpace);
@@ -136,22 +116,18 @@ formatter.keyword(":").prepend(noSpace).append(oneSpace);
 
 ## Generic helpers
 
-`AbstractFormatter` also provides higher-level helpers for recurring layout
-patterns:
+`AbstractFormatter` also provides higher-level helpers for recurring layout patterns:
 
 - `formatBlock(...)`
 - `formatSeparatedList(...)`
 - `formatLineComment(...)`
 - `formatMultilineComment(...)`
 
-Use them whenever the pattern is already standard in your language. That keeps
-the formatter small and consistent.
+Reach for them whenever the pattern is standard in your language. They keep the formatter small and consistent.
 
 ## Formatting hidden nodes
 
-Hidden nodes are handled through `HiddenNodeFormatter`.
-
-Typical comment formatting method:
+Hidden nodes go through `HiddenNodeFormatter`. Use this to normalize or reflow comment text when the comment's own layout matters:
 
 ```cpp
 void MyFormatter::formatLineComment(HiddenNodeFormatter &comment) const {
@@ -159,35 +135,33 @@ void MyFormatter::formatLineComment(HiddenNodeFormatter &comment) const {
 }
 ```
 
-This is the right place to normalize or reflow comment text when the layout of
-the comment itself matters.
-
 ## Wiring the formatter into services
 
-Creating the formatter class is not enough. You must also install it into the
-language services:
+Creating the formatter class isn't enough — install it into the language services:
 
 ```cpp
-auto services = pegium::makeDefaultServices(
+// lsp/Module.cpp — the LSP install module assigns the formatter slot:
+void installDomainModelLspModule(DomainModelServices &services) {
+  services.lsp.formatter = std::make_unique<DomainModelFormatter>(services);
+}
+
+// createDomainModelServices builds the container and runs the install modules:
+auto services = pegium::makeDefaultServices<DomainModelServices>(
     sharedServices, "domain-model");
-
-services->parser =
-    std::make_unique<const domainmodel::parser::DomainModelParser>(*services);
-
-services->lsp.formatter =
-    std::make_unique<lsp::DomainModelFormatter>(*services);
+installDomainModelCoreModule(*services);
+installDomainModelLspModule(*services);
 ```
 
-Without the formatter assignment, formatting requests simply keep using the
-empty default slot.
+Without the assignment, formatting requests keep using the empty default slot.
 
 ## Practical advice
 
 - start with one or two important node types
 - keep one formatting method per exact AST type
-- prefer `formatBlock(...)` and `formatSeparatedList(...)` over repeating the
-  same layout logic everywhere
+- prefer `formatBlock(...)` and `formatSeparatedList(...)` over repeating the same layout logic everywhere
 - touch hidden-node formatting only when comment text itself must change
 
-Use the [formatter DSL reference](../reference/formatter-dsl.md) for the full
-API surface.
+## Related pages
+
+- [Recipes — Formatting](../recipes/custom-formatter.md)
+- [Formatter DSL reference](../reference/formatter-dsl.md)

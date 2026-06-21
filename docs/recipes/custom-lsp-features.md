@@ -1,7 +1,6 @@
 # Custom LSP Features
 
-Pegium lets you replace individual LSP providers without rewriting the whole
-language server layer.
+Swap individual LSP providers without rewriting the whole language server layer.
 
 ## Common extension points
 
@@ -14,9 +13,7 @@ language server layer.
 
 ## Strategy
 
-Start from the default services, then swap one provider at a time. This keeps
-the rest of the language server stack stable while you iterate on a specific
-feature.
+Start from the default services, then swap one provider at a time. The rest of the language server stack stays stable while you iterate on a single feature.
 
 Typical wiring:
 
@@ -28,20 +25,16 @@ services->parser = std::make_unique<const my::parser::MyParser>(*services);
 services->lsp.hoverProvider = std::make_unique<lsp::MyHoverProvider>(*services);
 ```
 
-For completion-specific customization, prefer subclassing
-`lsp::DefaultCompletionProvider` and overriding its narrow hooks instead of
-rewriting the whole provider. See the
-[completion provider reference](../reference/completion-provider.md) for the
-available extension points.
+For completion, subclass `lsp::DefaultCompletionProvider` and override its narrow hooks rather than rewriting the whole provider. The [completion provider reference](../reference/completion-provider.md) lists the available extension points.
 
 ## When to write a custom provider
 
 - the language has unusual scoping or symbol lookup rules
-- completion items depend on semantic state that the default provider cannot see
+- completion items depend on semantic state the default provider cannot see
 - hover content needs custom documentation rendering
 - rename or definition behavior depends on domain-specific semantics
 
-## A practical order
+## Practical advice
 
 Replace the most visible or most language-specific feature first:
 

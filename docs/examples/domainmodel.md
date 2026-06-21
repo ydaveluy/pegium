@@ -2,9 +2,7 @@
 
 Source: [examples/domainmodel](https://github.com/ydaveluy/pegium/tree/main/examples/domainmodel)
 
-`domainmodel` is the clearest example of a declaration-oriented DSL in Pegium.
-It is a good bridge between the compact `arithmetics` example and more
-workspace-oriented examples.
+`domainmodel` is the clearest example of a declaration-oriented DSL in Pegium, bridging the compact `arithmetics` example and the more workspace-oriented ones.
 
 ## What it shows
 
@@ -13,17 +11,15 @@ workspace-oriented examples.
 - formatting with block-style layout
 - rename and editor support through LSP
 
-## Useful entry points
+## Entry points
 
 - CLI: `./build/examples/domainmodel/pegium-example-domainmodel-cli`
 - LSP: `./build/examples/domainmodel/pegium-example-domainmodel-lsp`
 
 ## What to read first
 
-The most useful reading path is usually:
-
 - `examples/domainmodel/src/domainmodel/core/Module.cpp` for service composition
-- `examples/domainmodel/src/domainmodel/ast.hpp` for declarations built on
+- `examples/domainmodel/src/domainmodel/core/ast.hpp` for declarations built on
   `pegium::NamedAstNode`
 - `examples/domainmodel/src/domainmodel/core/references/QualifiedNameProvider.cpp` for
   qualified-name construction
@@ -34,19 +30,15 @@ The most useful reading path is usually:
 - `examples/domainmodel/src/domainmodel/lsp/DomainModelFormatter.cpp` for block-oriented
   formatting
 
-## Why start here
-
-Use this example when your language looks like a modeling DSL rather than an
-expression language.
-
 ## Use this example when
 
+- your language is a modeling DSL rather than an expression language
 - the language has declarations, nesting, and blocks
 - qualified names matter
 - you want a clearer example of references and rename than `arithmetics`
 - you want a formatter centered on keywords and brace blocks
 
-## Continue with
+## Related pages
 
 - [Qualified Names](../recipes/scoping/qualified-names.md)
 - [Custom Scope Provider](../recipes/custom-scope-provider.md)

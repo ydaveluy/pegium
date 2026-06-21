@@ -8,20 +8,18 @@ scope provider only when lookup behavior itself must change.
 
 ## Main entry points
 
-- custom name provider
-- custom scope computation
-- custom scope provider
+Three services each solve a different problem:
 
-Each one solves a different problem:
+| Service | Controls |
+| --- | --- |
+| name provider | how declarations are named |
+| scope computation | which symbols are exported and indexed |
+| scope provider | which symbols are visible at a given reference site |
 
-- name provider: how declarations are named
-- scope computation: which symbols are exported and indexed
-- scope provider: which symbols are visible at a given reference site
+A custom name provider overrides the single primary lookup:
 
-In practice, a custom name provider usually customizes both:
-
-- `getName(...)` for the exported symbol key
-- `getNameNode(...)` for declaration ranges used by editor features
+- `nameOf(...)`: returns the exported symbol name and the CST node that marks the
+  declaration (the `getName` / `getNameNode` helpers delegate to it)
 
 When your AST already stores declaration names in a shared base type, prefer
 the recommended naming pattern described in
@@ -33,21 +31,19 @@ A `pegium::references::ScopeProvider` exposes two operations on a reference
 site described by `ReferenceInfo` (which carries the reference text, the
 container AST node, and the type of the expected target):
 
-- `getScopeEntry(...)` returns the first visible
-  `AstNodeDescription` matching the reference text, or `nullptr` if no
-  candidate exists. This is the fast path used by the linker.
-- `visitScopeEntries(...)` enumerates visible candidates in lexical order
-  and stops as soon as the visitor returns `false`. This is the path used
-  by completion.
+- `getScopeEntry(...)` returns the first visible `AstNodeDescription` matching
+  the reference text, or `nullptr` if no candidate exists. The linker uses this
+  fast path.
+- `visitScopeEntries(...)` enumerates visible candidates in lexical order and
+  stops as soon as the visitor returns `false`. Completion uses this path.
 
-Both operations should agree on visibility: if a description is reachable
-through `visitScopeEntries(...)`, an exact-match lookup with the same
-reference text must also return it through `getScopeEntry(...)`.
+Both operations must agree on visibility: if a description is reachable through
+`visitScopeEntries(...)`, an exact-match lookup with the same reference text must
+also return it through `getScopeEntry(...)`.
 
 ## Skeleton of a custom scope provider
 
-The simplest customization derives from `DefaultScopeProvider` and
-overrides only one of the two methods:
+Derive from `DefaultScopeProvider` and override only one of the two methods:
 
 ```cpp
 class MyScopeProvider final : public pegium::references::DefaultScopeProvider {
@@ -78,28 +74,24 @@ services->references.scopeProvider =
     std::make_unique<MyScopeProvider>(*services);
 ```
 
-## A practical order
+## Practical advice
+
+Customize in this order:
 
 1. keep the default linker
 2. customize exported names if needed
 3. customize scope computation for visibility
 4. customize the scope provider only when lookup itself needs a special rule
 
-## Typical reasons
-
-- imports
-- namespaces
-- qualified names
-- visibility modifiers
-- multi-file symbol aggregation
-
-## Practical advice
+Typical reasons to reach this far: imports, namespaces, qualified names,
+visibility modifiers, and multi-file symbol aggregation.
 
 Most scoping bugs are easier to diagnose if you first verify exported symbols,
-then visible symbols, then final linker behavior. Try not to change all three
+then visible symbols, then final linker behavior. Avoid changing all three
 layers at once.
 
 ## Related pages
 
 - [Scoping](scoping/index.md)
 - [Qualified Names](scoping/qualified-names.md)
+- [References and Scoping](../build-a-language/references-and-scoping.md)

@@ -1,12 +1,10 @@
 # Showcases
 
-Pegium ships several end-to-end examples. They are both showcases of the
-framework and practical starting points for real projects.
+Pegium ships several end-to-end examples. Each one is both a showcase of the framework and a starting point for real projects.
 
 ## Arithmetics
 
-The [arithmetics example](../examples/arithmetics.md) is the smallest complete
-showcase. It includes:
+The [arithmetics example](../examples/arithmetics.md) is the smallest complete showcase. It includes:
 
 - a grammar with precedence-aware expressions
 - an evaluator
@@ -15,8 +13,7 @@ showcase. It includes:
 
 ## DomainModel
 
-The [domainmodel example](../examples/domainmodel.md) shows a modeling DSL
-with:
+The [domainmodel example](../examples/domainmodel.md) shows a modeling DSL with:
 
 - nested declarations
 - qualified names
@@ -40,17 +37,12 @@ The [statemachine example](../examples/statemachine.md) focuses on:
 - state-oriented modeling
 - formatting and editor integration
 
-## Recommended first showcase
+## Practical advice
 
-If you only want to inspect one showcase before learning Pegium, start with
-[arithmetics](../examples/arithmetics.md). It is the most compact example that
-still exercises the full parser-to-editor path.
+Want to inspect just one showcase before learning Pegium? Start with [arithmetics](../examples/arithmetics.md). It's the most compact example that still exercises the full parser-to-editor path.
 
-## Where to go from here?
+## Related pages
 
-- Continue with the [examples overview](../examples/index.md) if you want to
-  compare the examples side by side.
-- Continue with the [workflow](../learn/workflow/index.md) if you want to
-  build your own language next.
-- Continue with [recipes](../recipes/index.md) once you know which subsystem
-  you want to customize.
+- [Examples overview](../examples/index.md) — compare the examples side by side.
+- [End-to-end walkthrough](../learn/walkthrough.md) — build your own language next.
+- [Recipes](../recipes/index.md) — customize a specific subsystem.
