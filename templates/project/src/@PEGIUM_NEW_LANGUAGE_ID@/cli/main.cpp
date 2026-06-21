@@ -1,0 +1,32 @@
+#include <@PEGIUM_NEW_LANGUAGE_ID@/core/Module.hpp>
+
+#include <pegium/cli/CliUtils.hpp>
+
+#include <iostream>
+#include <string_view>
+
+int main(int argc, char **argv) {
+  if (argc < 2) {
+    std::cerr << "Usage: @PEGIUM_NEW_LANGUAGE_ID@-cli <file@PEGIUM_NEW_EXT@>\n";
+    return 1;
+  }
+  try {
+    auto shared = pegium::cli::make_shared_services();
+    auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@Services(shared);
+    auto &langServices = *services;
+    shared.serviceRegistry->registerServices(std::move(services));
+
+    auto document =
+        pegium::cli::build_document_from_path(argv[1], langServices);
+    if (pegium::cli::has_error_diagnostics(*document)) {
+      std::cerr << "Validation errors:\n";
+      pegium::cli::print_error_diagnostics(*document, std::cerr);
+      return 2;
+    }
+    std::cout << "Parsed " << argv[1] << " successfully.\n";
+    return 0;
+  } catch (const std::exception &error) {
+    std::cerr << "Fatal error: " << error.what() << '\n';
+    return 3;
+  }
+}
