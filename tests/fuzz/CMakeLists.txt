@@ -13,22 +13,20 @@ target_link_libraries(PegiumWorkspaceFuzzTest PRIVATE
 )
 link_fuzztest(PegiumWorkspaceFuzzTest)
 
-# Coverage-guided fuzz mode (`-DFUZZTEST_FUZZING_MODE=ON`) registers each
-# `FUZZ_TEST` as a ctest entry that, by default, runs every WithSeeds
-# corpus entry against the instrumented binary. The instrumentation
-# (ASan + sancov) makes parses 10-100x slower, so iterating thousands of
-# adversarial seeds exceeds any reasonable test timeout. Restrict the
-# ctest registration to the deterministic `PegiumWorkspaceRegressionTest.*`
-# fixtures; the dynamic fuzz engine is still invoked manually with
-# `--fuzz=...` for the FUZZ_TEST entries.
-if(FUZZTEST_FUZZING_MODE)
-    pegium_register_gtest_target(PegiumWorkspaceFuzzTest
-        LABELS fuzz
-        TEST_FILTER "PegiumWorkspaceRegressionTest.*"
-    )
-else()
-    pegium_register_gtest_target(PegiumWorkspaceFuzzTest LABELS fuzz)
-endif()
+# Register only the deterministic `PegiumWorkspaceRegressionTest.*` fixtures as
+# ctest entries (they pin the curated adversarial cases and run in <1s total).
+# The `FUZZ_TEST` entries are coverage-guided targets whose value comes from the
+# instrumented `--fuzz=...` runs under `-DFUZZTEST_FUZZING_MODE=ON`. Running them
+# in a normal build's unit-test mode just replays their whole adversarial seed
+# corpus through the full workspace pipeline with no coverage feedback — e.g.
+# `AdversarialLanguageSingleDocumentPipeline` alone takes ~130s for the seed
+# replay (which `FUZZTEST_MAX_FUZZING_TIME` cannot bound). That cost dominated
+# the default `ctest` for little value, so the fuzzers are left for the manual /
+# fuzzing-mode `--fuzz=...` path in both configurations.
+pegium_register_gtest_target(PegiumWorkspaceFuzzTest
+    LABELS fuzz
+    TEST_FILTER "PegiumWorkspaceRegressionTest.*"
+)
 
 if(FUZZTEST_FUZZING_MODE)
     add_test(

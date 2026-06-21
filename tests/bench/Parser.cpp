@@ -101,10 +101,8 @@ BenchmarkTimings run_iteration(const std::string &source,
   }
 
   BenchmarkTimings timings{};
-  timings[static_cast<std::size_t>(BenchmarkStep::Parsing)] =
-      std::chrono::duration<double, std::milli>(end - start).count();
   timings[static_cast<std::size_t>(BenchmarkStep::FullBuild)] =
-      timings[static_cast<std::size_t>(BenchmarkStep::Parsing)];
+      std::chrono::duration<double, std::milli>(end - start).count();
   return timings;
 }
 
@@ -114,16 +112,16 @@ void register_parser_benchmarks(BenchmarkRegistry &registry) {
   const auto recoverySource =
       make_expression_source(benchmark_target_bytes(), true, false);
   registry.add("parser-recovery", recoverySource.size(),
-               [source = recoverySource] {
-                 return run_iteration(source, true);
-               });
+               [source = recoverySource] { return run_iteration(source, true); },
+               /*fullBuildOnly=*/true);
 
   const auto conversionSource =
       make_expression_source(benchmark_target_bytes(), false, true);
   registry.add("parser-conversion-diagnostics", conversionSource.size(),
                [source = conversionSource] {
                  return run_iteration(source, true);
-               });
+               },
+               /*fullBuildOnly=*/true);
 }
 
 } // namespace pegium::bench

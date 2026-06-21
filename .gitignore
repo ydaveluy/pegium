@@ -4,9 +4,9 @@ site/
 node_modules/
 out/
 .vscode-test/
+package-lock.json
 .cache/
 /Testing
-/tools/*
-!/tools/lints/
+__pycache__
 /dist
 .fuzz/
