@@ -17,6 +17,9 @@ public:
   using pegium::DefaultCoreService::DefaultCoreService;
 
   ~DefaultDocumentationProvider() override = default;
+  // Keep the grammar-element overload (keyword documentation) visible alongside
+  // the AstNode override below.
+  using DocumentationProvider::getDocumentation;
   /// Returns the Markdown documentation derived from the comment attached to `node`.
   [[nodiscard]] std::optional<std::string>
   getDocumentation(const AstNode &node) const override;

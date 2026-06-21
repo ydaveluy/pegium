@@ -41,8 +41,22 @@ struct Literal final : grammar::Literal {
     return getValue(node);
   }
   bool isCaseSensitive() const noexcept override { return case_sensitive; }
+  std::string_view getDocumentation() const noexcept override {
+    return _documentation;
+  }
+
+  /// Attach human-readable documentation to this keyword, surfaced on hover via
+  /// the DocumentationProvider. Returns a copy so it composes naturally:
+  /// `"class"_kw.doc("…") + …`. The text is stored as a non-owning view — pass
+  /// a string literal or a string that outlives the grammar.
+  [[nodiscard]] constexpr Literal doc(std::string_view documentation) const {
+    Literal copy{*this};
+    copy._documentation = documentation;
+    return copy;
+  }
 
 private:
+  std::string_view _documentation;
   friend struct detail::ParseAccess;
   friend struct detail::ProbeAccess;
   template <Expression... Elements> friend struct Group;

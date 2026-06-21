@@ -52,7 +52,9 @@ protected:
 
   Rule<HoverEntry> EntryRule{"Entry",
                              "entry"_kw + assign<&HoverEntry::name>(ID)};
-  Rule<HoverUse> UseRule{"Use", "use"_kw + assign<&HoverUse::targets>(ID)};
+  Rule<HoverUse> UseRule{
+      "Use", "use"_kw.doc("A use statement references entries.") +
+                 assign<&HoverUse::targets>(ID)};
   Rule<HoverModel> ModelRule{
       "Model",
       option("module"_kw + assign<&HoverModel::name>(ID)) +
@@ -223,6 +225,77 @@ TEST(MultilineCommentHoverProviderTest,
   const auto &content = std::get<::lsp::MarkupContent>(hover->contents);
   EXPECT_NE(content.value.find("Doc A1."), std::string::npos);
   EXPECT_NE(content.value.find("Doc A2."), std::string::npos);
+}
+
+TEST(MultilineCommentHoverProviderTest, RendersDocumentedKeyword) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices =
+        test::make_uninstalled_services<HoverParser>(*shared, "docs", {".docs"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("keyword-hover.docs"), "docs",
+      "use Value\n");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices =
+      &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  // Hover inside the documented `use` keyword.
+  ::lsp::HoverParams params{};
+  params.position.line = 0;
+  params.position.character = 1;
+
+  const auto hover = services->lsp.hoverProvider->getHoverContent(
+      *document, params, utils::default_cancel_token);
+  ASSERT_TRUE(hover.has_value());
+  ASSERT_TRUE(std::holds_alternative<::lsp::MarkupContent>(hover->contents));
+  const auto &content = std::get<::lsp::MarkupContent>(hover->contents);
+  EXPECT_NE(content.value.find("A use statement references entries."),
+            std::string::npos);
+}
+
+TEST(MultilineCommentHoverProviderTest, NoKeywordHoverWithoutDoc) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices =
+        test::make_uninstalled_services<HoverParser>(*shared, "docs", {".docs"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("plain-keyword.docs"), "docs",
+      "entry Value\n");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices =
+      &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = as_services(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  // Hover inside the undocumented `entry` keyword — no keyword documentation,
+  // and the keyword is not a cross-reference, so there is nothing to show.
+  ::lsp::HoverParams params{};
+  params.position.line = 0;
+  params.position.character = 1;
+
+  const auto hover = services->lsp.hoverProvider->getHoverContent(
+      *document, params, utils::default_cancel_token);
+  EXPECT_FALSE(hover.has_value());
 }
 
 } // namespace
