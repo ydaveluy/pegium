@@ -1,9 +1,6 @@
 # Examples
 
-Pegium ships four examples that cover complementary aspects of the framework.
-
-Use this section when you want to start from working code rather than from the
-abstract API documentation.
+Start from working code instead of the abstract API docs. Pegium ships four examples covering complementary aspects of the framework.
 
 ## Overview
 
@@ -16,46 +13,41 @@ abstract API documentation.
 
 ## Choose a starting point
 
-- Use `arithmetics` if you want the smallest end-to-end example.
-- Use `domainmodel` if you want a DomainModel-style DSL with entities,
-  nesting, and formatting rules.
-- Use `requirements` if you need multiple related languages or files.
-- Use `statemachine` if your domain is graph- or state-oriented.
+- `arithmetics` — the smallest end-to-end example.
+- `domainmodel` — a DomainModel-style DSL with entities, nesting, and formatting rules.
+- `requirements` — multiple related languages or files.
+- `statemachine` — a graph- or state-oriented domain.
 
-## How to use the examples
+## Practical advice
 
-The best way to reuse an example is usually:
+To reuse an example:
 
-1. choose the closest domain shape
-2. keep the project structure and service wiring
-3. shrink the grammar and AST to your actual needs
-4. add back domain-specific validation, references, and formatting
+1. Choose the closest domain shape.
+2. Keep the project structure and service wiring.
+3. Shrink the grammar and AST to your actual needs.
+4. Add back domain-specific validation, references, and formatting.
+
+Read them as a progression in this order:
+
+1. `arithmetics` — the smallest full parser-to-editor path.
+2. `domainmodel` — nested declarations, qualified names, and rename.
+3. `statemachine` — validation-heavy modeling.
+4. `requirements` — multiple related languages in one workspace.
 
 ## Running them
 
-After building the repository, each example exposes matching CLI and LSP
-entrypoints under `./build/examples/...`.
-
-For a quick first pass:
+After building the repository, each example exposes matching CLI and LSP entrypoints under `./build/examples/...`.
 
 ```bash
 ./build/examples/arithmetics/pegium-example-arithmetics-cli \
-  examples/arithmetics/example/example.calc
+  eval examples/arithmetics/example/example.calc
 
 ./build/examples/arithmetics/pegium-example-arithmetics-lsp
 ```
 
-## A good reading order
+The CLI takes a subcommand (`eval`) before the file path. Run it with no arguments to see the usage string.
 
-If you want to understand the examples as a progression rather than as isolated
-projects, a useful order is:
-
-1. `arithmetics` for the smallest full parser-to-editor path
-2. `domainmodel` for nested declarations, qualified names, and rename
-3. `statemachine` for validation-heavy modeling
-4. `requirements` for multiple related languages in one workspace
-
-## Where to go from here?
+## Related pages
 
 - [Learn Pegium](../learn/index.md)
 - [Recipes](../recipes/index.md)

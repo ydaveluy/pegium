@@ -1,21 +1,15 @@
 # Formatter DSL
 
-This page documents the user-facing formatting DSL built around
-`pegium::AbstractFormatter`.
-
-It complements the task-oriented formatting guide with the canonical API
-surface.
+The user-facing formatting DSL is built around `pegium::AbstractFormatter`. This page is the canonical API surface; it complements the task-oriented formatting guide.
 
 ## Creating a formatter
 
-The minimal pattern is:
+To build a formatter:
 
 1. derive from `AbstractFormatter`
 2. call the base constructor with `services`
 3. register formatting methods in the constructor with `on<T>(...)`
 4. assign an instance to `services->lsp.formatter`
-
-Example:
 
 ```cpp
 class MyFormatter : public pegium::AbstractFormatter {
@@ -33,7 +27,7 @@ protected:
 };
 ```
 
-Service wiring:
+Wire it into the services:
 
 ```cpp
 services->lsp.formatter = std::make_unique<lsp::MyFormatter>(*services);
@@ -49,22 +43,19 @@ on<ast::Entity>(&MyFormatter::formatEntity);
 onHidden("ML_COMMENT", &MyFormatter::formatComment);
 ```
 
-When the same AST type or hidden terminal rule is registered twice, the latest
-registration overrides the previous one.
+Registering the same AST type or hidden terminal rule twice overrides the previous registration.
 
-Most formatters should not override the global `format(...)` fallback. Register
-typed methods instead and let the formatter engine dispatch them while walking
-the AST.
+Don't override the global `format(...)` fallback. Register typed methods and let the formatter engine dispatch them as it walks the AST.
 
 ## Main entry points
 
 ### `format(FormattingBuilder &, const AstNode *)`
 
-Override this only if you need advanced fallback behavior.
+Override this only for advanced fallback behavior.
 
 ### `FormattingBuilder::getNodeFormatter(const NodeT *node)`
 
-Returns a node-scoped selector object for the supplied AST node.
+Returns a node-scoped selector for the supplied AST node.
 
 ## `NodeFormatter<T>` selectors
 
@@ -78,7 +69,7 @@ Returns a node-scoped selector object for the supplied AST node.
 - `hiddens("RULE")`
 - `interior(start, end)`
 
-All selections produce a `FormattingRegion`.
+Every selection produces a `FormattingRegion`.
 
 ## `FormattingRegion`
 
@@ -103,7 +94,7 @@ These helpers are protected members of `AbstractFormatter`:
 - `noIndent`
 - `fit(...)`
 
-They can be used directly inside formatting methods:
+Use them directly inside formatting methods:
 
 ```cpp
 formatter.keyword("entity").append(oneSpace);
@@ -112,9 +103,7 @@ formatter.property<&ast::Field::name>().prepend(oneSpace);
 
 ## Hidden nodes
 
-Hidden-node formatting is handled with `HiddenNodeFormatter`.
-
-Useful operations:
+Format hidden nodes with `HiddenNodeFormatter`:
 
 - `node()`
 - `ruleName()`
@@ -128,7 +117,7 @@ Useful operations:
 
 ## Generic helpers
 
-`AbstractFormatter` also provides higher-level helpers:
+`AbstractFormatter` provides higher-level helpers for common patterns such as brace blocks, comma-separated lists, and comment normalization:
 
 - `formatBlock(open, close, content, options)`
 - `formatSeparatedList(separators, options)`
@@ -136,9 +125,6 @@ Useful operations:
 - `formatLineComment(hiddenNode, options)`
 - `formatMultilineComment(text, options)`
 - `formatMultilineComment(hiddenNode, options)`
-
-These helpers are designed to cover common patterns such as brace blocks,
-comma-separated lists, and comment normalization.
 
 ## Related pages
 

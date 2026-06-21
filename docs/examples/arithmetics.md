@@ -2,9 +2,7 @@
 
 Source: [examples/arithmetics](https://github.com/ydaveluy/pegium/tree/main/examples/arithmetics)
 
-`arithmetics` is the smallest example that still shows the full Pegium loop:
-parser, language services, validation, formatting, CLI, LSP server, and VS
-Code client.
+`arithmetics` is the smallest example that still shows the full Pegium loop: parser, language services, validation, formatting, CLI, LSP server, and VS Code client.
 
 ## What it shows
 
@@ -14,25 +12,19 @@ Code client.
 - a stdio LSP server
 - a VS Code client
 
-## Useful entry points
+## Entry points
 
 - CLI: `./build/examples/arithmetics/pegium-example-arithmetics-cli`
 - LSP: `./build/examples/arithmetics/pegium-example-arithmetics-lsp`
 
 ## What to read first
 
-If you want to understand the example quickly, start with:
-
+- `examples/arithmetics/src/arithmetics/core/Parser.hpp` for the grammar and rule definitions
+- `examples/arithmetics/src/arithmetics/core/ast.hpp` for the AST shape
 - `examples/arithmetics/src/arithmetics/core/Module.cpp` for service wiring
-- `examples/arithmetics/src/arithmetics/core/Language.cpp` for the grammar and AST shaping
-- `examples/arithmetics/src/arithmetics/core/validation/ArithmeticsValidator.cpp` for semantic
-  checks
+- `examples/arithmetics/src/arithmetics/core/Language.cpp` for evaluating the parsed AST
+- `examples/arithmetics/src/arithmetics/core/validation/ArithmeticsValidator.cpp` for semantic checks
 - `examples/arithmetics/src/arithmetics/lsp/ArithmeticsFormatter.cpp` for formatter rules
-
-## Why start here
-
-This is the smallest example that still exercises parsing, services, validation,
-formatting, and the editor integration path.
 
 ## Use this example when
 
@@ -41,8 +33,8 @@ formatting, and the editor integration path.
 - you want to study `Infix` rules
 - you want the smallest full formatter example
 
-## Continue with
+## Related pages
 
-- [Write the Grammar](../learn/workflow/write_grammar.md)
+- [Grammar Essentials](../build-a-language/grammar.md)
 - [Dependency Loops](../recipes/validation/dependency-loops.md)
 - [Formatting](../build-a-language/formatting.md)

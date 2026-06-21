@@ -1,7 +1,6 @@
 # Pegium Mental Model
 
-This page gives a quick high-level model of how Pegium fits together before you
-start reading the subsystem pages.
+A quick high-level model of how Pegium fits together, so the subsystem pages make sense.
 
 ## The five ideas to keep in mind
 
@@ -13,47 +12,37 @@ start reading the subsystem pages.
 
 ## Main differences
 
-- Pegium grammars are written in C++ expressions instead of external grammar
-  files.
-- Pegium uses a PEG-based parser DSL as the foundation of the grammar layer.
-- C++ types and member pointers are used directly for AST construction and
-  formatter selections.
+- You write grammars as C++ expressions, not external grammar files.
+- A PEG-based parser DSL is the foundation of the grammar layer.
+- C++ types and member pointers drive AST construction and formatter selections.
 - Service composition happens through explicit service wiring.
 
 ## How to translate your intuition
 
-If you are used to language tooling frameworks:
+If you come from other language tooling frameworks:
 
-- think of the parser class as the home of the grammar
-- think of your AST structs as the language model you will validate and
-  traverse
-- think of scoping and linking as the stage that turns names into targets
-- think of the service container as the place where the language gets its
-  parser, validator, formatter, and editor behavior
+- The parser class is the home of the grammar.
+- Your AST structs are the language model you validate and traverse.
+- Scoping and linking turn names into targets.
+- The service container gives the language its parser, validator, formatter, and editor behavior.
 
-The biggest mental shift is that grammar and language services are ordinary C++
-code. You get stronger type coupling with the AST, but less of the declarative
-grammar-file feel.
+The biggest shift: grammar and language services are ordinary C++ code. You get stronger type coupling with the AST, but less of the declarative grammar-file feel.
 
-## What stays pleasantly similar
+## What stays similar
 
-Even with the different implementation language, the workflow remains familiar:
+The workflow is familiar:
 
-1. define the grammar
-2. shape the AST
-3. compute scopes and link references
-4. validate semantics
-5. add formatting and editor features
+1. Define the grammar.
+2. Shape the AST.
+3. Compute scopes and link references.
+4. Validate semantics.
+5. Add formatting and editor features.
 
-## Recommended reading path
+## Related pages
 
-If you want the fastest orientation path, start with:
-
-1. [Write the Grammar](../learn/workflow/write_grammar.md)
-2. [Resolve Cross-References](../learn/workflow/resolve_cross_references.md)
-3. [Create Validations](../learn/workflow/create_validations.md)
-4. [Add Formatting and LSP Services](../learn/workflow/generate_everything.md)
-5. [LSP Services](../build-a-language/lsp-services.md)
-
-Then keep [Reference](../reference/index.md) nearby for the precise service and
-document-model terminology.
+- [Build a Language End-to-End](../learn/walkthrough.md)
+- [Grammar Essentials](../build-a-language/grammar.md)
+- [References and Scoping](../build-a-language/references-and-scoping.md)
+- [Validation](../build-a-language/validation.md)
+- [LSP Services](../build-a-language/lsp-services.md)
+- [Reference](../reference/index.md) — precise service and document-model terminology.

@@ -1,29 +1,55 @@
 # AGENTS.md
 
-## Repository expectations
+Pegium is a generic C++20 language-engineering toolkit. These are the standing
+expectations for working in this repository.
 
-- build with -j32
-- never run `ctest` while a build is still running; wait for the active build to finish successfully first
-- run all tests with ctest
-- only build and test when it is relevant
-- build time is long so perform batch changes before building
+## Build & test
 
-## User architecture preferences
+- Build with `cmake --build build -j32`. Never prefix `cmake --build` with a
+  timeout.
+- The build is slow: for a multi-step change, batch everything and build once.
+- Never run `ctest` while a build is still running — wait for the active build
+  to finish successfully first.
+- Run the tests with `ctest`, and wrap `ctest` / `gtest` / fuzzer runs in a
+  shell `timeout`.
+- Only build and test when it is relevant to the change.
+- Benchmark hot-path changes with `PegiumBench` under callgrind, not just unit
+  tests.
 
-- When an invariant says a value must exist, prefer `const&` over nullable pointers in APIs and stored metadata. Keep pointers only for genuinely optional data.
-- Favor reducing public API surface when helpers can be internalized without hurting clarity.
-- ne pas faire de null check sur les pointeurs qui ne sont jamais null par design
-- vérifier comment c'est implémenté dans langium lorsque c'est applicable pour ne pas réinventer ni diverger : /home/yannick/git/langium
-- ne pas mentionner explicitement langium dans les commentaires et la doc pegium excepté dans le readme principal
-- documenter les API public : documentation courte mais utile
-- les optimisations doivent restées génériques et ne pas dépendre d'un langage donné
-- ne pas utiliser de thread_local
-- pas de wrappers qui ne font qu’un appel indirect de plus ou trampoline
-- éviter tout check nullptr si l'élément n'est pas null par design
-- utiliser C++20 autant que possible
-- pas de IIFE si pas de gain en lisibilité
-- utiliser void* pour type erasure
-- const_cast interdit
-- lorsqu'il y a une erreur toujours investiguer pour trouver l'origine du problème plutot que de corriger un symptome
-- pegium doit etre 100% générique et ne pas dépendre de la grammaire d'un language spécifique. Rien d'hardcodé dans le parser/recovery
-- le parse nominal ne doit en aucun cas avoir un surcout lié au recovery
+## Code style & API
+
+- Use C++20 features wherever they help.
+- Match the surrounding code: comment density, naming, and idioms.
+- When an invariant says a value must exist, take it by `const&`, not a nullable
+  pointer; keep pointers only for genuinely optional data.
+- Never add a `nullptr` check for a pointer that is never null by design.
+- `const_cast` is forbidden.
+- No `thread_local`.
+- Use `void*` for type erasure.
+- No wrappers that only add one more level of indirection / a trampoline.
+- No IIFE unless it genuinely improves readability.
+- Reduce the public API surface when a helper can be internalized without
+  hurting clarity.
+- Document public APIs: short but useful.
+- `noexcept` must be honest — do not mark `noexcept` anything that can allocate
+  or call a throwing virtual.
+
+## Generic engine & performance contracts
+
+- Pegium is 100% generic. Nothing in the parser or recovery may be hardcoded to
+  a specific language's grammar, and optimizations must stay language-agnostic.
+- The nominal parse path must carry zero overhead from error recovery.
+- The strict-mode parser combinator fast path is off-limits — do not refactor or
+  restyle it.
+- Thread-safety is a hard contract: the Reference / scope / index /
+  document-state read APIs must be safe for concurrent reads without locking.
+- There is intentionally no `Scope` wrapper abstraction; the visitor /
+  `getScopeEntry` design is deliberate and far faster — do not propose one.
+
+## Working approach
+
+- On any error, investigate to find the root cause instead of patching a
+  symptom.
+- Keep solutions proportionate to the problem — do not over-engineer.
+- When relevant, check how Langium does it (`https://github.com/eclipse-langium/langium`) to
+  avoid reinventing or diverging (the main README is the only exception).

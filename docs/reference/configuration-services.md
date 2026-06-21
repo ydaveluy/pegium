@@ -1,46 +1,34 @@
 # Configuration Services
 
-Pegium configures language behavior through explicit service objects. Instead of
-hiding language wiring behind a generated container, it uses one shared service
-container for runtime-wide concerns and one language service container per
-registered language.
+Pegium configures language behavior through explicit service objects. There is one shared service container for runtime-wide concerns, and one language service container per registered language.
 
-For most projects, the entry point is:
+For most projects you start from a language container (a `struct MyServices : pegium::Services`, see "Adding your own services" below) and populate it through your own install-module functions:
 
 ```cpp
-auto services = pegium::makeDefaultServices(
+auto services = pegium::makeDefaultServices<MyServices>(
     sharedServices, "my-language");
 
-services->parser = std::make_unique<const my::parser::MyParser>(*services);
+installMyCoreModule(*services); // parser, file extensions, validation, scoping
+installMyLspModule(*services);  // formatter and other LSP overrides
 ```
 
-`makeDefaultServices(...)` gives you a complete baseline. From there, you
-usually add your parser and replace only the pieces that are truly
-language-specific.
+`makeDefaultServices<MyServices>(...)` gives you a complete baseline inside your own container. Your install-module functions then add the parser and replace only the pieces that are language-specific. The template argument defaults to the base `pegium::Services`; pass your own type so the container can hold language-specific members.
 
 ## Shared services
 
-`SharedServices` owns the runtime pieces reused by every language registered in
-the same process.
-
-That includes:
+`SharedServices` owns the runtime pieces reused by every language registered in the same process:
 
 - the service registry and AST reflection
-- shared workspace services such as documents, index manager, document builder,
-  workspace lock, and workspace manager
-- shared LSP runtime services such as text documents, the language server, the
-  document update handler, and the fuzzy matcher
+- shared workspace services: documents, index manager, document builder, workspace lock, and workspace manager
+- shared LSP runtime services: text documents, the language server, the document update handler, and the fuzzy matcher
 
-These services are the right place for concerns that must stay consistent
-across the whole workspace or the whole language-server process.
+Put concerns here when they must stay consistent across the whole workspace or the whole language-server process.
 
 ## Language-specific services
 
-Each language gets its own `Services` object. It extends the core language
-services with `services.lsp`, so one container owns both the semantic layer and
-the editor-facing layer for that language.
+Each language gets its own `Services` object. It extends the core language services with `services.lsp`, so one container owns both the semantic layer and the editor-facing layer for that language.
 
-This is where you configure:
+Configure here:
 
 - the parser
 - name, scope, and linking services
@@ -50,11 +38,10 @@ This is where you configure:
 
 ## Overriding services
 
-The most common customization style is to keep the default graph and replace
-individual services in place:
+The common style is to keep the default graph and replace individual services in place, inside your install-module functions:
 
 ```cpp
-auto services = pegium::makeDefaultServices(
+auto services = pegium::makeDefaultServices<MyServices>(
     sharedServices, "my-language");
 
 services->parser = std::make_unique<const my::parser::MyParser>(*services);
@@ -65,19 +52,13 @@ services->validation.validationRegistry =
 services->lsp.formatter = std::make_unique<lsp::MyFormatter>(*services);
 ```
 
-This explicit style is one of Pegium's main architectural choices: the wiring
-is visible in ordinary C++ code, so it is easy to understand what the language
-actually depends on.
+This explicit style is one of Pegium's main architectural choices: the wiring lives in ordinary C++ code, so it is easy to see what the language depends on.
 
 ## Adding your own services
 
-Not every piece of custom logic needs to become a service. If some logic has no
-dependency on the rest of the framework, a plain function or helper class is
-often enough.
+Not every piece of custom logic needs to be a service. If logic has no dependency on the rest of the framework, a plain function or helper class is enough.
 
-When the code really depends on other Pegium services, derive your own service
-container from `pegium::Services` and let `makeDefaultServices<...>(...)`
-return that derived type:
+When the code depends on other Pegium services, derive your own service container from `pegium::Services` and let `makeDefaultServices<...>(...)` return that derived type:
 
 ```cpp
 struct MyServices : pegium::Services {
@@ -95,8 +76,7 @@ services->app.summaryService =
     std::make_unique<MySummaryService>(*services);
 ```
 
-That pattern keeps application-specific services close to the language service
-container without forcing you to replace the framework defaults.
+This keeps application-specific services close to the language container without forcing you to replace the framework defaults.
 
 ## Related pages
 

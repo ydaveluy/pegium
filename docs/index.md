@@ -13,7 +13,7 @@ template: home.html
   </p>
   <div class="pegium-actions">
     <a class="md-button md-button--primary" href="introduction/">Read the introduction</a>
-    <a class="md-button" href="learn/workflow/">Start the workflow</a>
+    <a class="md-button" href="learn/walkthrough/">Build a language</a>
   </div>
   <div class="pegium-pills">
     <span>C++20</span>
@@ -26,42 +26,37 @@ template: home.html
 
 <div class="grid cards" markdown>
 
--   __Semantics First__
+-   __Semantics first__
 
-    Shape the semantic model of your language directly through C++ AST types
-    and grammar assignments, while still keeping CST data available for
-    source-aware tooling.
+    Shape your language's semantic model directly through C++ AST types and
+    grammar assignments, with CST data still available for source-aware tooling.
 
--   __Lean By Default__
+-   __Lean by default__
 
     Start from `makeDefaultServices(...)`, keep the default LSP and workspace
-    behavior where it helps, and override only the parts that are
-    language-specific.
+    behavior, and override only the language-specific parts.
 
--   __Parser To Editor__
+-   __Parser to editor__
 
-    Use one coherent document model for parsing, linking, diagnostics,
-    formatting, completion, rename, references, and other editor-facing
-    features.
+    Use one document model for parsing, linking, diagnostics, formatting,
+    completion, rename, references, and other editor features.
 
--   __Examples That Scale__
+-   __Examples that scale__
 
-    Explore `arithmetics`, `domainmodel`, `requirements`, and `statemachine`
-    as real starting points instead of isolated API snippets.
+    Use `arithmetics`, `domainmodel`, `requirements`, and `statemachine` as
+    real starting points, not isolated API snippets.
 
 </div>
 
-## Start Here
+## Start here
 
 <div class="grid cards" markdown>
 
 -   [Introduction](introduction/index.md)
 
-    Start with the high-level picture, then branch into features, showcases,
-    or deeper concepts.
-
-    If you want a guided orientation page first, open
-    [Choose Your Path](introduction/choose-your-path.md).
+    Get the high-level picture, then branch into features, showcases, or
+    deeper concepts. Want to jump straight in? Build a language end-to-end in
+    the [walkthrough](learn/walkthrough.md).
 
 -   [Learn](learn/index.md)
 
@@ -70,25 +65,24 @@ template: home.html
 
 -   [Recipes](recipes/index.md)
 
-    Use focused guides for common customization tasks such as scoping,
-    validation, caching, multiple languages, and LSP overrides.
+    Focused guides for common customization tasks: scoping, validation,
+    caching, multiple languages, and LSP overrides.
 
 -   [Reference](reference/index.md)
 
-    Use the canonical subsystem pages for grammar, semantic model, services,
+    Canonical subsystem pages for grammar, semantic model, services,
     workspace, and document lifecycle concepts.
 
 -   [Examples](examples/index.md)
 
-    Inspect complete example languages and choose the best starting point for
-    your own project.
+    Browse complete example languages and pick the best starting point for
+    your project.
 
 </div>
 
-## Repository
+## Related pages
 
-Pegium keeps its documentation and examples in the main repository so the code
-and the docs stay close to each other:
+Documentation and examples live in the main repository, so the code and docs stay close together.
 
 - [Repository root](https://github.com/ydaveluy/pegium)
 - [Documentation sources](https://github.com/ydaveluy/pegium/tree/main/docs)

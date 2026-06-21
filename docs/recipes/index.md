@@ -1,16 +1,8 @@
 # Recipes
 
-Use the recipes when your question is task-shaped rather than workflow-shaped.
-They are the quickest way to answer questions such as "How do I wire two
-languages together?" or "Where should I cache this computation?".
+Reach for a recipe when your question is task-shaped rather than workflow-shaped. They answer questions like "How do I wire two languages together?" or "Where should I cache this computation?".
 
-## Where to go from here?
-
-Study the recipe sections in the navigation once you already know which
-subsystem you want to customize. They are designed to help with the common
-tasks that appear after the basic workflow is already in place.
-
-Typical examples:
+Pick a recipe once you know which subsystem you want to customize. They cover the common tasks that come up after the basic workflow is in place:
 
 - "How do I register multiple dependent languages?"
 - "How do I add qualified names or package-style scoping?"
@@ -27,6 +19,7 @@ Typical examples:
 - [Performance](performance/index.md)
 - [Custom LSP features](custom-lsp-features.md)
 
-If you are still building your first language, start with
-[Learn](../learn/index.md). If you need exact subsystem terminology while
-working through a recipe, keep [Reference](../reference/index.md) nearby.
+## Related pages
+
+- [Learn](../learn/index.md) — start here if you are building your first language
+- [Reference](../reference/index.md) — keep it nearby for exact subsystem terminology

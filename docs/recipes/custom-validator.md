@@ -1,10 +1,6 @@
 # Custom Validator
 
-Create a validator class when your language needs semantic rules beyond parsing.
-
-This page covers the basic validator structure. If your rule needs a
-whole-document graph walk, continue with
-[Dependency Loops](validation/dependency-loops.md).
+Add semantic rules beyond parsing by writing a validator class. This page covers the basic structure; for rules that need a whole-document graph walk, see [Dependency Loops](validation/dependency-loops.md).
 
 ## Pattern
 
@@ -12,11 +8,11 @@ whole-document graph walk, continue with
 2. register the methods in the validation registry
 3. report diagnostics with `ValidationAcceptor`
 
-This usually ends up as a small class plus one registry setup point.
+This is usually a small class plus one registry setup point.
 
 ## A concrete example
 
-The `domainmodel` example uses the following registration pattern:
+The `domainmodel` example registers checks like this:
 
 ```cpp
 template <typename TServices>
@@ -31,12 +27,9 @@ void registerValidationChecks(TServices &services) {
 }
 ```
 
-The template lets the same registration helper run on either the core or the
-LSP service container — both inherit `validation.validationRegistry` and
-expose the language's validator via `services.validator`.
+The template runs the same helper on either the core or the LSP service container. Both inherit `validation.validationRegistry` and expose the language's validator via `services.validator`.
 
-One validator method then attaches a diagnostic directly to the relevant
-property:
+A validator method then attaches a diagnostic directly to the relevant property:
 
 ```cpp
 void DomainModelValidator::checkEntityNameStartsWithCapital(
@@ -56,26 +49,22 @@ void DomainModelValidator::checkEntityNameStartsWithCapital(
 
 ## Typical workflow
 
-Start with checks that are obviously local and cheap:
+Start with checks that are local and cheap:
 
 - duplicate names
 - empty or missing required values
 - inconsistent flags or modifiers
 
-Then add more semantic or cross-reference aware checks once scoping and linking
-already work.
+Add semantic or cross-reference aware checks once scoping and linking work.
 
-## Good practices
+## Practical advice
 
 - keep checks small and type-specific
 - use categories when some checks are expensive
 - attach diagnostics to the most precise AST node or property available
-- do not duplicate grammar constraints that are already enforced during parsing
+- do not duplicate grammar constraints already enforced during parsing
 
-## Example direction
-
-Look at the validators in the shipped examples, especially `arithmetics` and
-`statemachine`, for the expected structure.
+For expected structure, look at the validators in the `arithmetics` and `statemachine` examples.
 
 ## Related pages
 

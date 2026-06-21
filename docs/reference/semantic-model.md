@@ -1,37 +1,30 @@
 # Semantic Model
 
-When AST nodes are created during parsing, they become the semantic model of
-your language. In Pegium, that semantic model is shaped directly by two things:
+Your semantic model is the AST that parsing builds. In Pegium, two things shape it directly:
 
 - the C++ AST node types you define
 - the grammar assignments and actions that populate them
 
-Unlike generator-centric workflows, Pegium does not infer a separate semantic
-type system from another DSL. The semantic model is already present in your C++
-types.
-
-This page explains how AST types, grammar assignments, references, and CST
-structure fit together.
+Pegium does not infer a separate semantic type system from another DSL. The model is already present in your C++ types.
 
 ## AST fields shape the model
 
-Consider this example:
+Consider this type:
 
 ```cpp
-struct Entity : pegium::AstNode {
-  string name;
+struct Entity : pegium::NamedAstNode {
   optional<reference<Entity>> superType;
   vector<pointer<Feature>> features;
 };
 ```
 
-This one type already tells the framework a lot:
+It already tells the framework a lot:
 
-- `name` is plain scalar semantic data
+- `name` (inherited from `NamedAstNode`) is the declared symbol name
 - `superType` is a link to another node
 - `features` are owned nested children
 
-The parser then decides how those fields are populated:
+The parser decides how those fields are populated:
 
 ```cpp
 Rule<ast::Entity> EntityRule{
@@ -43,31 +36,24 @@ Rule<ast::Entity> EntityRule{
         "}"_kw};
 ```
 
-So the semantic model in Pegium is the combined result of AST node definitions
-and grammar wiring.
+The semantic model is the combined result of AST definitions and grammar wiring.
 
-## Why this matters
-
-The shape of the AST is not just an implementation detail. It directly affects:
+The AST shape is not just an implementation detail. It affects:
 
 - how references are represented and linked
 - how validation reasons about the model
-- how formatter and editor features find the right source regions
-- how stable your language-specific code remains as the grammar evolves
+- how the formatter and editor features find source regions
+- how stable your language code stays as the grammar evolves
 
 ## References are part of the model
 
-References are more than strings. They let the same model support linking,
-completion, rename, and hover without inventing separate data structures for
-each feature.
+References are more than strings. They let one model support linking, completion, rename, and hover without separate data structures per feature.
 
 ## Runtime type information
 
-Pegium also keeps runtime type information for registered AST classes. For
-language authors, the practical consequence is simple: AST types produced
-directly by parser rules should stay default-constructible and lightweight.
+Pegium keeps runtime type information for registered AST classes. The consequence for you: AST types produced directly by parser rules should stay default-constructible and lightweight.
 
-The recommended pattern is:
+The recommended pattern:
 
 - keep parser-managed AST nodes simple
 - express semantic constraints with validation and linking
@@ -75,8 +61,7 @@ The recommended pattern is:
 
 ## Why the CST still matters
 
-The AST is the semantic model, but Pegium keeps the CST alongside it because
-many editor-facing features still need source structure:
+The AST is the semantic model, but Pegium keeps the CST alongside it because many editor features still need source structure:
 
 - formatting
 - comment rewriting
@@ -84,22 +69,21 @@ many editor-facing features still need source structure:
 - precise property ranges
 - cursor-sensitive features
 
-So the real working model of a Pegium language is AST plus CST plus references.
+So the working model of a Pegium language is AST plus CST plus references.
 
-## Stable modeling advice
+## Practical advice
 
-For mature languages, it is worth treating the AST as a deliberate API rather
-than whatever happened to fall out of the first grammar draft.
+For mature languages, treat the AST as a deliberate API rather than whatever fell out of the first grammar draft.
 
-Good signs of a stable model are:
+A stable model has:
 
-- containment is explicit
-- references are modeled as references, not raw strings
-- optionality reflects real semantics
-- later services can reason about the tree without special-case hacks
+- explicit containment
+- references modeled as references, not raw strings
+- optionality that reflects real semantics
+- a tree later services can reason about without special-case hacks
 
 ## Related pages
 
 - [Reference](index.md)
-- [Resolve Cross-References](../learn/workflow/resolve_cross_references.md)
+- [References and Scoping](../build-a-language/references-and-scoping.md)
 - [Glossary](glossary.md)

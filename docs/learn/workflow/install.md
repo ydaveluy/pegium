@@ -1,17 +1,12 @@
-# 1. Build the Repository
+# Build the Repository
 
-There are two reasons to clone and build Pegium itself:
+Clone and build Pegium itself for two reasons: to verify the framework runs on
+your machine (run a shipped example end-to-end), or to contribute to Pegium.
 
-1. **You want to verify the framework runs on your machine** before you
-   commit to using it. Run one of the shipped examples end-to-end to
-   confirm.
-2. **You want to contribute to Pegium itself** — fix a bug, add a
-   feature, ship a new example.
-
-If your goal is to **build your own language**, you do not need to
-clone Pegium at all. Skip to
-[2. Choose a Starting Point](scaffold.md) and start from the language
-template — Pegium gets pulled in as a `FetchContent` dependency.
+To **build your own language** you do not need to clone Pegium at all — skip to
+[Choose a Starting Point](scaffold.md), which gives you a one-liner that
+scaffolds a standalone project and pulls Pegium in as a `FetchContent`
+dependency.
 
 ## What you need
 
@@ -116,12 +111,7 @@ The main directories to keep in mind are:
 - `tests/` for usage patterns and regression coverage
 - `docs/` for this documentation
 
-## Outcome
+## Related pages
 
-At the end of this step, you should have a working build and at least one
-example binary that you can run locally.
-
-## Continue with
-
-- [2. Choose a Starting Point](scaffold.md)
-- [Examples Overview](../../examples/index.md)
+- [Choose a Starting Point](scaffold.md)
+- [Examples overview](../../examples/index.md)

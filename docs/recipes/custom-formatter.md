@@ -1,10 +1,6 @@
 # Formatting
 
-The formatter API is built for method-pointer registration and CST-backed
-selections.
-
-This page focuses on the concrete wiring pattern once you already know that
-formatting is the subsystem you want to customize.
+Wire up a custom formatter that reacts to AST nodes and CST-backed selections. The formatter API is built for method-pointer registration.
 
 ## Pattern
 
@@ -13,7 +9,7 @@ on<ast::Entity>(&MyFormatter::formatEntity);
 onHidden("ML_COMMENT", &MyFormatter::formatComment);
 ```
 
-That registration belongs in the formatter constructor.
+Put this registration in the formatter constructor.
 
 ## Inside a formatting method
 
@@ -29,11 +25,11 @@ formatBlock(openBrace, closeBrace, formatter.interior(openBrace, closeBrace));
 ## Typical workflow
 
 1. implement one formatting rule for the root node or top-level declarations
-2. normalize the obvious spaces around keywords and separators
+2. normalize the spaces around keywords and separators
 3. add block formatting
-4. only then add comment rewriting if needed
+4. add comment rewriting if needed
 
-## Good practices
+## Practical advice
 
 - prefer exact node registrations over one large fallback method
 - use the generic block and list helpers to keep rules consistent
@@ -42,5 +38,5 @@ formatBlock(openBrace, closeBrace, formatter.interior(openBrace, closeBrace));
 
 ## Related pages
 
-- [Learn: Add Formatting and LSP Services](../learn/workflow/generate_everything.md)
+- [LSP Services](../build-a-language/lsp-services.md)
 - [Formatter DSL](../reference/formatter-dsl.md)

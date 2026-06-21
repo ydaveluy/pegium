@@ -1,11 +1,8 @@
 # Build a Language
 
-This section groups the main subsystem guides for designing and wiring a
-language with Pegium.
+Focus on one Pegium subsystem at a time: grammar design, AST shape, scoping, formatting, validation, editor services, or workspace behavior.
 
-Use it when you already know the overall workflow and want to focus on one
-problem at a time: grammar design, AST shape, scoping, formatting, validation,
-editor services, or workspace behavior.
+Reach for these guides once you know the overall workflow and want to dig into a single problem.
 
 ## Topics
 
@@ -17,9 +14,7 @@ editor services, or workspace behavior.
 - [LSP services](lsp-services.md)
 - [Workspace lifecycle](workspace.md)
 
-## Where to go from here?
+## Related pages
 
-- Use [Learn](../learn/index.md) for the recommended order of implementation.
-- Use these pages when you want a topic-by-topic explanation of one subsystem.
-- Use [Reference](../reference/index.md) when you need the exact user-facing
-  concepts and APIs behind a subsystem.
+- [Learn](../learn/index.md) — the recommended order of implementation.
+- [Reference](../reference/index.md) — the exact user-facing concepts and APIs behind each subsystem.

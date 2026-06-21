@@ -1,7 +1,6 @@
 # Caches
 
-This recipe explains when to use Pegium's built-in cache types and how they fit
-into the document lifecycle.
+Reuse Pegium's built-in caches instead of recomputing the same derived data on every request, and let them invalidate themselves as documents change.
 
 ## What is the problem?
 
@@ -12,31 +11,25 @@ Many language services repeatedly derive the same information:
 - semantic summaries
 - expensive lookup tables
 
-Recomputing those structures on every request quickly becomes noticeable in
-completion, validation, or navigation features.
+Recomputing these on every completion, validation, or navigation request adds up fast.
 
 ## Cache types in Pegium
 
-`src/pegium/core/utils/Caching.hpp` provides four main cache shapes:
+`src/pegium/core/utils/Caching.hpp` provides four cache shapes:
 
-- `SimpleCache<K, V>` for plain key-value memoization
-- `ContextCache<Context, Key, Value>` for one cache per context object
-- `DocumentCache<K, V>` for values tied to a `workspace::DocumentId`
-- `WorkspaceCache<K, V>` for values that should be cleared when the workspace
-  changes
+- `SimpleCache<K, V>` — plain key-value memoization
+- `ContextCache<Context, Key, Value>` — one cache per context object
+- `DocumentCache<K, V>` — values tied to a `workspace::DocumentId`
+- `WorkspaceCache<K, V>` — values cleared when the workspace changes
 
 ## How to choose
 
-Use `DocumentCache` when the computed value belongs to one document and should
-be discarded automatically when that document changes.
-
-Use `WorkspaceCache` when the value depends on the whole project and any update
-should invalidate it.
-
-Use `ContextCache` when you already have a stable context key and want one map
-per context.
-
-Use `SimpleCache` only when lifecycle-driven invalidation is not important.
+| Cache | Use when |
+| --- | --- |
+| `DocumentCache` | the value belongs to one document and should be discarded when that document changes |
+| `WorkspaceCache` | the value depends on the whole project and any update should invalidate it |
+| `ContextCache` | you already have a stable context key and want one map per context |
+| `SimpleCache` | lifecycle-driven invalidation does not matter |
 
 ## A minimal `DocumentCache` pattern
 
@@ -62,33 +55,22 @@ private:
 };
 ```
 
-The key point is that `DocumentCache` is keyed by `document.id`, not by the AST
-node pointer. The cache clears itself automatically when the document builder
-reports that the document changed or was deleted.
+`DocumentCache` is keyed by `document.id`, not by the AST node pointer. It clears itself when the document builder reports the document changed or was deleted.
 
 ## Where Pegium already uses caches
 
-A good reference point is `pegium::workspace::DefaultIndexManager`, which uses
-a `ContextCache` for typed export views derived from the workspace index.
+`pegium::workspace::DefaultIndexManager` uses a `ContextCache` for typed export views derived from the workspace index.
 
-That is the model to follow: cache derived structures that are expensive to
-rebuild, but keep the source of truth elsewhere. Note that
-`pegium::references::DefaultScopeProvider` deliberately does *not* cache
-anything — local scope levels are precomputed and bucketed by container at
-scope-computation time, so each lookup is already a direct index access.
+Follow that model: cache derived structures that are expensive to rebuild, but keep the source of truth elsewhere. `pegium::references::DefaultScopeProvider` caches its per-reference-type *global* (workspace-wide exported) scope view in a `WorkspaceCache`. Its *local* scope levels are precomputed and bucketed by container at scope-computation time, so local lookups are direct index accesses and need no separate cache.
 
 ## Automatic invalidation
 
-`DocumentCache` listens to `DocumentBuilder::onUpdate(...)` and clears only the
-affected document entries.
+- `DocumentCache` listens to `DocumentBuilder::onUpdate(...)` and clears only the affected document entries.
+- `WorkspaceCache` also hooks into document builder events, but clears the whole cache when the relevant workspace state changes.
 
-`WorkspaceCache` also hooks into document builder events, but clears the whole
-cache when the relevant workspace state changes.
+This makes both safer than hand-rolled `std::unordered_map` members that never hear about document updates.
 
-That makes these caches safer than hand-rolled `std::unordered_map` members
-that never hear about document updates.
-
-## Good practices
+## Practical advice
 
 - cache derived data, not mutable ownership-heavy objects
 - keep cache keys small and stable
