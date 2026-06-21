@@ -497,167 +497,98 @@ TEST(DomainModelModuleTest, RenameFeatureEditsOnlyFeatureDeclaration) {
             "}\n");
 }
 
-TEST(DomainModelModuleTest, FormatterFormatsCompactModel) {
-  auto shared = pegium::test::make_empty_shared_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  pegium::installDefaultSharedLspServices(*shared);
-  pegium::test::initialize_shared_workspace_for_tests(*shared);
-  auto registeredServices =
-      domainmodel::lsp::createDomainModelServices(*shared, "domain-model");
+TEST(DomainModelModuleTest, FormatterFormatsDocument) {
+  struct Case {
+    const char *name;
+    const char *uri;
+    const char *source;
+    int tabSize;
+    const char *expected;
+  };
+  static const Case cases[] = {
+      {"FormatsCompactModel", "formatting.dmodel",
+       "package foo.bar { datatype Complex entity E2 extends E1 { next: E2 other: Complex }}",
+       4,
+       "package foo.bar {\n"
+       "    datatype Complex\n"
+       "    entity E2 extends E1 {\n"
+       "        next: E2\n"
+       "        other: Complex\n"
+       "    }\n"
+       "}"},
+      {"PreservesCommentsWhileReindenting", "formatting-comments.dmodel",
+       "package foo.bar {\n"
+       "// package comment\n"
+       "entity E1 {\n"
+       "// feature comment\n"
+       "next:E1\n"
+       "}\n"
+       "}",
+       2,
+       "package foo.bar {\n"
+       "  // package comment\n"
+       "  entity E1 {\n"
+       "    // feature comment\n"
+       "    next: E1\n"
+       "  }\n"
+       "}"},
+      {"IndentsMultilineCommentsInsideBlocks",
+       "formatting-multiline-comments.dmodel",
+       "package big {\n"
+       "    /*\n"
+       "comment\n"
+       "*/\n"
+       "    datatype Int\n"
+       "}",
+       4,
+       "package big {\n"
+       "    /*\n"
+       "    comment\n"
+       "    */\n"
+       "    datatype Int\n"
+       "}"},
+      {"PreservesDocCommentStyle", "formatting-doc-comments.dmodel",
+       "package big {\n"
+       "/**   comment */\n"
+       "datatype Int\n"
+       "}",
+       4,
+       "package big {\n"
+       "    /** comment */\n"
+       "    datatype Int\n"
+       "}"},
+  };
 
-  ASSERT_NE(registeredServices, nullptr);
+  for (const auto &c : cases) {
+    SCOPED_TRACE(c.name);
+    auto shared = pegium::test::make_empty_shared_services();
+    pegium::installDefaultSharedCoreServices(*shared);
+    pegium::installDefaultSharedLspServices(*shared);
+    pegium::test::initialize_shared_workspace_for_tests(*shared);
+    auto registeredServices =
+        domainmodel::lsp::createDomainModelServices(*shared, "domain-model");
 
-  shared->serviceRegistry->registerServices(std::move(registeredServices));
-  auto document = pegium::test::open_and_build_document(
-      *shared, pegium::test::make_file_uri("formatting.dmodel"), "domain-model",
-      "package foo.bar { datatype Complex entity E2 extends E1 { next: E2 other: Complex }}");
-  ASSERT_NE(document, nullptr);
-  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->lsp.formatter, nullptr);
+    ASSERT_NE(registeredServices, nullptr);
 
-  ::lsp::DocumentFormattingParams params{};
-  params.options.insertSpaces = true;
-  params.options.tabSize = 4;
-  const auto edits = services->lsp.formatter->formatDocument(
-      *document, params, pegium::utils::default_cancel_token);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+    auto document = pegium::test::open_and_build_document(
+        *shared, pegium::test::make_file_uri(c.uri), "domain-model", c.source);
+    ASSERT_NE(document, nullptr);
+    const auto *coreServices =
+        &shared->serviceRegistry->getServices(document->uri);
+    const auto *services = as_services(coreServices);
+    ASSERT_NE(services, nullptr);
+    ASSERT_NE(services->lsp.formatter, nullptr);
 
-  ASSERT_FALSE(edits.empty());
-  EXPECT_EQ(
-      apply_text_edits(*document, edits),
-      "package foo.bar {\n"
-      "    datatype Complex\n"
-      "    entity E2 extends E1 {\n"
-      "        next: E2\n"
-      "        other: Complex\n"
-      "    }\n"
-      "}");
-}
+    ::lsp::DocumentFormattingParams params{};
+    params.options.insertSpaces = true;
+    params.options.tabSize = c.tabSize;
+    const auto edits = services->lsp.formatter->formatDocument(
+        *document, params, pegium::utils::default_cancel_token);
 
-TEST(DomainModelModuleTest, FormatterPreservesCommentsWhileReindenting) {
-  auto shared = pegium::test::make_empty_shared_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  pegium::installDefaultSharedLspServices(*shared);
-  pegium::test::initialize_shared_workspace_for_tests(*shared);
-  auto registeredServices =
-      domainmodel::lsp::createDomainModelServices(*shared, "domain-model");
-
-  ASSERT_NE(registeredServices, nullptr);
-
-  shared->serviceRegistry->registerServices(std::move(registeredServices));
-  auto document = pegium::test::open_and_build_document(
-      *shared, pegium::test::make_file_uri("formatting-comments.dmodel"),
-      "domain-model",
-      "package foo.bar {\n"
-      "// package comment\n"
-      "entity E1 {\n"
-      "// feature comment\n"
-      "next:E1\n"
-      "}\n"
-      "}");
-  ASSERT_NE(document, nullptr);
-  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->lsp.formatter, nullptr);
-
-  ::lsp::DocumentFormattingParams params{};
-  params.options.insertSpaces = true;
-  params.options.tabSize = 2;
-  const auto edits = services->lsp.formatter->formatDocument(
-      *document, params, pegium::utils::default_cancel_token);
-
-  ASSERT_FALSE(edits.empty());
-  EXPECT_EQ(
-      apply_text_edits(*document, edits),
-      "package foo.bar {\n"
-      "  // package comment\n"
-      "  entity E1 {\n"
-      "    // feature comment\n"
-      "    next: E1\n"
-      "  }\n"
-      "}");
-}
-
-TEST(DomainModelModuleTest, FormatterIndentsMultilineCommentsInsideBlocks) {
-  auto shared = pegium::test::make_empty_shared_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  pegium::installDefaultSharedLspServices(*shared);
-  pegium::test::initialize_shared_workspace_for_tests(*shared);
-  auto registeredServices =
-      domainmodel::lsp::createDomainModelServices(*shared, "domain-model");
-
-  ASSERT_NE(registeredServices, nullptr);
-
-  shared->serviceRegistry->registerServices(std::move(registeredServices));
-  auto document = pegium::test::open_and_build_document(
-      *shared, pegium::test::make_file_uri("formatting-multiline-comments.dmodel"),
-      "domain-model",
-      "package big {\n"
-      "    /*\n"
-      "comment\n"
-      "*/\n"
-      "    datatype Int\n"
-      "}");
-  ASSERT_NE(document, nullptr);
-  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->lsp.formatter, nullptr);
-
-  ::lsp::DocumentFormattingParams params{};
-  params.options.insertSpaces = true;
-  params.options.tabSize = 4;
-  const auto edits = services->lsp.formatter->formatDocument(
-      *document, params, pegium::utils::default_cancel_token);
-
-  ASSERT_FALSE(edits.empty());
-  EXPECT_EQ(apply_text_edits(*document, edits),
-            "package big {\n"
-            "    /*\n"
-            "    comment\n"
-            "    */\n"
-            "    datatype Int\n"
-            "}");
-}
-
-TEST(DomainModelModuleTest, FormatterPreservesDocCommentStyle) {
-  auto shared = pegium::test::make_empty_shared_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  pegium::installDefaultSharedLspServices(*shared);
-  pegium::test::initialize_shared_workspace_for_tests(*shared);
-  auto registeredServices =
-      domainmodel::lsp::createDomainModelServices(*shared, "domain-model");
-
-  ASSERT_NE(registeredServices, nullptr);
-
-  shared->serviceRegistry->registerServices(std::move(registeredServices));
-  auto document = pegium::test::open_and_build_document(
-      *shared, pegium::test::make_file_uri("formatting-doc-comments.dmodel"),
-      "domain-model",
-      "package big {\n"
-      "/**   comment */\n"
-      "datatype Int\n"
-      "}");
-  ASSERT_NE(document, nullptr);
-  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->lsp.formatter, nullptr);
-
-  ::lsp::DocumentFormattingParams params{};
-  params.options.insertSpaces = true;
-  params.options.tabSize = 4;
-  const auto edits = services->lsp.formatter->formatDocument(
-      *document, params, pegium::utils::default_cancel_token);
-
-  ASSERT_FALSE(edits.empty());
-  EXPECT_EQ(apply_text_edits(*document, edits),
-            "package big {\n"
-            "    /** comment */\n"
-            "    datatype Int\n"
-            "}");
+    ASSERT_FALSE(edits.empty());
+    EXPECT_EQ(apply_text_edits(*document, edits), c.expected);
+  }
 }
 
 TEST(DomainModelModuleTest, GeneratorCreatesExpectedJavaFiles) {

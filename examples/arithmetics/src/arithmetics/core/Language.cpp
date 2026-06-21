@@ -1,4 +1,4 @@
-#include <arithmetics/parser/Parser.hpp>
+#include <arithmetics/core/Parser.hpp>
 #include <arithmetics/Operator.hpp>
 
 #include <algorithm>

@@ -1,7 +1,7 @@
 #include <arithmetics/core/validation/ArithmeticsValidator.hpp>
 
 #include <arithmetics/Operator.hpp>
-#include <arithmetics/ast.hpp>
+#include <arithmetics/core/ast.hpp>
 
 #include <cmath>
 #include <format>

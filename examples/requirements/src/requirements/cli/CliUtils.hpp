@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-#include <requirements/ast.hpp>
+#include <requirements/core/ast.hpp>
 #include <pegium/core/services/CoreServices.hpp>
 
 namespace pegium::workspace {

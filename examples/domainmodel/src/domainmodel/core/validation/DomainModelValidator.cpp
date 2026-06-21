@@ -1,6 +1,6 @@
 #include <domainmodel/core/validation/DomainModelValidator.hpp>
 
-#include <domainmodel/ast.hpp>
+#include <domainmodel/core/ast.hpp>
 
 #include <cctype>
 

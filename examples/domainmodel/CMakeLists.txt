@@ -58,7 +58,7 @@ target_link_libraries(pegium_example_domainmodel_cli
 )
 
 add_executable(pegium-example-domainmodel-cli
-    src/domainmodel/cli_main.cpp
+    src/domainmodel/cli/main.cpp
 )
 target_compile_features(pegium-example-domainmodel-cli PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-domainmodel-cli PRIVATE
@@ -68,7 +68,7 @@ target_link_libraries(pegium-example-domainmodel-cli PRIVATE
 )
 
 add_executable(pegium-example-domainmodel-lsp
-    src/domainmodel/lsp_main.cpp
+    src/domainmodel/lsp/main.cpp
 )
 target_compile_features(pegium-example-domainmodel-lsp PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-domainmodel-lsp PRIVATE

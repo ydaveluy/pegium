@@ -1,12 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <arithmetics/lsp/Module.hpp>
-#include <arithmetics/parser/Parser.hpp>
+#include <arithmetics/core/Parser.hpp>
 
 #include "LanguageTestSupport.hpp"
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
+
+#include <functional>
+#include <string>
 
 namespace arithmetics::tests {
 namespace {
@@ -708,61 +711,237 @@ TEST(ArithmeticsLanguageTest,
   EXPECT_FALSE(lastCall->args.empty());
 }
 
-TEST(ArithmeticsLanguageTest,
-     RecoveryKeepsFollowingStatementAfterLongGarbageTail) {
-  parser::ArithmeticParser parser;
-  const std::string text =
-      "Module basicMath\n"
-      "\n"
-      "def a: 5;\n"
-      "def b: 3;\n"
-      "def c: a + b; // 8\n"
-      "def d: (a ^ b); // 164\n"
-      "\n"
-      "def root(x, y):\n"
-      "    x^(1/y);\n"
-      "\n"
-      "def sqrt(x):\n"
-      "    root(x, 2);\n"
-      "\n"
-      "2 * c; // 16\n"
-      "b % 2; // 1\n"
-      "\n"
-      "// This language is case-insensitive regarding symbol names\n"
-      "Root(D, 3); // 32\n"
-      "Root(64, 3); // 4\n"
-      "\n"
-      "\n"
-      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
-      "xxxxxxxxxxxxxxxxxxxxxxx\n"
-      "\n"
-      "Root(64, 3/0); // 4\n";
-  auto document = pegium::test::parse_document(
-      parser, text,
-      pegium::test::make_file_uri(
-          "recovered-long-garbage-tail-followed-by-call.calc"),
-      "arithmetics");
+// Folds the three large-module recovery tests that share the identical ordered
+// assertion sequence (value / fullMatch / hasRecovered / module cast /
+// statements.size() >= 11 / last statement is an Evaluation whose expression is
+// a FunctionCall to 'root' with non-empty args), varying only the input module
+// text. Each row reproduces its parse setup + module text verbatim.
+//
+// NOTE: BrokenCallAfterComplexFirstArgumentKeepsFunctionNameWithoutGarbagePrefix
+// (asserts args.size() == 2) and the
+// RecoveryKeepsRecoveredCallBeforeTrailingGarbage* tests (assert
+// statements.size() >= 10 and index statements[9]) are intentionally NOT folded
+// here: their assertion shapes differ, so they remain their own tests.
+TEST(ArithmeticsLanguageTest, RecoveredTrailingCallKeepsRootBackStatement) {
+  struct Outcome {
+    bool value;
+    bool fullMatch;
+    bool hasRecovered;
+    ast::Module *module;
+    std::size_t statementCount;
+    ast::Evaluation *lastEvaluation;
+    ast::FunctionCall *lastCall;
+    std::string func;
+    bool argsEmpty;
+    std::string parseDump;
+    std::string shapes;
+  };
+  struct Case {
+    const char *name;
+    std::function<Outcome()> run;
+  };
 
-  const auto &parsed = document->parseResult;
-  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
-  ASSERT_TRUE(parsed.value) << parseDump;
-  EXPECT_TRUE(parsed.fullMatch) << parseDump;
-  EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
+  static const Case kCases[] = {
+      {"RecoveryKeepsFollowingStatementAfterLongGarbageTail",
+       [] {
+         parser::ArithmeticParser parser;
+         const std::string text =
+             "Module basicMath\n"
+             "\n"
+             "def a: 5;\n"
+             "def b: 3;\n"
+             "def c: a + b; // 8\n"
+             "def d: (a ^ b); // 164\n"
+             "\n"
+             "def root(x, y):\n"
+             "    x^(1/y);\n"
+             "\n"
+             "def sqrt(x):\n"
+             "    root(x, 2);\n"
+             "\n"
+             "2 * c; // 16\n"
+             "b % 2; // 1\n"
+             "\n"
+             "// This language is case-insensitive regarding symbol names\n"
+             "Root(D, 3); // 32\n"
+             "Root(64, 3); // 4\n"
+             "\n"
+             "\n"
+             "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+             "xxxxxxxxxxxxxxxxxxxxxxx\n"
+             "\n"
+             "Root(64, 3/0); // 4\n";
+         auto document = pegium::test::parse_document(
+             parser, text,
+             pegium::test::make_file_uri(
+                 "recovered-long-garbage-tail-followed-by-call.calc"),
+             "arithmetics");
 
-  auto *module = dynamic_cast<ast::Module *>(parsed.value);
-  ASSERT_NE(module, nullptr) << parseDump;
-  ASSERT_GE(module->statements.size(), 11u)
-      << parseDump << " :: " << summarize_module_statement_shapes(*module);
+         const auto &parsed = document->parseResult;
+         auto *module = dynamic_cast<ast::Module *>(parsed.value);
+         std::size_t statementCount =
+             module != nullptr ? module->statements.size() : 0u;
+         auto *lastEvaluation =
+             (module != nullptr && !module->statements.empty())
+                 ? dynamic_cast<ast::Evaluation *>(module->statements.back())
+                 : nullptr;
+         auto *lastCall =
+             lastEvaluation != nullptr
+                 ? dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression)
+                 : nullptr;
+         return Outcome{
+             static_cast<bool>(parsed.value),
+             parsed.fullMatch,
+             parsed.recoveryReport.hasRecovered,
+             module,
+             statementCount,
+             lastEvaluation,
+             lastCall,
+             lastCall != nullptr ? std::string(lastCall->func.getRefText())
+                                 : std::string(),
+             lastCall != nullptr ? lastCall->args.empty() : true,
+             dump_parse_diagnostics(parsed.parseDiagnostics),
+             module != nullptr ? summarize_module_statement_shapes(*module)
+                               : std::string()};
+       }},
+      {"ShortGarbageLineBeforeComplexBrokenCallKeepsFollowingCallRecoveryLocal",
+       [] {
+         parser::ArithmeticParser parser;
+         const std::string text =
+             "Module basicMath\n"
+             "\n"
+             "def a: 5;\n"
+             "def b: 3;\n"
+             "\n"
+             "def c: a + b; // 8\n"
+             "def d: (a ^ b); // 164\n"
+             "\n"
+             "def root(x, y):\n"
+             "    x^(1/y);\n"
+             "\n"
+             "def sqrt(x):\n"
+             "    root(x, 2);\n"
+             "\n"
+             "2 * c; // 16\n"
+             "b % 2; // 1\n"
+             "\n"
+             "// This language is case-insensitive regarding symbol names\n"
+             "Root(D, 3); // 32\n"
+             "Root(64, 3); // 4\n"
+             "xx\n"
+             "\n"
+             "Root(64 + 5 3/0+5-3); // 4\n";
+         auto document = pegium::test::parse_document(
+             parser, text,
+             pegium::test::make_file_uri(
+                 "short-garbage-line-before-complex-broken-call-keeps-following-call-local.calc"),
+             "arithmetics");
 
-  auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back());
-  ASSERT_NE(lastEvaluation, nullptr) << parseDump;
-  auto *lastCall =
-      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression);
-  ASSERT_NE(lastCall, nullptr)
-      << parseDump << " :: " << summarize_module_statement_shapes(*module);
-  EXPECT_EQ(lastCall->func.getRefText(), "root");
-  EXPECT_FALSE(lastCall->args.empty());
+         const auto &parsed = document->parseResult;
+         auto *module = dynamic_cast<ast::Module *>(parsed.value);
+         std::size_t statementCount =
+             module != nullptr ? module->statements.size() : 0u;
+         auto *lastEvaluation =
+             (module != nullptr && !module->statements.empty())
+                 ? dynamic_cast<ast::Evaluation *>(module->statements.back())
+                 : nullptr;
+         auto *lastCall =
+             lastEvaluation != nullptr
+                 ? dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression)
+                 : nullptr;
+         return Outcome{
+             static_cast<bool>(parsed.value),
+             parsed.fullMatch,
+             parsed.recoveryReport.hasRecovered,
+             module,
+             statementCount,
+             lastEvaluation,
+             lastCall,
+             lastCall != nullptr ? std::string(lastCall->func.getRefText())
+                                 : std::string(),
+             lastCall != nullptr ? lastCall->args.empty() : true,
+             dump_parse_diagnostics(parsed.parseDiagnostics),
+             module != nullptr ? summarize_module_statement_shapes(*module)
+                               : std::string()};
+       }},
+      {"SpacedShortGarbageLineBeforeComplexBrokenCallKeepsFollowingCallRecoveryLocal",
+       [] {
+         parser::ArithmeticParser parser;
+         const std::string text =
+             "Module basicMath\n"
+             "\n"
+             "def a: 5;\n"
+             "def b: 3;\n"
+             "\n"
+             "def c: a + b; // 8\n"
+             "def d: (a ^ b); // 164\n"
+             "\n"
+             "def root(x, y):\n"
+             "    x^(1/y);\n"
+             "\n"
+             "def sqrt(x):\n"
+             "    root(x, 2);\n"
+             "\n"
+             "2 * c; // 16\n"
+             "b % 2; // 1\n"
+             "\n"
+             "// This language is case-insensitive regarding symbol names\n"
+             "Root(D, 3); // 32\n"
+             "Root(64, 3); // 4\n"
+             "x    \n"
+             "\n"
+             "Root(64 + 5 3/0+5-3); // 4\n";
+         auto document = pegium::test::parse_document(
+             parser, text,
+             pegium::test::make_file_uri(
+                 "spaced-short-garbage-line-before-complex-broken-call-keeps-following-call-local.calc"),
+             "arithmetics");
+
+         const auto &parsed = document->parseResult;
+         auto *module = dynamic_cast<ast::Module *>(parsed.value);
+         std::size_t statementCount =
+             module != nullptr ? module->statements.size() : 0u;
+         auto *lastEvaluation =
+             (module != nullptr && !module->statements.empty())
+                 ? dynamic_cast<ast::Evaluation *>(module->statements.back())
+                 : nullptr;
+         auto *lastCall =
+             lastEvaluation != nullptr
+                 ? dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression)
+                 : nullptr;
+         return Outcome{
+             static_cast<bool>(parsed.value),
+             parsed.fullMatch,
+             parsed.recoveryReport.hasRecovered,
+             module,
+             statementCount,
+             lastEvaluation,
+             lastCall,
+             lastCall != nullptr ? std::string(lastCall->func.getRefText())
+                                 : std::string(),
+             lastCall != nullptr ? lastCall->args.empty() : true,
+             dump_parse_diagnostics(parsed.parseDiagnostics),
+             module != nullptr ? summarize_module_statement_shapes(*module)
+                               : std::string()};
+       }},
+  };
+
+  for (const auto &c : kCases) {
+    SCOPED_TRACE(c.name);
+    const Outcome o = c.run();
+    const std::string &parseDump = o.parseDump;
+    ASSERT_TRUE(o.value) << parseDump;
+    EXPECT_TRUE(o.fullMatch) << parseDump;
+    EXPECT_TRUE(o.hasRecovered) << parseDump;
+
+    ASSERT_NE(o.module, nullptr) << parseDump;
+    ASSERT_GE(o.statementCount, 11u) << parseDump << " :: " << o.shapes;
+
+    ASSERT_NE(o.lastEvaluation, nullptr) << parseDump << " :: " << o.shapes;
+    ASSERT_NE(o.lastCall, nullptr) << parseDump << " :: " << o.shapes;
+    EXPECT_EQ(o.func, "root");
+    EXPECT_FALSE(o.argsEmpty);
+  }
 }
 
 
@@ -822,118 +1001,6 @@ TEST(ArithmeticsLanguageTest,
 }
 
 
-TEST(ArithmeticsLanguageTest,
-     ShortGarbageLineBeforeComplexBrokenCallKeepsFollowingCallRecoveryLocal) {
-  parser::ArithmeticParser parser;
-  const std::string text =
-      "Module basicMath\n"
-      "\n"
-      "def a: 5;\n"
-      "def b: 3;\n"
-      "\n"
-      "def c: a + b; // 8\n"
-      "def d: (a ^ b); // 164\n"
-      "\n"
-      "def root(x, y):\n"
-      "    x^(1/y);\n"
-      "\n"
-      "def sqrt(x):\n"
-      "    root(x, 2);\n"
-      "\n"
-      "2 * c; // 16\n"
-      "b % 2; // 1\n"
-      "\n"
-      "// This language is case-insensitive regarding symbol names\n"
-      "Root(D, 3); // 32\n"
-      "Root(64, 3); // 4\n"
-      "xx\n"
-      "\n"
-      "Root(64 + 5 3/0+5-3); // 4\n";
-  auto document = pegium::test::parse_document(
-      parser, text,
-      pegium::test::make_file_uri(
-          "short-garbage-line-before-complex-broken-call-keeps-following-call-local.calc"),
-      "arithmetics");
-
-  const auto &parsed = document->parseResult;
-  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
-  ASSERT_TRUE(parsed.value) << parseDump;
-  EXPECT_TRUE(parsed.fullMatch) << parseDump;
-  EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
-
-  auto *module = dynamic_cast<ast::Module *>(parsed.value);
-  ASSERT_NE(module, nullptr) << parseDump;
-  ASSERT_GE(module->statements.size(), 11u)
-      << parseDump << " :: " << summarize_module_statement_shapes(*module);
-
-  auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back());
-  ASSERT_NE(lastEvaluation, nullptr)
-      << parseDump << " :: " << summarize_module_statement_shapes(*module);
-  auto *lastCall =
-      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression);
-  ASSERT_NE(lastCall, nullptr)
-      << parseDump << " :: " << summarize_module_statement_shapes(*module);
-  EXPECT_EQ(lastCall->func.getRefText(), "root");
-  EXPECT_FALSE(lastCall->args.empty());
-}
-
-TEST(ArithmeticsLanguageTest,
-     SpacedShortGarbageLineBeforeComplexBrokenCallKeepsFollowingCallRecoveryLocal) {
-  parser::ArithmeticParser parser;
-  const std::string text =
-      "Module basicMath\n"
-      "\n"
-      "def a: 5;\n"
-      "def b: 3;\n"
-      "\n"
-      "def c: a + b; // 8\n"
-      "def d: (a ^ b); // 164\n"
-      "\n"
-      "def root(x, y):\n"
-      "    x^(1/y);\n"
-      "\n"
-      "def sqrt(x):\n"
-      "    root(x, 2);\n"
-      "\n"
-      "2 * c; // 16\n"
-      "b % 2; // 1\n"
-      "\n"
-      "// This language is case-insensitive regarding symbol names\n"
-      "Root(D, 3); // 32\n"
-      "Root(64, 3); // 4\n"
-      "x    \n"
-      "\n"
-      "Root(64 + 5 3/0+5-3); // 4\n";
-  auto document = pegium::test::parse_document(
-      parser, text,
-      pegium::test::make_file_uri(
-          "spaced-short-garbage-line-before-complex-broken-call-keeps-following-call-local.calc"),
-      "arithmetics");
-
-  const auto &parsed = document->parseResult;
-  const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
-  ASSERT_TRUE(parsed.value) << parseDump;
-  EXPECT_TRUE(parsed.fullMatch) << parseDump;
-  EXPECT_TRUE(parsed.recoveryReport.hasRecovered) << parseDump;
-
-  auto *module = dynamic_cast<ast::Module *>(parsed.value);
-  ASSERT_NE(module, nullptr) << parseDump;
-  ASSERT_GE(module->statements.size(), 11u)
-      << parseDump << " :: " << summarize_module_statement_shapes(*module);
-
-  auto *lastEvaluation =
-      dynamic_cast<ast::Evaluation *>(module->statements.back());
-  ASSERT_NE(lastEvaluation, nullptr)
-      << parseDump << " :: " << summarize_module_statement_shapes(*module);
-  auto *lastCall =
-      dynamic_cast<ast::FunctionCall *>(lastEvaluation->expression);
-  ASSERT_NE(lastCall, nullptr)
-      << parseDump << " :: " << summarize_module_statement_shapes(*module);
-  EXPECT_EQ(lastCall->func.getRefText(), "root");
-  EXPECT_FALSE(lastCall->args.empty());
-}
-
 TEST(ArithmeticsLanguageTest, EmptyDocumentPublishesSingleGrammarDiagnosticDirectParse) {
   parser::ArithmeticParser parser;
   auto document = pegium::test::parse_document(
@@ -973,7 +1040,7 @@ TEST(ArithmeticsLanguageTest, CommentProviderReturnsLeadingBlockComment) {
   EXPECT_NE(comment.find("Adds numbers."), std::string_view::npos);
 }
 
-TEST(ArithmeticsLanguageTest, DocumentationProviderRendersJSDocMarkdown) {
+TEST(ArithmeticsLanguageTest, DocumentationProviderRendersDocCommentMarkdown) {
   parser::ArithmeticParser parser;
   auto document = pegium::test::parse_document(
       parser,
@@ -1001,7 +1068,7 @@ TEST(ArithmeticsLanguageTest, DocumentationProviderRendersJSDocMarkdown) {
                                  ->getDocumentation(*definition);
   ASSERT_TRUE(documentation.has_value());
   EXPECT_NE(documentation->find("Adds numbers."), std::string::npos);
-  EXPECT_NE(documentation->find("- `@param x first value`"), std::string::npos);
+  EXPECT_NE(documentation->find("*@param* — x first value"), std::string::npos);
 }
 
 TEST(ArithmeticsLanguageTest, HoverReturnsNoContentWithoutDocumentation) {

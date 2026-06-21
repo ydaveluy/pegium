@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <domainmodel/parser/Parser.hpp>
+#include <domainmodel/core/Parser.hpp>
 
 #include <pegium/core/text/TextSnapshot.hpp>
 #include <pegium/examples/ExampleTestSupport.hpp>

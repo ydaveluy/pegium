@@ -511,7 +511,7 @@ TEST(ArithmeticsModuleTest, InitializeResultSerializesForLspTransport) {
   });
 }
 
-TEST(ArithmeticsModuleTest, FormatterFormatsCompactModule) {
+TEST(ArithmeticsModuleTest, FormatterFormatsToExpectedText) {
   auto shared = pegium::test::make_empty_shared_services();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
@@ -522,106 +522,76 @@ TEST(ArithmeticsModuleTest, FormatterFormatsCompactModule) {
   ASSERT_NE(registeredServices, nullptr);
   shared->serviceRegistry->registerServices(std::move(registeredServices));
 
-  auto document = pegium::test::open_and_build_document(
-      *shared, pegium::test::make_file_uri("arithmetics-format.calc"),
-      "arithmetics",
-      "module demo def value:1+2;def root(x,y):x^(1/y);root(value,3);");
-  ASSERT_NE(document, nullptr);
+  struct Case {
+    const char *name;
+    std::string_view uri;
+    std::string_view input;
+    std::string_view expected;
+  };
+  static const Case cases[] = {
+      {"CompactModule", "arithmetics-format.calc",
+       "module demo def value:1+2;def root(x,y):x^(1/y);root(value,3);",
+       "module demo\n"
+       "def value: 1 + 2;\n"
+       "def root(x, y): x ^ (1 / y);\n"
+       "root(value, 3);"},
+      {"BinaryOperatorSpacing", "arithmetics-operators.calc",
+       "module demo def value:2 +          8 * 7 / 0 -             9 * 7;",
+       "module demo\n"
+       "def value: 2 + 8 * 7 / 0 - 9 * 7;"},
+      {"RootIndentationWithLeadingComments", "arithmetics-root-indent.calc",
+       "            /** module comment */\n"
+       "        Module basicMath\n"
+       "\n"
+       " \n"
+       "/** test */\n"
+       "def c: 2 * 5;\n",
+       "/** module comment */\n"
+       "Module basicMath\n"
+       "\n"
+       " \n"
+       "/** test */\n"
+       "def c: 2 * 5;\n"},
+      {"DocCommentsAndTags", "arithmetics-doc-comment.calc",
+       "module demo\n"
+       "/**\n"
+       "*   Adds   numbers.\n"
+       "* @param   x   first   value\n"
+       "*   more   details\n"
+       "*/\n"
+       "def add(x):x+1;",
+       "module demo\n"
+       "/**\n"
+       " * Adds numbers.\n"
+       " * @param x first value\n"
+       " *  more details\n"
+       " */\n"
+       "def add(x): x + 1;"},
+  };
 
-  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->lsp.formatter, nullptr);
+  for (const auto &c : cases) {
+    SCOPED_TRACE(c.name);
 
-  ::lsp::DocumentFormattingParams params{};
-  params.options.insertSpaces = true;
-  params.options.tabSize = 2;
-  const auto edits = services->lsp.formatter->formatDocument(
-      *document, params, pegium::utils::default_cancel_token);
+    auto document = pegium::test::open_and_build_document(
+        *shared, pegium::test::make_file_uri(std::string(c.uri)), "arithmetics",
+        std::string(c.input));
+    ASSERT_NE(document, nullptr);
 
-  ASSERT_FALSE(edits.empty());
-  EXPECT_EQ(apply_text_edits(*document, edits),
-            "module demo\n"
-            "def value: 1 + 2;\n"
-            "def root(x, y): x ^ (1 / y);\n"
-            "root(value, 3);");
-}
+    const auto *coreServices =
+        &shared->serviceRegistry->getServices(document->uri);
+    const auto *services = as_services(coreServices);
+    ASSERT_NE(services, nullptr);
+    ASSERT_NE(services->lsp.formatter, nullptr);
 
-TEST(ArithmeticsModuleTest, FormatterNormalizesBinaryOperatorSpacing) {
-  auto shared = pegium::test::make_empty_shared_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  pegium::installDefaultSharedLspServices(*shared);
-  pegium::test::initialize_shared_workspace_for_tests(*shared);
-  auto registeredServices =
-      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
+    ::lsp::DocumentFormattingParams params{};
+    params.options.insertSpaces = true;
+    params.options.tabSize = 2;
+    const auto edits = services->lsp.formatter->formatDocument(
+        *document, params, pegium::utils::default_cancel_token);
 
-  ASSERT_NE(registeredServices, nullptr);
-  shared->serviceRegistry->registerServices(std::move(registeredServices));
-
-  auto document = pegium::test::open_and_build_document(
-      *shared, pegium::test::make_file_uri("arithmetics-operators.calc"),
-      "arithmetics",
-      "module demo def value:2 +          8 * 7 / 0 -             9 * 7;");
-  ASSERT_NE(document, nullptr);
-
-  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->lsp.formatter, nullptr);
-
-  ::lsp::DocumentFormattingParams params{};
-  params.options.insertSpaces = true;
-  params.options.tabSize = 2;
-  const auto edits = services->lsp.formatter->formatDocument(
-      *document, params, pegium::utils::default_cancel_token);
-
-  ASSERT_FALSE(edits.empty());
-  EXPECT_EQ(apply_text_edits(*document, edits),
-            "module demo\n"
-            "def value: 2 + 8 * 7 / 0 - 9 * 7;");
-}
-
-TEST(ArithmeticsModuleTest, FormatterNormalizesRootIndentationWithLeadingComments) {
-  auto shared = pegium::test::make_empty_shared_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  pegium::installDefaultSharedLspServices(*shared);
-  pegium::test::initialize_shared_workspace_for_tests(*shared);
-  auto registeredServices =
-      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
-
-  ASSERT_NE(registeredServices, nullptr);
-  shared->serviceRegistry->registerServices(std::move(registeredServices));
-
-  auto document = pegium::test::open_and_build_document(
-      *shared, pegium::test::make_file_uri("arithmetics-root-indent.calc"),
-      "arithmetics",
-      "            /** module comment */\n"
-      "        Module basicMath\n"
-      "\n"
-      " \n"
-      "/** test */\n"
-      "def c: 2 * 5;\n");
-  ASSERT_NE(document, nullptr);
-
-  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->lsp.formatter, nullptr);
-
-  ::lsp::DocumentFormattingParams params{};
-  params.options.insertSpaces = true;
-  params.options.tabSize = 2;
-  const auto edits = services->lsp.formatter->formatDocument(
-      *document, params, pegium::utils::default_cancel_token);
-
-  ASSERT_FALSE(edits.empty());
-  EXPECT_EQ(apply_text_edits(*document, edits),
-            "/** module comment */\n"
-            "Module basicMath\n"
-            "\n"
-            " \n"
-            "/** test */\n"
-            "def c: 2 * 5;\n");
+    ASSERT_FALSE(edits.empty());
+    EXPECT_EQ(apply_text_edits(*document, edits), c.expected);
+  }
 }
 
 TEST(ArithmeticsModuleTest, CodeActionsKeepRecoveryAndLanguageSpecificFixes) {
@@ -669,51 +639,6 @@ TEST(ArithmeticsModuleTest, CodeActionsKeepRecoveryAndLanguageSpecificFixes) {
             "Delete unexpected text");
   EXPECT_EQ(std::get<::lsp::CodeAction>((*actions)[1]).title,
             "Replace with constant 3");
-}
-
-TEST(ArithmeticsModuleTest, FormatterNormalizesDocCommentsAndTags) {
-  auto shared = pegium::test::make_empty_shared_services();
-  pegium::installDefaultSharedCoreServices(*shared);
-  pegium::installDefaultSharedLspServices(*shared);
-  pegium::test::initialize_shared_workspace_for_tests(*shared);
-  auto registeredServices =
-      arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
-
-  ASSERT_NE(registeredServices, nullptr);
-  shared->serviceRegistry->registerServices(std::move(registeredServices));
-
-  auto document = pegium::test::open_and_build_document(
-      *shared, pegium::test::make_file_uri("arithmetics-doc-comment.calc"),
-      "arithmetics",
-      "module demo\n"
-      "/**\n"
-      "*   Adds   numbers.\n"
-      "* @param   x   first   value\n"
-      "*   more   details\n"
-      "*/\n"
-      "def add(x):x+1;");
-  ASSERT_NE(document, nullptr);
-
-  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
-  ASSERT_NE(services, nullptr);
-  ASSERT_NE(services->lsp.formatter, nullptr);
-
-  ::lsp::DocumentFormattingParams params{};
-  params.options.insertSpaces = true;
-  params.options.tabSize = 2;
-  const auto edits = services->lsp.formatter->formatDocument(
-      *document, params, pegium::utils::default_cancel_token);
-
-  ASSERT_FALSE(edits.empty());
-  EXPECT_EQ(apply_text_edits(*document, edits),
-            "module demo\n"
-            "/**\n"
-            " * Adds numbers.\n"
-            " * @param x first value\n"
-            " *  more details\n"
-            " */\n"
-            "def add(x): x + 1;");
 }
 
 } // namespace

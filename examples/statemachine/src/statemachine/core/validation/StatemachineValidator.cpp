@@ -1,6 +1,6 @@
 #include <statemachine/core/validation/StatemachineValidator.hpp>
 
-#include <statemachine/ast.hpp>
+#include <statemachine/core/ast.hpp>
 
 #include <cctype>
 #include <string>

@@ -5,7 +5,7 @@
 #include <domainmodel/core/references/DomainModelScopeComputation.hpp>
 #include <domainmodel/core/references/QualifiedNameProvider.hpp>
 #include <domainmodel/core/validation/DomainModelValidator.hpp>
-#include <domainmodel/parser/Parser.hpp>
+#include <domainmodel/core/Parser.hpp>
 
 namespace domainmodel {
 

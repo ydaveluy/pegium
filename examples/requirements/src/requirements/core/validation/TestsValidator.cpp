@@ -1,6 +1,6 @@
 #include <requirements/core/validation/TestsValidator.hpp>
 
-#include <requirements/ast.hpp>
+#include <requirements/core/ast.hpp>
 
 #include <algorithm>
 #include <cctype>

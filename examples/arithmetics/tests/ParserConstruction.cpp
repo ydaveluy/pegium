@@ -1,11 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <arithmetics/lsp/Module.hpp>
-#include <arithmetics/parser/Parser.hpp>
+#include <arithmetics/core/Parser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <cstdlib>
 #include <sstream>
+
+#include "LanguageTestSupport.hpp"
 
 namespace arithmetics::tests {
 namespace {
@@ -54,34 +56,11 @@ struct ExposedArithmeticParser final : parser::ArithmeticParser {
     (void)Evaluation.getElement();
     (void)Expression.getElement();
     (void)BinaryExpression.getElement();
-    (void)Addition.getElement();
-    (void)Multiplication.getElement();
-    (void)Exponentiation.getElement();
-    (void)Modulo.getElement();
     (void)PrimaryExpression.getElement();
   }
 };
 
-std::string dump_parse_diagnostics(
-    const std::vector<pegium::parser::ParseDiagnostic> &diagnostics) {
-  std::string dump;
-  for (const auto &diagnostic : diagnostics) {
-    if (!dump.empty()) {
-      dump += " | ";
-    }
-    std::ostringstream current;
-    current << diagnostic.kind;
-    if (diagnostic.element != nullptr) {
-      current << ":" << *diagnostic.element;
-    }
-    if (!diagnostic.message.empty()) {
-      current << ":" << diagnostic.message;
-    }
-    current << "@" << diagnostic.beginOffset << "-" << diagnostic.endOffset;
-    dump += current.str();
-  }
-  return dump;
-}
+// dump_parse_diagnostics is shared from LanguageTestSupport.hpp.
 
 std::string dump_document_diagnostics(const pegium::workspace::Document &document) {
   std::string dump;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <domainmodel/ast.hpp>
+#include <domainmodel/core/ast.hpp>
 
 #include <string>
 #include <string_view>

@@ -56,7 +56,7 @@ target_link_libraries(pegium_example_arithmetics_cli
 )
 
 add_executable(pegium-example-arithmetics-cli
-    src/arithmetics/cli_main.cpp
+    src/arithmetics/cli/main.cpp
 )
 target_compile_features(pegium-example-arithmetics-cli PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-arithmetics-cli PRIVATE
@@ -66,7 +66,7 @@ target_link_libraries(pegium-example-arithmetics-cli PRIVATE
 )
 
 add_executable(pegium-example-arithmetics-lsp
-    src/arithmetics/lsp_main.cpp
+    src/arithmetics/lsp/main.cpp
 )
 target_compile_features(pegium-example-arithmetics-lsp PRIVATE cxx_std_20)
 target_link_libraries(pegium-example-arithmetics-lsp PRIVATE

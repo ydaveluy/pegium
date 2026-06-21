@@ -1,28 +1,29 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/ast.hpp>
-#include <arithmetics/parser/Parser.hpp>
+#include <arithmetics/core/ast.hpp>
+#include <arithmetics/core/Parser.hpp>
 
 #include "LanguageTestSupport.hpp"
 
 #include <pegium/core/parser/ParseDiagnostics.hpp>
 
 #include <string>
+#include <string_view>
 
 namespace arithmetics::tests {
 namespace {
 
-/// Phase G regression corpus. When a single statement is locally
+/// Panic-resync regression corpus. When a single statement is locally
 /// unrecoverable (e.g. contains a doubled operator mid-expression like
 /// `5 * ++ 5`), the outer `many(Statement)` must resync at the next
 /// statement start instead of declaring the rest of the module
 /// `Incomplete`. The resync is driven by Repetition's last-resort
 /// `ResyncSkip` candidate: scan forward up to
-/// `ParseOptions::maxResyncSkipBytes` codepoints, stop at the first
+/// `ParseOptions::maxResyncSkipCodepoints` codepoints, stop at the first
 /// position where the iteration strictly starts, emit one fused
 /// `Delete` over the skipped range.
 ///
-/// These tests pin the distant-recovery property that Phase G unlocks:
+/// These tests pin the distant-recovery property:
 /// the broken statement may be bracketed by any number of healthy
 /// statements, every statement past the broken one must still land in
 /// the parsed AST.
@@ -46,82 +47,76 @@ void expect_fullmatch_with_statement_count(const std::string &text,
       << "panic-mode resync lost statements\n" << parseDump;
 }
 
-TEST(ArithmeticsPanicResyncRecoveryTest,
-     DoubledPlusMidStatementKeepsSurroundingStatements) {
-  // `def a: 5 * ++ 5;` is locally unrecoverable — `* ++` is a two-edit
-  // trap the normal ranker rejects. Phase G skips past the broken
-  // body, the module keeps every def/eval after.
-  expect_fullmatch_with_statement_count(
-      "Module basicMath\n"
-      "\n"
-      "def a: 5 * ++ 5;\n"
-      "def b: 3;\n"
-      "def c: a + b;\n"
-      "def d: (a ^ b);\n"
-      "\n"
-      "def root(x, y):\n"
-      "    x^(1/y);\n"
-      "\n"
-      "def sqrt(x):\n"
-      "    root(x, 2);\n"
-      "\n"
-      "2 * c; // 16\n"
-      "b % 2; // 1\n"
-      "\n"
-      "Root(D, 3); // 32\n"
-      "Root(64, 3); // 4\n"
-      "Sqrt(81); // 9\n",
-      /*expectedMinStatements=*/11);
-}
-
-TEST(ArithmeticsPanicResyncRecoveryTest,
-     BrokenStatementBeforeHealthyTailReachesFullMatch) {
-  // Minimal reproducer: the broken def is the first statement; every
-  // statement after it must still parse.
-  expect_fullmatch_with_statement_count(
-      "Module m\n"
-      "def a: 5 * ++ 5;\n"
-      "def b: 3;\n"
-      "def c: 8;\n",
-      /*expectedMinStatements=*/3);
-}
-
-TEST(ArithmeticsPanicResyncRecoveryTest,
-     HealthyBetweenBrokenSurvivesResync) {
-  expect_fullmatch_with_statement_count(
-      "Module m\n"
-      "def a: 5;\n"
-      "def b: 5 * ++ 5;\n"
-      "def c: 8;\n",
-      /*expectedMinStatements=*/3);
-}
-
-TEST(ArithmeticsPanicResyncRecoveryTest,
-     TwoSuccessiveBrokenStatementsBothResync) {
-  // Multi-site recovery: two unrelated broken statements in the same
-  // input. The F/C follow-up (InfixRule strict-probe + Phase G) makes
-  // both sites resync independently. Each broken def becomes a single
-  // fused delete; `def a`, `def b`, `def c`, `2 ** 3` evaluate all
-  // land in the AST.
-  expect_fullmatch_with_statement_count(
-      "Module m\n"
-      "def a: 5 * ++ 5;\n"
-      "def b: 3;\n"
-      "2 ** 3;\n"
-      "def c: 8;\n",
-      /*expectedMinStatements=*/4);
-}
-
-TEST(ArithmeticsPanicResyncRecoveryTest,
-     TwoBrokenStatementsBracketingHealthyOneResync) {
-  // Both defs contain the doubled-operator pattern; the healthy def
-  // in the middle plus the trailing def c all still land in the AST.
-  expect_fullmatch_with_statement_count(
-      "Module m\n"
-      "def a: 5 * ++ 5;\n"
-      "def b: 5 * ++ 5;\n"
-      "def c: 8;\n",
-      /*expectedMinStatements=*/3);
+TEST(ArithmeticsPanicResyncRecoveryTest, ResyncStatementCountCorpus) {
+  struct Case {
+    const char *name;
+    std::string_view text;
+    std::size_t minStatements;
+  };
+  static constexpr Case kCases[] = {
+      // `def a: 5 * ++ 5;` is locally unrecoverable — `* ++` is a two-edit
+      // trap the normal ranker rejects. Panic resync skips past the broken
+      // body, the module keeps every def/eval after.
+      {"DoubledPlusMidStatementKeepsSurroundingStatements",
+       "Module basicMath\n"
+       "\n"
+       "def a: 5 * ++ 5;\n"
+       "def b: 3;\n"
+       "def c: a + b;\n"
+       "def d: (a ^ b);\n"
+       "\n"
+       "def root(x, y):\n"
+       "    x^(1/y);\n"
+       "\n"
+       "def sqrt(x):\n"
+       "    root(x, 2);\n"
+       "\n"
+       "2 * c; // 16\n"
+       "b % 2; // 1\n"
+       "\n"
+       "Root(D, 3); // 32\n"
+       "Root(64, 3); // 4\n"
+       "Sqrt(81); // 9\n",
+       /*expectedMinStatements=*/11},
+      // Minimal reproducer: the broken def is the first statement; every
+      // statement after it must still parse.
+      {"BrokenStatementBeforeHealthyTailReachesFullMatch",
+       "Module m\n"
+       "def a: 5 * ++ 5;\n"
+       "def b: 3;\n"
+       "def c: 8;\n",
+       /*expectedMinStatements=*/3},
+      {"HealthyBetweenBrokenSurvivesResync",
+       "Module m\n"
+       "def a: 5;\n"
+       "def b: 5 * ++ 5;\n"
+       "def c: 8;\n",
+       /*expectedMinStatements=*/3},
+      // Multi-site recovery: two unrelated broken statements in the same
+      // input. The InfixRule strict-probe + panic resync makes
+      // both sites resync independently. Each broken def becomes a single
+      // fused delete; `def a`, `def b`, `def c`, `2 ** 3` evaluate all
+      // land in the AST.
+      {"TwoSuccessiveBrokenStatementsBothResync",
+       "Module m\n"
+       "def a: 5 * ++ 5;\n"
+       "def b: 3;\n"
+       "2 ** 3;\n"
+       "def c: 8;\n",
+       /*expectedMinStatements=*/4},
+      // Both defs contain the doubled-operator pattern; the healthy def
+      // in the middle plus the trailing def c all still land in the AST.
+      {"TwoBrokenStatementsBracketingHealthyOneResync",
+       "Module m\n"
+       "def a: 5 * ++ 5;\n"
+       "def b: 5 * ++ 5;\n"
+       "def c: 8;\n",
+       /*expectedMinStatements=*/3},
+  };
+  for (const auto &c : kCases) {
+    SCOPED_TRACE(c.name);
+    expect_fullmatch_with_statement_count(std::string(c.text), c.minStatements);
+  }
 }
 
 TEST(ArithmeticsPanicResyncRecoveryTest,

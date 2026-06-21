@@ -4,7 +4,7 @@
 
 #include <statemachine/core/validation/StatemachineValidator.hpp>
 #include <statemachine/lsp/StatemachineFormatter.hpp>
-#include <statemachine/parser/Parser.hpp>
+#include <statemachine/core/Parser.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace statemachine {

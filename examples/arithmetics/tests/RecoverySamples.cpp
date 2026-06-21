@@ -1,65 +1,19 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/parser/Parser.hpp>
+#include <arithmetics/core/Parser.hpp>
 
 #include <pegium/core/grammar/AbstractRule.hpp>
 #include <pegium/core/grammar/Assignment.hpp>
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
 
+#include "LanguageTestSupport.hpp"
+
 namespace arithmetics::tests {
 namespace {
 
-std::string summarize_expression(const ast::Expression *expression) {
-  if (expression == nullptr) {
-    return "<null-expr>";
-  }
-  if (const auto *number = dynamic_cast<const ast::NumberLiteral *>(expression);
-      number != nullptr) {
-    return "number:" + std::to_string(number->value);
-  }
-  if (const auto *call = dynamic_cast<const ast::FunctionCall *>(expression);
-      call != nullptr) {
-    return "call:" + call->func.getRefText();
-  }
-  if (const auto *grouped =
-          dynamic_cast<const ast::GroupedExpression *>(expression);
-      grouped != nullptr) {
-    return "group(" + summarize_expression(grouped->expression) + ")";
-  }
-  if (const auto *binary =
-          dynamic_cast<const ast::BinaryExpression *>(expression);
-      binary != nullptr) {
-    return "binary(" + summarize_expression(binary->left) + " " +
-           binary->op + " " + summarize_expression(binary->right) + ")";
-  }
-  return "other-expr";
-}
-
-std::string summarize_module_statement_shapes(const ast::Module &module) {
-  std::string summary;
-  for (const auto &statement : module.statements) {
-    if (!summary.empty()) {
-      summary += " | ";
-    }
-    if (const auto *definition =
-            dynamic_cast<const ast::Definition *>(statement);
-        definition != nullptr) {
-      summary += "def:";
-      summary += definition->name;
-      continue;
-    }
-    if (const auto *evaluation =
-            dynamic_cast<const ast::Evaluation *>(statement);
-        evaluation != nullptr) {
-      summary += "eval:";
-      summary += summarize_expression(evaluation->expression);
-      continue;
-    }
-    summary += "other";
-  }
-  return summary;
-}
+// summarize_expression / summarize_module_statement_shapes are shared from
+// LanguageTestSupport.hpp (arithmetics::tests scope).
 
 bool has_diagnostic_at_offset(
     std::span<const pegium::parser::ParseDiagnostic> diagnostics,

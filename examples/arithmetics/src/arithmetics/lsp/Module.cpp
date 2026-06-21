@@ -5,7 +5,7 @@
 #include <arithmetics/core/validation/ArithmeticsValidator.hpp>
 #include <arithmetics/lsp/ArithmeticsCodeActionProvider.hpp>
 #include <arithmetics/lsp/ArithmeticsFormatter.hpp>
-#include <arithmetics/parser/Parser.hpp>
+#include <arithmetics/core/Parser.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace arithmetics {
