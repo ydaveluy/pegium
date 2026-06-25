@@ -126,7 +126,7 @@ ParseResult PegiumParser::parse(text::TextSnapshot text,
                                         result.failureVisibleCursorOffset,
                                         inputSize,
                                         result.recoveryReport.hasRecovered,
-                                        result.fullMatch);
+                                        result.fullMatch, options.recoveryEnabled);
   }
   result.parseDiagnostics =
       detail::materialize_syntax_diagnostics(syntaxDiagnostics);

@@ -79,7 +79,7 @@ append_syntax_summary_entry(std::vector<SyntaxScriptEntry> &entries,
                             TextOffset lastVisibleCursorOffset,
                             TextOffset failureVisibleCursorOffset,
                             TextOffset inputSize, bool hasRecovered,
-                            bool fullMatch) {
+                            bool fullMatch, bool recoveryEnabled) {
   if (!fullMatch) {
     if (has_parse_diagnostic_kind(entries, ParseDiagnosticKind::Incomplete)) {
       return;
@@ -87,8 +87,13 @@ append_syntax_summary_entry(std::vector<SyntaxScriptEntry> &entries,
     const auto incompleteOffset =
         std::max(parsedLength, failureVisibleCursorOffset);
     const auto safeInputSize = std::max(parsedLength, inputSize);
+    // Unconsumed input is reported as a ranged "Unexpected input." diagnostic
+    // spanning the tail. With recovery enabled this is gated on a committed
+    // recovery (the precise edit diagnostics carry the detail); when recovery is
+    // disabled there are no edit diagnostics, so the strict parse still surfaces
+    // a visible error region instead of a zero-width marker.
     const auto trailingUnexpectedInput =
-        hasRecovered && parsedLength < safeInputSize;
+        parsedLength < safeInputSize && (hasRecovered || !recoveryEnabled);
     const auto recoveredTailBegin =
         std::min(parsedLength, lastVisibleCursorOffset);
     entries.push_back({.kind = ParseDiagnosticKind::Incomplete,
