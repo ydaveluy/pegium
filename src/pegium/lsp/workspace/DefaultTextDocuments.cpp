@@ -72,7 +72,7 @@ DefaultTextDocuments::getNormalized(std::string_view normalizedUri) const {
   }
 
   std::scoped_lock lock(_mutex);
-  const auto it = _documents.find(std::string(normalizedUri));
+  const auto it = _documents.find(normalizedUri);
   return it == _documents.end() ? nullptr : it->second;
 }
 

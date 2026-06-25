@@ -1,4 +1,4 @@
-#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 
 #include <cassert>
 #include <optional>
@@ -25,7 +25,7 @@ struct WrappedCodeLens {
 };
 
 template <typename Result, typename Accessor, typename Invoker>
-Result with_document_provider(pegium::SharedServices &sharedServices,
+Result with_document_provider(const pegium::SharedServices &sharedServices,
                               std::string uri, Accessor accessor,
                               Invoker invoker) {
   return with_workspace_read_lock(
@@ -48,7 +48,7 @@ Result with_document_provider(pegium::SharedServices &sharedServices,
 }
 
 template <typename Result, typename Accessor, typename Invoker>
-Result with_item_provider(pegium::SharedServices &sharedServices,
+Result with_item_provider(const pegium::SharedServices &sharedServices,
                           const std::string &uri, Accessor accessor,
                           Invoker invoker) {
   return with_workspace_read_lock(
@@ -116,7 +116,7 @@ std::optional<WrappedCodeLens> unwrap_code_lens(const ::lsp::CodeLens &codeLens)
 } // namespace
 
 std::optional<::lsp::CompletionList>
-getCompletion(pegium::SharedServices &sharedServices,
+getCompletion(const pegium::SharedServices &sharedServices,
               const ::lsp::CompletionParams &params,
               const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<::lsp::CompletionList>>(
@@ -129,7 +129,7 @@ getCompletion(pegium::SharedServices &sharedServices,
 }
 
 std::optional<::lsp::SignatureHelp>
-getSignatureHelp(pegium::SharedServices &sharedServices,
+getSignatureHelp(const pegium::SharedServices &sharedServices,
                  const ::lsp::SignatureHelpParams &params,
                  const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<::lsp::SignatureHelp>>(
@@ -144,7 +144,7 @@ getSignatureHelp(pegium::SharedServices &sharedServices,
 }
 
 std::optional<::lsp::Hover>
-getHoverContent(pegium::SharedServices &sharedServices,
+getHoverContent(const pegium::SharedServices &sharedServices,
                 const ::lsp::HoverParams &params,
                 const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<::lsp::Hover>>(
@@ -157,7 +157,7 @@ getHoverContent(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::CodeLens>
-getCodeLens(pegium::SharedServices &sharedServices,
+getCodeLens(const pegium::SharedServices &sharedServices,
             const ::lsp::CodeLensParams &params,
             const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::CodeLens>>(
@@ -178,7 +178,7 @@ getCodeLens(pegium::SharedServices &sharedServices,
 }
 
 std::optional<::lsp::CodeLens>
-resolveCodeLens(pegium::SharedServices &sharedServices,
+resolveCodeLens(const pegium::SharedServices &sharedServices,
                 const ::lsp::CodeLens &codeLens,
                 const utils::CancellationToken &cancelToken) {
   return with_workspace_read_lock(
@@ -218,7 +218,7 @@ resolveCodeLens(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::DocumentSymbol>
-getDocumentSymbols(pegium::SharedServices &sharedServices,
+getDocumentSymbols(const pegium::SharedServices &sharedServices,
                    const ::lsp::DocumentSymbolParams &params,
                    const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::DocumentSymbol>>(
@@ -233,7 +233,7 @@ getDocumentSymbols(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::DocumentHighlight>
-getDocumentHighlights(pegium::SharedServices &sharedServices,
+getDocumentHighlights(const pegium::SharedServices &sharedServices,
                       const ::lsp::DocumentHighlightParams &params,
                       const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::DocumentHighlight>>(
@@ -248,7 +248,7 @@ getDocumentHighlights(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::FoldingRange>
-getFoldingRanges(pegium::SharedServices &sharedServices,
+getFoldingRanges(const pegium::SharedServices &sharedServices,
                  const ::lsp::FoldingRangeParams &params,
                  const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::FoldingRange>>(
@@ -263,7 +263,7 @@ getFoldingRanges(pegium::SharedServices &sharedServices,
 }
 
 std::optional<std::vector<::lsp::LocationLink>>
-getDeclaration(pegium::SharedServices &sharedServices,
+getDeclaration(const pegium::SharedServices &sharedServices,
                const ::lsp::DeclarationParams &params,
                const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<std::vector<::lsp::LocationLink>>>(
@@ -276,7 +276,7 @@ getDeclaration(pegium::SharedServices &sharedServices,
 }
 
 std::optional<std::vector<::lsp::LocationLink>>
-getDefinition(pegium::SharedServices &sharedServices,
+getDefinition(const pegium::SharedServices &sharedServices,
               const ::lsp::DefinitionParams &params,
               const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<std::vector<::lsp::LocationLink>>>(
@@ -289,7 +289,7 @@ getDefinition(pegium::SharedServices &sharedServices,
 }
 
 std::optional<std::vector<::lsp::LocationLink>>
-getTypeDefinition(pegium::SharedServices &sharedServices,
+getTypeDefinition(const pegium::SharedServices &sharedServices,
                   const ::lsp::TypeDefinitionParams &params,
                   const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<std::vector<::lsp::LocationLink>>>(
@@ -304,7 +304,7 @@ getTypeDefinition(pegium::SharedServices &sharedServices,
 }
 
 std::optional<std::vector<::lsp::LocationLink>>
-getImplementation(pegium::SharedServices &sharedServices,
+getImplementation(const pegium::SharedServices &sharedServices,
                   const ::lsp::ImplementationParams &params,
                   const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<std::vector<::lsp::LocationLink>>>(
@@ -319,7 +319,7 @@ getImplementation(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::Location>
-getReferences(pegium::SharedServices &sharedServices,
+getReferences(const pegium::SharedServices &sharedServices,
               const ::lsp::ReferenceParams &params,
               const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::Location>>(
@@ -332,7 +332,7 @@ getReferences(pegium::SharedServices &sharedServices,
 }
 
 std::optional<::lsp::WorkspaceEdit>
-rename(pegium::SharedServices &sharedServices,
+rename(const pegium::SharedServices &sharedServices,
        const ::lsp::RenameParams &params,
        const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<::lsp::WorkspaceEdit>>(
@@ -345,7 +345,7 @@ rename(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::TextEdit>
-formatDocument(pegium::SharedServices &sharedServices,
+formatDocument(const pegium::SharedServices &sharedServices,
                const ::lsp::DocumentFormattingParams &params,
                const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::TextEdit>>(
@@ -360,7 +360,7 @@ formatDocument(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::TextEdit>
-formatDocumentRange(pegium::SharedServices &sharedServices,
+formatDocumentRange(const pegium::SharedServices &sharedServices,
                     const ::lsp::DocumentRangeFormattingParams &params,
                     const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::TextEdit>>(
@@ -375,7 +375,7 @@ formatDocumentRange(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::TextEdit>
-formatDocumentOnType(pegium::SharedServices &sharedServices,
+formatDocumentOnType(const pegium::SharedServices &sharedServices,
                      const ::lsp::DocumentOnTypeFormattingParams &params,
                      const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::TextEdit>>(
@@ -388,7 +388,7 @@ formatDocumentOnType(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::InlayHint>
-getInlayHints(pegium::SharedServices &sharedServices,
+getInlayHints(const pegium::SharedServices &sharedServices,
               const ::lsp::InlayHintParams &params,
               const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::InlayHint>>(
@@ -401,7 +401,7 @@ getInlayHints(pegium::SharedServices &sharedServices,
 }
 
 std::optional<::lsp::SemanticTokens>
-getSemanticTokensFull(pegium::SharedServices &sharedServices,
+getSemanticTokensFull(const pegium::SharedServices &sharedServices,
                       const ::lsp::SemanticTokensParams &params,
                       const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<::lsp::SemanticTokens>>(
@@ -416,7 +416,7 @@ getSemanticTokensFull(pegium::SharedServices &sharedServices,
 }
 
 std::optional<::lsp::SemanticTokens>
-getSemanticTokensRange(pegium::SharedServices &sharedServices,
+getSemanticTokensRange(const pegium::SharedServices &sharedServices,
                        const ::lsp::SemanticTokensRangeParams &params,
                        const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<::lsp::SemanticTokens>>(
@@ -431,7 +431,7 @@ getSemanticTokensRange(pegium::SharedServices &sharedServices,
 }
 
 std::optional<::lsp::OneOf<::lsp::SemanticTokens, ::lsp::SemanticTokensDelta>>
-getSemanticTokensDelta(pegium::SharedServices &sharedServices,
+getSemanticTokensDelta(const pegium::SharedServices &sharedServices,
                        const ::lsp::SemanticTokensDeltaParams &params,
                        const utils::CancellationToken &cancelToken) {
   return with_document_provider<
@@ -464,7 +464,7 @@ executeCommand(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::CallHierarchyItem>
-prepareCallHierarchy(pegium::SharedServices &sharedServices,
+prepareCallHierarchy(const pegium::SharedServices &sharedServices,
                      const ::lsp::CallHierarchyPrepareParams &params,
                      const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::CallHierarchyItem>>(
@@ -479,7 +479,7 @@ prepareCallHierarchy(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::CallHierarchyIncomingCall>
-getIncomingCalls(pegium::SharedServices &sharedServices,
+getIncomingCalls(const pegium::SharedServices &sharedServices,
                  const ::lsp::CallHierarchyIncomingCallsParams &params,
                  const utils::CancellationToken &cancelToken) {
   return with_item_provider<std::vector<::lsp::CallHierarchyIncomingCall>>(
@@ -493,7 +493,7 @@ getIncomingCalls(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::CallHierarchyOutgoingCall>
-getOutgoingCalls(pegium::SharedServices &sharedServices,
+getOutgoingCalls(const pegium::SharedServices &sharedServices,
                  const ::lsp::CallHierarchyOutgoingCallsParams &params,
                  const utils::CancellationToken &cancelToken) {
   return with_item_provider<std::vector<::lsp::CallHierarchyOutgoingCall>>(
@@ -507,7 +507,7 @@ getOutgoingCalls(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::TypeHierarchyItem>
-prepareTypeHierarchy(pegium::SharedServices &sharedServices,
+prepareTypeHierarchy(const pegium::SharedServices &sharedServices,
                      const ::lsp::TypeHierarchyPrepareParams &params,
                      const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::TypeHierarchyItem>>(
@@ -522,7 +522,7 @@ prepareTypeHierarchy(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::TypeHierarchyItem>
-getTypeHierarchySupertypes(pegium::SharedServices &sharedServices,
+getTypeHierarchySupertypes(const pegium::SharedServices &sharedServices,
                            const ::lsp::TypeHierarchySupertypesParams &params,
                            const utils::CancellationToken &cancelToken) {
   return with_item_provider<std::vector<::lsp::TypeHierarchyItem>>(
@@ -536,7 +536,7 @@ getTypeHierarchySupertypes(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::TypeHierarchyItem>
-getTypeHierarchySubtypes(pegium::SharedServices &sharedServices,
+getTypeHierarchySubtypes(const pegium::SharedServices &sharedServices,
                          const ::lsp::TypeHierarchySubtypesParams &params,
                          const utils::CancellationToken &cancelToken) {
   return with_item_provider<std::vector<::lsp::TypeHierarchyItem>>(
@@ -550,7 +550,7 @@ getTypeHierarchySubtypes(pegium::SharedServices &sharedServices,
 }
 
 std::optional<std::vector<::lsp::OneOf<::lsp::Command, ::lsp::CodeAction>>>
-getCodeActions(pegium::SharedServices &sharedServices,
+getCodeActions(const pegium::SharedServices &sharedServices,
                const ::lsp::CodeActionParams &params,
                const utils::CancellationToken &cancelToken) {
   return with_document_provider<
@@ -564,7 +564,7 @@ getCodeActions(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::DocumentLink>
-getDocumentLinks(pegium::SharedServices &sharedServices,
+getDocumentLinks(const pegium::SharedServices &sharedServices,
                  const ::lsp::DocumentLinkParams &params,
                  const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::DocumentLink>>(
@@ -579,7 +579,7 @@ getDocumentLinks(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::SelectionRange>
-getSelectionRanges(pegium::SharedServices &sharedServices,
+getSelectionRanges(const pegium::SharedServices &sharedServices,
                    const ::lsp::SelectionRangeParams &params,
                    const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::vector<::lsp::SelectionRange>>(
@@ -594,7 +594,7 @@ getSelectionRanges(pegium::SharedServices &sharedServices,
 }
 
 std::optional<::lsp::PrepareRenameResult>
-prepareRename(pegium::SharedServices &sharedServices,
+prepareRename(const pegium::SharedServices &sharedServices,
               const ::lsp::PrepareRenameParams &params,
               const utils::CancellationToken &cancelToken) {
   return with_document_provider<std::optional<::lsp::PrepareRenameResult>>(
@@ -607,7 +607,7 @@ prepareRename(pegium::SharedServices &sharedServices,
 }
 
 std::vector<::lsp::WorkspaceSymbol>
-getWorkspaceSymbols(pegium::SharedServices &sharedServices,
+getWorkspaceSymbols(const pegium::SharedServices &sharedServices,
                     const ::lsp::WorkspaceSymbolParams &params,
                     const utils::CancellationToken &cancelToken) {
   return with_workspace_read_lock(
@@ -623,7 +623,7 @@ getWorkspaceSymbols(pegium::SharedServices &sharedServices,
 }
 
 std::optional<::lsp::WorkspaceSymbol>
-resolveWorkspaceSymbol(pegium::SharedServices &sharedServices,
+resolveWorkspaceSymbol(const pegium::SharedServices &sharedServices,
                        const ::lsp::WorkspaceSymbol &symbol,
                        const utils::CancellationToken &cancelToken) {
   return with_workspace_read_lock(

@@ -82,7 +82,10 @@ struct LspFeatureServices {
 /// Language service container that extends core services with LSP features.
 struct Services : pegium::CoreServices {
   explicit Services(const SharedServices &sharedServices);
-  Services(Services &&) noexcept = default;
+  // Non-movable: installed default providers hold a back-reference to this
+  // Services, so a member-wise move would leave them dangling. Services is only
+  // ever heap-owned via unique_ptr, so the move ctor is never needed.
+  Services(Services &&) noexcept = delete;
   Services &operator=(Services &&) noexcept = delete;
   Services(const Services &) = delete;
   Services &operator=(const Services &) = delete;

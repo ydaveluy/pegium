@@ -139,7 +139,9 @@ std::vector<const AstNode *>
 find_declarations_at_offset(const workspace::Document &document,
                             TextOffset offset,
                             const references::References &references) {
-  assert(document.parseResult.cst != nullptr);
+  if (document.parseResult.cst == nullptr) {
+    return {};
+  }
   if (const auto selectedNode =
           find_declaration_node_at_offset(*document.parseResult.cst, offset);
       selectedNode.has_value()) {
@@ -213,8 +215,13 @@ to_lsp_workspace_edit(const WorkspaceEditData &workspaceEdit,
 
   for (const auto &[documentId, edits] : workspaceEdit.changes) {
     utils::throw_if_cancelled(cancelToken);
+    // The document may have been removed from the store after the edit data was
+    // computed (the ids come from an index-derived snapshot). Skip such stale
+    // targets instead of dereferencing a null document.
     const auto document = sharedServices.workspace.documents->getDocument(documentId);
-    assert(document != nullptr);
+    if (document == nullptr) {
+      continue;
+    }
     const auto &textDocument = document->textDocument();
 
     auto &lspEdits = changes[::lsp::Uri::parse(document->uri)];

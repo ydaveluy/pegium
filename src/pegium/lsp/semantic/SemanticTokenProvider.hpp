@@ -25,7 +25,9 @@ public:
     return {};
   }
 
-  /// Returns the supported token modifiers indexed by their semantic-token id.
+  /// Returns the supported token modifiers, each name mapped to its modifier
+  /// bit flag (`1u << modifier id`) for OR-combining into a token's modifier
+  /// bitset.
   [[nodiscard]] virtual StringIndexMap tokenModifiers() const {
     return {};
   }

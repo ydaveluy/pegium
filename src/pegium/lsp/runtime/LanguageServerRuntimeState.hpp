@@ -29,7 +29,9 @@ public:
   [[nodiscard]] bool exitRequested() const noexcept;
   void setExitRequested(bool value) noexcept;
 
-  [[nodiscard]] const workspace::InitializeCapabilities &
+  // Returned by value: a snapshot taken under _requestCancellationMutex so a
+  // concurrent reset()/setInitializeCapabilities() cannot tear the read.
+  [[nodiscard]] workspace::InitializeCapabilities
   initializeCapabilities() const noexcept;
   void setInitializeCapabilities(
       workspace::InitializeCapabilities capabilities) noexcept;
@@ -49,8 +51,10 @@ private:
   std::atomic<bool> _initialized = false;
   std::atomic<bool> _shutdownRequested = false;
   std::atomic<bool> _exitRequested = false;
+  // Guarded by _requestCancellationMutex (it is a non-atomic aggregate; reset(),
+  // the getter, and the setter all take the lock).
   workspace::InitializeCapabilities _initializeCapabilities;
-  std::mutex _requestCancellationMutex;
+  mutable std::mutex _requestCancellationMutex;
   std::condition_variable _requestCancellationCv;
   utils::TransparentStringMap<std::shared_ptr<utils::CancellationTokenSource>>
       _requestCancellation;

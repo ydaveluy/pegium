@@ -1,28 +1,52 @@
 #include <pegium/lsp/symbols/DefaultWorkspaceSymbolProvider.hpp>
 
-#include <cassert>
 #include <memory>
-#include <string>
+#include <optional>
 #include <utility>
 
+#include <pegium/core/references/NameProvider.hpp>
+#include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/ServiceRegistry.hpp>
+#include <pegium/core/workspace/Document.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 
 namespace pegium {
 
 namespace {
 
-::lsp::Location symbol_location(const pegium::SharedServices &sharedServices,
-                                const workspace::AstNodeDescription &entry) {
-  assert(entry.nameLength > 0);
+std::optional<::lsp::Location>
+symbol_location(const pegium::SharedServices &sharedServices,
+                const workspace::AstNodeDescription &entry) {
+  // An index snapshot can outlive the document in the store: allElements()
+  // hands back a value copy, so a reader (especially one calling this read API
+  // outside the workspace lock) can hold an entry whose document was deleted
+  // since. Skip it rather than dereferencing a null document.
   const auto document =
       sharedServices.workspace.documents->getDocument(entry.documentId);
-  assert(document != nullptr);
+  if (document == nullptr) {
+    return std::nullopt;
+  }
+
+  // Range from the declaration site (name node, else the node's own range).
+  const auto *node = document->findAstNode(entry.symbolId);
+  if (node == nullptr) {
+    return std::nullopt;
+  }
+  const auto *services =
+      sharedServices.serviceRegistry->findServices(document->uri);
+  if (services == nullptr) {
+    return std::nullopt;
+  }
+  const auto site = references::declaration_site_node(
+      *node, *services->references.nameProvider);
+  if (!site.has_value()) {
+    return std::nullopt;
+  }
 
   ::lsp::Location location{};
   location.uri = ::lsp::Uri::parse(document->uri);
-  location.range.start = document->textDocument().positionAt(entry.offset);
-  location.range.end =
-      document->textDocument().positionAt(entry.offset + entry.nameLength);
+  location.range.start = document->textDocument().positionAt(site->getBegin());
+  location.range.end = document->textDocument().positionAt(site->getEnd());
   return location;
 }
 
@@ -45,10 +69,15 @@ DefaultWorkspaceSymbolProvider::getSymbols(
       continue;
     }
 
+    auto location = symbol_location(shared, entry);
+    if (!location.has_value()) {
+      continue;
+    }
+
     ::lsp::WorkspaceSymbol workspaceSymbol{};
     workspaceSymbol.name = entry.name;
     workspaceSymbol.kind = nodeKindProvider.getSymbolKind(entry);
-    workspaceSymbol.location = symbol_location(shared, entry);
+    workspaceSymbol.location = std::move(*location);
     symbols.push_back(std::move(workspaceSymbol));
   }
   return symbols;

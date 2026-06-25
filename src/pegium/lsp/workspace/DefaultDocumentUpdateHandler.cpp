@@ -199,7 +199,7 @@ void DefaultDocumentUpdateHandler::quiesce() {
     std::scoped_lock lock(_dispatchMutex);
     dispatches = std::move(_dispatches);
   }
-  for (auto &dispatch : dispatches) {
+  for (const auto &dispatch : dispatches) {
     if (dispatch.valid()) {
       dispatch.wait();
     }

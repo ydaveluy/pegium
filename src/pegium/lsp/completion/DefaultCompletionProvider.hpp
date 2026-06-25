@@ -26,7 +26,9 @@ struct CompletionContext {
   const ::lsp::CompletionParams &params;
   /// Absolute cursor offset in the document.
   TextOffset offset = 0;
-  /// Offset of the current token start. Equals `offset` between tokens.
+  /// Start of the replaced range: the current token start (equal to `offset`
+  /// between tokens), widened to the full reference begin for datatype-rule
+  /// references such as a dotted qualified name (mirrored by `tokenEndOffset`).
   TextOffset tokenOffset = 0;
   /// End offset of the replaced range. Widened to the full reference for
   /// datatype-rule references (mirroring `tokenOffset`'s widening), so this is

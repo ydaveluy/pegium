@@ -65,8 +65,12 @@ build_completion_text_edit(const CompletionContext &context,
   textEdit.newText = std::string(newText);
   textEdit.range.start =
       context.document.textDocument().positionAt(context.tokenOffset);
+  // Replace up to the (possibly widened) end of the token/reference, not just up
+  // to the cursor. Completing in the middle of a name otherwise leaves the
+  // suffix after the cursor behind. tokenEndOffset equals offset on the
+  // suffix-fallback path, so that case is unaffected.
   textEdit.range.end =
-      context.document.textDocument().positionAt(context.offset);
+      context.document.textDocument().positionAt(context.tokenEndOffset);
   return textEdit;
 }
 
@@ -163,7 +167,7 @@ DefaultCompletionProvider::getCompletion(
     CompletionContext context{document, params, offset, replaceOffset,
                               replaceEndOffset, token.text, prefix, node,
                               reference, feature};
-    completionFor(context, [&accept, &context](CompletionValue value) {
+    completionFor(context, [&accept, &context](const CompletionValue &value) {
       accept(context, value);
     });
     if (!continueCompletion(context)) {
@@ -183,7 +187,7 @@ DefaultCompletionProvider::getCompletion(
                               replaceOffset,     replaceEndOffset,
                               token.text,        prefix,     node,
                               reference,         referenceFeature};
-    completionFor(context, [&accept, &context](CompletionValue value) {
+    completionFor(context, [&accept, &context](const CompletionValue &value) {
       accept(context, value);
     });
   }
@@ -196,7 +200,7 @@ DefaultCompletionProvider::getCompletion(
       CompletionContext context{document, params, offset, offset, offset,
                                 {},          {},     node,   reference,
                                 feature};
-      completionFor(context, [&accept, &context](CompletionValue value) {
+      completionFor(context, [&accept, &context](const CompletionValue &value) {
         accept(context, value);
       });
       if (!continueCompletion(context)) {

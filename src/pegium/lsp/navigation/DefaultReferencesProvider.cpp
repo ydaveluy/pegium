@@ -2,7 +2,6 @@
 #include <pegium/lsp/support/LspProviderUtils.hpp>
 #include <pegium/core/syntax-tree/CstUtils.hpp>
 
-#include <cassert>
 #include <unordered_set>
 #include <utility>
 
@@ -32,9 +31,15 @@ std::vector<::lsp::Location> DefaultReferencesProvider::findReferences(
       if (!seen.insert(location_key(location)).second) {
         continue;
       }
+      // An indexed reference (from a value-copy index snapshot) can outlive its
+      // document in the store, e.g. when this read API is used outside the
+      // workspace lock. Skip such stale references instead of dereferencing
+      // null; the held shared_ptr keeps the document alive across positionAt.
       const auto targetDocument =
           services.shared.workspace.documents->getDocument(location.documentId);
-      assert(targetDocument != nullptr);
+      if (targetDocument == nullptr) {
+        continue;
+      }
       const auto &textDocument = targetDocument->textDocument();
 
       ::lsp::Location result{};

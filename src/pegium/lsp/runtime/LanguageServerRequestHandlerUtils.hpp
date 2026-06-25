@@ -22,16 +22,8 @@
 
 namespace pegium {
 
-/// Converts a document offset range to the corresponding LSP range.
-::lsp::Range offset_to_range(const workspace::Document &document,
-                             TextOffset begin, TextOffset end);
-
 /// Throws when the language server has not completed initialization.
 void ensure_initialized(const LanguageServerHandlerContext &server);
-
-/// Maps a textual code-action kind to the matching LSP enum value.
-std::optional<::lsp::CodeActionKindEnum>
-to_lsp_code_action_kind(std::string_view kind);
 
 /// Loads `uri` and waits until it reaches `requiredState`.
 std::shared_ptr<workspace::Document>
@@ -232,9 +224,7 @@ auto adapt_async_result(LanguageServerHandlerContext &server, T &&value,
 
 template <typename F>
 /// Dispatches background work for one LSP request.
-auto dispatch_async(const pegium::SharedServices &sharedServices, F &&task)
-    -> std::future<std::invoke_result_t<F>> {
-  (void)sharedServices;
+auto dispatch_async(F &&task) -> std::future<std::invoke_result_t<F>> {
   return std::async(std::launch::deferred, std::forward<F>(task));
 }
 
@@ -260,7 +250,6 @@ auto make_async_request(LanguageServerHandlerContext &owner, F &&handler) {
     }
     owner.registerRequestCancellation(requestKey, cancellation);
     return dispatch_async(
-        owner.sharedServices(),
         [&owner, requestKey, cancellation, handlerPtr,
          ownedParams = std::move(ownedParams)]() mutable -> Result {
           const auto cleanup = [&owner, &requestKey, &cancellation]() {

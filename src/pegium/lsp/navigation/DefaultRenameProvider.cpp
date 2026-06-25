@@ -3,14 +3,8 @@
 #include <pegium/core/syntax-tree/CstUtils.hpp>
 
 #include <algorithm>
-#include <array>
-#include <cassert>
-#include <cstdint>
-#include <memory>
-#include <sstream>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 #include <pegium/lsp/services/SharedServices.hpp>
@@ -86,9 +80,22 @@ std::optional<::lsp::PrepareRenameResult> DefaultRenameProvider::prepareRename(
     return std::nullopt;
   }
 
+  // Report the same span rename() will edit. A reference parsed through a
+  // datatype rule (e.g. a dotted qualified name a.b.c) spans the whole reference
+  // node, not just the token under the cursor; widen to it so the rename UI
+  // extent matches the applied edit (rename() edits the whole reference node).
+  auto begin = token.begin;
+  auto end = token.end;
+  if (const auto *reference = find_reference_at_offset(document, offset)) {
+    if (const auto refNode = reference->getRefNode(); refNode.valid()) {
+      begin = refNode.getBegin();
+      end = refNode.getEnd();
+    }
+  }
+
   ::lsp::Range range{};
-  range.start = textDocument.positionAt(token.begin);
-  range.end = textDocument.positionAt(token.end);
+  range.start = textDocument.positionAt(begin);
+  range.end = textDocument.positionAt(end);
   ::lsp::PrepareRenameResult result{};
   result = std::move(range);
   return result;

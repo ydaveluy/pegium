@@ -206,15 +206,12 @@ effective_tab_size(const ::lsp::FormattingOptions &options) noexcept {
 
 [[nodiscard]] bool ranges_overlap(const ::lsp::Range &inside,
                                   const ::lsp::Range &total) noexcept {
-  if ((inside.start.line <= total.start.line &&
-       inside.end.line >= total.end.line) ||
-      (inside.start.line >= total.start.line &&
-       inside.end.line <= total.end.line) ||
-      (inside.start.line <= total.end.line &&
-       inside.end.line >= total.end.line)) {
-    return true;
-  }
-  return false;
+  // Standard inclusive line-interval overlap. The previous three-case form
+  // missed edits that straddle the TOP boundary of the requested range
+  // (inside.start < total.start <= inside.end < total.end), silently dropping
+  // them from a range/on-type format.
+  return inside.start.line <= total.end.line &&
+         total.start.line <= inside.end.line;
 }
 
 [[nodiscard]] bool edit_inside_range(const workspace::Document &document,
@@ -471,10 +468,11 @@ create_hidden_text_edits(const std::optional<CstNodeView> &previous,
 
   const auto hiddenStartChars =
       get_existing_indentation_character_count(hiddenStartText, context);
+  const auto shouldReindentHiddenText =
+      move == nullptr ? !previousEndsOnSameLine : !move->characters.has_value();
   const auto expectedStartChars =
-      (move == nullptr ? !previousEndsOnSameLine : !move->characters.has_value())
-          ? get_indentation_character_count(effectiveContext)
-          : hiddenStartChars;
+      shouldReindentHiddenText ? get_indentation_character_count(effectiveContext)
+                               : hiddenStartChars;
   const auto characterIncrease = expectedStartChars - hiddenStartChars;
 
   if (move == nullptr && !previousEndsOnSameLine && characterIncrease != 0) {
@@ -487,14 +485,11 @@ create_hidden_text_edits(const std::optional<CstNodeView> &previous,
 
   const auto targetText =
       replacementText == nullptr ? hidden.getText() : std::string_view(*replacementText);
-  const auto shouldReindentHiddenText =
-      move == nullptr ? !previousEndsOnSameLine : !move->characters.has_value();
+  const auto reindentChars =
+      replacementText == nullptr ? characterIncrease : expectedStartChars;
   const auto normalizedHiddenText =
       shouldReindentHiddenText
-          ? reindent_hidden_text(targetText,
-                                 replacementText == nullptr ? characterIncrease
-                                                            : expectedStartChars,
-                                 effectiveContext)
+          ? reindent_hidden_text(targetText, reindentChars, effectiveContext)
           : std::string(targetText);
   if (replacementText != nullptr || normalizedHiddenText != hidden.getText()) {
     edits.push_back(PendingEdit{
@@ -564,8 +559,7 @@ find_hidden_replacement(const std::unordered_map<NodeId, std::string> &replaceme
   auto existing =
       std::string(document.textDocument().getText().substr(
           edit.begin, edit.end - edit.begin));
-  const auto removal = std::ranges::remove(existing, '\r');
-  existing.erase(removal.begin(), removal.end());
+  std::erase(existing, '\r');
   return edit.newText != existing;
 }
 
@@ -666,6 +660,13 @@ finalize_edits(const workspace::Document &document, std::vector<PendingEdit> edi
       filtered.pop_back();
       last = filtered.empty() ? nullptr : &filtered.back();
     }
+    // Two edits over the same zero-width gap (begin == end, e.g. a leaf's
+    // `append` and the adjacent next leaf's `prepend`) do not satisfy the
+    // `begin < end` overlap test above, so collapse an exact-range duplicate
+    // here. Keep the later edit, matching the overlap rule's "later wins".
+    if (last != nullptr && last->begin == edit.begin && last->end == edit.end) {
+      filtered.pop_back();
+    }
     filtered.push_back(edit);
   }
 
@@ -685,21 +686,21 @@ finalize_edits(const workspace::Document &document, std::vector<PendingEdit> edi
 
 [[nodiscard]] int compare_moves(const FormattingMove &left,
                                 const FormattingMove &right) noexcept {
-  const auto leftLines = left.lines.value_or(0);
-  const auto rightLines = right.lines.value_or(0);
-  if (leftLines != rightLines) {
+  if (const auto leftLines = left.lines.value_or(0),
+      rightLines = right.lines.value_or(0);
+      leftLines != rightLines) {
     return leftLines < rightLines ? -1 : 1;
   }
 
-  const auto leftTabs = left.tabs.value_or(0);
-  const auto rightTabs = right.tabs.value_or(0);
-  if (leftTabs != rightTabs) {
+  if (const auto leftTabs = left.tabs.value_or(0),
+      rightTabs = right.tabs.value_or(0);
+      leftTabs != rightTabs) {
     return leftTabs < rightTabs ? -1 : 1;
   }
 
-  const auto leftChars = left.characters.value_or(0);
-  const auto rightChars = right.characters.value_or(0);
-  if (leftChars != rightChars) {
+  if (const auto leftChars = left.characters.value_or(0),
+      rightChars = right.characters.value_or(0);
+      leftChars != rightChars) {
     return leftChars < rightChars ? -1 : 1;
   }
   return 0;
@@ -797,19 +798,20 @@ std::string AbstractFormatter::formatMultilineComment(
 
   std::string result = options.start;
   const auto endPrefix = derive_comment_end_prefix(options.newLineStart);
+  using enum CommentLineKind;
   for (const auto &line : lines) {
     result.push_back('\n');
     switch (line.kind) {
-    case CommentLineKind::Blank:
+    case Blank:
       result += options.newLineStart;
       break;
-    case CommentLineKind::TagContinuation:
+    case TagContinuation:
       append_prefixed_comment_line(result,
                                    options.newLineStart + options.tagContinuation,
                                    line.text);
       break;
-    case CommentLineKind::Tag:
-    case CommentLineKind::Text:
+    case Tag:
+    case Text:
       append_prefixed_comment_line(result, options.newLineStart, line.text);
       break;
     }

@@ -1,5 +1,6 @@
 #include <pegium/lsp/support/JsonValue.hpp>
 
+#include <cassert>
 #include <cmath>
 #include <limits>
 
@@ -7,8 +8,14 @@ namespace pegium {
 
 namespace {
 
+// LSP wire integers are 32-bit; pegium ids/offsets reaching here must fit.
+// Out-of-range values saturate as a defensive fallback but violate the wire
+// contract, so the mismatch is caught in Debug.
 constexpr ::lsp::json::Integer
 to_lsp_integer(std::int64_t value) noexcept {
+  assert(value >= std::numeric_limits<::lsp::json::Integer>::min() &&
+         value <= std::numeric_limits<::lsp::json::Integer>::max() &&
+         "value exceeds the LSP 32-bit wire range");
   if (value < std::numeric_limits<::lsp::json::Integer>::min()) {
     return std::numeric_limits<::lsp::json::Integer>::min();
   }

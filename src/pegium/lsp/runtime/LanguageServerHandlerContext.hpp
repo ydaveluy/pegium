@@ -58,7 +58,7 @@ public:
     _runtimeState.setExitRequested(value);
   }
 
-  [[nodiscard]] const workspace::InitializeCapabilities &
+  [[nodiscard]] workspace::InitializeCapabilities
   initializeCapabilities() const noexcept {
     return _runtimeState.initializeCapabilities();
   }

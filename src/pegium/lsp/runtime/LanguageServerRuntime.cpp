@@ -171,7 +171,8 @@ void addDiagnosticsHandler(::lsp::MessageHandler &messageHandler,
                                 .text = std::string(document->textDocument().getText()),
                                 .version = document->textDocument().version(),
                                 .diagnostics = document->diagnostics,
-                            });
+                            },
+                            textDocuments.get());
       }));
 }
 

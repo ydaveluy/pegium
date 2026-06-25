@@ -1,9 +1,11 @@
 #include <pegium/lsp/runtime/LanguageServerRequestHandlerParts.hpp>
 
+#include <algorithm>
+
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
-#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/runtime/LanguageServerRequestHandlerUtils.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
@@ -13,14 +15,12 @@ namespace pegium {
 namespace {
 
 bool has_code_lens_resolve_provider(const pegium::SharedServices &sharedServices) {
-  for (const auto *coreServices : sharedServices.serviceRegistry->all()) {
-    const auto *services = as_services(coreServices);
-    if (services != nullptr && services->lsp.codeLensProvider != nullptr &&
-        services->lsp.codeLensProvider->supportsResolveCodeLens()) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::any_of(
+      sharedServices.serviceRegistry->all(), [](const auto *coreServices) {
+        const auto *services = as_services(coreServices);
+        return services != nullptr && services->lsp.codeLensProvider != nullptr &&
+               services->lsp.codeLensProvider->supportsResolveCodeLens();
+      });
 }
 
 } // namespace

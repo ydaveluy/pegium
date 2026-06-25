@@ -44,11 +44,8 @@ bool DefaultFuzzyMatcher::match(std::string_view query,
       matchedFirstCharacter = matchedFirstCharacter ||
                               !previous.has_value() ||
                               is_word_transition(*previous, current);
-      if (matchedFirstCharacter) {
-        ++character;
-        if (character == query.size()) {
-          return true;
-        }
+      if (matchedFirstCharacter && ++character == query.size()) {
+        return true;
       }
     }
     previous = current;

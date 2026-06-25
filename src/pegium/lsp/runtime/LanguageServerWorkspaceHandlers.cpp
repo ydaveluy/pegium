@@ -5,7 +5,7 @@
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
-#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/runtime/LanguageServerRequestHandlerUtils.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 

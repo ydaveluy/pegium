@@ -1,6 +1,6 @@
 #include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
 
-#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/runtime/internal/RuntimeObservability.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/workspace/WorkspaceAdapters.hpp>
@@ -86,6 +86,7 @@ LanguageServerCapabilities collect_language_server_capabilities(
   std::set<std::string, std::less<>> allCommitCharacters;
   std::set<std::string, std::less<>> signatureTriggerCharacters;
   std::set<std::string, std::less<>> signatureRetriggerCharacters;
+  bool hasSignatureHelpProvider = false;
   std::vector<std::string> semanticTokenTypes;
   std::vector<std::string> semanticTokenModifiers;
   bool hasSemanticTokenProvider = false;
@@ -117,6 +118,7 @@ LanguageServerCapabilities collect_language_server_capabilities(
 
     if (const auto *provider = services->lsp.signatureHelp.get();
         provider != nullptr) {
+      hasSignatureHelpProvider = true;
       const auto options = provider->signatureHelpOptions();
       if (options.triggerCharacters.has_value()) {
         for (const auto &character : *options.triggerCharacters) {
@@ -236,9 +238,11 @@ LanguageServerCapabilities collect_language_server_capabilities(
     }
   }
 
-  if (!signatureTriggerCharacters.empty()) {
+  if (hasSignatureHelpProvider) {
     ::lsp::SignatureHelpOptions options{};
-    options.triggerCharacters = to_lsp_array(signatureTriggerCharacters);
+    if (!signatureTriggerCharacters.empty()) {
+      options.triggerCharacters = to_lsp_array(signatureTriggerCharacters);
+    }
     if (!signatureRetriggerCharacters.empty()) {
       options.retriggerCharacters = to_lsp_array(signatureRetriggerCharacters);
     }

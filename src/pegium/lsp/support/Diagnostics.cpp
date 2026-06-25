@@ -10,6 +10,7 @@
 
 #include <pegium/lsp/support/JsonValue.hpp>
 #include <pegium/core/workspace/Document.hpp>
+#include <pegium/core/workspace/TextDocumentProvider.hpp>
 
 namespace pegium {
 
@@ -38,9 +39,84 @@ constexpr int clamp_to_lsp_integer(std::int64_t value) noexcept {
 
 } // namespace
 
+::lsp::Diagnostic
+to_lsp_diagnostic(const workspace::TextDocument &positionDocument,
+                  const Diagnostic &diagnostic,
+                  const workspace::TextDocumentProvider *crossFileProvider) {
+  const auto &documentUri = positionDocument.uri();
+  ::lsp::Diagnostic lspDiagnostic{};
+  lspDiagnostic.severity = to_lsp_diagnostic_severity(diagnostic.severity);
+  lspDiagnostic.source = diagnostic.source;
+  lspDiagnostic.message = diagnostic.message;
+  if (diagnostic.code.has_value()) {
+    if (const auto *code = std::get_if<std::int64_t>(&*diagnostic.code)) {
+      lspDiagnostic.code =
+          ::lsp::OneOf<int, ::lsp::String>(clamp_to_lsp_integer(*code));
+    } else if (const auto *stringCode =
+                   std::get_if<std::string>(&*diagnostic.code)) {
+      lspDiagnostic.code = ::lsp::OneOf<int, ::lsp::String>(*stringCode);
+    }
+  }
+  if (diagnostic.codeDescription.has_value()) {
+    const auto uri = ::lsp::Uri::parse(*diagnostic.codeDescription);
+    if (uri.isValid()) {
+      ::lsp::CodeDescription codeDescription{};
+      codeDescription.href = uri;
+      lspDiagnostic.codeDescription = std::move(codeDescription);
+    }
+  }
+  if (!diagnostic.tags.empty()) {
+    ::lsp::Array<::lsp::DiagnosticTagEnum> tags;
+    tags.reserve(diagnostic.tags.size());
+    for (const auto tag : diagnostic.tags) {
+      tags.push_back(to_lsp_diagnostic_tag(tag));
+    }
+    lspDiagnostic.tags = std::move(tags);
+  }
+  if (!diagnostic.relatedInformation.empty()) {
+    ::lsp::Array<::lsp::DiagnosticRelatedInformation> relatedInformation;
+    relatedInformation.reserve(diagnostic.relatedInformation.size());
+    for (const auto &entry : diagnostic.relatedInformation) {
+      ::lsp::DiagnosticRelatedInformation related{};
+      const auto entryUri = entry.uri.empty() ? ::lsp::Uri::parse(documentUri)
+                                              : ::lsp::Uri::parse(entry.uri);
+      related.location.uri =
+          entryUri.isValid() ? entryUri : ::lsp::Uri::parse(documentUri);
+
+      // Map the entry's offsets against the document it actually points at: a
+      // cross-file entry resolves through `crossFileProvider`; same-document or
+      // unresolvable entries use `positionDocument`.
+      const workspace::TextDocument *rangeDocument = &positionDocument;
+      std::shared_ptr<workspace::TextDocument> crossFileHolder;
+      if (!entry.uri.empty() && crossFileProvider != nullptr) {
+        if (auto resolved = crossFileProvider->get(entry.uri);
+            resolved != nullptr && resolved->uri() != documentUri) {
+          crossFileHolder = std::move(resolved);
+          rangeDocument = crossFileHolder.get();
+        }
+      }
+      related.location.range.start = rangeDocument->positionAt(entry.begin);
+      related.location.range.end = rangeDocument->positionAt(
+          entry.end >= entry.begin ? entry.end : entry.begin);
+      related.message = entry.message;
+      relatedInformation.push_back(std::move(related));
+    }
+    lspDiagnostic.relatedInformation = std::move(relatedInformation);
+  }
+  if (diagnostic.data.has_value()) {
+    lspDiagnostic.data = to_lsp_any(*diagnostic.data);
+  }
+
+  lspDiagnostic.range.start = positionDocument.positionAt(diagnostic.begin);
+  lspDiagnostic.range.end = positionDocument.positionAt(
+      diagnostic.end >= diagnostic.begin ? diagnostic.end : diagnostic.begin);
+  return lspDiagnostic;
+}
+
 void publish_diagnostics(
     ::lsp::MessageHandler *messageHandler,
-    const workspace::DocumentDiagnosticsSnapshot &snapshot) {
+    const workspace::DocumentDiagnosticsSnapshot &snapshot,
+    const workspace::TextDocumentProvider *crossFileProvider) {
   if (messageHandler == nullptr) {
     return;
   }
@@ -55,61 +131,8 @@ void publish_diagnostics(
       workspace::TextDocument::create(snapshot.uri, "", 0, snapshot.text);
 
   for (const auto &diagnostic : snapshot.diagnostics) {
-    ::lsp::Diagnostic lspDiagnostic{};
-    lspDiagnostic.severity = to_lsp_diagnostic_severity(diagnostic.severity);
-    lspDiagnostic.source = diagnostic.source;
-    lspDiagnostic.message = diagnostic.message;
-    if (diagnostic.code.has_value()) {
-      if (const auto *code = std::get_if<std::int64_t>(&*diagnostic.code)) {
-        lspDiagnostic.code = ::lsp::OneOf<int, ::lsp::String>(
-            clamp_to_lsp_integer(*code));
-      } else if (const auto *code = std::get_if<std::string>(&*diagnostic.code)) {
-        lspDiagnostic.code = ::lsp::OneOf<int, ::lsp::String>(*code);
-      }
-    }
-    if (diagnostic.codeDescription.has_value()) {
-      const auto uri = ::lsp::Uri::parse(*diagnostic.codeDescription);
-      if (uri.isValid()) {
-        ::lsp::CodeDescription codeDescription{};
-        codeDescription.href = uri;
-        lspDiagnostic.codeDescription = std::move(codeDescription);
-      }
-    }
-    if (!diagnostic.tags.empty()) {
-      ::lsp::Array<::lsp::DiagnosticTagEnum> tags;
-      tags.reserve(diagnostic.tags.size());
-      for (const auto tag : diagnostic.tags) {
-        tags.push_back(to_lsp_diagnostic_tag(tag));
-      }
-      lspDiagnostic.tags = std::move(tags);
-    }
-    if (!diagnostic.relatedInformation.empty()) {
-      ::lsp::Array<::lsp::DiagnosticRelatedInformation> relatedInformation;
-      relatedInformation.reserve(diagnostic.relatedInformation.size());
-      for (const auto &entry : diagnostic.relatedInformation) {
-        ::lsp::DiagnosticRelatedInformation related{};
-        const auto entryUri =
-            entry.uri.empty() ? ::lsp::Uri::parse(snapshot.uri)
-                              : ::lsp::Uri::parse(entry.uri);
-        related.location.uri =
-            entryUri.isValid() ? entryUri : ::lsp::Uri::parse(snapshot.uri);
-        related.location.range.start = positionDocument.positionAt(entry.begin);
-        related.location.range.end = positionDocument.positionAt(
-            entry.end >= entry.begin ? entry.end : entry.begin);
-        related.message = entry.message;
-        relatedInformation.push_back(std::move(related));
-      }
-      lspDiagnostic.relatedInformation = std::move(relatedInformation);
-    }
-    if (diagnostic.data.has_value()) {
-      lspDiagnostic.data = to_lsp_any(*diagnostic.data);
-    }
-
-    lspDiagnostic.range.start = positionDocument.positionAt(diagnostic.begin);
-    lspDiagnostic.range.end = positionDocument.positionAt(
-        diagnostic.end >= diagnostic.begin ? diagnostic.end : diagnostic.begin);
-
-    params.diagnostics.push_back(std::move(lspDiagnostic));
+    params.diagnostics.push_back(
+        to_lsp_diagnostic(positionDocument, diagnostic, crossFileProvider));
   }
 
   messageHandler

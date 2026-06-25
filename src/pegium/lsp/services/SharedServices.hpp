@@ -42,11 +42,18 @@ struct SharedServices : pegium::SharedCoreServices {
   SharedLspServices lsp;
 
   SharedServices();
-  SharedServices(SharedServices &&) noexcept;
-  SharedServices &operator=(SharedServices &&) noexcept;
+  // Non-movable for the same reason as its SharedCoreServices base: installed
+  // LSP services hold a back-reference to this SharedServices.
+  SharedServices(SharedServices &&) noexcept = delete;
+  SharedServices &operator=(SharedServices &&) noexcept = delete;
   SharedServices(const SharedServices &) = delete;
   SharedServices &operator=(const SharedServices &) = delete;
   ~SharedServices() override;
+
+  /// True when the shared core services and the required shared LSP runtime
+  /// services are all present. Optional LSP pieces (languageClient,
+  /// executeCommandHandler, fileOperationHandler) are not required.
+  [[nodiscard]] bool isComplete() const noexcept override;
 };
 
 } // namespace pegium

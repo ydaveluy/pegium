@@ -5,8 +5,12 @@
 namespace pegium {
 
 SharedServices::SharedServices() = default;
-SharedServices::SharedServices(SharedServices &&) noexcept = default;
-SharedServices &SharedServices::operator=(SharedServices &&) noexcept = default;
 SharedServices::~SharedServices() = default;
+
+bool SharedServices::isComplete() const noexcept {
+  return SharedCoreServices::isComplete() && lsp.textDocuments &&
+         lsp.documentUpdateHandler && lsp.fuzzyMatcher && lsp.languageServer &&
+         lsp.nodeKindProvider && lsp.workspaceSymbolProvider;
+}
 
 } // namespace pegium

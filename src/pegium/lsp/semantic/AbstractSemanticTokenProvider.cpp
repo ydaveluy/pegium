@@ -273,7 +273,10 @@ AbstractSemanticTokenProvider::semanticTokensOptions() const {
   }
   options.range = true;
   ::lsp::SemanticTokensOptionsFull full{};
-  full.delta = false;
+  // Advertise delta support: semanticHighlightDelta() is fully implemented
+  // (result-id tracking + cached-snapshot diffing) and unit-tested, so clients
+  // can use the incremental path instead of re-requesting the full token set.
+  full.delta = true;
   options.full = full;
   return options;
 }

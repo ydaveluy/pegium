@@ -8,6 +8,7 @@
 
 #include <pegium/lsp/workspace/TextDocuments.hpp>
 #include <pegium/core/utils/Event.hpp>
+#include <pegium/core/utils/TransparentStringHash.hpp>
 
 namespace pegium {
 
@@ -84,7 +85,7 @@ private:
   };
 
   mutable std::mutex _mutex;
-  std::unordered_map<std::string, std::shared_ptr<workspace::TextDocument>>
+  utils::TransparentStringMap<std::shared_ptr<workspace::TextDocument>>
       _documents;
   utils::EventEmitter<workspace::TextDocumentChangeEvent> _onDidOpen;
   utils::EventEmitter<workspace::TextDocumentChangeEvent> _onDidChangeContent;

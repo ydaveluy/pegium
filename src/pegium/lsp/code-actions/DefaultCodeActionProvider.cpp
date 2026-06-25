@@ -52,22 +52,22 @@ DefaultCodeActionProvider::getCodeActions(
     const utils::CancellationToken &cancelToken) const {
   utils::throw_if_cancelled(cancelToken);
 
-  if (!accepts_quick_fix_only(params.context)) {
-    return std::nullopt;
-  }
-
   CodeActionResult actions;
-  for (const auto &diagnostic : params.context.diagnostics) {
-    utils::throw_if_cancelled(cancelToken);
+  // The built-in diagnostic quick fixes only apply when the request accepts the
+  // QuickFix kind; override-contributed actions decide their own kinds below.
+  if (accepts_quick_fix_only(params.context)) {
+    for (const auto &diagnostic : params.context.diagnostics) {
+      utils::throw_if_cancelled(cancelToken);
 
-    const auto edits = extractDefaultCodeActions(diagnostic);
-    if (!edits.has_value()) {
-      continue;
-    }
-    for (const auto &edit : *edits) {
-      if (auto action = makeDefaultCodeAction(document, diagnostic, edit);
-          action.has_value()) {
-        actions.emplace_back(std::move(*action));
+      const auto edits = extractDefaultCodeActions(diagnostic);
+      if (!edits.has_value()) {
+        continue;
+      }
+      for (const auto &edit : *edits) {
+        if (auto action = makeDefaultCodeAction(document, diagnostic, edit);
+            action.has_value()) {
+          actions.emplace_back(std::move(*action));
+        }
       }
     }
   }
@@ -112,13 +112,15 @@ DefaultCodeActionProvider::extractDefaultCodeActions(
     }
     const auto &object = entry.object();
     auto kind = get_string_field(object, "kind");
-    auto editKind = get_string_field(object, "editKind");
     auto title = get_string_field(object, "title");
     auto newText = get_string_field(object, "newText");
     auto begin = get_uint_field(object, "begin");
     auto end = get_uint_field(object, "end");
-    if (!kind.has_value() || !editKind.has_value() || !title.has_value() ||
-        !newText.has_value() || !begin.has_value() || !end.has_value()) {
+    // `editKind` was required-then-discarded: makeDefaultCodeAction derives
+    // behaviour solely from kind/begin/end/newText, so the read added coupling
+    // without use.
+    if (!kind.has_value() || !title.has_value() || !newText.has_value() ||
+        !begin.has_value() || !end.has_value()) {
       continue;
     }
     actions.push_back({.kind = std::move(*kind),

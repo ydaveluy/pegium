@@ -18,6 +18,9 @@ void LanguageServerRuntimeState::reset() noexcept {
     _initializeCapabilities = {};
     pending = std::move(_requestCancellation);
     _requestCancellation.clear();
+    // Wake waitForPendingRequests(): its predicate (_requestCancellation
+    // empty) is now satisfied, mirroring clearRequestCancellation().
+    _requestCancellationCv.notify_all();
   }
   for (const auto &source : std::views::values(pending)) {
     source->request_stop();
@@ -48,13 +51,15 @@ void LanguageServerRuntimeState::setExitRequested(bool value) noexcept {
   _exitRequested.store(value, std::memory_order_release);
 }
 
-const workspace::InitializeCapabilities &
+workspace::InitializeCapabilities
 LanguageServerRuntimeState::initializeCapabilities() const noexcept {
+  std::scoped_lock lock(_requestCancellationMutex);
   return _initializeCapabilities;
 }
 
 void LanguageServerRuntimeState::setInitializeCapabilities(
     workspace::InitializeCapabilities capabilities) noexcept {
+  std::scoped_lock lock(_requestCancellationMutex);
   _initializeCapabilities = std::move(capabilities);
 }
 

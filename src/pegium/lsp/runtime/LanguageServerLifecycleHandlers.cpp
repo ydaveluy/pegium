@@ -1,5 +1,6 @@
 #include <pegium/lsp/runtime/LanguageServerRequestHandlerParts.hpp>
 
+#include <lsp/error.h>
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
@@ -19,6 +20,11 @@ void addLanguageServerLifecycleHandlers(LanguageServerHandlerContext &server,
 
   handler.add<::lsp::requests::Initialize>(
       [&server](const ::lsp::InitializeParams &params) {
+        if (server.initialized()) {
+          throw ::lsp::RequestError(
+              static_cast<int>(::lsp::ErrorCodes::InvalidRequest),
+              "Server already initialized");
+        }
         auto result = server.initialize(params);
         server.setInitialized(true);
         return result;

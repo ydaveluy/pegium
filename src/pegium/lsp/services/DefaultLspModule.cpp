@@ -1,5 +1,6 @@
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
+#include <cassert>
 #include <memory>
 #include <mutex>
 #include <string_view>
@@ -39,13 +40,14 @@ constexpr std::string_view kWindowShowMessageMethod = "window/showMessage";
 int to_lsp_message_type(
     observability::ObservationSeverity severity) noexcept {
   switch (severity) {
-  case observability::ObservationSeverity::Trace:
+    using enum observability::ObservationSeverity;
+  case Trace:
     return 4;
-  case observability::ObservationSeverity::Info:
+  case Info:
     return 3;
-  case observability::ObservationSeverity::Warning:
+  case Warning:
     return 2;
-  case observability::ObservationSeverity::Error:
+  case Error:
     return 1;
   }
   return 3;
@@ -225,6 +227,10 @@ void installDefaultSharedLspServices(SharedServices &sharedServices) {
     sharedServices.lsp.workspaceSymbolProvider =
         std::make_unique<DefaultWorkspaceSymbolProvider>(sharedServices);
   }
+  // Defense-in-depth: fires only if a required shared service was added to
+  // SharedServices::isComplete() but not installed here or in the core install.
+  assert(sharedServices.isComplete() &&
+         "installDefaultSharedLspServices left the shared container incomplete");
 }
 
 } // namespace pegium

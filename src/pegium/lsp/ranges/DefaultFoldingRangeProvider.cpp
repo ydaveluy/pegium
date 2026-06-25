@@ -2,14 +2,7 @@
 #include <pegium/lsp/support/LspProviderUtils.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cassert>
-#include <cstdint>
-#include <memory>
-#include <sstream>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 #include <pegium/lsp/services/SharedServices.hpp>

@@ -1,5 +1,22 @@
 #pragma once
 
+/// pegium's headless language-server feature API: every LSP feature as a free
+/// function over a `SharedServices` and an `lsp::*Params`, returning the LSP
+/// result directly — no running server, transport, or message loop. The actual
+/// language server (and the `pegium::testing` harness) are just callers of these.
+///
+/// Use this to drive a feature from a test or tool when the high-level
+/// `pegium::testing` `expect…` helpers are not enough (e.g. rename, prepare
+/// rename, code actions, or asserting on the raw protocol result). Build the
+/// `params` for an offset with `document.textDocument().positionAt(offset)`.
+///
+/// Thread-safety: every feature function is safe to call concurrently. Each
+/// operates on a read-locked snapshot of the workspace (it coordinates with the
+/// document-build pipeline), so concurrent feature requests do not race with
+/// each other or with in-flight builds. The query functions take a
+/// `const SharedServices&` (they only read language state); `executeCommand`
+/// takes a non-const reference, since running a command may change it.
+
 #include <optional>
 #include <string>
 #include <vector>
@@ -14,147 +31,147 @@ namespace pegium {
 
 /// Resolves completion items for one cursor position.
 [[nodiscard]] std::optional<::lsp::CompletionList>
-getCompletion(pegium::SharedServices &sharedServices,
+getCompletion(const pegium::SharedServices &sharedServices,
               const ::lsp::CompletionParams &params,
               const utils::CancellationToken &cancelToken =
                   utils::default_cancel_token);
 
 /// Resolves signature help for one cursor position.
 [[nodiscard]] std::optional<::lsp::SignatureHelp>
-getSignatureHelp(pegium::SharedServices &sharedServices,
+getSignatureHelp(const pegium::SharedServices &sharedServices,
                  const ::lsp::SignatureHelpParams &params,
                  const utils::CancellationToken &cancelToken =
                      utils::default_cancel_token);
 
 /// Resolves hover content for one cursor position.
 [[nodiscard]] std::optional<::lsp::Hover>
-getHoverContent(pegium::SharedServices &sharedServices,
+getHoverContent(const pegium::SharedServices &sharedServices,
                 const ::lsp::HoverParams &params,
                 const utils::CancellationToken &cancelToken =
                     utils::default_cancel_token);
 
 /// Computes code lenses for one document.
 [[nodiscard]] std::vector<::lsp::CodeLens>
-getCodeLens(pegium::SharedServices &sharedServices,
+getCodeLens(const pegium::SharedServices &sharedServices,
             const ::lsp::CodeLensParams &params,
             const utils::CancellationToken &cancelToken =
                 utils::default_cancel_token);
 
 /// Resolves deferred metadata for one code lens.
 [[nodiscard]] std::optional<::lsp::CodeLens>
-resolveCodeLens(pegium::SharedServices &sharedServices,
+resolveCodeLens(const pegium::SharedServices &sharedServices,
                 const ::lsp::CodeLens &codeLens,
                 const utils::CancellationToken &cancelToken =
                     utils::default_cancel_token);
 
 /// Computes document symbols for one document.
 [[nodiscard]] std::vector<::lsp::DocumentSymbol>
-getDocumentSymbols(pegium::SharedServices &sharedServices,
+getDocumentSymbols(const pegium::SharedServices &sharedServices,
                    const ::lsp::DocumentSymbolParams &params,
                    const utils::CancellationToken &cancelToken =
                        utils::default_cancel_token);
 
 /// Computes highlight ranges at one cursor position.
 [[nodiscard]] std::vector<::lsp::DocumentHighlight>
-getDocumentHighlights(pegium::SharedServices &sharedServices,
+getDocumentHighlights(const pegium::SharedServices &sharedServices,
                       const ::lsp::DocumentHighlightParams &params,
                       const utils::CancellationToken &cancelToken =
                           utils::default_cancel_token);
 
 /// Computes folding ranges for one document.
 [[nodiscard]] std::vector<::lsp::FoldingRange>
-getFoldingRanges(pegium::SharedServices &sharedServices,
+getFoldingRanges(const pegium::SharedServices &sharedServices,
                  const ::lsp::FoldingRangeParams &params,
                  const utils::CancellationToken &cancelToken =
                      utils::default_cancel_token);
 
 /// Resolves declaration targets for one cursor position.
 [[nodiscard]] std::optional<std::vector<::lsp::LocationLink>>
-getDeclaration(pegium::SharedServices &sharedServices,
+getDeclaration(const pegium::SharedServices &sharedServices,
                const ::lsp::DeclarationParams &params,
                const utils::CancellationToken &cancelToken =
                    utils::default_cancel_token);
 
 /// Resolves definition targets for one cursor position.
 [[nodiscard]] std::optional<std::vector<::lsp::LocationLink>>
-getDefinition(pegium::SharedServices &sharedServices,
+getDefinition(const pegium::SharedServices &sharedServices,
               const ::lsp::DefinitionParams &params,
               const utils::CancellationToken &cancelToken =
                   utils::default_cancel_token);
 
 /// Resolves type-definition targets for one cursor position.
 [[nodiscard]] std::optional<std::vector<::lsp::LocationLink>>
-getTypeDefinition(pegium::SharedServices &sharedServices,
+getTypeDefinition(const pegium::SharedServices &sharedServices,
                   const ::lsp::TypeDefinitionParams &params,
                   const utils::CancellationToken &cancelToken =
                       utils::default_cancel_token);
 
 /// Resolves implementation targets for one cursor position.
 [[nodiscard]] std::optional<std::vector<::lsp::LocationLink>>
-getImplementation(pegium::SharedServices &sharedServices,
+getImplementation(const pegium::SharedServices &sharedServices,
                   const ::lsp::ImplementationParams &params,
                   const utils::CancellationToken &cancelToken =
                       utils::default_cancel_token);
 
 /// Resolves all references reachable from one cursor position.
 [[nodiscard]] std::vector<::lsp::Location>
-getReferences(pegium::SharedServices &sharedServices,
+getReferences(const pegium::SharedServices &sharedServices,
               const ::lsp::ReferenceParams &params,
               const utils::CancellationToken &cancelToken =
                   utils::default_cancel_token);
 
 /// Computes the workspace edit for a rename request.
 [[nodiscard]] std::optional<::lsp::WorkspaceEdit>
-rename(pegium::SharedServices &sharedServices,
+rename(const pegium::SharedServices &sharedServices,
        const ::lsp::RenameParams &params,
        const utils::CancellationToken &cancelToken =
            utils::default_cancel_token);
 
 /// Formats a whole document.
 [[nodiscard]] std::vector<::lsp::TextEdit>
-formatDocument(pegium::SharedServices &sharedServices,
+formatDocument(const pegium::SharedServices &sharedServices,
                const ::lsp::DocumentFormattingParams &params,
                const utils::CancellationToken &cancelToken =
                    utils::default_cancel_token);
 
 /// Formats one document range.
 [[nodiscard]] std::vector<::lsp::TextEdit>
-formatDocumentRange(pegium::SharedServices &sharedServices,
+formatDocumentRange(const pegium::SharedServices &sharedServices,
                     const ::lsp::DocumentRangeFormattingParams &params,
                     const utils::CancellationToken &cancelToken =
                         utils::default_cancel_token);
 
 /// Formats one document after a trigger character was typed.
 [[nodiscard]] std::vector<::lsp::TextEdit>
-formatDocumentOnType(pegium::SharedServices &sharedServices,
+formatDocumentOnType(const pegium::SharedServices &sharedServices,
                      const ::lsp::DocumentOnTypeFormattingParams &params,
                      const utils::CancellationToken &cancelToken =
                          utils::default_cancel_token);
 
 /// Computes inlay hints for one document range.
 [[nodiscard]] std::vector<::lsp::InlayHint>
-getInlayHints(pegium::SharedServices &sharedServices,
+getInlayHints(const pegium::SharedServices &sharedServices,
               const ::lsp::InlayHintParams &params,
               const utils::CancellationToken &cancelToken =
                   utils::default_cancel_token);
 
 /// Computes a full semantic-token snapshot.
 [[nodiscard]] std::optional<::lsp::SemanticTokens>
-getSemanticTokensFull(pegium::SharedServices &sharedServices,
+getSemanticTokensFull(const pegium::SharedServices &sharedServices,
                       const ::lsp::SemanticTokensParams &params,
                       const utils::CancellationToken &cancelToken =
                           utils::default_cancel_token);
 
 /// Computes semantic tokens for one document range.
 [[nodiscard]] std::optional<::lsp::SemanticTokens>
-getSemanticTokensRange(pegium::SharedServices &sharedServices,
+getSemanticTokensRange(const pegium::SharedServices &sharedServices,
                        const ::lsp::SemanticTokensRangeParams &params,
                        const utils::CancellationToken &cancelToken =
                            utils::default_cancel_token);
 
 /// Computes a semantic-token delta from a previous result id.
 [[nodiscard]] std::optional<::lsp::OneOf<::lsp::SemanticTokens, ::lsp::SemanticTokensDelta>>
-getSemanticTokensDelta(pegium::SharedServices &sharedServices,
+getSemanticTokensDelta(const pegium::SharedServices &sharedServices,
                        const ::lsp::SemanticTokensDeltaParams &params,
                        const utils::CancellationToken &cancelToken =
                            utils::default_cancel_token);
@@ -172,42 +189,42 @@ executeCommand(pegium::SharedServices &sharedServices,
 
 /// Resolves the initial call-hierarchy items at one cursor position.
 [[nodiscard]] std::vector<::lsp::CallHierarchyItem>
-prepareCallHierarchy(pegium::SharedServices &sharedServices,
+prepareCallHierarchy(const pegium::SharedServices &sharedServices,
                      const ::lsp::CallHierarchyPrepareParams &params,
                      const utils::CancellationToken &cancelToken =
                          utils::default_cancel_token);
 
 /// Resolves incoming calls for one call-hierarchy item.
 [[nodiscard]] std::vector<::lsp::CallHierarchyIncomingCall>
-getIncomingCalls(pegium::SharedServices &sharedServices,
+getIncomingCalls(const pegium::SharedServices &sharedServices,
                  const ::lsp::CallHierarchyIncomingCallsParams &params,
                  const utils::CancellationToken &cancelToken =
                      utils::default_cancel_token);
 
 /// Resolves outgoing calls for one call-hierarchy item.
 [[nodiscard]] std::vector<::lsp::CallHierarchyOutgoingCall>
-getOutgoingCalls(pegium::SharedServices &sharedServices,
+getOutgoingCalls(const pegium::SharedServices &sharedServices,
                  const ::lsp::CallHierarchyOutgoingCallsParams &params,
                  const utils::CancellationToken &cancelToken =
                      utils::default_cancel_token);
 
 /// Resolves the initial type-hierarchy items at one cursor position.
 [[nodiscard]] std::vector<::lsp::TypeHierarchyItem>
-prepareTypeHierarchy(pegium::SharedServices &sharedServices,
+prepareTypeHierarchy(const pegium::SharedServices &sharedServices,
                      const ::lsp::TypeHierarchyPrepareParams &params,
                      const utils::CancellationToken &cancelToken =
                          utils::default_cancel_token);
 
 /// Resolves direct supertypes for one type-hierarchy item.
 [[nodiscard]] std::vector<::lsp::TypeHierarchyItem>
-getTypeHierarchySupertypes(pegium::SharedServices &sharedServices,
+getTypeHierarchySupertypes(const pegium::SharedServices &sharedServices,
                            const ::lsp::TypeHierarchySupertypesParams &params,
                            const utils::CancellationToken &cancelToken =
                                utils::default_cancel_token);
 
 /// Resolves direct subtypes for one type-hierarchy item.
 [[nodiscard]] std::vector<::lsp::TypeHierarchyItem>
-getTypeHierarchySubtypes(pegium::SharedServices &sharedServices,
+getTypeHierarchySubtypes(const pegium::SharedServices &sharedServices,
                          const ::lsp::TypeHierarchySubtypesParams &params,
                          const utils::CancellationToken &cancelToken =
                              utils::default_cancel_token);
@@ -215,42 +232,42 @@ getTypeHierarchySubtypes(pegium::SharedServices &sharedServices,
 /// Computes code actions for one document range.
 [[nodiscard]] std::optional<std::vector<
     ::lsp::OneOf<::lsp::Command, ::lsp::CodeAction>>>
-getCodeActions(pegium::SharedServices &sharedServices,
+getCodeActions(const pegium::SharedServices &sharedServices,
                const ::lsp::CodeActionParams &params,
                const utils::CancellationToken &cancelToken =
                    utils::default_cancel_token);
 
 /// Resolves document links for one document.
 [[nodiscard]] std::vector<::lsp::DocumentLink>
-getDocumentLinks(pegium::SharedServices &sharedServices,
+getDocumentLinks(const pegium::SharedServices &sharedServices,
                  const ::lsp::DocumentLinkParams &params,
                  const utils::CancellationToken &cancelToken =
                      utils::default_cancel_token);
 
 /// Computes selection ranges for one or more cursor positions.
 [[nodiscard]] std::vector<::lsp::SelectionRange>
-getSelectionRanges(pegium::SharedServices &sharedServices,
+getSelectionRanges(const pegium::SharedServices &sharedServices,
                    const ::lsp::SelectionRangeParams &params,
                    const utils::CancellationToken &cancelToken =
                        utils::default_cancel_token);
 
 /// Checks whether the symbol at the cursor can be renamed.
 [[nodiscard]] std::optional<::lsp::PrepareRenameResult>
-prepareRename(pegium::SharedServices &sharedServices,
+prepareRename(const pegium::SharedServices &sharedServices,
               const ::lsp::PrepareRenameParams &params,
               const utils::CancellationToken &cancelToken =
                   utils::default_cancel_token);
 
 /// Searches workspace symbols matching `params`.
 [[nodiscard]] std::vector<::lsp::WorkspaceSymbol>
-getWorkspaceSymbols(pegium::SharedServices &sharedServices,
+getWorkspaceSymbols(const pegium::SharedServices &sharedServices,
                     const ::lsp::WorkspaceSymbolParams &params,
                     const utils::CancellationToken &cancelToken =
                         utils::default_cancel_token);
 
 /// Resolves deferred metadata for one workspace symbol.
 [[nodiscard]] std::optional<::lsp::WorkspaceSymbol>
-resolveWorkspaceSymbol(pegium::SharedServices &sharedServices,
+resolveWorkspaceSymbol(const pegium::SharedServices &sharedServices,
                        const ::lsp::WorkspaceSymbol &symbol,
                        const utils::CancellationToken &cancelToken =
                            utils::default_cancel_token);

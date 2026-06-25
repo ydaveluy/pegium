@@ -1,7 +1,6 @@
 #include <pegium/lsp/symbols/DefaultDocumentSymbolProvider.hpp>
 
-#include <cassert>
-#include <memory>
+#include <iterator>
 #include <utility>
 
 #include <pegium/core/references/NameProvider.hpp>

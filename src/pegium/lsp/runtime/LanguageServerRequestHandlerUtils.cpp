@@ -27,54 +27,17 @@ std::atomic<std::uint64_t> g_anonymousRequestCounter{0};
 
 } // namespace
 
-::lsp::Range offset_to_range(const workspace::Document &document,
-                             TextOffset begin, TextOffset end) {
-  const auto &textDocument = document.textDocument();
-  ::lsp::Range range{};
-  range.start = textDocument.positionAt(begin);
-  range.end = textDocument.positionAt(end >= begin ? end : begin);
-  return range;
-}
-
 void ensure_initialized(const LanguageServerHandlerContext &server) {
   if (!server.initialized()) {
     throw ::lsp::RequestError(
         static_cast<int>(::lsp::ErrorCodes::ServerNotInitialized),
         "Server not initialized");
   }
-}
-
-std::optional<::lsp::CodeActionKindEnum>
-to_lsp_code_action_kind(std::string_view kind) {
-  using enum ::lsp::CodeActionKind;
-  if (kind.empty()) {
-    return std::nullopt;
+  if (server.shutdownRequested()) {
+    throw ::lsp::RequestError(
+        static_cast<int>(::lsp::ErrorCodes::InvalidRequest),
+        "Server is shutting down");
   }
-  if (kind == "quickfix") {
-    return QuickFix;
-  }
-  if (kind == "refactor") {
-    return Refactor;
-  }
-  if (kind == "refactor.extract") {
-    return RefactorExtract;
-  }
-  if (kind == "refactor.inline") {
-    return RefactorInline;
-  }
-  if (kind == "refactor.rewrite") {
-    return RefactorRewrite;
-  }
-  if (kind == "source") {
-    return Source;
-  }
-  if (kind == "source.organizeImports") {
-    return SourceOrganizeImports;
-  }
-  if (kind == "source.fixAll") {
-    return SourceFixAll;
-  }
-  return std::nullopt;
 }
 
 std::shared_ptr<workspace::Document>
@@ -153,6 +116,11 @@ void wait_until_phase(pegium::SharedServices &sharedServices,
     if (uri.has_value() &&
         requiredState.type == ServiceRequirement::Type::Document) {
       if (document == nullptr) {
+        // A URI the server has no language for is not an error: return so the
+        // caller yields an empty result rather than RequestFailed.
+        if (sharedServices.serviceRegistry->findServices(*uri) == nullptr) {
+          return;
+        }
         throw utils::LanguageServerError(
             std::format("No document found for URI: {}", *uri));
       }
