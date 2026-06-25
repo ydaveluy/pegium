@@ -62,6 +62,7 @@ public:
       !IsOrderedChoice<Element>::value &&
       std::remove_cvref_t<Element>::isFailureSafe;
   static constexpr Associativity kAssociativity = Assoc;
+  using ElementType = Element;
 
   static_assert(
       operator_has_required_raw_values,
@@ -703,11 +704,17 @@ private:
         if (precedence < minPrecedence) {
           return false;
         }
+        const auto operatorCheckpoint = ctx.mark();
         if (parser::attempt_fast_probe(ctx, op) &&
             parser::attempt_parse_strict(ctx, op)) {
-          nextMinPrecedence =
-              detail::infix_next_min_precedence<decltype(op)>(precedence);
-          return true;
+          if (!detail::infix_operator_shadowed<std::remove_cvref_t<decltype(op)>,
+                                               Operators...>(ctx.cursor(),
+                                                             ctx.end)) {
+            nextMinPrecedence =
+                detail::infix_next_min_precedence<decltype(op)>(precedence);
+            return true;
+          }
+          ctx.rewind(operatorCheckpoint);
         }
         if constexpr (I + 1 == sizeof...(Operators)) {
           return false;
@@ -741,11 +748,16 @@ private:
         // context with both flags pinned to false.
         auto editGuard = ctx.withEditPermissions(false, false);
         (void)editGuard;
-        if (const bool matched = parser::attempt_parse_editable(ctx, op);
-            matched) {
-          nextMinPrecedence =
-              detail::infix_next_min_precedence<decltype(op)>(precedence);
-          return true;
+        const auto operatorCheckpoint = ctx.mark();
+        if (parser::attempt_parse_editable(ctx, op)) {
+          if (!detail::infix_operator_shadowed<std::remove_cvref_t<decltype(op)>,
+                                               Operators...>(ctx.cursor(),
+                                                             ctx.end)) {
+            nextMinPrecedence =
+                detail::infix_next_min_precedence<decltype(op)>(precedence);
+            return true;
+          }
+          ctx.rewind(operatorCheckpoint);
         }
         if constexpr (I + 1 == sizeof...(Operators)) {
           return false;

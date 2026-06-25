@@ -11,6 +11,7 @@
 #include <pegium/core/grammar/InfixRule.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/ExpectFrontier.hpp>
+#include <pegium/core/parser/Literal.hpp>
 #include <pegium/core/parser/ParseAttempt.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParseContext.hpp>
@@ -18,6 +19,7 @@
 #include <pegium/core/parser/RawValueTraits.hpp>
 #include <pegium/core/parser/ValueBuildContext.hpp>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -328,6 +330,62 @@ infix_next_min_precedence(std::int32_t precedence) noexcept {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Maximal-munch guard for prefix-overlapping single-literal operators.
+//
+// In a scannerless precedence parser, `|` (declared at a tighter level) would
+// match the prefix of `||` (a looser level) and shadow it. The guard lets a
+// shorter single-literal operator yield to a longer declared operator that also
+// matches at the same position, so `|`/`||` and `&`/`&&` parse correctly with
+// plain literals — no hand-written `!"|"` lookahead. `OrderedChoice` and
+// non-literal (e.g. terminal) operators never shadow, so they cost nothing.
+// -----------------------------------------------------------------------------
+template <typename T> struct infix_literal_view;
+template <auto L, bool CS> struct infix_literal_view<Literal<L, CS>> {
+  static constexpr std::string_view value{L.begin(), L.size()};
+};
+
+template <typename... Ops>
+constexpr auto infix_single_literal_operator_texts() {
+  constexpr std::size_t count =
+      (0U + ... +
+       (IsLiteral<std::remove_cvref_t<typename Ops::ElementType>> ? 1U : 0U));
+  std::array<std::string_view, count> texts{};
+  std::size_t index = 0;
+  (
+      [&] {
+        using E = std::remove_cvref_t<typename Ops::ElementType>;
+        if constexpr (IsLiteral<E>) {
+          texts[index++] = infix_literal_view<E>::value;
+        }
+      }(),
+      ...);
+  return texts;
+}
+
+/// True when the single-`Literal` operator `MatchedOp` that just matched
+/// (ending at `cursor`) is only a prefix of a longer declared operator that
+/// also matches here — it must yield to that longer operator. Non-literal
+/// operators are never shadowed.
+template <typename MatchedOp, typename... Ops>
+[[nodiscard]] bool infix_operator_shadowed(const char *cursor,
+                                           const char *end) noexcept {
+  using E = std::remove_cvref_t<typename MatchedOp::ElementType>;
+  if constexpr (IsLiteral<E>) {
+    static constexpr auto texts = infix_single_literal_operator_texts<Ops...>();
+    constexpr std::size_t matchedLen = infix_literal_view<E>::value.size();
+    const char *const start = cursor - matchedLen;
+    for (const std::string_view candidate : texts) {
+      if (candidate.size() > matchedLen &&
+          static_cast<std::size_t>(end - start) >= candidate.size() &&
+          std::string_view{start, candidate.size()} == candidate) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 template <typename Model, typename... Operators> struct InfixRuleExpectSupport {
   template <std::size_t I = 0>
   static bool try_match_operator(const Model *model, ExpectContext &ctx,
@@ -347,14 +405,12 @@ template <typename Model, typename... Operators> struct InfixRuleExpectSupport {
       const auto checkpoint = ctx.mark();
       auto noEditGuard = ctx.withEditTrackingDisabled();
       (void)noEditGuard;
-      if (parse(op, ctx)) {
-        if (ctx.frontierBlocked()) {
-          ctx.rewind(checkpoint);
-        } else {
-          nextMinPrecedence =
-              infix_next_min_precedence<decltype(op)>(precedence);
-          return true;
-        }
+      if (parse(op, ctx) && !ctx.frontierBlocked() &&
+          !infix_operator_shadowed<std::remove_cvref_t<decltype(op)>,
+                                   Operators...>(ctx.cursor(), ctx.end)) {
+        nextMinPrecedence =
+            infix_next_min_precedence<decltype(op)>(precedence);
+        return true;
       }
       ctx.rewind(checkpoint);
       return try_match_operator<I + 1>(model, ctx, minPrecedence,
