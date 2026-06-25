@@ -19,7 +19,7 @@ Source: [examples/arithmetics](https://github.com/ydaveluy/pegium/tree/main/exam
 
 ## What to read first
 
-- `examples/arithmetics/src/arithmetics/core/Parser.hpp` for the grammar and rule definitions
+- `examples/arithmetics/src/arithmetics/core/ArithmeticParser.hpp` for the grammar and rule definitions
 - `examples/arithmetics/src/arithmetics/core/ast.hpp` for the AST shape
 - `examples/arithmetics/src/arithmetics/core/Module.cpp` for service wiring
 - `examples/arithmetics/src/arithmetics/core/Language.cpp` for evaluating the parsed AST

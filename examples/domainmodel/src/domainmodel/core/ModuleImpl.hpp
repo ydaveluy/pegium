@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include <domainmodel/core/Parser.hpp>
+#include <domainmodel/core/DomainModelParser.hpp>
 #include <domainmodel/core/Services.hpp>
 #include <domainmodel/core/references/DomainModelScopeComputation.hpp>
 #include <domainmodel/core/references/QualifiedNameProvider.hpp>

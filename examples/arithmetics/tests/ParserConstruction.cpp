@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <arithmetics/lsp/Module.hpp>
-#include <arithmetics/core/Parser.hpp>
+#include <arithmetics/core/ArithmeticParser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <cstdlib>

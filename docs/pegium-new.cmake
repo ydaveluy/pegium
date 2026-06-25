@@ -430,7 +430,7 @@ then add a `VSCE_PAT` secret and uncomment the publish step in the workflow (or 
 | What you want to change     | File(s) to edit                                       |
 |-----------------------------|-------------------------------------------------------|
 | Add a new AST node          | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/ast.hpp`                                  |
-| Extend the grammar          | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/Parser.hpp`                        |
+| Extend the grammar          | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/@PEGIUM_NEW_CLASS@Parser.hpp`                        |
 | Add validation checks       | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/` (add a validator class)            |
 | Add LSP features (hover, …) | `src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/`                                     |
 | Add a code generator        | `src/@PEGIUM_NEW_LANGUAGE_ID@/cli/main.cpp`            |
@@ -491,60 +491,7 @@ int main(int argc, char **argv) {
   }
 }
 ]==])
-_pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/Module.cpp]==] [==[always]==] [==[#include <@PEGIUM_NEW_LANGUAGE_ID@/core/Module.hpp>
-
-#include <utility>
-
-#include <@PEGIUM_NEW_LANGUAGE_ID@/core/Parser.hpp>
-
-namespace @PEGIUM_NEW_LANGUAGE_ID@ {
-
-namespace {
-template <typename Services> void apply@PEGIUM_NEW_CLASS@CoreModule(Services &services) {
-  services.parser = std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(services);
-  services.languageMetaData.fileExtensions = {"@PEGIUM_NEW_EXT@"};
-}
-} // namespace
-
-std::unique_ptr<@PEGIUM_NEW_CLASS@CoreServices>
-create@PEGIUM_NEW_CLASS@Services(const pegium::SharedCoreServices &sharedServices,
-                     std::string languageId) {
-  auto services = std::make_unique<@PEGIUM_NEW_CLASS@CoreServices>(sharedServices);
-  services->languageMetaData.languageId = std::move(languageId);
-  pegium::installDefaultCoreServices(*services);
-  apply@PEGIUM_NEW_CLASS@CoreModule(*services);
-  return services;
-}
-
-bool register@PEGIUM_NEW_CLASS@Services(pegium::SharedCoreServices &sharedServices) {
-  sharedServices.serviceRegistry->registerServices(
-      create@PEGIUM_NEW_CLASS@Services(sharedServices));
-  return true;
-}
-
-} // namespace @PEGIUM_NEW_LANGUAGE_ID@
-]==])
-_pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/Module.hpp]==] [==[always]==] [==[#pragma once
-
-#include <memory>
-#include <string>
-
-#include <@PEGIUM_NEW_LANGUAGE_ID@/core/Services.hpp>
-#include <pegium/core/services/SharedCoreServices.hpp>
-
-namespace @PEGIUM_NEW_LANGUAGE_ID@ {
-
-/// Builds the core-only @PEGIUM_NEW_CLASS@ language services.
-std::unique_ptr<@PEGIUM_NEW_CLASS@CoreServices>
-create@PEGIUM_NEW_CLASS@Services(const pegium::SharedCoreServices &sharedServices,
-                     std::string languageId = "@PEGIUM_NEW_LANGUAGE_ID@");
-
-/// Registers the core-only @PEGIUM_NEW_CLASS@ services in `sharedServices`.
-bool register@PEGIUM_NEW_CLASS@Services(pegium::SharedCoreServices &sharedServices);
-
-} // namespace @PEGIUM_NEW_LANGUAGE_ID@
-]==])
-_pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/Parser.hpp]==] [==[always]==] [==[#pragma once
+_pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/@PEGIUM_NEW_CLASS@Parser.hpp]==] [==[always]==] [==[#pragma once
 
 #include <string>
 
@@ -593,6 +540,59 @@ protected:
 
 } // namespace @PEGIUM_NEW_LANGUAGE_ID@::parser
 ]==])
+_pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/Module.cpp]==] [==[always]==] [==[#include <@PEGIUM_NEW_LANGUAGE_ID@/core/Module.hpp>
+
+#include <utility>
+
+#include <@PEGIUM_NEW_LANGUAGE_ID@/core/@PEGIUM_NEW_CLASS@Parser.hpp>
+
+namespace @PEGIUM_NEW_LANGUAGE_ID@ {
+
+namespace {
+template <typename Services> void apply@PEGIUM_NEW_CLASS@CoreModule(Services &services) {
+  services.parser = std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(services);
+  services.languageMetaData.fileExtensions = {"@PEGIUM_NEW_EXT@"};
+}
+} // namespace
+
+std::unique_ptr<@PEGIUM_NEW_CLASS@CoreServices>
+create@PEGIUM_NEW_CLASS@Services(const pegium::SharedCoreServices &sharedServices,
+                     std::string languageId) {
+  auto services = std::make_unique<@PEGIUM_NEW_CLASS@CoreServices>(sharedServices);
+  services->languageMetaData.languageId = std::move(languageId);
+  pegium::installDefaultCoreServices(*services);
+  apply@PEGIUM_NEW_CLASS@CoreModule(*services);
+  return services;
+}
+
+bool register@PEGIUM_NEW_CLASS@Services(pegium::SharedCoreServices &sharedServices) {
+  sharedServices.serviceRegistry->registerServices(
+      create@PEGIUM_NEW_CLASS@Services(sharedServices));
+  return true;
+}
+
+} // namespace @PEGIUM_NEW_LANGUAGE_ID@
+]==])
+_pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/Module.hpp]==] [==[always]==] [==[#pragma once
+
+#include <memory>
+#include <string>
+
+#include <@PEGIUM_NEW_LANGUAGE_ID@/core/Services.hpp>
+#include <pegium/core/services/SharedCoreServices.hpp>
+
+namespace @PEGIUM_NEW_LANGUAGE_ID@ {
+
+/// Builds the core-only @PEGIUM_NEW_CLASS@ language services.
+std::unique_ptr<@PEGIUM_NEW_CLASS@CoreServices>
+create@PEGIUM_NEW_CLASS@Services(const pegium::SharedCoreServices &sharedServices,
+                     std::string languageId = "@PEGIUM_NEW_LANGUAGE_ID@");
+
+/// Registers the core-only @PEGIUM_NEW_CLASS@ services in `sharedServices`.
+bool register@PEGIUM_NEW_CLASS@Services(pegium::SharedCoreServices &sharedServices);
+
+} // namespace @PEGIUM_NEW_LANGUAGE_ID@
+]==])
 _pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/Services.hpp]==] [==[always]==] [==[#pragma once
 
 #include <pegium/core/services/CoreServices.hpp>
@@ -629,7 +629,7 @@ _pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/Module.cpp]==] [==[lsp]==]
 
 #include <utility>
 
-#include <@PEGIUM_NEW_LANGUAGE_ID@/core/Parser.hpp>
+#include <@PEGIUM_NEW_LANGUAGE_ID@/core/@PEGIUM_NEW_CLASS@Parser.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace @PEGIUM_NEW_LANGUAGE_ID@::lsp {

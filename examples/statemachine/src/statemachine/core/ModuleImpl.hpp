@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include <statemachine/core/Parser.hpp>
+#include <statemachine/core/StateMachineParser.hpp>
 #include <statemachine/core/Services.hpp>
 #include <statemachine/core/validation/StatemachineValidator.hpp>
 

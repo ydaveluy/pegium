@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include <@PEGIUM_NEW_LANGUAGE_ID@/core/Parser.hpp>
+#include <@PEGIUM_NEW_LANGUAGE_ID@/core/@PEGIUM_NEW_CLASS@Parser.hpp>
 
 namespace @PEGIUM_NEW_LANGUAGE_ID@ {
 

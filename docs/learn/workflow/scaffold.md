@@ -64,7 +64,7 @@ You get:
 
 | File                                    | Role                                       |
 |-----------------------------------------|--------------------------------------------|
-| `src/mylang/core/Parser.hpp`          | grammar rules and terminals                |
+| `src/mylang/core/MyLangParser.hpp`          | grammar rules and terminals                |
 | `src/mylang/core/ast.hpp`                    | AST types and reference fields             |
 | `src/mylang/core/Module.cpp`            | core service wiring (parser, validator…)   |
 | `src/mylang/lsp/Module.cpp`             | LSP feature wiring (formatter, hover…)     |

@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include <arithmetics/core/Parser.hpp>
+#include <arithmetics/core/ArithmeticParser.hpp>
 #include <arithmetics/core/Services.hpp>
 #include <arithmetics/core/validation/ArithmeticsValidator.hpp>
 

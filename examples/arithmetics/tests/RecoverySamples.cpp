@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/core/Parser.hpp>
+#include <arithmetics/core/ArithmeticParser.hpp>
 
 #include <pegium/core/grammar/AbstractRule.hpp>
 #include <pegium/core/grammar/Assignment.hpp>

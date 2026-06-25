@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include <requirements/core/Parser.hpp>
+#include <requirements/core/RequirementsParser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>

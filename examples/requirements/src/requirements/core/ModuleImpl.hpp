@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include <requirements/core/Parser.hpp>
+#include <requirements/core/RequirementsParser.hpp>
 #include <requirements/core/Services.hpp>
 #include <requirements/core/validation/RequirementsValidator.hpp>
 #include <requirements/core/validation/TestsValidator.hpp>

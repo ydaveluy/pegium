@@ -74,7 +74,7 @@ then add a `VSCE_PAT` secret and uncomment the publish step in the workflow (or 
 | What you want to change     | File(s) to edit                                       |
 |-----------------------------|-------------------------------------------------------|
 | Add a new AST node          | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/ast.hpp`                                  |
-| Extend the grammar          | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/Parser.hpp`                        |
+| Extend the grammar          | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/@PEGIUM_NEW_CLASS@Parser.hpp`                        |
 | Add validation checks       | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/` (add a validator class)            |
 | Add LSP features (hover, …) | `src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/`                                     |
 | Add a code generator        | `src/@PEGIUM_NEW_LANGUAGE_ID@/cli/main.cpp`            |

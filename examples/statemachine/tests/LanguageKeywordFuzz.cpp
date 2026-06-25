@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <statemachine/core/Parser.hpp>
+#include <statemachine/core/StateMachineParser.hpp>
 
 #include <pegium/examples/KeywordFuzzHarness.hpp>
 

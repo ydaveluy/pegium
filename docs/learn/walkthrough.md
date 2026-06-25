@@ -61,12 +61,12 @@ The member-type aliases come from `AstNode`:
 - `pointer<T>` is an arena-owned child node; `vector<>` holds repeated members.
 - `reference<T>` is a cross-link to another node, resolved later by the linker.
 
-## 2. Write the grammar — `core/Parser.hpp`
+## 2. Write the grammar — `core/StateMachineParser.hpp`
 
 Subclass `pegium::parser::PegiumParser`, override `getEntryRule()` and `getSkipper()`, and declare your terminals and rules with the PEG DSL. The grammar shapes the AST directly through the `assign`/`append` actions.
 
 ```cpp
-// From examples/statemachine/src/statemachine/core/Parser.hpp (comments trimmed).
+// From examples/statemachine/src/statemachine/core/StateMachineParser.hpp (comments trimmed).
 #include <statemachine/core/ast.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 

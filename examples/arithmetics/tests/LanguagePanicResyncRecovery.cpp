@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <arithmetics/core/ast.hpp>
-#include <arithmetics/core/Parser.hpp>
+#include <arithmetics/core/ArithmeticParser.hpp>
 
 #include "LanguageTestSupport.hpp"
 
