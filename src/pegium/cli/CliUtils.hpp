@@ -14,7 +14,10 @@ struct Document;
 namespace pegium::cli {
 
 /// Creates shared services for standalone CLI execution.
-[[nodiscard]] pegium::SharedCoreServices make_shared_services();
+///
+/// Returns an owning handle (SharedCoreServices is non-movable: its installed
+/// services hold back-references to it, so it must stay at a fixed address).
+[[nodiscard]] std::unique_ptr<pegium::SharedCoreServices> make_shared_services();
 
 /// Loads or rebuilds the document for `path` and returns the shared snapshot.
 [[nodiscard]] std::shared_ptr<workspace::Document>

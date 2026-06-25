@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -18,17 +19,6 @@
 #include <pegium/core/workspace/Documents.hpp>
 
 namespace {
-
-std::string normalize_extension(std::string_view extension) {
-  if (extension.empty()) {
-    return {};
-  }
-  std::string normalized(extension);
-  if (normalized.front() != '.') {
-    normalized.insert(normalized.begin(), '.');
-  }
-  return normalized;
-}
 
 std::string join_values(const std::vector<std::string> &values) {
   std::string out;
@@ -56,10 +46,11 @@ bool matches_language_path(
     }
   }
 
-  const auto extension = normalize_extension(path.extension().string());
+  const auto extension =
+      pegium::utils::normalize_extension(path.extension().string());
   return std::ranges::any_of(
       languageMetaData.fileExtensions, [&extension](const auto &candidate) {
-        return normalize_extension(candidate) == extension;
+        return pegium::utils::normalize_extension(candidate) == extension;
       });
 }
 
@@ -94,13 +85,15 @@ void validate_language_path(
 
 namespace pegium::cli {
 
-pegium::SharedCoreServices make_shared_services() {
-  pegium::SharedCoreServices sharedServices;
-  pegium::installDefaultSharedCoreServices(sharedServices);
-  sharedServices.workspace.configurationProvider->initialize(
+std::unique_ptr<pegium::SharedCoreServices> make_shared_services() {
+  // Heap-construct so the object stays at a fixed address: installed services
+  // hold back-references to it, and SharedCoreServices is non-movable.
+  auto sharedServices = std::make_unique<pegium::SharedCoreServices>();
+  pegium::installDefaultSharedCoreServices(*sharedServices);
+  sharedServices->workspace.configurationProvider->initialize(
       workspace::InitializeParams{});
   auto initialized =
-      sharedServices.workspace.configurationProvider->initialized(
+      sharedServices->workspace.configurationProvider->initialized(
           workspace::InitializedParams{});
   initialized.get();
   return sharedServices;
@@ -110,6 +103,9 @@ std::shared_ptr<workspace::Document>
 build_document_from_path(std::string_view path,
                          const pegium::CoreServices &services,
                          bool validation) {
+  if (path.empty()) {
+    throw utils::CliUsageError("No file path was provided.");
+  }
   const auto absolutePath = std::filesystem::absolute(std::filesystem::path(path));
   const auto absolutePathString = absolutePath.string();
   const auto uri = utils::path_to_file_uri(absolutePathString);
@@ -117,6 +113,10 @@ build_document_from_path(std::string_view path,
   if (!services.shared.workspace.fileSystemProvider->exists(uri)) {
     throw utils::CliUsageError("File " + absolutePathString +
                                " does not exist.");
+  }
+  if (!std::filesystem::is_regular_file(absolutePath)) {
+    throw utils::CliUsageError("Path " + absolutePathString +
+                               " is not a regular file.");
   }
 
   validate_language_path(absolutePath, services.languageMetaData);

@@ -122,10 +122,13 @@ std::string grammar_source(const grammar::AbstractElement *grammarElement) {
   return "Unknown";
 }
 
-pegium::JsonValue::Array convert_children(const CstNodeView &node,
-                                            const CstJsonConversionOptions &options) {
+// Converts every child of `container` (a CstNodeView or a RootCstNode, both of
+// which iterate to CstNodeView children).
+template <typename CstContainer>
+pegium::JsonValue::Array convert_children(const CstContainer &container,
+                                          const CstJsonConversionOptions &options) {
   pegium::JsonValue::Array children;
-  for (const auto &child : node) {
+  for (const auto &child : container) {
     children.emplace_back(CstJsonConverter::convert(child, options));
   }
   return children;
@@ -161,12 +164,7 @@ CstJsonConverter::convert(const CstNodeView &node, const Options &options) {
 pegium::JsonValue
 CstJsonConverter::convert(const RootCstNode &root, const Options &options) {
   pegium::JsonValue::Object object;
-  pegium::JsonValue::Array content;
-  for (const auto &child : root) {
-    content.emplace_back(convert(child, options));
-  }
-  object.try_emplace("content", std::move(content));
-
+  object.try_emplace("content", convert_children(root, options));
   return pegium::JsonValue(std::move(object));
 }
 
