@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <typeindex>
 #include <unordered_set>
 
@@ -34,6 +35,13 @@ public:
   [[nodiscard]] virtual std::vector<AstNodeDescription>
   allElements(std::optional<std::type_index> type = std::nullopt,
               std::span<const DocumentId> documentIds = {}) const = 0;
+  /// Returns the first indexed exported symbol named `name` in allElements()
+  /// order (optionally filtered by type), or nullopt. Equivalent to scanning
+  /// allElements() for the first name match, but without materializing the
+  /// whole index — copies out a single description under the read lock.
+  [[nodiscard]] virtual std::optional<AstNodeDescription>
+  findByName(std::string_view name,
+             std::optional<std::type_index> type = std::nullopt) const = 0;
   /// Returns every indexed reference targeting `targetKey`.
   [[nodiscard]] virtual std::vector<ReferenceDescription>
   findAllReferences(const NodeKey &targetKey) const = 0;

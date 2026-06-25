@@ -74,21 +74,23 @@ constexpr std::array<bool, 256> createCharacterRange(std::string_view s) {
   return value;
 }
 
-/// Build an array of char (remove the ending '\0')
-/// @tparam N the number of char without the ending '\0'
+/// Compile-time builder of a 256-entry byte-membership table from a character
+/// range literal (the trailing '\0' is excluded from the range).
+/// @tparam N the number of chars including the ending '\0' (i.e. the literal's
+/// array size)
 template <std::size_t N> struct range_array_builder {
   std::array<bool, 256> value{};
   constexpr explicit(false) range_array_builder(const char (&s)[N])
       : value{createCharacterRange({s, N - 1})} {}
 };
 
-static constexpr const auto is_word_lookup =
+inline constexpr const auto is_word_lookup =
     range_array_builder{"a-zA-Z0-9_"}.value;
 constexpr bool isWord(char c) {
   return is_word_lookup[static_cast<unsigned char>(c)];
 }
 
-static constexpr const auto is_letter_lookup =
+inline constexpr const auto is_letter_lookup =
     range_array_builder{"a-zA-Z"}.value;
 constexpr bool isLetter(char c) {
   return is_letter_lookup[static_cast<unsigned char>(c)];
@@ -108,7 +110,7 @@ consteval auto make_utf8_codepoint_length_table() {
   return table;
 }
 
-static constexpr auto utf8_codepoint_length_table =
+inline constexpr auto utf8_codepoint_length_table =
     make_utf8_codepoint_length_table();
 
 constexpr std::size_t utf8_codepoint_length(char leadByte) noexcept {
@@ -267,7 +269,7 @@ consteval auto make_tolower() {
   }
   return lookup;
 }
-static constexpr auto tolower_array = make_tolower();
+inline constexpr auto tolower_array = make_tolower();
 
 /// Fast helper function to convert a char to lower case
 /// @param c the char to convert

@@ -16,9 +16,7 @@ struct ValueBuildContext;
 namespace pegium::grammar {
 
 struct DataTypeRule : AbstractRule {
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::DataTypeRule;
-  }
+  constexpr DataTypeRule() noexcept : AbstractRule(ElementKind::DataTypeRule) {}
   virtual RuleValue
   getValue(const CstNodeView &node,
            const parser::ValueBuildContext *context = nullptr) const = 0;

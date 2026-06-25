@@ -264,8 +264,8 @@ private:
       return detail::apply_terminal_recovery_choice(
           ctx, choice, this, []() { return false; },
           [this, &ctx, cursorStart, choice]() {
-            const char *const replaceEnd = cursorStart + choice.consumed;
-            if (!detail::can_apply_recovery_match(ctx, replaceEnd) ||
+            if (const char *const replaceEnd = cursorStart + choice.consumed;
+                !detail::can_apply_recovery_match(ctx, replaceEnd) ||
                 !ctx.replaceLeaf(replaceEnd, this, choice.cost.budgetCost,
                                  /*hidden=*/false, choice.distance)) {
               return false;

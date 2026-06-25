@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <functional>
+#include <format>
 #include <pegium/core/grammar/AnyCharacter.hpp>
 #include <pegium/core/grammar/CharacterRange.hpp>
 #include <pegium/core/grammar/Literal.hpp>
@@ -36,8 +37,8 @@ template <typename T> struct DataTypeRuleValueSupport {
 
   [[nodiscard]] static std::string
   unsupported_element_conversion_message(grammar::ElementKind kind) {
-    return "ValueConvert not provided for rule " +
-           std::to_string(static_cast<int>(kind));
+    return std::format("ValueConvert not provided for rule {}",
+                       static_cast<int>(kind));
   }
 
   template <typename Rule>

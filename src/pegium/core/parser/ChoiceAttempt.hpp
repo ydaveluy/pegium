@@ -86,7 +86,7 @@ struct RecoveryPolicyFingerprint {
   bool insideEditWindow = false;
   bool completedWindowContinuation = false;
   // Read by Repetition / UnorderedGroup / InfixRule recovery decisions
-  // (`Repetition.hpp:242`, `UnorderedGroup.hpp:102`, `InfixRule.hpp:670`).
+  // (`Repetition.hpp:251`, `UnorderedGroup.hpp:102`, `InfixRule.hpp:516`).
   // A choice attempt cached at one value can replay a wrong winner if the
   // bit flips between visits.
   bool frontierBlocked = false;
@@ -97,8 +97,9 @@ struct RecoveryPolicyFingerprint {
   // Index into committed-recovery-edits replay; controls whether edits
   // are admissible at the current cursor (`ParseContext.cpp:53,97,141`).
   std::uint32_t committedRecoveryEditIndex = 0;
-  // Per-attempt edit budgets. Mutated by `ExtendedDeleteScanBudgetScope`
-  // (`RecoveryUtils.hpp:54-55`); affects which candidates are admissible.
+  // Per-attempt edit budgets, mutated by `ExtendedDeleteScanBudgetScope` in
+  // `tryEnable()` (`RecoveryUtils.hpp:37-38`) and `restore()` (`:48-49`);
+  // affects which candidates are admissible.
   std::uint32_t remainingEditCount = 0;
   std::uint32_t remainingConsecutiveDeletes = 0;
 

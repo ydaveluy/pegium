@@ -680,9 +680,9 @@ private:
       static bool has_operator_fast_probe(const Model *model, Context &ctx,
                                           std::int32_t minPrecedence) {
         const auto &op = std::get<I>(model->ops);
-        constexpr auto precedence =
-            static_cast<std::int32_t>(sizeof...(Operators) - I);
-        if (precedence >= minPrecedence &&
+        if (constexpr auto precedence =
+                static_cast<std::int32_t>(sizeof...(Operators) - I);
+            precedence >= minPrecedence &&
             parser::attempt_fast_probe(ctx, op)) {
           return true;
         }
@@ -977,15 +977,6 @@ private:
         return {.matched = true, .stopTail = nestedReplayResult.stopTail};
       }
 
-      /// Observable variant of `recover_stray_operator_run`: runs the
-      /// same delete-scan logic against the cursor without committing
-      /// any mutation (cursor, skipAfterDelete, edits all rewound), and
-      /// returns the number of codepoint deletes that the scan would
-      /// produce on commit. `std::nullopt` means the scan would not
-      /// admit a `DeleteOperatorNoise` recovery from the current cursor
-      /// (operator probe fails or the scan runs past its budget without
-      /// matching). Used to project a real `RecoveryKey` for the
-      /// `DeleteOperatorNoise` candidate at selection time.
       /// Shared bounded delete-scan over a stray operator run: skip operator
       /// noise until the operator probe re-accepts, unless a recoverable
       /// primary hides behind a local trivia gap. The caller owns the
@@ -1033,6 +1024,14 @@ private:
             std::forward<OnMatch>(onMatch));
       }
 
+      /// Observable variant of `recover_stray_operator_run`: runs the same
+      /// delete-scan logic against the cursor without committing any mutation
+      /// (cursor, skipAfterDelete, edits all rewound), and returns the number
+      /// of codepoint deletes the scan would produce on commit. `std::nullopt`
+      /// means the scan would not admit a `DeleteOperatorNoise` recovery from
+      /// the current cursor (operator probe fails or the scan runs past its
+      /// budget without matching). Used to project a real `RecoveryKey` for the
+      /// `DeleteOperatorNoise` candidate at selection time.
       [[nodiscard]] static std::optional<std::uint32_t>
       observe_stray_operator_run_delete_count(const Model *model,
                                               RecoveryContext &ctx,

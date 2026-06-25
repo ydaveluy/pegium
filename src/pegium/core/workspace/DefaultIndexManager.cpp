@@ -9,16 +9,6 @@
 
 namespace pegium::workspace {
 
-namespace {
-
-bool matches_type(const AstNodeDescription &description,
-                  std::type_index expectedType,
-                  const AstReflection &reflection) {
-  return type_is_assignable(description.type, expectedType, reflection);
-}
-
-} // namespace
-
 DefaultIndexManager::DefaultIndexManager(
     pegium::SharedCoreServices &sharedServices)
     : pegium::DefaultSharedCoreService(sharedServices) {}
@@ -102,14 +92,9 @@ std::vector<AstNodeDescription> DefaultIndexManager::allElements(
 
   std::scoped_lock lock(_mutex);
   if (documentIds.empty()) {
-    std::vector<DocumentId> indexedDocumentIds;
-    indexedDocumentIds.reserve(_exportsByDocument.size());
-    for (const auto &[documentId, exports] : _exportsByDocument) {
-      (void)exports;
-      indexedDocumentIds.push_back(documentId);
-    }
-    std::ranges::sort(indexedDocumentIds);
-    for (const auto documentId : indexedDocumentIds) {
+    // _exportsByDocument is ordered by DocumentId, so iterating its keys yields
+    // the canonical order directly — no separate sort needed.
+    for (const auto documentId : std::views::keys(_exportsByDocument)) {
       auto descriptions = getFileDescriptionsLocked(documentId, type);
       result.insert(result.end(), descriptions.begin(), descriptions.end());
     }
@@ -121,6 +106,29 @@ std::vector<AstNodeDescription> DefaultIndexManager::allElements(
     result.insert(result.end(), descriptions.begin(), descriptions.end());
   }
   return result;
+}
+
+std::optional<AstNodeDescription>
+DefaultIndexManager::findByName(std::string_view name,
+                               std::optional<std::type_index> type) const {
+  std::scoped_lock lock(_mutex);
+
+  // Scan in the same order allElements() produces (documents ordered by id, then
+  // each document's export order) and stop at the first name match, copying out
+  // a single description under the lock — avoids materializing the whole index.
+  for (const auto &exports : std::views::values(_exportsByDocument)) {
+    for (const auto &description : exports) {
+      if (description.name != name) {
+        continue;
+      }
+      if (type.has_value() &&
+          !type_is_assignable(description.type, *type, *shared.astReflection)) {
+        continue;
+      }
+      return description;
+    }
+  }
+  return std::nullopt;
 }
 
 std::vector<ReferenceDescription>
@@ -180,7 +188,7 @@ DefaultIndexManager::filterDescriptionsByTypeLocked(
   std::vector<AstNodeDescription> filtered;
   const auto &reflection = *shared.astReflection;
   for (const auto &description : exports) {
-    if (matches_type(description, type, reflection)) {
+    if (type_is_assignable(description.type, type, reflection)) {
       filtered.push_back(description);
     }
   }

@@ -18,7 +18,7 @@ public:
 
   void clearLinkState() const noexcept override {
     _target = nullptr;
-    _description = nullptr;
+    _description.reset();
     resetBaseLinkState();
   }
 
@@ -43,7 +43,7 @@ protected:
   [[nodiscard]] const workspace::AstNodeDescription &
   resolvedDescription() const override {
     ensureResolved();
-    assert(_description != nullptr);
+    assert(_description.has_value());
     return *_description;
   }
 
@@ -67,24 +67,37 @@ private:
           // therefore hands us a node that IS-A `T`, making the cast a static
           // downcast.
           assert(dynamic_cast<const T *>(resolved.node) != nullptr);
+          assert(resolved.description != nullptr);
+          // Own the description by value: for cross-document (global) targets
+          // the resolved pointer aims into the scope provider's global cache,
+          // which is freed when a later build invalidates it. A copy keeps
+          // go-to-definition / find-references valid for documents that are not
+          // relinked by that build.
+          //
+          // Copy the description (the only throwing step) BEFORE storing the
+          // never-throwing `_target` pointer and publishing, so a bad_alloc here
+          // leaves the reference fully unresolved rather than with `_target` set
+          // and `_description` empty (which would make operator bool() lie and
+          // resolvedDescription() dereference an empty optional).
+          _description = *resolved.description;
           _target = static_cast<const T *>(resolved.node);
-          _description = resolved.description;
           publishState(ReferenceState::Resolved);
         },
         [] { /* unresolved: nothing to publish */ });
   }
 
   mutable const T *_target = nullptr;
-  mutable const workspace::AstNodeDescription *_description = nullptr;
+  mutable std::optional<workspace::AstNodeDescription> _description;
 };
 
-/// Resolved entry of a multi-valued reference: pairs the (non-owning) node
-/// description pointer with the typed pointer to the resolved AST node.
+/// Resolved entry of a multi-valued reference: pairs an owned copy of the node
+/// description with the typed pointer to the resolved AST node.
 ///
-/// Pointer lifetimes mirror those of `Reference<T>`: descriptions live in the
-/// owning document's index, AST nodes live in the parsed document.
+/// The description is held BY VALUE so it stays valid after the scope provider's
+/// global cache is invalidated by a later build (cross-document targets). The
+/// `ref` pointer lives in the parsed document, as before.
 template <typename T> struct MultiReferenceItem {
-  const workspace::AstNodeDescription *description = nullptr;
+  workspace::AstNodeDescription description{};
   const T *ref = nullptr;
 };
 
@@ -106,8 +119,6 @@ public:
     ensureResolved();
     return std::span<const Item>(_items.data(), _items.size());
   }
-
-  [[nodiscard]] std::span<const Item> resolveAll() const { return items(); }
 
   [[nodiscard]] const T *operator[](std::size_t index) const {
     ensureResolved();
@@ -168,8 +179,7 @@ protected:
   resolvedDescriptionAt(std::size_t index) const override {
     ensureResolved();
     assert(index < _items.size());
-    assert(_items[index].description != nullptr);
-    return *_items[index].description;
+    return _items[index].description;
   }
 
 private:
@@ -190,8 +200,9 @@ private:
           _items.reserve(descriptions.size());
           for (const auto &resolved : descriptions) {
             assert(dynamic_cast<const T *>(resolved.node) != nullptr);
+            assert(resolved.description != nullptr);
             _items.push_back(
-                Item{.description = resolved.description,
+                Item{.description = *resolved.description,
                      .ref = static_cast<const T *>(resolved.node)});
           }
           publishState(ReferenceState::Resolved);

@@ -34,16 +34,13 @@ using SymbolId = std::uint32_t;
 inline constexpr SymbolId InvalidSymbolId =
     std::numeric_limits<SymbolId>::max();
 
-/// Stable exported symbol description stored in workspace indexes.
+/// Stable exported symbol description stored in workspace indexes: the name,
+/// the type, and the (documentId, symbolId) identity for re-resolving the node.
 struct AstNodeDescription {
   std::string name;
   std::type_index type = std::type_index(typeid(void));
   DocumentId documentId = InvalidDocumentId;
   SymbolId symbolId = InvalidSymbolId;
-  /// Byte offset of the visible symbol name in the source document.
-  TextOffset offset = 0;
-  /// Length in bytes of the visible symbol name in the source document.
-  TextOffset nameLength = 0;
 };
 
 /// Name-indexed scope entries preserving the first declaration separately.
@@ -60,7 +57,18 @@ struct NamedScopeEntries {
   }
 
   [[nodiscard]] bool empty() const noexcept { return first == nullptr; }
+
+  /// The first-seen entry for this name. Precondition: `!empty()`.
+  [[nodiscard]] const AstNodeDescription *firstEntry() const noexcept {
+    assert(first != nullptr);
+    return first;
+  }
 };
+
+/// Name index mapping a symbol name to its scope entries. The key caches its
+/// hash (`utils::HashedStringView`) so a reference name hashed once can be probed
+/// across every bucket and ancestor scope level without re-hashing.
+using NamedScopeEntryIndex = utils::HashedStringViewMap<NamedScopeEntries>;
 
 /// Scope entries grouped by assignable target type.
 ///
@@ -68,10 +76,7 @@ struct NamedScopeEntries {
 /// indexes them by name. `std::deque` is used so that adding a new description
 /// never invalidates the pointers held by the name index.
 struct ScopeEntryBucket {
-  using NameIndex =
-      std::unordered_map<std::string_view,
-                         NamedScopeEntries,
-                         utils::TransparentStringHash, std::equal_to<>>;
+  using NameIndex = NamedScopeEntryIndex;
 
   std::type_index type = std::type_index(typeid(void));
   std::deque<AstNodeDescription> ownedEntries;
@@ -123,8 +128,11 @@ struct ReferenceDescription {
   TextOffset sourceOffset = 0;
   TextOffset sourceLength = 0;
 
-  std::type_index referenceType = std::type_index(typeid(void));
   bool local = false;
+  // True when the source reference is a multi-reference. Lets consumers (e.g.
+  // get_self_nodes) skip non-multi incoming references in O(1) instead of
+  // re-resolving each one against the source document.
+  bool multiReference = false;
   std::optional<DocumentId> targetDocumentId;
   std::optional<SymbolId> targetSymbolId;
 

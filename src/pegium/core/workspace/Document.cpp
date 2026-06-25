@@ -1,9 +1,11 @@
 #include <pegium/core/workspace/Document.hpp>
 
 #include <cassert>
+#include <string>
 #include <utility>
 
 #include <pegium/core/syntax-tree/AstArena.hpp>
+#include <pegium/core/utils/Errors.hpp>
 
 namespace pegium::workspace {
 namespace {
@@ -16,7 +18,8 @@ std::string resolve_document_uri(
 
 } // namespace
 
-Document::Document(std::shared_ptr<TextDocument> textDocument, std::string uri)
+Document::Document(std::shared_ptr<TextDocument> textDocument,
+                   const std::string &uri)
     : uri(resolve_document_uri(textDocument, uri)),
       _textDocument(std::move(textDocument)) {
   assert(_textDocument != nullptr);
@@ -45,11 +48,21 @@ SymbolId Document::makeSymbolId(const AstNode &node) const noexcept {
   return static_cast<SymbolId>(node.symbolId());
 }
 
-const AstNode &Document::getAstNode(SymbolId symbolId) const noexcept {
+const AstNode &Document::getAstNode(SymbolId symbolId) const {
   assert(symbolId != InvalidSymbolId);
-  assert(parseResult.astArena != nullptr);
-  const auto *node = parseResult.astArena->getNode(symbolId);
-  assert(node != nullptr);
+  const auto *node = parseResult.astArena != nullptr
+                         ? parseResult.astArena->getNode(symbolId)
+                         : nullptr;
+  if (node == nullptr) {
+    // The build relinks every dependent of a changed/deleted document
+    // (DefaultDocumentBuilder::shouldRelink -> IndexManager::isAffected), so a
+    // resolved description always points at a live node. If that invariant is
+    // ever violated, throw a catchable error rather than dereferencing null (a
+    // release-mode UAF); the linker turns it into a LinkingError.
+    throw utils::MissingAstDocumentError(
+        "Document::getAstNode: symbol " + std::to_string(symbolId) +
+        " no longer resolves to a live AST node (stale reference?)");
+  }
   return *node;
 }
 

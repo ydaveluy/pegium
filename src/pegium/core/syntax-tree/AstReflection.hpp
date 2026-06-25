@@ -111,11 +111,16 @@ private:
 [[nodiscard]] inline bool
 type_is_assignable(std::type_index candidate, std::type_index expected,
                    const AstReflection &reflection) noexcept {
-  if (expected == std::type_index(typeid(void)) ||
-      candidate == std::type_index(typeid(void))) {
+  // `type_index::operator==` falls back to `strcmp` on libstdc++; the name()
+  // pointer compare (FastTypeIndexEqual) is correct within a single DSO and one
+  // instruction. This gate runs once per scope bucket per reference, so the
+  // strcmp fallback was a measurable slice of the build's __strcmp_avx2 cost.
+  static const std::type_index voidType{typeid(void)};
+  constexpr utils::FastTypeIndexEqual eq{};
+  if (eq(expected, voidType) || eq(candidate, voidType)) {
     return false;
   }
-  if (candidate == expected) {
+  if (eq(candidate, expected)) {
     return true;
   }
   return reflection.isSubtype(candidate, expected);

@@ -17,7 +17,8 @@ namespace pegium::parser {
 /// crossing a structural boundary.
 inline constexpr std::uint32_t kDefaultMaxConsecutiveCodepointDeletes = 8;
 
-/// Maximum bytes a `Repetition` may skip when no normal recovery plan can
+/// Maximum number of codepoints a `Repetition` may skip when no normal recovery
+/// plan can
 /// bridge the current iteration (last-resort panic-mode budget). Shared by the
 /// `ParseOptions` default and the `RecoveryContext` per-window limit so they
 /// cannot drift.

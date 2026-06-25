@@ -42,7 +42,7 @@ enum class RecoveryAttemptStatus : std::uint8_t {
 struct RecoveryProbeAxes {
   /// Forbids the fuzzy WHOLE-keyword Replace at a terminal when a boundary
   /// split-Insert is also enumerable (keyword matches exactly as a prefix and a
-  /// visible continuation follows). Read in `Literal::selectLocalRecoveryChoice`
+  /// visible continuation follows). Read in `Literal::try_local_recovery`
   /// via the `RecoveryContext` mirror.
   bool forbidWholeKeywordFuzzyReplace = false;
   /// Forbids the out-of-window single-fuzzy-edit keyword Replace carve-out

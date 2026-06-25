@@ -23,7 +23,7 @@ namespace detail {
 
 struct CompiledValidationCheckEntry {
   std::type_index targetType = std::type_index(typeid(AstNode));
-  ValidationCheck check;        // unwrapped: try/catch is hoisted to PreparedChecks::run
+  ValidationCheck check; // unwrapped: try/catch is hoisted to runChecks
   std::string category;
 };
 
@@ -37,8 +37,6 @@ struct CompiledValidationRegistry {
   std::vector<std::string> knownCategories;
   std::vector<CompiledValidationCheckEntry> checks;
   CompiledValidationCheckIndex checksByType;
-  std::vector<ValidationPreparation> checksBefore;
-  std::vector<ValidationPreparation> checksAfter;
   std::shared_ptr<observability::ObservabilitySink> sink;
 };
 
@@ -113,8 +111,6 @@ DefaultValidationRegistry::compiledRegistry() const {
 
   auto compiled = std::make_shared<detail::CompiledValidationRegistry>();
   compiled->knownCategories = _knownCategories;
-  compiled->checksBefore = _registeredChecksBefore;
-  compiled->checksAfter = _registeredChecksAfter;
 
   compiled->checks.reserve(_registeredChecks.size());
   for (const auto &entry : _registeredChecks) {

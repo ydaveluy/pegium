@@ -82,13 +82,17 @@ struct Document {
 
   /// Returns the symbol identifier of `node` inside this document.
   [[nodiscard]] SymbolId makeSymbolId(const AstNode &node) const noexcept;
-  /// Resolves a symbol identifier previously created by `makeSymbolId(...)`.
+  /// Resolves a symbol identifier previously created by `makeSymbolId(...)` to
+  /// its AST node.
   ///
-  /// `symbolId` must be valid, the document must currently own an AST, and
-  /// the symbol must still resolve to a live node.
-  [[nodiscard]] const AstNode &getAstNode(SymbolId symbolId) const noexcept;
-  /// Resolves a symbol identifier previously created by `makeSymbolId(...)`.
-  /// `symbolId` must be valid and the document must currently own an AST.
+  /// Throws `utils::MissingAstDocumentError` when the document currently owns no
+  /// AST or `symbolId` does not resolve to a live node. Use `findAstNode(...)`
+  /// when an absent node is an expected outcome (it returns `nullptr`).
+  [[nodiscard]] const AstNode &getAstNode(SymbolId symbolId) const;
+  /// Resolves a symbol identifier previously created by `makeSymbolId(...)`,
+  /// returning `nullptr` when `symbolId` is invalid, the document owns no AST,
+  /// or the id no longer resolves to a live node. Use `getAstNode(...)` to throw
+  /// instead of returning null.
   [[nodiscard]] const AstNode *findAstNode(SymbolId symbolId) const noexcept;
 
   /// Creates a document backed by `textDocument`.
@@ -96,7 +100,7 @@ struct Document {
   /// When `uri` is empty, the attached text-document URI becomes the document
   /// URI. The resolved URI then stays stable for the lifetime of the document.
   explicit Document(std::shared_ptr<TextDocument> textDocument,
-                    std::string uri = {});
+                    const std::string &uri = {});
   ~Document();
   Document(const Document &other)=delete;
   Document &operator=(const Document &other)=delete;

@@ -34,6 +34,15 @@ concept HasInitImpl =
   return type != invalid_type();
 }
 
+/// The `NamedAstNode` mixin type index. It is a C++ base, not a grammar type, so
+/// it is registered explicitly (via the per-type `derivesFromNamedAstNode` flag)
+/// rather than discovered through the grammar — letting `is_a<NamedAstNode>` /
+/// `ast_ptr_cast<NamedAstNode>` resolve names through the O(1) reflection
+/// `isSubtype` instead of a per-node `dynamic_cast`.
+[[nodiscard]] inline std::type_index named_ast_node_type() noexcept {
+  return std::type_index(typeid(NamedAstNode));
+}
+
 struct AstNodeTypeInfo {
   std::type_index type = invalid_type();
   bool (*isInstance)(const AstNode &) noexcept = nullptr;
@@ -164,6 +173,7 @@ public:
     }
     _finalized = true;
     finalizeReferenceInducedEdges();
+    finalizeNamedMixinEdges();
   }
 
 private:
@@ -191,6 +201,23 @@ private:
     registerKnownType(subtype);
     registerKnownType(supertype);
     _reflection->registerSubtype(subtype, supertype);
+  }
+
+  // NamedAstNode is a C++ mixin, not a grammar type, so the grammar induces no
+  // subtype edge to it. Probe each produced type once (a single dynamic_cast per
+  // type at bootstrap, off the hot path) and record the `type -> NamedAstNode`
+  // edge for matches, so name lookup resolves via the O(1) reflection isSubtype
+  // (ast_ptr_cast) instead of a per-node dynamic_cast. Mirrors
+  // finalizeReferenceInducedEdges.
+  void finalizeNamedMixinEdges() {
+    for (const auto &[producedType, typeInfo] : _producedTypesByType) {
+      if (typeInfo == nullptr || typeInfo->probe == nullptr) {
+        continue;
+      }
+      if (is_ast_instance<NamedAstNode>(typeInfo->probe())) {
+        addDirectSubtypeEdge(producedType, named_ast_node_type());
+      }
+    }
   }
 
   void finalizeReferenceInducedEdges() {

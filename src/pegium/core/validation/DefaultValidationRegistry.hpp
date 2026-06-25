@@ -27,8 +27,8 @@ struct CompiledValidationRegistry;
 /// Default mutable registry of validation checks and preparations.
 ///
 /// Adds no public API beyond the abstract `ValidationRegistry`: every
-/// implementation detail (the compiled registry snapshot, per-call category
-/// mask caching) is private. Tests interact through the abstract interface.
+/// implementation detail (the compiled registry snapshot built lazily under
+/// `_compileMutex`) is private. Tests interact through the abstract interface.
 class DefaultValidationRegistry : public ValidationRegistry,
                                   protected pegium::DefaultCoreService {
 public:

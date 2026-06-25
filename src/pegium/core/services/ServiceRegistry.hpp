@@ -37,6 +37,9 @@ public:
   /// resource-exhaustion / filesystem failure while normalizing the URI.
   [[nodiscard]] virtual const CoreServices *
   findServices(std::string_view uri) const = 0;
+
+  /// Returns every registered language's services, in registration order.
+  /// All elements are non-null.
   [[nodiscard]] virtual std::vector<const CoreServices *> all() const = 0;
 };
 

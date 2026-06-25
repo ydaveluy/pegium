@@ -624,14 +624,14 @@ template <EditableParseModeContext Context, typename Element, typename MatchFn,
   const bool deleteScanBlocksVisibleInsert =
       deleteScanChoice.kind == TerminalRecoveryChoiceKind::DeleteScan &&
       cursorStartsVisibleSource && !cursorStartsStructuredVisibleSource;
-  const bool allowInsertCandidate =
-      allowInsert &&
-      (!cursorStartsVisibleSource ||
-       ((visibleSourceEditCount == 0u ||
-         scopedLeadingContinuationInsertAllowed ||
-         structuredVisibleContinuationInsertAllowed) &&
-        !deleteScanBlocksVisibleInsert));
-  if (allowInsertCandidate) {
+  if (const bool allowInsertCandidate =
+          allowInsert &&
+          (!cursorStartsVisibleSource ||
+           ((visibleSourceEditCount == 0u ||
+             scopedLeadingContinuationInsertAllowed ||
+             structuredVisibleContinuationInsertAllowed) &&
+            !deleteScanBlocksVisibleInsert));
+      allowInsertCandidate) {
     const auto insertChoice =
         evaluate_insert_synthetic_terminal_candidate(ctx, cursorStart, element);
     considerChoice(insertChoice);
@@ -753,8 +753,9 @@ template <EditableParseModeContext Context, typename Element,
     const Element *element, ApplyMatchedInsertFn &&applyMatchedInsert,
     ApplyReplaceFn &&applyReplace, OnInsertFn &&onInsert,
     ApplyDeleteScanFn &&applyDeleteScan) {
+  using enum TerminalRecoveryChoiceKind;
   switch (choice.kind) {
-  case TerminalRecoveryChoiceKind::Insert:
+  case Insert:
     if (choice.consumed > 0u) {
       return std::forward<ApplyMatchedInsertFn>(applyMatchedInsert)();
     }
@@ -764,11 +765,11 @@ template <EditableParseModeContext Context, typename Element,
     ctx.leaf(ctx.cursor(), element, false, true);
     std::forward<OnInsertFn>(onInsert)();
     return true;
-  case TerminalRecoveryChoiceKind::Replace:
+  case Replace:
     return std::forward<ApplyReplaceFn>(applyReplace)();
-  case TerminalRecoveryChoiceKind::DeleteScan:
+  case DeleteScan:
     return std::forward<ApplyDeleteScanFn>(applyDeleteScan)();
-  case TerminalRecoveryChoiceKind::None:
+  case None:
     return false;
   }
   return false;

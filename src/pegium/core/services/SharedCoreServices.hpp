@@ -59,11 +59,19 @@ struct SharedCoreServices {
   std::unique_ptr<ServiceRegistry> serviceRegistry;
 
   SharedCoreServices() = default;
-  SharedCoreServices(SharedCoreServices &&) noexcept = default;
-  SharedCoreServices &operator=(SharedCoreServices &&) noexcept = default;
+  // Non-movable: installed shared services hold a back-reference to this
+  // SharedCoreServices (DefaultSharedCoreService::shared), so a member-wise move
+  // would leave them dangling. It must stay at a fixed address — heap-own it
+  // (make_shared_services) or hold it as an in-place local. (Matches Services.)
+  SharedCoreServices(SharedCoreServices &&) noexcept = delete;
+  SharedCoreServices &operator=(SharedCoreServices &&) noexcept = delete;
   SharedCoreServices(const SharedCoreServices &) = delete;
   SharedCoreServices &operator=(const SharedCoreServices &) = delete;
   virtual ~SharedCoreServices() noexcept = default;
+
+  /// True when every required shared core service is present. `textDocuments`
+  /// is excluded — it is optional and published only by the shared LSP layer.
+  [[nodiscard]] virtual bool isComplete() const noexcept;
 };
 
 /// Installs the default shared core services into `sharedServices`.

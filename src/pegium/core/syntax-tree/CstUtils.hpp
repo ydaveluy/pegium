@@ -56,9 +56,9 @@ find_node_at_offset(const RootCstNode &root, TextOffset offset);
 
 /// Returns the declaration-relevant CST node at `offset`.
 ///
-/// If the cursor is directly after an identifier-like character, the lookup
-/// first steps one code unit to the left so declaration queries work at the
-/// end of names as expected by editor features.
+/// When the cursor sits past the end of the text or on a non-identifier
+/// codepoint, the lookup first steps back onto the previous UTF-8 codepoint so a
+/// declaration touched on its right edge still resolves.
 [[nodiscard]] std::optional<CstNodeView>
 find_declaration_node_at_offset(const RootCstNode &root, TextOffset offset);
 

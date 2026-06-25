@@ -85,7 +85,7 @@ struct ParseContext {
     _builder.exit(static_cast<TextOffset>(checkpoint - begin),
                   lastVisibleCursorOffset(), element);
     // Cancellation is checked at parser-rule granularity (ParserRule
-    // calls `throw_if_cancelled(cancelToken())` after each successful
+    // calls `throw_if_cancelled(cancellationToken())` after each successful
     // rule exit), not on every Group/Repetition/Choice/Assignment
     // exit — the inner exits are too hot for a memory-load + branch on
     // every call (about 1.6% of strict-path Ir on the bench).
@@ -168,7 +168,7 @@ struct ParseContext {
 
 struct RecoveryContext;
 
-[[nodiscard]] inline constexpr bool elements_equivalent_for_replay(
+[[nodiscard]] constexpr bool elements_equivalent_for_replay(
     const grammar::AbstractElement *lhs,
     const grammar::AbstractElement *rhs) noexcept {
   if (lhs == rhs) {
@@ -247,13 +247,13 @@ struct TrackedParseContext : ParseContext {
     }
   }
 
-  inline void skip() noexcept;
+  void skip() noexcept;
 
-  inline void leaf(const char *endPtr, const grammar::AbstractElement *element,
-                   bool hidden = false, bool recovered = false);
-  inline void leaf(const char *beginPtr, const char *endPtr,
-                   const grammar::AbstractElement *element,
-                   bool hidden = false, bool recovered = false);
+  void leaf(const char *endPtr, const grammar::AbstractElement *element,
+            bool hidden = false, bool recovered = false);
+  void leaf(const char *beginPtr, const char *endPtr,
+            const grammar::AbstractElement *element,
+            bool hidden = false, bool recovered = false);
 
   [[nodiscard]] SkipperGuard
   with_skipper(const Skipper &overrideSkipper) noexcept {
@@ -263,18 +263,19 @@ struct TrackedParseContext : ParseContext {
     return SkipperGuard{*this, _skipper, overrideSkipper};
   }
 
-  [[nodiscard]] const char *skip_without_builder(const char *begin) const noexcept {
+  [[nodiscard]] const char *skip_without_builder(const char *from) const noexcept {
     // 1-entry cache: the no-builder skipper is purely a function of (begin,
     // _skipper) and is called heavily during recovery exploration at
     // overlapping positions. Caching the most recent (begin -> end) result
     // avoids re-walking the same trivia run dozens of times per offset.
-    if (begin == _skipCacheBegin) {
+    if (from == _skipCacheBegin && _skipper == _skipCacheSkipper) {
       return _skipCacheEnd;
     }
-    const char *const end = _skipper->skip(begin);
-    _skipCacheBegin = begin;
-    _skipCacheEnd = end;
-    return end;
+    const char *const to = _skipper->skip(from);
+    _skipCacheBegin = from;
+    _skipCacheEnd = to;
+    _skipCacheSkipper = _skipper;
+    return to;
   }
 
   [[nodiscard]] constexpr bool isFailureHistoryRecordingEnabled() const noexcept {
@@ -316,6 +317,10 @@ protected:
   // live here.
   mutable const char *_skipCacheBegin = nullptr;
   mutable const char *_skipCacheEnd = nullptr;
+  // The cached (begin -> end) is only valid for the skipper that produced it: a
+  // local-skipper scope (with_skipper) can map the same cursor to a different
+  // end, so the active skipper is part of the cache key.
+  mutable const Skipper *_skipCacheSkipper = nullptr;
   bool _recordFailureHistory = true;
   bool _runRecoveryBookkeeping = false;
 };
@@ -406,11 +411,11 @@ struct RecoveryContext : TrackedParseContext {
   /// the `replaceLeaf` carve-out below.
   bool forbidOutOfWindowFuzzyFold = false;
   /// When set, the fuzzy whole-keyword Replace candidate is suppressed in
-  /// `Literal::selectLocalRecoveryChoice` whenever a boundary split-Insert is
+  /// `Literal::try_local_recovery` whenever a boundary split-Insert is
   /// also enumerable (mirror of
   /// `RecoveryAttemptSpec::probeAxes.forbidWholeKeywordFuzzyReplace`, set only
   /// by the forbid-Replace sibling probe). Threaded in `execute_recovery_parse`;
-  /// read in `selectLocalRecoveryChoice`.
+  /// read in `Literal::try_local_recovery`.
   bool forbidWholeKeywordFuzzyReplace = false;
   /// Hard cap on the cumulative number of `ParserRule` recovery entries
   /// during a single recovery window. A pathological grammar shape (e.g.
@@ -614,7 +619,7 @@ struct RecoveryContext : TrackedParseContext {
   }
 
   inline void refreshRecoveryPhase() noexcept {
-    auto &windowReplay = recoveryState.windowReplay;
+    const auto &windowReplay = recoveryState.windowReplay;
     if (!windowReplay.recoveryBookkeepingEnabled) [[likely]] {
       return;
     }
@@ -994,7 +999,8 @@ public:
     // `>` → `=>` (literal length 2) stays gated, `re` → `req` (length 3) and
     // `initialStat` → `initialState` (length 12) go through.
     //
-    // `forbidOutOfWindowFuzzyFold` (mirror of the ParseOptions axis) forces the
+    // `forbidOutOfWindowFuzzyFold` (mirror of
+    // `RecoveryAttemptSpec::probeAxes.forbidOutOfWindowFuzzyFold`) forces the
     // carve-out OFF for the no-fold sibling probe, which re-descends the same
     // window to expose a competing pure-delete candidate to the ranker.
     constexpr std::size_t kWordLiteralLengthFloor = 3u;
@@ -1106,10 +1112,11 @@ private:
     if (entry == nullptr) {
       return false;
     }
+    using enum ParseDiagnosticKind;
     switch (entry->kind) {
-    case ParseDiagnosticKind::Inserted:
+    case Inserted:
       return entry->beginOffset == offset && entry->endOffset == offset;
-    case ParseDiagnosticKind::Deleted:
+    case Deleted:
       // A committed Delete at [b, e) may replay from any cursor position
       // c < e: cursors c < b consume the gap between the prior edit and the
       // original delete span, producing a single merged Delete@[c, e) that
@@ -1118,16 +1125,16 @@ private:
       // delete-merge replay path; the strict `matching_committed_delete`
       // predicate guards the actual replay site.)
       return offset < entry->endOffset;
-    case ParseDiagnosticKind::Replaced:
+    case Replaced:
       // The upper bound is INCLUSIVE (`<= endOffset`) and load-bearing: a
       // committed Replace replay validates its span END via
       // canEditAtOffset(endOffset) at replaceLeaf, so the end position itself
       // must be replayable. An exclusive `<` would reject the legal replay and
       // break the cross-window Replace cascade (e.g. statemachine/initialStat).
       return offset >= entry->beginOffset && offset <= entry->endOffset;
-    case ParseDiagnosticKind::Incomplete:
-    case ParseDiagnosticKind::Recovered:
-    case ParseDiagnosticKind::ConversionError:
+    case Incomplete:
+    case Recovered:
+    case ConversionError:
       return false;
     }
     return false;
@@ -1342,6 +1349,7 @@ inline void TrackedParseContext::skip() noexcept {
     // never reads this cache.
     _skipCacheBegin = before;
     _skipCacheEnd = _cursor;
+    _skipCacheSkipper = _skipper;
     static_cast<RecoveryContext &>(*this).afterTrackedSkip();
   }
 }

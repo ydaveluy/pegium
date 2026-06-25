@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -35,6 +36,9 @@ public:
   [[nodiscard]] std::vector<AstNodeDescription>
   allElements(std::optional<std::type_index> type = std::nullopt,
               std::span<const DocumentId> documentIds = {}) const override;
+  [[nodiscard]] std::optional<AstNodeDescription>
+  findByName(std::string_view name,
+             std::optional<std::type_index> type = std::nullopt) const override;
   [[nodiscard]] std::vector<ReferenceDescription>
   findAllReferences(const NodeKey &targetKey) const override;
 
@@ -52,8 +56,11 @@ private:
                                  std::type_index type) const;
 
   mutable std::mutex _mutex;
-  std::unordered_map<DocumentId, std::vector<AstNodeDescription>>
-      _exportsByDocument;
+  // Sorted by DocumentId so iteration is inherently in a stable, deterministic
+  // order — the order shared by allElements() and findByName(). This is why a
+  // std::map is used rather than an unordered_map (whose iteration order is
+  // unspecified): the determinism is structural, not re-imposed per call.
+  std::map<DocumentId, std::vector<AstNodeDescription>> _exportsByDocument;
   std::unordered_map<DocumentId, std::vector<ReferenceDescription>>
       _referencesByDocument;
 

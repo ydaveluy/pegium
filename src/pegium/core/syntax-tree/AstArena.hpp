@@ -74,12 +74,18 @@ public:
   template <typename T, typename... Args>
     requires std::derived_from<T, AstNode>
   [[nodiscard]] T *create(Args &&...args) {
+    // Reserve the recording slot before constructing the node, so the storeNode
+    // write below cannot throw afterwards. A throw here, or later from the pool
+    // allocation or the constructor, leaves no recorded node, so a bad_alloc
+    // cannot leave a fully-constructed node unrecorded and thus undestroyed at
+    // teardown.
+    ensureChunkCapacity();
     const NodeId id = _count;
     void *mem = _pool->allocate(sizeof(T), alignof(T));
     auto *obj = ::new (mem) T(std::forward<Args>(args)...);
     obj->_symbolId = id;
     obj->_arena = this;
-    registerNode(obj);
+    storeNode(obj);
     return obj;
   }
 
@@ -105,12 +111,21 @@ private:
   static_assert(std::has_single_bit(chunk_size),
                 "chunk_size must be power of two");
 
-  void registerNode(AstNode *node) {
+  // Ensures there is room to record one more node, making the later storeNode
+  // write non-throwing. Runs before the node is constructed: a throw here, or
+  // later from the pool allocation or the constructor, leaves no recorded node,
+  // so no node is ever left constructed-but-undestroyed at teardown.
+  void ensureChunkCapacity() {
     if (static_cast<std::size_t>(_count >> chunk_shift) == _chunks.size())
         [[unlikely]] {
       _chunks.push_back(static_cast<AstNode **>(_pool->allocate(
           sizeof(AstNode *) * chunk_size, alignof(AstNode *))));
     }
+  }
+
+  // Records an already-constructed node. noexcept: ensureChunkCapacity() has
+  // guaranteed the slot exists.
+  void storeNode(AstNode *node) noexcept {
     _chunks[_count >> chunk_shift][_count & chunk_mask] = node;
     ++_count;
   }

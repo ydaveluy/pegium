@@ -19,7 +19,9 @@ std::ostream &operator<<(std::ostream &os, const AssignmentOperator &op) {
 }
 
 Assignment::AssignmentOperator Assignment::getOperator() const noexcept {
-  return AssignmentOperator::Append;
+  // Default to the common, least-surprising operator: a subclass that forgets to
+  // override degrades to "=" (Assign) rather than the rare "+=" (Append).
+  return AssignmentOperator::Assign;
 }
 
 void Assignment::print(std::ostream &os) const {

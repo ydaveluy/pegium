@@ -21,9 +21,7 @@ struct ValueBuildContext;
 namespace pegium::grammar {
 
 struct ParserRule : AbstractRule {
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::ParserRule;
-  }
+  constexpr ParserRule() noexcept : AbstractRule(ElementKind::ParserRule) {}
   virtual AstNode *
   getValue(const CstNodeView &, const parser::ValueBuildContext &) const = 0;
   virtual bool rule(parser::ParseContext &) const = 0;

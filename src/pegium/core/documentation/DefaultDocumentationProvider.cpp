@@ -8,7 +8,9 @@
 #include <utility>
 
 #include <pegium/core/documentation/DocComment.hpp>
+#include <pegium/core/references/NameProvider.hpp>
 #include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/ServiceRegistry.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
 #include <pegium/core/syntax-tree/AstUtils.hpp>
 #include <pegium/core/workspace/Document.hpp>
@@ -80,11 +82,17 @@ std::optional<std::string> DefaultDocumentationProvider::getDocumentation(
     // everything else defers to the user-overridable tag hook.
     if (inlineTag && is_link_tag(name)) {
       const auto [target, display] = split_link_content(content);
-      if (auto resolved = documentationLinkRenderer(node, target, display);
+      // {@linkcode} renders its label as code.
+      const std::string label = name == "linkcode"
+                                    ? "`" + std::string(display) + "`"
+                                    : std::string(display);
+      if (auto resolved = documentationLinkRenderer(node, target, label);
           resolved.has_value()) {
         return resolved;
       }
-      return display;
+      // Unresolved target (e.g. URL or file URI): let the default inline-tag
+      // renderer emit the markdown link and styling.
+      return std::nullopt;
     }
     return documentationTagRenderer(node, name, content, inlineTag);
   };
@@ -106,7 +114,6 @@ DefaultDocumentationProvider::documentationLinkRenderer(
   if (!description.has_value()) {
     return std::nullopt;
   }
-  assert(description->nameLength > 0);
 
   const auto &contextDocument = getDocument(node);
   const workspace::Document *targetDocument = &contextDocument;
@@ -123,8 +130,23 @@ DefaultDocumentationProvider::documentationLinkRenderer(
     targetDocument = targetHolder.get();
   }
 
+  const auto *targetNode = targetDocument->findAstNode(description->symbolId);
+  if (targetNode == nullptr) {
+    return std::nullopt;
+  }
+  const auto *targetServices =
+      services.shared.serviceRegistry->findServices(targetDocument->uri);
+  if (targetServices == nullptr) {
+    return std::nullopt;
+  }
+  const auto site = references::declaration_site_node(
+      *targetNode, *targetServices->references.nameProvider);
+  if (!site.has_value()) {
+    return std::nullopt;
+  }
+
   const auto position =
-      targetDocument->textDocument().positionAt(description->offset);
+      targetDocument->textDocument().positionAt(site->getBegin());
   const auto uri = std::format("{}#L{},{}", targetDocument->uri,
                                position.line + 1, position.character + 1);
   return std::format("[{}]({})", display, uri);
@@ -149,6 +171,7 @@ DefaultDocumentationProvider::findNameInLocalSymbols(const AstNode &node,
     return std::nullopt;
   }
 
+  const utils::HashedStringView nameKey{name};
   for (const auto *current = &node; current != nullptr;
        current = current->getContainer()) {
     const auto *entries = document.localSymbols.forContainer(current);
@@ -156,7 +179,7 @@ DefaultDocumentationProvider::findNameInLocalSymbols(const AstNode &node,
       continue;
     }
     for (const auto &bucket : *entries) {
-      const auto it = bucket.entriesByName.find(name);
+      const auto it = bucket.entriesByName.find(nameKey);
       if (it != bucket.entriesByName.end() && !it->second.empty()) {
         return *it->second.first;
       }
@@ -170,13 +193,9 @@ std::optional<workspace::AstNodeDescription>
 DefaultDocumentationProvider::findNameInGlobalScope(
     const AstNode &node, std::string_view name) const {
   (void)node;
-  const auto *indexManager = services.shared.workspace.indexManager.get();
-  for (const auto &entry : indexManager->allElements()) {
-    if (entry.name == name) {
-      return entry;
-    }
-  }
-  return std::nullopt;
+  // Resolve the first global symbol with this name without materializing (and
+  // deep-copying) the entire workspace index, which this runs per inline link.
+  return services.shared.workspace.indexManager->findByName(name);
 }
 
 } // namespace pegium::documentation

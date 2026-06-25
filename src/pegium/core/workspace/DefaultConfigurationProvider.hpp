@@ -1,17 +1,25 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 
 #include <pegium/core/services/DefaultSharedCoreService.hpp>
+#include <pegium/core/utils/TransparentStringHash.hpp>
 #include <pegium/core/workspace/Configuration.hpp>
 
 namespace pegium::workspace {
 
 /// Shared configuration provider backed by LSP workspace settings.
-class DefaultConfigurationProvider final : public ConfigurationProvider,
-                                           protected pegium::DefaultSharedCoreService {
+///
+/// Inherits enable_shared_from_this so the detached async started by
+/// initialized() can hold the provider alive for its whole duration (the task
+/// writes back into the provider after slow client round-trips).
+class DefaultConfigurationProvider final
+    : public ConfigurationProvider,
+      protected pegium::DefaultSharedCoreService,
+      public std::enable_shared_from_this<DefaultConfigurationProvider> {
 public:
   explicit DefaultConfigurationProvider(
       const pegium::SharedCoreServices &sharedServices);
@@ -43,7 +51,7 @@ private:
       const pegium::JsonValue &sectionConfiguration) const;
 
   mutable std::mutex _settingsMutex;
-  std::unordered_map<std::string, pegium::JsonValue> _settingsBySection;
+  utils::TransparentStringMap<pegium::JsonValue> _settingsBySection;
   utils::EventEmitter<ConfigurationSectionUpdate> _onSectionUpdate;
   bool _workspaceConfigurationSupported = false;
   // Written by the async initialized() task and polled via isReady(); atomic to

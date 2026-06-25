@@ -4,13 +4,14 @@ namespace pegium::parser::detail {
 
 ReplayPrefixClass classify_replay_prefix(bool hadEdits,
                                          bool hasDestructiveEdit) noexcept {
+  using enum ReplayPrefixClass;
   if (!hadEdits) {
-    return ReplayPrefixClass::Empty;
+    return Empty;
   }
   if (hasDestructiveEdit) {
-    return ReplayPrefixClass::ExtendedCommittedPrefix;
+    return ExtendedCommittedPrefix;
   }
-  return ReplayPrefixClass::NewLocalPrefix;
+  return NewLocalPrefix;
 }
 
 bool continues_after_first_edit(

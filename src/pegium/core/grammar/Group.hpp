@@ -8,9 +8,7 @@
 namespace pegium::grammar {
 
 struct Group : AbstractElement {
-  constexpr ElementKind getKind() const noexcept final {
-    return ElementKind::Group;
-  }
+  constexpr Group() noexcept : AbstractElement(ElementKind::Group) {}
   /// get the element at the given index in this group.
   virtual const AbstractElement *get(std::size_t index) const noexcept = 0;
   /// get the number of elements in this group. 

@@ -1,6 +1,8 @@
 #include <pegium/core/parser/PegiumParser.hpp>
 
+#include <limits>
 #include <optional>
+#include <stdexcept>
 
 #include <pegium/core/parser/AssignmentHelpers.hpp>
 #include <pegium/core/parser/CstSearch.hpp>
@@ -45,13 +47,16 @@ struct StandaloneCoreServices {
 };
 
 const pegium::CoreServices &standalone_core_services() noexcept {
-  static const StandaloneCoreServices services = [] {
-    StandaloneCoreServices services;
-    pegium::installDefaultSharedCoreServices(services.shared);
-    pegium::installDefaultCoreServices(services.core);
-    return services;
+  // Construct in place and install into it — never return-by-value: the
+  // installed services hold back-references to `instance`, and CoreServices is
+  // non-movable, so a returned-by-value copy would dangle (and not compile).
+  static StandaloneCoreServices instance;
+  [[maybe_unused]] static const bool initialized = [] {
+    pegium::installDefaultSharedCoreServices(instance.shared);
+    pegium::installDefaultCoreServices(instance.core);
+    return true;
   }();
-  return services.core;
+  return instance.core;
 }
 
 } // namespace
@@ -61,6 +66,12 @@ PegiumParser::PegiumParser() noexcept
 
 ParseResult PegiumParser::parse(text::TextSnapshot text,
                                 const utils::CancellationToken &cancelToken) const {
+  // TextOffset is 32-bit: a larger input would silently truncate offsets and
+  // misparse. Reject it with a clear error instead.
+  if (text.size() > std::numeric_limits<TextOffset>::max()) {
+    throw std::length_error(
+        "pegium: input exceeds the maximum supported size (4 GiB)");
+  }
   const auto &entryRule = getEntryRule();
   const auto &skipper = getSkipper();
   const ParseOptions options = getParseOptions();
@@ -153,6 +164,12 @@ ExpectResult PegiumParser::expect(
     std::string_view text, TextOffset offset,
     const utils::CancellationToken &cancelToken) const {
   utils::throw_if_cancelled(cancelToken);
+  // TextOffset is 32-bit: a larger input would silently truncate offsets and
+  // misparse. Reject it here too, so expect() agrees with parse() (above).
+  if (text.size() > std::numeric_limits<TextOffset>::max()) {
+    throw std::length_error(
+        "pegium: input exceeds the maximum supported size (4 GiB)");
+  }
   const auto &entryRule = getEntryRule();
   const auto &skipper = getSkipper();
   const auto options = getParseOptions();

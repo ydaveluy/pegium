@@ -10,53 +10,27 @@
 
 namespace pegium::references {
 
-/// Combined name lookup result returned by `NameProvider::nameOf`.
-///
-/// `name` is the textual symbol; empty when the node is unnamed. `cstNode`
-/// points at the CST source of `name` (typically the `name` assignment) and
-/// is invalid when the name was assigned outside the parser (hand-built
-/// nodes) — callers should fall back to `node.getCstNode()` in that case.
-struct AstNodeName {
-  std::string name;
-  CstNodeView cstNode;
-
-  [[nodiscard]] bool empty() const noexcept { return name.empty(); }
-};
-
 /// Computes the user-visible name of AST nodes that participate in scoping.
+///
+/// Split into two independent lookups: `getName` is cheap
+/// and reads the name without touching the CST, while `getNameNode` performs
+/// the CST lookup and is paid only when the source range is actually needed.
 class NameProvider {
 public:
   virtual ~NameProvider() noexcept = default;
 
-  /// Returns the textual name and its CST source for `node` in a single
-  /// lookup. The result is empty when the node has no name. This is the
-  /// preferred entry point for indexing/scope-computation paths that need
-  /// both pieces of information; the `getName` / `getNameNode` helpers below
-  /// delegate to this method.
-  [[nodiscard]] virtual AstNodeName nameOf(const AstNode &node) const = 0;
-
-  /// Returns the symbolic name of `node`, or `std::nullopt` when the node
-  /// is unnamed. Default implementation delegates to `nameOf`; override only
-  /// when a faster name-only path exists.
+  /// Returns the textual name of `node`, or `std::nullopt` when the node is
+  /// unnamed. Must not require a CST lookup, so name-only callers (indexing
+  /// filters, hover labels, tests) stay cheap.
   [[nodiscard]] virtual std::optional<std::string>
-  getName(const AstNode &node) const {
-    auto info = nameOf(node);
-    if (info.empty()) {
-      return std::nullopt;
-    }
-    return std::move(info.name);
-  }
+  getName(const AstNode &node) const = 0;
 
-  /// Returns the CST node that carries the `name` assignment of `node`.
-  /// Default implementation delegates to `nameOf`.
+  /// Returns the CST node that carries the `name` of `node`, or `std::nullopt`
+  /// when the name has no CST source (unnamed node, or a name assigned outside
+  /// the parser). Callers needing a declaration range should fall back to
+  /// `node.getCstNode()` in the latter case (see `declaration_site_node`).
   [[nodiscard]] virtual std::optional<CstNodeView>
-  getNameNode(const AstNode &node) const {
-    auto info = nameOf(node);
-    if (!info.cstNode.valid()) {
-      return std::nullopt;
-    }
-    return info.cstNode;
-  }
+  getNameNode(const AstNode &node) const = 0;
 };
 
 /// Reusable naming data for editor-facing features.
@@ -93,12 +67,16 @@ required_declaration_site_node(const AstNode &node,
 /// Returns the user-facing name plus the CST ranges used by editor features.
 [[nodiscard]] inline std::optional<NamedNodeInfo>
 named_node_info(const AstNode &node, const NameProvider &nameProvider) {
-  auto info = nameProvider.nameOf(node);
-  if (info.empty() || !info.cstNode.valid() || !node.hasCstNode()) {
+  auto name = nameProvider.getName(node);
+  if (!name.has_value() || !node.hasCstNode()) {
     return std::nullopt;
   }
-  return NamedNodeInfo{.name = std::move(info.name),
-                       .selectionNode = info.cstNode,
+  auto nameNode = nameProvider.getNameNode(node);
+  if (!nameNode.has_value()) {
+    return std::nullopt;
+  }
+  return NamedNodeInfo{.name = std::move(*name),
+                       .selectionNode = *nameNode,
                        .nodeCst = node.getCstNode()};
 }
 

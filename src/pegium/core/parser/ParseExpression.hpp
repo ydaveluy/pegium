@@ -179,9 +179,13 @@ struct Wrapper {
   template <Expression Element> void set(Element &&element) {
     using W = Model<Element>;
 
+    // Construct before publishing (like operator=): a throwing constructor then
+    // leaves *this unchanged instead of in a half-set (_ops set, _obj null)
+    // state that reset() would not clean up.
+    auto *obj = new W(std::forward<Element>(element));
     reset();
     _ops = &W::ops;
-    _obj = new W(std::forward<Element>(element));
+    _obj = obj;
   }
 
   bool has_terminal() const noexcept {
@@ -346,7 +350,7 @@ private:
     }
 
     static constexpr Ops make_ops() noexcept {
-      Ops ops{
+      Ops result{
           .parse = &Model::parse,
           .parseTracked = &Model::parseTracked,
           .fastProbeTracked = &Model::fastProbeTracked,
@@ -360,19 +364,19 @@ private:
           .clone = &Model::clone,
       };
       if constexpr (RecoveryProbeCapableExpression<T>) {
-        ops.probeRecoverable = &Model::probeRecoverable;
+        result.probeRecoverable = &Model::probeRecoverable;
       }
       if constexpr (EntryRecoveryProbeCapableExpression<T>) {
-        ops.probeRecoverableAtEntry = &Model::probeRecoverableAtEntry;
+        result.probeRecoverableAtEntry = &Model::probeRecoverableAtEntry;
       }
       if constexpr (EntryRecoveryConsumesVisibleProbeCapableExpression<T>) {
-        ops.probeRecoverableAtEntryConsumesVisible =
+        result.probeRecoverableAtEntryConsumesVisible =
             &Model::probeRecoverableAtEntryConsumesVisible;
       }
       if constexpr (TerminalCapableExpression<T>) {
-        ops.terminal = &Model::terminal;
+        result.terminal = &Model::terminal;
       }
-      return ops;
+      return result;
     }
 
     inline static constexpr Ops ops = make_ops();

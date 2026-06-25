@@ -14,9 +14,8 @@ struct ValueBuildContext;
 namespace pegium::grammar {
 
 struct InfixOperator : AbstractElement {
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::InfixOperator;
-  }
+  constexpr InfixOperator() noexcept
+      : AbstractElement(ElementKind::InfixOperator) {}
 
   enum class Associativity { Left, Right };
 
@@ -30,10 +29,8 @@ struct InfixOperator : AbstractElement {
 };
 
 struct InfixRule : AbstractRule {
+  constexpr InfixRule() noexcept : AbstractRule(ElementKind::InfixRule) {}
   constexpr ~InfixRule() noexcept override = default;
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::InfixRule;
-  }
   virtual AstNode *
   getValue(const CstNodeView &node, AstNode *lhsNode,
            const parser::ValueBuildContext &context) const = 0;

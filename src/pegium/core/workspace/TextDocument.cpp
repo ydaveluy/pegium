@@ -305,8 +305,11 @@ void TextDocument::ensureLineIndex() const {
 
   for (std::uint32_t chunk = 0; chunk < impl.numChunks; ++chunk) {
     const auto chunkStart = chunk * kLineIndexChunkSize;
-    const auto chunkEnd =
-        std::min<TextOffset>(clampedSize, chunkStart + kLineIndexChunkSize);
+    // Compute the bound in 64-bit: for the final chunk of a ~4 GiB document
+    // `chunkStart + kLineIndexChunkSize` would wrap a 32-bit TextOffset to 0,
+    // making chunkEnd 0 and silently dropping that chunk's newlines.
+    const auto chunkEnd = static_cast<TextOffset>(std::min<std::uint64_t>(
+        clampedSize, static_cast<std::uint64_t>(chunkStart) + kLineIndexChunkSize));
     impl.chunkLineLowerBound[chunk] =
         static_cast<std::uint32_t>(impl.lineStart.size() - 1);
 

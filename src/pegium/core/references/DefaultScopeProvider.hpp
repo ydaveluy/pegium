@@ -39,10 +39,7 @@ public:
 protected:
   /// Cached view of all globally exported entries accepted by one reference type.
   struct CompiledGlobalEntries {
-    using NameIndex =
-        std::unordered_map<std::string_view,
-                           workspace::NamedScopeEntries,
-                           utils::TransparentStringHash, std::equal_to<>>;
+    using NameIndex = workspace::NamedScopeEntryIndex;
 
     std::vector<workspace::AstNodeDescription> elements;
     std::vector<const workspace::AstNodeDescription *> allEntries;

@@ -365,9 +365,10 @@ DocCommentNode parse_tag(ParseContext &context, bool inlineTag) {
   tag.name = tagToken.content.substr(1); // drop leading '@'
   tag.inlineTag = inlineTag;
 
-  const bool hasText = context.index < context.tokens.size() &&
-                       context.tokens[context.index].type == Token::Type::Text;
-  if (!hasText) {
+  if (const bool hasText =
+          context.index < context.tokens.size() &&
+          context.tokens[context.index].type == Token::Type::Text;
+      !hasText) {
     tag.range = tagToken.range;
     return tag;
   }
@@ -390,11 +391,12 @@ void append_empty_line(const Token &token, DocCommentNode *element) {
 }
 
 std::optional<DocCommentNode> parse_element(ParseContext &context, DocCommentNode *last) {
+  using enum Token::Type;
   const auto &next = context.tokens[context.index];
-  if (next.type == Token::Type::Tag) {
+  if (next.type == Tag) {
     return parse_tag(context, false);
   }
-  if (next.type == Token::Type::Text || next.type == Token::Type::InlineTag) {
+  if (next.type == Text || next.type == InlineTag) {
     return parse_text(context);
   }
   append_empty_line(next, last);
@@ -422,7 +424,7 @@ DocComment parse_comment(ParseContext &context) {
 
 // Rendering ----------------------------------------------------------------
 
-std::string fill_newlines(const std::string &text) {
+std::string fill_newlines(std::string_view text) {
   return text.ends_with('\n') ? "\n" : "\n\n";
 }
 
@@ -459,9 +461,16 @@ std::optional<std::string> render_inline_tag(std::string_view name,
   }
   std::string target = content;
   std::string display = content;
-  if (const auto space = content.find(' '); space != std::string::npos) {
-    target = content.substr(0, space);
-    display = content.substr(skip_whitespace(content, space));
+  // Split target|display on '|' first, then on whitespace — matching the
+  // provider's split_link_content so a {@link a|b} renders the same with or
+  // without a renderTag hook installed.
+  auto separator = content.find('|');
+  if (separator == std::string::npos) {
+    separator = content.find_first_of(" \t");
+  }
+  if (separator != std::string::npos) {
+    target = content.substr(0, separator);
+    display = content.substr(skip_whitespace(content, separator + 1));
   }
   if (name == "linkcode" ||
       (name == "link" && options.link == DocCommentRenderOptions::LinkStyle::Code)) {
@@ -476,14 +485,15 @@ std::optional<std::string> render_inline_tag(std::string_view name,
 }
 
 std::string tag_marker(DocCommentRenderOptions::TagStyle style) {
+  using enum DocCommentRenderOptions::TagStyle;
   switch (style) {
-  case DocCommentRenderOptions::TagStyle::Italic:
+  case Italic:
     return "*";
-  case DocCommentRenderOptions::TagStyle::Bold:
+  case Bold:
     return "**";
-  case DocCommentRenderOptions::TagStyle::BoldItalic:
+  case BoldItalic:
     return "***";
-  case DocCommentRenderOptions::TagStyle::Plain:
+  case Plain:
     break;
   }
   return "";

@@ -41,23 +41,6 @@ std::optional<CstNodeView> first_visible_descendant(const CstNodeView &node) {
   return std::nullopt;
 }
 
-bool literal_matches_keyword(const grammar::Literal &literal,
-                             std::string_view keyword) noexcept {
-  const auto expected = literal.getValue();
-  if (expected.size() != keyword.size()) {
-    return false;
-  }
-  if (literal.isCaseSensitive()) {
-    return expected == keyword;
-  }
-  for (std::size_t index = 0; index < expected.size(); ++index) {
-    if (utils::tolower(expected[index]) != utils::tolower(keyword[index])) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool text_matches_keyword(std::string_view text,
                           std::string_view keyword) noexcept {
   if (text.size() != keyword.size()) {
@@ -69,6 +52,15 @@ bool text_matches_keyword(std::string_view text,
     }
   }
   return true;
+}
+
+bool literal_matches_keyword(const grammar::Literal &literal,
+                             std::string_view keyword) noexcept {
+  const auto expected = literal.getValue();
+  if (literal.isCaseSensitive()) {
+    return expected == keyword;
+  }
+  return text_matches_keyword(expected, keyword);
 }
 
 std::optional<std::string_view>
@@ -85,19 +77,26 @@ terminal_rule_name(const CstNodeView &node) noexcept {
   return static_cast<const grammar::TerminalRule *>(grammarElement)->getName();
 }
 
+// True when `child` is a visible Assignment node binding `feature`. Shared by
+// the collect-all (`collect_feature_nodes`) and indexed-lookup
+// (`find_node_for_feature`) walks so the filter lives in one place.
+[[nodiscard]] bool child_assigns_feature(const CstNodeView &child,
+                                         std::string_view feature) noexcept {
+  if (child.isHidden() || child.getGrammarElement()->getKind() !=
+                              grammar::ElementKind::Assignment) {
+    return false;
+  }
+  return static_cast<const grammar::Assignment *>(child.getGrammarElement())
+             ->getFeature() == feature;
+}
+
 void collect_feature_nodes(const CstNodeView &node, std::string_view feature,
                            std::vector<CstNodeView> &matches) {
   if (!node.valid()) {
     return;
   }
   for (const auto &child : node) {
-    if (child.isHidden() ||
-        child.getGrammarElement()->getKind() != grammar::ElementKind::Assignment) {
-      continue;
-    }
-    const auto *assignment =
-        static_cast<const grammar::Assignment *>(child.getGrammarElement());
-    if (assignment->getFeature() == feature) {
+    if (child_assigns_feature(child, feature)) {
       matches.push_back(child);
     }
   }
@@ -228,16 +227,7 @@ std::optional<CstNodeView> find_node_for_feature(const CstNodeView &node,
   }
   std::size_t seen = 0;
   for (const auto &child : node) {
-    if (child.isHidden() ||
-        child.getGrammarElement()->getKind() != grammar::ElementKind::Assignment) {
-      continue;
-    }
-    const auto *assignment =
-        static_cast<const grammar::Assignment *>(child.getGrammarElement());
-    if (assignment->getFeature() != feature) {
-      continue;
-    }
-    if (seen++ == index) {
+    if (child_assigns_feature(child, feature) && seen++ == index) {
       return child;
     }
   }

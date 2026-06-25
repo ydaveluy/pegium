@@ -131,9 +131,11 @@ inline constexpr std::string_view type_name_v = computeTypeName<Type>();
 #if defined(__clang__) || defined(__GNUC__)
   int status = 0;
   const auto input = std::string(typeName);
-  std::unique_ptr<char, decltype(&std::free)> demangled(
-      abi::__cxa_demangle(input.c_str(), nullptr, nullptr, &status), &std::free);
-  if (status == 0 && demangled) {
+  constexpr auto freeDeleter = [](char *ptr) { std::free(ptr); };
+  if (std::unique_ptr<char, decltype(freeDeleter)> demangled(
+          abi::__cxa_demangle(input.c_str(), nullptr, nullptr, &status),
+          freeDeleter);
+      status == 0 && demangled) {
     return std::string(simplifyTypeName(demangled.get()));
   }
 #endif

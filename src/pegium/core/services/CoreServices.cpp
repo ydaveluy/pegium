@@ -14,15 +14,53 @@
 
 namespace pegium {
 
+std::optional<std::string_view>
+CoreServices::firstMissingService() const noexcept {
+  // Single source of truth for the required-service set; keep in sync with
+  // installDefaultCoreServices(...) below (which installs all of these except
+  // `parser`, intentionally left to the caller). `isComplete()` derives from
+  // this so the two can never disagree.
+  if (!parser) {
+    return "parser";
+  }
+  if (!documentation.commentProvider) {
+    return "documentation.commentProvider";
+  }
+  if (!documentation.documentationProvider) {
+    return "documentation.documentationProvider";
+  }
+  if (!references.nameProvider) {
+    return "references.nameProvider";
+  }
+  if (!references.scopeProvider) {
+    return "references.scopeProvider";
+  }
+  if (!references.references) {
+    return "references.references";
+  }
+  if (!references.scopeComputation) {
+    return "references.scopeComputation";
+  }
+  if (!references.linker) {
+    return "references.linker";
+  }
+  if (!validation.validationRegistry) {
+    return "validation.validationRegistry";
+  }
+  if (!validation.documentValidator) {
+    return "validation.documentValidator";
+  }
+  if (!workspace.astNodeDescriptionProvider) {
+    return "workspace.astNodeDescriptionProvider";
+  }
+  if (!workspace.referenceDescriptionProvider) {
+    return "workspace.referenceDescriptionProvider";
+  }
+  return std::nullopt;
+}
+
 bool CoreServices::isComplete() const noexcept {
-  return parser && references.nameProvider &&
-         workspace.astNodeDescriptionProvider &&
-         workspace.referenceDescriptionProvider &&
-         references.scopeProvider && references.references &&
-         references.scopeComputation && references.linker &&
-         validation.validationRegistry &&
-         validation.documentValidator && documentation.commentProvider &&
-         documentation.documentationProvider;
+  return !firstMissingService();
 }
 
 void installDefaultCoreServices(CoreServices &services) {

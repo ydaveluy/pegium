@@ -43,14 +43,4 @@ findFirstRootMatchingNode(const RootCstNode &root,
   return std::nullopt;
 }
 
-inline std::optional<CstNodeView>
-firstVisibleChild(const CstNodeView &node) {
-  for (const auto &child : node) {
-    if (!child.isHidden()) {
-      return child;
-    }
-  }
-  return std::nullopt;
-}
-
 } // namespace pegium::parser::detail

@@ -14,6 +14,9 @@ namespace pegium::utils {
 [[nodiscard]] std::optional<std::string> file_uri_to_path(std::string_view uri);
 /// Converts a local path to a normalized `file:` URI.
 [[nodiscard]] std::string path_to_file_uri(std::string_view path);
+/// Normalizes a file extension to a leading-dot form (`"calc"` -> `".calc"`);
+/// returns `""` unchanged and leaves an already-dotted extension as-is.
+[[nodiscard]] std::string normalize_extension(std::string_view extension);
 /// Returns whether two URIs normalize to the same value.
 [[nodiscard]] bool equals_uri(std::string_view left, std::string_view right);
 /// Returns whether `child` is located under `parent` in URI space.

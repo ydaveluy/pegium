@@ -173,6 +173,7 @@ position_starts_structured_visible_source(const Context &ctx,
 template <typename VisitFn>
 [[nodiscard]] inline DeleteScanVisitResult
 invoke_delete_scan_visit(VisitFn &visitFn, const DeleteScanVisitState &state) {
+  using enum DeleteScanVisitResult;
   if constexpr (requires {
                   { visitFn(state) } -> std::same_as<DeleteScanVisitResult>;
                 }) {
@@ -182,11 +183,9 @@ invoke_delete_scan_visit(VisitFn &visitFn, const DeleteScanVisitState &state) {
                        }) {
     return visitFn();
   } else if constexpr (requires { visitFn(state); }) {
-    return visitFn(state) ? DeleteScanVisitResult::Accept
-                          : DeleteScanVisitResult::Continue;
+    return visitFn(state) ? Accept : Continue;
   } else {
-    return visitFn() ? DeleteScanVisitResult::Accept
-                     : DeleteScanVisitResult::Continue;
+    return visitFn() ? Accept : Continue;
   }
 }
 

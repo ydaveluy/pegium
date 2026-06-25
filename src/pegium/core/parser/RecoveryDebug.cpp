@@ -44,20 +44,21 @@ summarize_recovery_attempt_edits(const RecoveryAttempt &attempt) {
       .entryCount = attempt.recoveryEdits.size(),
       .editCost = attempt.editCost,
   };
+  using enum ParseDiagnosticKind;
   for (const auto &entry : attempt.recoveryEdits) {
     switch (entry.kind) {
-    case ParseDiagnosticKind::Inserted:
+    case Inserted:
       ++summary.insertCount;
       break;
-    case ParseDiagnosticKind::Deleted:
+    case Deleted:
       ++summary.deleteCount;
       break;
-    case ParseDiagnosticKind::Replaced:
+    case Replaced:
       ++summary.replaceCount;
       break;
-    case ParseDiagnosticKind::Incomplete:
-    case ParseDiagnosticKind::Recovered:
-    case ParseDiagnosticKind::ConversionError:
+    case Incomplete:
+    case Recovered:
+    case ConversionError:
       break;
     }
     summary.firstEditOffset = std::min(summary.firstEditOffset, entry.beginOffset);

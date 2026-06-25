@@ -8,9 +8,7 @@
 namespace pegium::grammar {
 
 struct AnyCharacter : AbstractElement {
-  constexpr ElementKind getKind() const noexcept final {
-    return ElementKind::AnyCharacter;
-  }
+  constexpr AnyCharacter() noexcept : AbstractElement(ElementKind::AnyCharacter) {}
   constexpr ~AnyCharacter() noexcept override = default;
   virtual std::string_view getValue(const CstNodeView &node) const noexcept;
 

@@ -26,20 +26,21 @@ namespace pegium::workspace {
 namespace {
 
 std::string_view document_state_name(DocumentState state) {
+  using enum DocumentState;
   switch (state) {
-  case DocumentState::Changed:
+  case Changed:
     return "Changed";
-  case DocumentState::Parsed:
+  case Parsed:
     return "Parsed";
-  case DocumentState::IndexedContent:
+  case IndexedContent:
     return "IndexedContent";
-  case DocumentState::ComputedScopes:
+  case ComputedScopes:
     return "ComputedScopes";
-  case DocumentState::Linked:
+  case Linked:
     return "Linked";
-  case DocumentState::IndexedReferences:
+  case IndexedReferences:
     return "IndexedReferences";
-  case DocumentState::Validated:
+  case Validated:
     return "Validated";
   }
   return "Unknown";
@@ -89,8 +90,11 @@ void DefaultDocumentBuilder::build(
     const BuildOptions &options, utils::CancellationToken cancelToken,
     const std::function<void()> &downgradeLock) const {
   auto &documentStore = *shared.workspace.documents;
+  std::vector<DocumentId> changedDocumentIds;
+  changedDocumentIds.reserve(documents.size());
   for (const auto &document : documents) {
     const auto documentId = ensure_document_id(documentStore, *document);
+    changedDocumentIds.push_back(documentId);
     if (document->state == DocumentState::Validated) {
       if (const auto *enabled = std::get_if<bool>(&options.validation);
           enabled != nullptr && *enabled) {
@@ -124,12 +128,6 @@ void DefaultDocumentBuilder::build(
   {
     std::scoped_lock lock(_stateMutex);
     _currentState = DocumentState::Changed;
-  }
-
-  std::vector<DocumentId> changedDocumentIds;
-  changedDocumentIds.reserve(documents.size());
-  for (const auto &document : documents) {
-    changedDocumentIds.push_back(ensure_document_id(documentStore, *document));
   }
 
   emitUpdate(changedDocumentIds, {});
@@ -172,11 +170,17 @@ void DefaultDocumentBuilder::update(
 
   for (const auto documentId : orderedDeletedDocumentIds) {
     utils::throw_if_cancelled(cancelToken);
+    // Drop the index + build-state contributions BEFORE removing the document
+    // from the store, so the index never advertises a document the store has
+    // already dropped. The reverse order is harmless (a freshly-parsed document
+    // is likewise present in the store before it is indexed). This narrows but
+    // does not close the window for a reader holding a pre-deletion index
+    // snapshot, so index-derived getDocument() lookups still null-check.
+    cleanUpDeleted(documentId);
     if (auto deletedDocument = documentStore.deleteDocument(documentId);
         deletedDocument != nullptr) {
       deletedDocument->state = DocumentState::Changed;
     }
-    cleanUpDeleted(documentId);
   }
 
   for (const auto documentId : orderedChangedDocumentIds) {
@@ -366,10 +370,10 @@ std::vector<std::shared_ptr<Document>> DefaultDocumentBuilder::sortDocuments(
   // Move documents that have an open text document to the front. Unstable —
   // the relative order within each group is not preserved, exactly as the
   // previous hand-rolled two-pointer partition did.
-  std::partition(documents.begin(), documents.end(),
-                 [this](const std::shared_ptr<Document> &document) {
-                   return hasTextDocument(document);
-                 });
+  std::ranges::partition(documents,
+                         [this](const std::shared_ptr<Document> &document) {
+                           return hasTextDocument(document);
+                         });
   return documents;
 }
 
@@ -774,30 +778,31 @@ void DefaultDocumentBuilder::resetToState(Document &document,
   const auto documentId =
       ensure_document_id(*shared.workspace.documents, document);
 
+  using enum DocumentState;
   switch (state) {
-  case DocumentState::Changed:
-  case DocumentState::Parsed:
+  case Changed:
+  case Parsed:
     shared.workspace.indexManager->removeContent(documentId);
     [[fallthrough]];
-  case DocumentState::IndexedContent:
+  case IndexedContent:
     document.localSymbols.clear();
     [[fallthrough]];
-  case DocumentState::ComputedScopes:
+  case ComputedScopes:
     shared.serviceRegistry
         ->getServices(document.uri)
         .references.linker->unlink(document);
     [[fallthrough]];
-  case DocumentState::Linked:
+  case Linked:
     shared.workspace.indexManager->removeReferences(documentId);
     [[fallthrough]];
-  case DocumentState::IndexedReferences:
+  case IndexedReferences:
     document.diagnostics.clear();
     {
       std::scoped_lock lock(_stateMutex);
       _buildStateByDocumentId.erase(documentId);
     }
     [[fallthrough]];
-  case DocumentState::Validated:
+  case Validated:
     break;
   }
 

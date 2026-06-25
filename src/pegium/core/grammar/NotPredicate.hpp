@@ -7,9 +7,7 @@
 namespace pegium::grammar {
 
 struct NotPredicate : AbstractElement {
-  constexpr ElementKind getKind() const noexcept final {
-    return ElementKind::NotPredicate;
-  }
+  constexpr NotPredicate() noexcept : AbstractElement(ElementKind::NotPredicate) {}
 
   virtual const AbstractElement *getElement() const noexcept = 0;
   constexpr ~NotPredicate() noexcept override = default;

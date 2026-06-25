@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -47,6 +48,13 @@ public:
 
     clear();
 
+    // `_disposed` is set only AFTER clear(): clear() (and the cache methods it
+    // calls) go through throwIfDisposed(), so it must run while still
+    // not-disposed. Do NOT hoist `_disposed = true` into the early-out claim
+    // above — that makes clear() throw (regression caught by
+    // DocumentCacheTest.DisposeRemovesListenersAndRejectsFurtherAccess). The
+    // check-then-set is non-atomic, but clear()/_toDispose.dispose() are
+    // idempotent, so a concurrent double-dispose is a benign no-op.
     {
       std::scoped_lock lock(_disposeMutex);
       _disposed = true;
@@ -298,6 +306,9 @@ class DocumentCache final : public DisposableCache {
 public:
   explicit DocumentCache(const pegium::SharedCoreServices &sharedServices) {
     auto *documentBuilder = sharedServices.workspace.documentBuilder.get();
+    assert(documentBuilder != nullptr &&
+           "DocumentCache requires shared.workspace.documentBuilder; install "
+           "the shared core services before any language services");
     this->onDispose(documentBuilder->onUpdate(this->guardCallback(
         [this](std::span<const workspace::DocumentId> changedDocumentIds,
                std::span<const workspace::DocumentId> deletedDocumentIds) {
@@ -453,6 +464,9 @@ public:
       const pegium::SharedCoreServices &sharedServices,
       std::optional<workspace::DocumentState> state = std::nullopt) {
     auto *documentBuilder = sharedServices.workspace.documentBuilder.get();
+    assert(documentBuilder != nullptr &&
+           "WorkspaceCache requires shared.workspace.documentBuilder; install "
+           "the shared core services before any language services");
     if (state.has_value()) {
       this->onDispose(documentBuilder->onBuildPhase(
           *state, this->guardCallback(

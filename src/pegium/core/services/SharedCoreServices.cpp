@@ -1,5 +1,7 @@
 #include <pegium/core/services/SharedCoreServices.hpp>
 
+#include <cassert>
+
 #include <pegium/core/observability/ObservabilitySinks.hpp>
 #include <pegium/core/services/DefaultServiceRegistry.hpp>
 #include <pegium/core/workspace/DefaultConfigurationProvider.hpp>
@@ -11,6 +13,15 @@
 #include <pegium/core/workspace/DefaultWorkspaceManager.hpp>
 
 namespace pegium {
+
+bool SharedCoreServices::isComplete() const noexcept {
+  return observabilitySink && astReflection && execution.taskScheduler &&
+         serviceRegistry && workspace.configurationProvider &&
+         workspace.fileSystemProvider && workspace.documentFactory &&
+         workspace.documents && workspace.indexManager &&
+         workspace.documentBuilder && workspace.workspaceLock &&
+         workspace.workspaceManager;
+}
 
 void installDefaultSharedCoreServices(SharedCoreServices &sharedServices) {
   if (!sharedServices.observabilitySink) {
@@ -61,6 +72,14 @@ void installDefaultSharedCoreServices(SharedCoreServices &sharedServices) {
     sharedServices.workspace.workspaceManager =
         std::make_unique<workspace::DefaultWorkspaceManager>(sharedServices);
   }
+  // Defense-in-depth: every slot above is fill-if-empty, so this fires only if a
+  // required shared service was added to isComplete() but not installed here.
+  // Statically dispatch to the base check: this installer owns only the core
+  // shared slots. A virtual call would reach SharedServices::isComplete(), which
+  // also requires the LSP slots that installDefaultSharedLspServices(...) installs
+  // afterwards — aborting every Debug build of an LSP container.
+  assert(sharedServices.SharedCoreServices::isComplete() &&
+         "installDefaultSharedCoreServices left the shared container incomplete");
 }
 
 } // namespace pegium

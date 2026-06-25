@@ -27,7 +27,7 @@ LocalSymbols::emplace(const AstNode *container,
 
   // `std::deque::push_back` is element-stable, so the address pushed into the
   // name index stays valid for the entire lifetime of this `LocalSymbols`.
-  auto &stored = bucket->ownedEntries.emplace_back(std::move(description));
+  const auto &stored = bucket->ownedEntries.emplace_back(std::move(description));
   bucket->entriesByName.try_emplace(stored.name).first->second.add(stored);
   ++_totalSize;
   return stored;

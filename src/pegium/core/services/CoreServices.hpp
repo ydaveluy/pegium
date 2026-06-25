@@ -1,7 +1,10 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -75,11 +78,22 @@ struct CoreServices {
 
   explicit CoreServices(const SharedCoreServices &sharedServices)
       : shared(sharedServices) {}
-  CoreServices(CoreServices &&) noexcept = default;
+  // Non-movable: installed default services hold a back-reference to this
+  // CoreServices (DefaultCoreService::services), so a member-wise move would
+  // leave them dangling. CoreServices is only ever heap-owned via unique_ptr,
+  // so the move ctor is never needed. (Matches pegium::Services.)
+  CoreServices(CoreServices &&) noexcept = delete;
   CoreServices &operator=(CoreServices &&) noexcept = delete;
   CoreServices(const CoreServices &) = delete;
   CoreServices &operator=(const CoreServices &) = delete;
   virtual ~CoreServices() noexcept = default;
+
+  /// Returns the field path of the first required service that is missing
+  /// (e.g. `"parser"` or `"references.scopeProvider"`), or `std::nullopt` when
+  /// the container is complete. This is the single source of truth for the
+  /// required-service set; `isComplete()` is derived from it.
+  [[nodiscard]] virtual std::optional<std::string_view>
+  firstMissingService() const noexcept;
 
   [[nodiscard]] virtual bool isComplete() const noexcept;
 
@@ -99,5 +113,28 @@ struct CoreServices {
 ///
 /// Shared defaults must already be installed on `services.shared`.
 void installDefaultCoreServices(CoreServices &services);
+
+/// Builds one core-only language service container with the default core
+/// services installed — the headless counterpart of `makeDefaultServices`.
+///
+/// Allocate, set the language id, and install the defaults in one call; your
+/// install-module then adds the parser and overrides. The template argument
+/// defaults to the base `CoreServices`; pass your own derived type so the
+/// container can hold language-specific members.
+template <typename TServices = CoreServices>
+[[nodiscard]] std::unique_ptr<TServices>
+makeDefaultCoreServices(const SharedCoreServices &sharedServices,
+                        std::string languageId) {
+  static_assert(std::is_base_of_v<CoreServices, TServices>,
+                "TServices must derive from pegium::CoreServices.");
+  static_assert(
+      std::is_constructible_v<TServices, const SharedCoreServices &>,
+      "TServices must be constructible from const pegium::SharedCoreServices&.");
+
+  auto services = std::make_unique<TServices>(sharedServices);
+  services->languageMetaData.languageId = std::move(languageId);
+  installDefaultCoreServices(*services);
+  return services;
+}
 
 } // namespace pegium

@@ -672,8 +672,8 @@ can_try_prefix_delete_retry(const grammar::ParserRule &entryRule,
   if (recoveryEdits.empty()) {
     return false;
   }
-  const auto &first = recoveryEdits.front();
-  if (first.kind != ParseDiagnosticKind::Inserted ||
+  if (const auto &first = recoveryEdits.front();
+      first.kind != ParseDiagnosticKind::Inserted ||
       first.beginOffset != baseOffset) {
     return false;
   }
@@ -888,7 +888,8 @@ execute_recovery_parse(const grammar::ParserRule &entryRule,
                                 : failureMaxCursorOffset;
   if (attempt.entryRuleMatched) {
     auto window = spec.window;
-    if (const auto replayForwardCount = parseCtx.replayForwardTokenCount()) {
+    if (const auto replayForwardCount = parseCtx.replayForwardTokenCount();
+        replayForwardCount.has_value()) {
       window.forwardTokenCount = *replayForwardCount;
     }
     attempt.replayWindow = window;

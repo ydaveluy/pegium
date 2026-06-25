@@ -20,9 +20,7 @@ std::ostream &operator<<(std::ostream &os, const AssignmentOperator &op);
 
 struct Assignment : AbstractElement {
   using AssignmentOperator = pegium::grammar::AssignmentOperator;
-  constexpr ElementKind getKind() const noexcept final {
-    return ElementKind::Assignment;
-  }
+  constexpr Assignment() noexcept : AbstractElement(ElementKind::Assignment) {}
   virtual AssignmentOperator getOperator() const noexcept;
   constexpr ~Assignment() noexcept override = default;
   virtual void execute(AstNode *current, const CstNodeView &cst,

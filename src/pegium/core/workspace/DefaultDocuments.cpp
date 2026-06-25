@@ -99,6 +99,11 @@ std::vector<std::shared_ptr<Document>> DefaultDocuments::getDocuments(
 std::shared_ptr<Document> DefaultDocuments::getOrCreateDocument(
     std::string_view uri, const utils::CancellationToken &cancelToken) {
   const auto normalizedUri = utils::normalize_uri(uri);
+  if (normalizedUri.empty()) {
+    // Match every sibling accessor: a malformed URI yields the documented
+    // nullptr rather than forwarding "" to the factory/filesystem.
+    return nullptr;
+  }
   {
     std::scoped_lock lock(_mutex);
     if (const auto *existing = _documents.find(normalizedUri);

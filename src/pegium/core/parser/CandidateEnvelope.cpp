@@ -34,11 +34,11 @@ bool extension_dominates(const CandidateEnvelope &next,
   }
   // Both former predicates accepted outright unless their guard condition held,
   // in which case the extension must pay its way (progress gained >= extra cost).
-  const bool ratioGuardActive =
-      guard == ExtensionDominanceGuard::WhenCurrentProgressedPastAnchor
-          ? current.key.progressAfterEdits > current.key.firstEditOffset
-          : current.replayPrefix == ReplayPrefixClass::ExtendedCommittedPrefix;
-  if (ratioGuardActive) {
+  if (const bool ratioGuardActive =
+          guard == ExtensionDominanceGuard::WhenCurrentProgressedPastAnchor
+              ? current.key.progressAfterEdits > current.key.firstEditOffset
+              : current.replayPrefix ==
+                    ReplayPrefixClass::ExtendedCommittedPrefix) {
     // monus() (saturating subtraction) keeps the non-underflow invariant local:
     // both gaps are guaranteed non-negative by is_extending_anchor_pair
     // (editCost >= editCost, progressAfterEdits > progressAfterEdits) above.

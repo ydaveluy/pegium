@@ -228,9 +228,9 @@ public:
   /// become validation diagnostics, except `OperationCancelled` which
   /// propagates.
   ///
-  /// Implementations may cache work across consecutive calls that pass the
-  /// same `categories` span (identity-based). Callers iterating an AST should
-  /// keep the same `categories` span alive for the duration of the loop.
+  /// The `categories` span is only read during the call; the registry keeps no
+  /// per-call state, so it is safe to share across documents validated in
+  /// parallel.
   virtual void runChecks(const AstNode &node,
                          const ValidationAcceptor &acceptor,
                          std::span<const std::string> categories,

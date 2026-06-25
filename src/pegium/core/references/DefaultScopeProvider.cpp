@@ -55,17 +55,21 @@ using DescriptionVisitor =
 [[nodiscard]] const AstNodeDescription *
 find_scope_entry(const pegium::SharedCoreServices &shared,
                  const workspace::BucketedScopeEntries &entries,
-                 std::type_index referenceType, std::string_view name) noexcept {
+                 std::type_index referenceType,
+                 const utils::HashedStringView &name) noexcept {
   for (const auto &bucket : entries) {
-    if (!accepts_bucket(shared, referenceType, bucket)) {
-      continue;
-    }
+    // Probe the (O(1), hash-cached) name index first; only pay the bucket type
+    // check (isSubtype) for buckets that actually hold the name. Same
+    // conjunction and iteration order as before, so the selected entry is
+    // identical.
     const auto it = bucket.entriesByName.find(name);
     if (it == bucket.entriesByName.end()) {
       continue;
     }
-    assert(!it->second.empty());
-    return it->second.first;
+    if (!accepts_bucket(shared, referenceType, bucket)) {
+      continue;
+    }
+    return it->second.firstEntry();
   }
   return nullptr;
 }
@@ -73,21 +77,27 @@ find_scope_entry(const pegium::SharedCoreServices &shared,
 [[nodiscard]] bool visit_entries(const pegium::SharedCoreServices &shared,
                                  const workspace::BucketedScopeEntries &entries,
                                  std::type_index referenceType,
-                                 std::string_view name,
+                                 const utils::HashedStringView &name,
                                  DescriptionVisitor visitor) {
   for (const auto &bucket : entries) {
-    if (!accepts_bucket(shared, referenceType, bucket)) {
-      continue;
-    }
-    if (name.empty()) {
+    if (name.value.empty()) {
+      // Whole-bucket visit: the type check is the only filter.
+      if (!accepts_bucket(shared, referenceType, bucket)) {
+        continue;
+      }
       if (!visit_owned_entries(bucket.ownedEntries, visitor)) {
         return false;
       }
       continue;
     }
 
+    // Named visit: probe the name index first; only type-check buckets that
+    // hold the name (same conjunction/order as before).
     const auto it = bucket.entriesByName.find(name);
     if (it == bucket.entriesByName.end()) {
+      continue;
+    }
+    if (!accepts_bucket(shared, referenceType, bucket)) {
       continue;
     }
     if (!visit_named_entries(it->second, visitor)) {
@@ -126,15 +136,18 @@ const workspace::AstNodeDescription *DefaultScopeProvider::getScopeEntry(
   }
 
   const auto referenceType = context.getReferenceType();
+  // Hash the reference text once; the key is reused across every bucket and
+  // ancestor scope level (and the global index) without rehashing.
+  const utils::HashedStringView nameKey{context.referenceText};
   if (const auto *container = context.container; container != nullptr) {
     const auto &localSymbols = getDocument(*container).localSymbols;
     const AstNodeDescription *entry = nullptr;
     (void)visit_local_scope_levels(
         localSymbols, container,
-        [this, referenceType, &context,
+        [this, referenceType, &nameKey,
          &entry](const workspace::BucketedScopeEntries &entries) {
           entry = find_scope_entry(services.shared, entries, referenceType,
-                                   context.referenceText);
+                                   nameKey);
           return entry == nullptr;
         });
     if (entry != nullptr) {
@@ -143,12 +156,11 @@ const workspace::AstNodeDescription *DefaultScopeProvider::getScopeEntry(
   }
 
   const auto globalEntries = getGlobalEntries(referenceType);
-  const auto globalIt = globalEntries->entriesByName.find(context.referenceText);
+  const auto globalIt = globalEntries->entriesByName.find(nameKey);
   if (globalIt == globalEntries->entriesByName.end()) {
     return nullptr;
   }
-  assert(!globalIt->second.empty());
-  return globalIt->second.first;
+  return globalIt->second.firstEntry();
 }
 
 bool DefaultScopeProvider::visitScopeEntries(
@@ -156,14 +168,15 @@ bool DefaultScopeProvider::visitScopeEntries(
     utils::function_ref<bool(const workspace::AstNodeDescription &)> visitor)
     const {
   const auto referenceType = context.getReferenceType();
+  const utils::HashedStringView nameKey{context.referenceText};
   if (const auto *container = context.container; container != nullptr) {
     const auto &localSymbols = getDocument(*container).localSymbols;
     if (!visit_local_scope_levels(
             localSymbols, container,
-            [this, referenceType, &context,
+            [this, referenceType, &nameKey,
              visitor](const workspace::BucketedScopeEntries &entries) {
               return visit_entries(services.shared, entries, referenceType,
-                                   context.referenceText, visitor);
+                                   nameKey, visitor);
             })) {
       return false;
     }
@@ -174,7 +187,7 @@ bool DefaultScopeProvider::visitScopeEntries(
     return visit_entry_pointers(globalEntries->allEntries, visitor);
   }
 
-  const auto globalIt = globalEntries->entriesByName.find(context.referenceText);
+  const auto globalIt = globalEntries->entriesByName.find(nameKey);
   if (globalIt == globalEntries->entriesByName.end()) {
     return true;
   }

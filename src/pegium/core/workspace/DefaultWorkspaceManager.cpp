@@ -4,6 +4,7 @@
 #include <exception>
 #include <filesystem>
 #include <future>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -67,6 +68,13 @@ DefaultWorkspaceManager::workspaceFolders() const {
 
 void DefaultWorkspaceManager::initialize(const InitializeParams &params) {
   std::scoped_lock lock(_initMutex);
+  // Unblock anyone still waiting on the previous, now-abandoned readiness
+  // promise before installing a fresh one: a re-initialize would otherwise
+  // leave ready() waiters hanging on a promise that is never settled.
+  if (_readyPromise && !_readySettled) {
+    _readyPromise->set_exception(std::make_exception_ptr(
+        std::runtime_error("workspace re-initialized before becoming ready")));
+  }
   _readyPromise = std::make_shared<std::promise<void>>();
   _readyFuture = _readyPromise->get_future().share();
   _readySettled = false;
@@ -155,7 +163,7 @@ std::vector<std::shared_ptr<Document>> DefaultWorkspaceManager::performStartup(
   auto &documentStore = *shared.workspace.documents;
   std::vector<std::shared_ptr<Document>> loadedDocuments;
 
-  auto collector = [this, &documentStore,
+  auto collector = [&documentStore,
                     &loadedDocuments](std::shared_ptr<Document> document) {
     assert(document != nullptr);
     assert(!document->uri.empty());

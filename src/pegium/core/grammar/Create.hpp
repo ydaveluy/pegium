@@ -14,9 +14,7 @@ class AstArena;
 namespace pegium::grammar {
 
 struct Create : AbstractElement {
-  constexpr ElementKind getKind() const noexcept final {
-    return ElementKind::Create;
-  }
+  constexpr Create() noexcept : AbstractElement(ElementKind::Create) {}
   constexpr ~Create() noexcept override = default;
 
   virtual AstNode *getValue(AstArena &arena) const = 0;

@@ -18,8 +18,13 @@ void StderrObservabilitySink::publish(const Observation &observation) noexcept {
 }
 
 FanoutObservabilitySink::FanoutObservabilitySink(
-    std::vector<std::shared_ptr<ObservabilitySink>> sinks)
-    : _sinks(std::move(sinks)) {}
+    std::vector<std::shared_ptr<ObservabilitySink>> sinks) {
+  // Funnel through addSink so the constructor applies the same null/duplicate
+  // filtering — otherwise a duplicate supplied here is published to twice.
+  for (auto &sink : sinks) {
+    addSink(std::move(sink));
+  }
+}
 
 void FanoutObservabilitySink::publish(const Observation &observation) noexcept {
   std::vector<std::shared_ptr<ObservabilitySink>> sinks;

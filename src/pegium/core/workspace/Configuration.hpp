@@ -67,7 +67,7 @@ public:
   [[nodiscard]] virtual WorkspaceConfiguration
   getWorkspaceConfigurationForLanguage(std::string_view languageId) const = 0;
   /// Returns the effective configuration for a workspace URI.
-  virtual WorkspaceConfiguration
+  [[nodiscard]] virtual WorkspaceConfiguration
   getWorkspaceConfiguration(std::string_view workspaceUri) const = 0;
 };
 

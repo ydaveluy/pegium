@@ -113,9 +113,9 @@ private:
                            DocumentState targetState,
                            utils::CancellationToken cancelToken) const;
   void publishWorkspaceState(DocumentState targetState) const;
-  // Advances one document to @p targetState and notifies its per-document phase
-  // listeners. Called per document from inside a build phase's parallel body, so
-  // listeners may run concurrently for distinct documents.
+  // Records one document's progress by setting its state to @p targetState.
+  // Per-document phase listeners are NOT notified here: runMergedPhase fires them
+  // serially and in document order once the phase has drained.
   void advance(const std::shared_ptr<Document> &document,
                DocumentState targetState,
                utils::CancellationToken cancelToken) const;

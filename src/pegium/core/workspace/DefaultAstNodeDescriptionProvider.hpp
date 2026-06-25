@@ -16,8 +16,8 @@ public:
   using pegium::DefaultCoreService::DefaultCoreService;
 
   [[nodiscard]] std::optional<AstNodeDescription>
-  createDescription(const AstNode &node, const Document &document,
-                    references::AstNodeName nameInfo) const override;
+  createDescription(const AstNode &node, std::string name,
+                    const Document &document) const override;
 };
 
 } // namespace pegium::workspace

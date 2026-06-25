@@ -37,12 +37,6 @@ template <typename T> struct ParserRuleBuildSupport {
     std::vector<PendingAssignmentEntry> pendingOverflowEntries;
     const auto &root = node.root();
 
-    const auto clearPendingAssignments =
-        [&pendingInlineCount, &pendingOverflowEntries]() noexcept {
-      pendingInlineCount = 0;
-      pendingOverflowEntries.clear();
-        };
-
     const auto addPendingAssignment =
         [&pendingInlineCount, &pendingInlineEntries,
          &pendingOverflowEntries](const grammar::Assignment *assignment,
@@ -85,9 +79,11 @@ template <typename T> struct ParserRuleBuildSupport {
         };
 
     const auto applyAndClearPendingAssignments =
-        [&applyPendingAssignments, &clearPendingAssignments](AstNode *targetNode) {
+        [&applyPendingAssignments, &pendingInlineCount,
+         &pendingOverflowEntries](AstNode *targetNode) {
       applyPendingAssignments(targetNode);
-      clearPendingAssignments();
+      pendingInlineCount = 0;
+      pendingOverflowEntries.clear();
         };
 
     if (node.isLeaf()) {

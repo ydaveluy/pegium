@@ -32,7 +32,16 @@ enum class ElementKind {
 
 struct AbstractElement {
   using ElementKind = pegium::grammar::ElementKind;
-  constexpr virtual ElementKind getKind() const noexcept = 0;
+
+  constexpr explicit AbstractElement(ElementKind kind) noexcept : _kind(kind) {}
+
+  /// Returns the element kind. Stored once at construction (grammar bootstrap)
+  /// rather than dispatched virtually, so hot readers reaching it through a
+  /// `const AbstractElement *` (e.g. `getGrammarElement()->getKind()`) pay a
+  /// plain field load instead of a vtable indirection that cannot be
+  /// devirtualised through the base pointer.
+  [[nodiscard]] constexpr ElementKind getKind() const noexcept { return _kind; }
+
   constexpr virtual bool isNullable() const noexcept = 0;
   constexpr virtual ~AbstractElement() noexcept = default;
   constexpr virtual void print(std::ostream &os) const = 0;
@@ -42,6 +51,9 @@ struct AbstractElement {
     obj.print(os);
     return os;
   }
+
+private:
+  ElementKind _kind;
 };
 
 } // namespace pegium::grammar

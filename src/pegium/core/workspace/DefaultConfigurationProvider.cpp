@@ -25,16 +25,30 @@ DefaultConfigurationProvider::initialized(const InitializedParams &params) {
     return promise.get_future();
   }
 
-  return std::async(std::launch::async, [this, params]() mutable {
-    std::vector<std::string> sections;
-    sections.push_back("pegium");
-    for (const auto *services : shared.serviceRegistry->all()) {
-      const auto &languageId = services->languageMetaData.languageId;
-      if (std::ranges::find(sections, languageId) == sections.end()) {
-        sections.push_back(languageId);
-      }
+  // Resolve the section list on the calling thread so the async task never
+  // touches `shared` (the SharedCoreServices reference) — only `this` and the
+  // captured params/sections. This removes the teardown race on
+  // shared.serviceRegistry.
+  std::vector<std::string> sections;
+  sections.emplace_back("pegium");
+  for (const auto *services : shared.serviceRegistry->all()) {
+    const auto &languageId = services->languageMetaData.languageId;
+    if (std::ranges::find(sections, languageId) == sections.end()) {
+      sections.push_back(languageId);
     }
+  }
 
+  // Keep the provider alive for the whole task when it is shared_ptr-managed
+  // (the production case): the task writes back into this provider's members
+  // after slow client round-trips, and SharedServices may be torn down
+  // meanwhile. weak_from_this() is empty for a stack-constructed provider
+  // (tests), where the caller already guarantees the lifetime by joining the
+  // returned future.
+  auto self = weak_from_this().lock();
+
+  return std::async(std::launch::async,
+                    [this, self = std::move(self), params,
+                     sections = std::move(sections)]() mutable {
     if (params.registerDidChangeConfiguration) {
       auto registration = params.registerDidChangeConfiguration(sections);
       if (registration.valid()) {
@@ -66,6 +80,8 @@ DefaultConfigurationProvider::initialized(const InitializedParams &params) {
     }
 
     _ready.store(true, std::memory_order_release);
+    // `self` is captured solely to keep the provider alive across the task.
+    (void)self;
   });
 }
 
@@ -99,7 +115,7 @@ std::optional<pegium::JsonValue>
 DefaultConfigurationProvider::getConfiguration(std::string_view languageId,
                                                std::string_view key) const {
   std::scoped_lock lock(_settingsMutex);
-  const auto sectionIt = _settingsBySection.find(std::string(languageId));
+  const auto sectionIt = _settingsBySection.find(languageId);
   if (sectionIt == _settingsBySection.end() || !sectionIt->second.isObject()) {
     return std::nullopt;
   }
@@ -137,7 +153,7 @@ DefaultConfigurationProvider::getWorkspaceConfigurationForLanguage(
     return configuration;
   }
   std::scoped_lock lock(_settingsMutex);
-  const auto sectionIt = _settingsBySection.find(std::string(languageId));
+  const auto sectionIt = _settingsBySection.find(languageId);
   if (sectionIt == _settingsBySection.end()) {
     return configuration;
   }

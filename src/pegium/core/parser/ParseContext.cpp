@@ -56,10 +56,10 @@ bool RecoveryContext::insertSynthetic(const grammar::AbstractElement *element) {
     return false;
   }
   clearPendingDeleteHiddenTriviaBridge();
-  const bool canInsertAtCursor =
-      canInsert() ||
-      (allowInsert && allowsCompletedWindowInsertionClusterAtCursor());
-  if (!canInsertAtCursor || !canAffordEdit(ParseDiagnosticKind::Inserted)) {
+  if (const bool canInsertAtCursor =
+          canInsert() ||
+          (allowInsert && allowsCompletedWindowInsertionClusterAtCursor());
+      !canInsertAtCursor || !canAffordEdit(ParseDiagnosticKind::Inserted)) {
     PEGIUM_RECOVERY_TRACE("[rule] insert blocked offset=", cursorOffset(),
                           " floor=", editFloorOffset);
     return false;
@@ -213,7 +213,7 @@ bool RecoveryContext::extendLastDeleteThroughHiddenTrivia() noexcept {
     return false;
   }
   clearPendingDeleteHiddenTriviaBridge();
-  if (auto &lastEdit = recoveryEdits.back();
+  if (const auto &lastEdit = recoveryEdits.back();
       lastEdit.kind != ParseDiagnosticKind::Deleted ||
       lastEdit.endOffset != cursorOffset()) {
     return false;

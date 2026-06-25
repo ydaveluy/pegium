@@ -49,9 +49,6 @@ next_visible_leaf_at_or_after(const workspace::Document &document,
   return std::nullopt;
 }
 
-[[nodiscard]] FoundToken find_found_token(const workspace::Document &document,
-                                          TextOffset offset);
-
 
 [[nodiscard]] std::string quote_keyword(std::string_view value) {
   return "'" + std::string(value) + "'";

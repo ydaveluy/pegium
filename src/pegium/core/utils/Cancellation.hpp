@@ -9,7 +9,7 @@ using CancellationToken = std::stop_token;
 using CancellationTokenSource = std::stop_source;
 
 /// Default token used when an API accepts cancellation but the caller has none.
-inline static const CancellationToken default_cancel_token{};
+inline const CancellationToken default_cancel_token{};
 
 /// Exception thrown when cooperative cancellation is observed.
 class OperationCancelled : public std::runtime_error {

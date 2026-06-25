@@ -182,9 +182,9 @@ public:
   /// Sequential dispatcher per-mode. Each mode's logic lives in a
   /// dedicated helper (`parse_elements_strict`, `parse_elements_recovery`,
   /// `parse_elements_expect`) so the strict-only path is physically
-  /// separated from the recovery branch (the lint
-  /// `check_strict_path` verifies the strict helper does not touch
-  /// any recovery symbol).
+  /// separated from the recovery branch. Keeping the strict helper free of
+  /// recovery symbols is a maintenance invariant, not currently enforced by
+  /// an automated check.
   template <ParseModeContext Context, std::size_t I>
   bool parse_elements(
       Context &ctx,
@@ -814,8 +814,8 @@ private:
           if (previousStrictProgress) {
             return true;
           }
-          const auto &current = std::get<I>(elements);
-          if (element_is_terminal_like_for_missing_insert(current) &&
+          if (const auto &current = std::get<I>(elements);
+              element_is_terminal_like_for_missing_insert(current) &&
               allows_synthetic_terminal_insert(
                   ctx, current, /*allowSequenceLiteralInsert=*/true) &&
               detail::cursor_starts_visible_source(ctx)) {
@@ -1170,8 +1170,8 @@ private:
       RecoveryContext &ctx, const Checkpoint &checkpoint,
       const TerminalRecoveryState &terminalRecoveryState,
       const SequenceFacts &terminalEntryFacts) const {
-    const auto &current = std::get<I>(elements);
-    if (current.getKind() == ElementKind::Literal ||
+    if (const auto &current = std::get<I>(elements);
+        current.getKind() == ElementKind::Literal ||
         current.getKind() == ElementKind::TerminalRule) {
       ctx.rewind(checkpoint);
       return build_terminal_sequence_legality<I>(
@@ -1429,9 +1429,8 @@ private:
           return false;
         }
       }
-      const bool currentMatchesStrict =
-          detail::attempt_parse_without_side_effects(ctx, current);
-      if (currentMatchesStrict) {
+      if (const bool currentMatchesStrict =
+              detail::attempt_parse_without_side_effects(ctx, current)) {
         // When `current` is the last element, analyze_suffix_entry_facts<count>
         // returns {} (strictStartsAtCurrentCursor=false), so this also covers
         // the "nothing follows" case without a separate guard.
@@ -1522,17 +1521,17 @@ private:
     auto allowLocalInsertGuard =
         ctx.withEditPermissions(true, ctx.allowDelete);
     (void)allowLocalInsertGuard;
-    const bool inserted = ctx.insertSynthetic(std::addressof(current));
-    if (!inserted) {
+    if (const bool inserted = ctx.insertSynthetic(std::addressof(current));
+        !inserted) {
       ctx.rewind(checkpoint);
       return false;
     }
     ctx.leaf(ctx.cursor(), std::addressof(current), false, true);
     const auto editCountAfterCurrent = ctx.recoveryEditCount();
     const auto editCostAfterCurrent = ctx.currentEditCost();
-    const bool tailMatched =
-        this->template parse_clean_tail_without_edits<I + 1>(ctx);
-    if (!tailMatched || ctx.recoveryEditCount() != editCountAfterCurrent ||
+    if (const bool tailMatched =
+            this->template parse_clean_tail_without_edits<I + 1>(ctx);
+        !tailMatched || ctx.recoveryEditCount() != editCountAfterCurrent ||
         ctx.currentEditCost() != editCostAfterCurrent) {
       ctx.rewind(checkpoint);
       return false;
@@ -1644,7 +1643,7 @@ private:
     const auto baseEditCost = ctx.currentEditCost();
     const auto baseRecoveryEditCount = ctx.recoveryEditCount();
     if (allowInsertCurrentTerminal) {
-      this->consider_sequence_recovery_candidate(
+      consider_sequence_recovery_candidate(
           bestPlan, bestCandidate,
           {.valid = true,
            .insertCurrentTerminal = true,
@@ -1662,7 +1661,7 @@ private:
       if (!deleteRun.has_value()) {
         return;
       }
-      this->consider_sequence_recovery_candidate(
+      consider_sequence_recovery_candidate(
           bestPlan, bestCandidate,
           {.valid = true,
            .insertCurrentTerminal = true,

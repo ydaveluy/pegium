@@ -182,6 +182,17 @@ std::string path_to_file_uri(std::string_view path) {
   return "file://" + percent_encode(normalized);
 }
 
+std::string normalize_extension(std::string_view extension) {
+  if (extension.empty()) {
+    return {};
+  }
+  std::string normalized(extension);
+  if (normalized.front() != '.') {
+    normalized.insert(normalized.begin(), '.');
+  }
+  return normalized;
+}
+
 bool equals_uri(std::string_view left, std::string_view right) {
   return normalize_uri(left) == normalize_uri(right);
 }

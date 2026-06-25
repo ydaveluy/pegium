@@ -1,7 +1,6 @@
 #include <pegium/core/references/DefaultScopeComputation.hpp>
 
 #include <cassert>
-#include <string>
 #include <utility>
 
 #include <pegium/core/services/CoreServices.hpp>
@@ -61,12 +60,12 @@ void DefaultScopeComputation::collectLocalSymbolsForNode(
 std::optional<workspace::AstNodeDescription>
 DefaultScopeComputation::make_description(
     const AstNode &node, const workspace::Document &document) const {
-  auto info = services.references.nameProvider->nameOf(node);
-  if (info.empty()) {
+  auto name = services.references.nameProvider->getName(node);
+  if (!name.has_value()) {
     return std::nullopt;
   }
   return services.workspace.astNodeDescriptionProvider->createDescription(
-      node, document, std::move(info));
+      node, std::move(*name), document);
 }
 
 void DefaultScopeComputation::addExportedSymbol(

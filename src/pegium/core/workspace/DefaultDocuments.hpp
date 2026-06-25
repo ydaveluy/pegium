@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include <pegium/core/services/DefaultSharedCoreService.hpp>
+#include <pegium/core/utils/TransparentStringHash.hpp>
 #include <pegium/core/utils/UriTrie.hpp>
 #include <pegium/core/workspace/Documents.hpp>
 
@@ -65,7 +66,7 @@ private:
   mutable std::mutex _mutex;
   utils::UriTrie<std::shared_ptr<Document>> _documents;
   std::unordered_map<DocumentId, std::shared_ptr<Document>> _documentsById;
-  std::unordered_map<std::string, DocumentId> _documentIdsByUri;
+  utils::TransparentStringMap<DocumentId> _documentIdsByUri;
   std::unordered_map<DocumentId, std::string> _documentUrisById;
   DocumentId _nextDocumentId = 1;
 };

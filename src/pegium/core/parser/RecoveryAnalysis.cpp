@@ -266,14 +266,15 @@ inline constexpr unsigned kMaxLeadingVisibleEntryDepth = 256u;
 classify_leading_visible_entry(const grammar::AbstractElement &element,
                                unsigned depth = 0u) noexcept {
   using enum grammar::ElementKind;
+  using enum LeadingVisibleEntryKind;
   if (depth >= kMaxLeadingVisibleEntryDepth) {
-    return LeadingVisibleEntryKind::Unguarded;
+    return Unguarded;
   }
   const unsigned childDepth = depth + 1u;
   switch (element.getKind()) {
   case AndPredicate:
   case NotPredicate:
-    return LeadingVisibleEntryKind::PredicateGuarded;
+    return PredicateGuarded;
   case Assignment:
     return classify_leading_visible_entry(
         *static_cast<const grammar::Assignment &>(element).getElement(),
@@ -293,7 +294,7 @@ classify_leading_visible_entry(const grammar::AbstractElement &element,
   case Repetition: {
     const auto &repetition = static_cast<const grammar::Repetition &>(element);
     return repetition.getMin() == 0u
-               ? LeadingVisibleEntryKind::None
+               ? None
                : classify_leading_visible_entry(*repetition.getElement(),
                                                 childDepth);
   }
@@ -305,14 +306,14 @@ classify_leading_visible_entry(const grammar::AbstractElement &element,
         continue;
       }
       if (const auto childKind = classify_leading_visible_entry(*child, childDepth);
-          childKind != LeadingVisibleEntryKind::None) {
+          childKind != None) {
         return childKind;
       }
       if (!child->isNullable()) {
-        return LeadingVisibleEntryKind::None;
+        return None;
       }
     }
-    return LeadingVisibleEntryKind::None;
+    return None;
   }
   case OrderedChoice: {
     const auto &choice = static_cast<const grammar::OrderedChoice &>(element);
@@ -323,14 +324,14 @@ classify_leading_visible_entry(const grammar::AbstractElement &element,
         continue;
       }
       const auto childKind = classify_leading_visible_entry(*child, childDepth);
-      if (childKind == LeadingVisibleEntryKind::Unguarded) {
-        return LeadingVisibleEntryKind::Unguarded;
+      if (childKind == Unguarded) {
+        return Unguarded;
       }
       sawGuarded = sawGuarded ||
-                   childKind == LeadingVisibleEntryKind::PredicateGuarded;
+                   childKind == PredicateGuarded;
     }
-    return sawGuarded ? LeadingVisibleEntryKind::PredicateGuarded
-                      : LeadingVisibleEntryKind::None;
+    return sawGuarded ? PredicateGuarded
+                      : None;
   }
   case UnorderedGroup: {
     const auto &group = static_cast<const grammar::UnorderedGroup &>(element);
@@ -341,26 +342,26 @@ classify_leading_visible_entry(const grammar::AbstractElement &element,
         continue;
       }
       const auto childKind = classify_leading_visible_entry(*child, childDepth);
-      if (childKind == LeadingVisibleEntryKind::Unguarded) {
-        return LeadingVisibleEntryKind::Unguarded;
+      if (childKind == Unguarded) {
+        return Unguarded;
       }
       sawGuarded = sawGuarded ||
-                   childKind == LeadingVisibleEntryKind::PredicateGuarded;
+                   childKind == PredicateGuarded;
     }
-    return sawGuarded ? LeadingVisibleEntryKind::PredicateGuarded
-                      : LeadingVisibleEntryKind::None;
+    return sawGuarded ? PredicateGuarded
+                      : None;
   }
   case Create:
   case Nest:
-    return LeadingVisibleEntryKind::None;
+    return None;
   case AnyCharacter:
   case CharacterRange:
   case Literal:
   case TerminalRule:
   case InfixOperator:
-    return LeadingVisibleEntryKind::Unguarded;
+    return Unguarded;
   }
-  return LeadingVisibleEntryKind::Unguarded;
+  return Unguarded;
 }
 
 } // namespace

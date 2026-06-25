@@ -76,8 +76,8 @@ EmptyFileSystemProvider::readDirectory(std::string_view uri) const {
 FileSystemNode LocalFileSystemProvider::stat(std::string_view uri) const {
   const auto path = resolve_path(uri);
   std::error_code ec;
-  const auto status = std::filesystem::status(path, ec);
-  if (ec || (!std::filesystem::is_regular_file(status) &&
+  if (const auto status = std::filesystem::status(path, ec);
+      ec || (!std::filesystem::is_regular_file(status) &&
              !std::filesystem::is_directory(status))) {
     throw missing_file_system_node("stat", uri);
   }

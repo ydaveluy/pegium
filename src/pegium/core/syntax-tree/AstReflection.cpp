@@ -40,15 +40,14 @@ void AstReflection::registerType(std::type_index type) {
 
 void AstReflection::registerSubtype(std::type_index subtype,
                                     std::type_index supertype) {
-  if (subtype == invalid_type() || supertype == invalid_type() ||
-      subtype == supertype) {
-    registerTypeInternal(subtype);
-    registerTypeInternal(supertype);
-    return;
-  }
-
+  // Always record both endpoints; only build a transitive edge for a real
+  // (valid, distinct) subtype relationship.
   registerTypeInternal(subtype);
   registerTypeInternal(supertype);
+  if (subtype == invalid_type() || supertype == invalid_type() ||
+      subtype == supertype) {
+    return;
+  }
 
   const auto &allSubtypes = _subtypesByType.at(subtype);
 
@@ -76,10 +75,8 @@ void AstReflection::registerTypeInternal(std::type_index type) {
   if (!is_valid_type(type)) {
     return;
   }
-  if (_types.insert(type).second) {
-    _subtypesByType[type].insert(type);
-    return;
-  }
+  _types.insert(type);
+  // Reflexive self-edge: idempotent, always present after registration.
   _subtypesByType[type].insert(type);
 }
 

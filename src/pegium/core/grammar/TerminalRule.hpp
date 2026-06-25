@@ -17,9 +17,7 @@ struct ValueBuildContext;
 namespace pegium::grammar {
 
 struct TerminalRule : AbstractRule {
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::TerminalRule;
-  }
+  constexpr TerminalRule() noexcept : AbstractRule(ElementKind::TerminalRule) {}
   virtual RuleValue
   getValue(const CstNodeView &node,
            const parser::ValueBuildContext *context = nullptr) const = 0;

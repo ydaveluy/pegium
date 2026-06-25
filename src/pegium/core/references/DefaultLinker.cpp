@@ -188,6 +188,10 @@ auto DefaultLinker::withReferenceInfo(const AbstractReference &reference,
     return workspace::LinkingError{
         .info = makeReferenceInfo(cycle.reference()),
         .kind = workspace::LinkingErrorKind::Cycle};
+  } catch (const utils::OperationCancelled &) {
+    // Cooperative cancellation must propagate, not be swallowed into a
+    // per-reference LinkingError (which would let the build report success).
+    throw;
   } catch (const std::exception &error) {
     return createExceptionLinkingError(info, error.what());
   }

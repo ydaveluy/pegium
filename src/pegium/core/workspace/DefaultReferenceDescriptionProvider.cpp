@@ -22,7 +22,7 @@ DefaultReferenceDescriptionProvider::createDescriptions(
       continue;
     }
 
-    const auto targetText = reference.getRefText();
+    const auto &targetText = reference.getRefText();
     if (targetText.empty()) {
       continue;
     }
@@ -37,7 +37,7 @@ DefaultReferenceDescriptionProvider::createDescriptions(
         .sourceDocumentId = document.id,
         .sourceOffset = sourceOffset,
         .sourceLength = sourceLength,
-        .referenceType = reference.getReferenceType(),
+        .multiReference = reference.isMultiReference(),
     };
 
     if (reference.isMultiReference()) {

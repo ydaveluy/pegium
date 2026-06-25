@@ -137,6 +137,14 @@ get_self_nodes(const AstNode &node, const pegium::CoreServices &services) {
   // so a plain reference enumerated ahead of the multi-reference does not mask
   // the siblings.
   for (const auto &incoming : indexManager->findAllReferences(targetKey)) {
+    // Only a multi-reference pulls in siblings. The indexed flag lets us skip
+    // plain references in O(1); resolving the actual reference (a linear scan of
+    // the source document via find_reference_at_offset) is done only for the
+    // few multi-references, so this stays O(incoming) instead of O(incoming x
+    // references) on a high-fan-in symbol.
+    if (!incoming.multiReference) {
+      continue;
+    }
     const auto sourceDocument = documents.getDocument(incoming.sourceDocumentId);
     if (sourceDocument == nullptr) {
       continue;
@@ -203,6 +211,13 @@ DefaultReferences::findReferences(const AstNode &targetNode,
     // sibling declaration is reported as a self-reference.
     for (const auto *selfNode : get_self_nodes(targetNode, services)) {
       const auto &selfDocument = getDocument(*selfNode);
+      // Honor the document filter for self-references too: the indexed-reference
+      // loop below filters by options.documentId, so a self-node from another
+      // document would otherwise produce a highlight range against the wrong doc.
+      if (options.documentId.has_value() &&
+          selfDocument.id != *options.documentId) {
+        continue;
+      }
       const auto declarationNode =
           required_declaration_site_node(*selfNode, *nameProvider);
       results.push_back(workspace::ReferenceDescription{

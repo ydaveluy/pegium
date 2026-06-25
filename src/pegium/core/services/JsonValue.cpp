@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <locale>
 #include <ostream>
 #include <span>
 #include <sstream>
@@ -63,6 +64,10 @@ std::string serialize_number(double value) {
     return "null";
   }
   std::ostringstream stream;
+  // JSON requires a '.' decimal separator and no digit grouping; the global
+  // locale (which an LSP host may set to e.g. de_DE/fr_FR) must not leak into
+  // the wire format, so always format numbers with the classic "C" locale.
+  stream.imbue(std::locale::classic());
   stream.precision(std::numeric_limits<double>::max_digits10);
   stream << value;
   return stream.str();
@@ -240,11 +245,15 @@ std::int64_t JsonValue::integer() const {
           "Cannot convert a non-finite JSON number to an integer.");
     }
     const auto wideValue = static_cast<long double>(*value);
+    // INT64_MIN (-2^63) is exactly representable; INT64_MAX (2^63-1) is NOT on
+    // platforms where long double == double, where it rounds up to 2^63 and a
+    // value of exactly 2^63 would slip past a `> maxInteger` test and make the
+    // final cast UB. Use the exactly-representable 2^63 (= -INT64_MIN) as an
+    // EXCLUSIVE upper bound instead.
     constexpr auto minInteger =
         static_cast<long double>(std::numeric_limits<std::int64_t>::min());
-    constexpr auto maxInteger =
-        static_cast<long double>(std::numeric_limits<std::int64_t>::max());
-    if (wideValue < minInteger || wideValue > maxInteger) {
+    constexpr auto maxIntegerExclusive = -minInteger;
+    if (wideValue < minInteger || wideValue >= maxIntegerExclusive) {
       throw std::out_of_range(
           "Cannot convert an out-of-range JSON number to an integer.");
     }

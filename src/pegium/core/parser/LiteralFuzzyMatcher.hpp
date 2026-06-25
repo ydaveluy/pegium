@@ -38,7 +38,7 @@ struct LiteralFuzzyCandidate {
 
 using LiteralFuzzyCandidates = std::vector<LiteralFuzzyCandidate>;
 
-/// Direct-mapped cache for `find_literal_fuzzy_candidates`.
+/// Direct-mapped cache for `find_literal_fuzzy_candidates_view`.
 ///
 /// Memoizes the Levenshtein-DP keyed on the (literal storage, input span,
 /// case-sensitivity) identity tuple. Both pointers are stable for the

@@ -7,9 +7,7 @@
 namespace pegium::grammar {
 
 struct Repetition : AbstractElement {
-  constexpr ElementKind getKind() const noexcept final {
-    return ElementKind::Repetition;
-  }
+  constexpr Repetition() noexcept : AbstractElement(ElementKind::Repetition) {}
 
   constexpr ~Repetition() noexcept override = default;
   virtual std::size_t getMin() const noexcept = 0;

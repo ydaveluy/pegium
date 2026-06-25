@@ -12,17 +12,6 @@
 namespace pegium {
 namespace {
 
-std::string normalize_extension(std::string_view extension) {
-  if (extension.empty()) {
-    return {};
-  }
-  std::string normalized(extension);
-  if (!normalized.empty() && normalized.front() != '.') {
-    normalized.insert(normalized.begin(), '.');
-  }
-  return normalized;
-}
-
 const CoreServices *lookup_by_language_id_locked(
     const utils::TransparentStringMap<std::unique_ptr<CoreServices>>
         &servicesByLanguageId,
@@ -63,10 +52,11 @@ void DefaultServiceRegistry::registerServices(
     throw utils::ServiceRegistrationError(
         "Cannot register core services without a languageId.");
   }
-  if (!services->isComplete()) {
+  if (const auto missing = services->firstMissingService()) {
     throw utils::ServiceRegistrationError(
         "Cannot register incomplete core services for language '" +
-        services->languageMetaData.languageId + "'.");
+        services->languageMetaData.languageId + "': missing service '" +
+        std::string(*missing) + "'.");
   }
 
   const std::string languageId = services->languageMetaData.languageId;
@@ -133,9 +123,11 @@ std::vector<const CoreServices *> DefaultServiceRegistry::all() const {
   std::vector<const CoreServices *> services;
   services.reserve(_registrationOrder.size());
   for (const auto &languageId : _registrationOrder) {
-    const auto *service =
-        lookup_by_language_id_locked(_servicesByLanguageId, languageId);
-    services.push_back(service);
+    if (const auto *service =
+            lookup_by_language_id_locked(_servicesByLanguageId, languageId);
+        service != nullptr) {
+      services.push_back(service);
+    }
   }
   return services;
 }
@@ -180,7 +172,7 @@ const CoreServices *DefaultServiceRegistry::findServicesLocked(
 const CoreServices *
 DefaultServiceRegistry::lookupByExtension(std::string_view extension) const {
   const auto languageIt =
-      _languageIdByExtension.find(normalize_extension(extension));
+      _languageIdByExtension.find(utils::normalize_extension(extension));
   if (languageIt == _languageIdByExtension.end()) {
     return nullptr;
   }
@@ -199,7 +191,7 @@ DefaultServiceRegistry::lookupByFileName(std::string_view fileName) const {
 void DefaultServiceRegistry::removeLanguageMappingsLocked(
     std::string_view languageId, const CoreServices &services) {
   for (const auto &extension : services.languageMetaData.fileExtensions) {
-    const auto normalized = normalize_extension(extension);
+    const auto normalized = utils::normalize_extension(extension);
     if (normalized.empty()) {
       continue;
     }
@@ -223,7 +215,7 @@ void DefaultServiceRegistry::removeLanguageMappingsLocked(
 void DefaultServiceRegistry::addLanguageMappingsLocked(
     std::string_view languageId, const CoreServices &services) {
   for (const auto &extension : services.languageMetaData.fileExtensions) {
-    const auto normalized = normalize_extension(extension);
+    const auto normalized = utils::normalize_extension(extension);
     if (normalized.empty()) {
       continue;
     }

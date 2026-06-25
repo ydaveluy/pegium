@@ -357,7 +357,7 @@ private:
   using ChoiceAttempt = detail::ChoiceAttempt;
 
   /// Captures the no-edit branch candidate. Only called after
-  /// `observe_no_edit_parse` matched, so no recovery edits were
+  /// `attempt_parse_no_edits` matched, so no recovery edits were
   /// committed: editCost / editCount / firstEditOffset are zero by
   /// construction.
   [[nodiscard]] detail::EditableRecoveryCandidate
@@ -378,10 +378,11 @@ private:
   ///
   ///   1. Admission: if `candidate.envelope.key.matched` is false, the
   ///      candidate is rejected.
-  ///   2. Family redundancy: `extension_outranks_anchor_base` removes
-  ///      a base candidate when an extending candidate (same anchor,
+  ///   2. Family redundancy: `extension_dominates` removes a base
+  ///      candidate when an extending candidate (same anchor,
   ///      `ReplayPrefixClass::ExtendedCommittedPrefix`) progresses
-  ///      strictly further at strictly higher cost. NOT a
+  ///      strictly further at no-worse cost, gated by a
+  ///      `progressGap >= costGap` ratio test. NOT a
   ///      replay-equivalence dominance — the two candidates carry
   ///      different scripts.
   ///   3. Ranking: `is_better_recovery_key` on `envelope.key` decides

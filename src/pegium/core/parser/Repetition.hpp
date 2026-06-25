@@ -491,7 +491,7 @@ private:
   /// `admission -> family-redundancy -> ranking`, mirroring
   /// `OrderedChoice::consider_choice_attempt`. The two
   /// family-redundancy filters
-  /// (`destructive_extension_outranks_anchor_base` and
+  /// (`extension_dominates` with the `WhenCurrentIsExtended` guard, and
   /// `boundary_repair_outranks_no_edit_iteration`) are checked
   /// before the central ranking; they are NOT
   /// replay-equivalence dominance — they remove redundancy inside
@@ -556,8 +556,8 @@ private:
       const IterationPlanList &plans) noexcept {
     std::optional<std::size_t> singleIndex;
     for (std::size_t i = 0; i < plans.size(); ++i) {
-      const auto &plan = plans[i];
-      if (!plan.legal || plan.kind == IterationReplayKind::NoInsert) {
+      if (const auto &plan = plans[i];
+          !plan.legal || plan.kind == IterationReplayKind::NoInsert) {
         continue;
       }
       if (singleIndex.has_value()) {
@@ -639,15 +639,16 @@ private:
     (void)detail::visit_guarded_delete_scan_positions(
         ctx, [&ctx]() { return !ctx.probeFollowAcceptsHere(); },
         [this, &ctx, &consumesVisible](const detail::DeleteScanVisitState &) {
+          using enum detail::DeleteScanVisitResult;
           if (ctx.probeFollowAcceptsHere()) {
-            return detail::DeleteScanVisitResult::Stop;
+            return Stop;
           }
           if (attempt_fast_probe(ctx, _element) ||
               probe_recoverable_at_entry_consumes_visible(_element, ctx)) {
             consumesVisible = true;
-            return detail::DeleteScanVisitResult::Accept;
+            return Accept;
           }
-          return detail::DeleteScanVisitResult::Continue;
+          return Continue;
         },
         {.scan = {.maxDeletes = maxDeletes,
                   .allowOverflow = !is_optional}});
@@ -765,10 +766,11 @@ private:
     return walk_grammar_first_non_nullable_satisfies(
         element,
         [](const grammar::AbstractElement &leaf) noexcept {
+          using enum ElementKind;
           switch (leaf.getKind()) {
-          case ElementKind::TerminalRule:
-          case ElementKind::AnyCharacter:
-          case ElementKind::CharacterRange:
+          case TerminalRule:
+          case AnyCharacter:
+          case CharacterRange:
             return true;
           default:
             return false;
@@ -1506,18 +1508,6 @@ private:
     return selection;
   }
 
-  /// Last-resort panic-mode resync skip.
-  ///
-  /// Scans forward from the failing cursor up to
-  /// `ctx.maxResyncSkipCodepoints` codepoints looking for the first position
-  /// where `_element` strictly starts and consumes at least one codepoint.
-  /// The skipped range is emitted as a contiguous `Delete` edit run and
-  /// the iteration is treated as matched at the resync point.
-  ///
-  /// Only invoked when every normal iteration plan failed; the produced
-  /// candidate's `editCost` naturally makes a cheaper local candidate
-  /// dominate under the shared `RecoveryKey` comparator, so this path
-  /// never steals from admissible lower-cost recoveries.
   /// Last-resort panic-mode resync skip. Pass 1 deletes noise until the
   /// iteration element itself re-parses cleanly (no destructive edit) from a
   /// fresh start. When `allowParentFollowFallback` is set, pass 2 (after
@@ -1576,9 +1566,9 @@ private:
            with_iteration_element_follow(
                ctx, [&]() { return parse(_element, ctx); })) &&
           ctx.cursor() != parseCursor) {
-        const auto editSummary = detail::summarize_edits_since(
-            ctx.recoveryEditsView(), targetRecoveryEditCount);
-        if (editSummary.hasDestructiveEdit) {
+        if (const auto editSummary = detail::summarize_edits_since(
+                ctx.recoveryEditsView(), targetRecoveryEditCount);
+            editSummary.hasDestructiveEdit) {
           ctx.rewind(parseCheckpoint);
           continue;
         }
