@@ -859,8 +859,8 @@ public:
   /// escape: a single-edit fuzzy keyword replace, or the first delete of a
   /// run).
   [[nodiscard]] constexpr bool
-  destructiveEditOutsideActiveWindow(const EditWindow *window,
-                                     bool windowContinuationHatch) const noexcept {
+  destructiveEditOutsideActiveWindow(bool windowContinuationHatch) const noexcept {
+    const auto *window = currentEditWindow();
     return recoveryState.windowReplay.inRecoveryPhase && window != nullptr &&
            cursorOffset() > window->maxCursorOffset &&
            recoveryState.editBudget.hadEdits &&
@@ -980,7 +980,6 @@ public:
                             cursorOffset(), " floor=", editFloorOffset);
       return false;
     }
-    const auto *window = currentEditWindow();
     // Carve-out for the canonical "truncated/typoed word keyword" Replace.
     // We allow such a Replace to bypass the destructive-outside-window
     // guard because cascading recoveries (e.g. `statemachin` +
@@ -1018,7 +1017,7 @@ public:
         !forbidOutOfWindowFuzzyFold && targetsWordKeyword &&
         fuzzyOperationDistance == 1u && replaceSpan > 0;
     if (!canEdit() ||
-        destructiveEditOutsideActiveWindow(window, !singleEditFuzzyKeywordReplace) ||
+        destructiveEditOutsideActiveWindow(!singleEditFuzzyKeywordReplace) ||
         !canEditAtOffset(endOffset) ||
         !canAffordEdit(replacementCost)) {
       PEGIUM_RECOVERY_TRACE("[rule] replace blocked offset=", cursorOffset(),

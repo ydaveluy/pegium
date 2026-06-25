@@ -4,8 +4,6 @@
 
 #include <algorithm>
 #include <concepts>
-#include <cstdint>
-#include <memory>
 #include <type_traits>
 
 #include <pegium/core/parser/ParseContext.hpp>

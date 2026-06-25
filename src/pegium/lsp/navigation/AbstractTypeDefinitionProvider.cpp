@@ -1,9 +1,6 @@
 #include <pegium/lsp/navigation/AbstractTypeDefinitionProvider.hpp>
 #include <pegium/lsp/support/LspProviderUtils.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
-#include <pegium/core/syntax-tree/CstUtils.hpp>
-
-#include <cassert>
 
 namespace pegium {
 

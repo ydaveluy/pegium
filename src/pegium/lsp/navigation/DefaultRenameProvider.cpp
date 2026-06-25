@@ -1,10 +1,8 @@
 #include <pegium/lsp/navigation/DefaultRenameProvider.hpp>
 #include <pegium/lsp/support/LspProviderUtils.hpp>
-#include <pegium/core/syntax-tree/CstUtils.hpp>
 
 #include <algorithm>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 #include <pegium/lsp/services/SharedServices.hpp>

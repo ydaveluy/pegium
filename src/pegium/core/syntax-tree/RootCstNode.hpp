@@ -36,9 +36,6 @@ class CstBuilder;
 /// - sibling chains are linked through `CstNode::nextSiblingId`
 class RootCstNode {
 public:
-  using Text = std::string_view;
-  using Iterator = Text::const_iterator;
-
   explicit RootCstNode(text::TextSnapshot text,
                        std::pmr::memory_resource *upstream =
                            std::pmr::get_default_resource());

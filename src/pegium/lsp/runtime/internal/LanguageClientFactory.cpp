@@ -37,14 +37,10 @@ public:
             promise->set_value();
           },
           [this, promise](const ::lsp::ResponseError &error) mutable {
-            _sink.publish(observability::Observation{
-                .severity = observability::ObservationSeverity::Error,
-                .code = observability::ObservationCode::LspRuntimeBackgroundTaskFailed,
-                .message =
-                    "Language client capability registration failed: " +
-                    std::string(error.message()),
-                .category = "client/registerCapability",
-            });
+            publish_lsp_runtime_failure(
+                _sink, "client/registerCapability",
+                "Language client capability registration failed: " +
+                    std::string(error.message()));
             promise->set_value();
           });
     } catch (const std::exception &error) {
@@ -84,13 +80,10 @@ public:
             promise->set_value(std::move(values));
           },
           [this, promise](const ::lsp::ResponseError &error) mutable {
-            _sink.publish(observability::Observation{
-                .severity = observability::ObservationSeverity::Error,
-                .code = observability::ObservationCode::LspRuntimeBackgroundTaskFailed,
-                .message = "Language client configuration fetch failed: " +
-                           std::string(error.message()),
-                .category = "workspace/configuration",
-            });
+            publish_lsp_runtime_failure(
+                _sink, "workspace/configuration",
+                "Language client configuration fetch failed: " +
+                    std::string(error.message()));
             promise->set_value({});
           });
     } catch (const std::exception &error) {

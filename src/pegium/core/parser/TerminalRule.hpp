@@ -120,9 +120,8 @@ private:
   }
 
   bool delete_scan_match(RecoveryContext &ctx) const noexcept {
-    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
-        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
-    };
+    const auto localRecoveryFacts =
+        detail::local_skip_terminal_recovery_facts(ctx);
     return detail::probe_nearby_delete_scan_match(
         ctx,
         [this](const char *scanCursor) noexcept { return terminal(scanCursor); },
@@ -215,13 +214,7 @@ private:
                                      &matchRecoverableTerminal,
                                      &applyRecoveredLeaf]() {
       const auto &facts = effectiveRecoveryFacts;
-      const bool hasHadEdits =
-          []<typename Ctx>(const Ctx &currentCtx) constexpr noexcept {
-            if constexpr (requires { currentCtx.hasHadEdits(); }) {
-              return currentCtx.hasHadEdits();
-            }
-            return false;
-          }(ctx);
+      const bool hasHadEdits = detail::context_has_had_edits(ctx);
       detail::TerminalRecoveryCandidate bestChoice;
       if (_literalRecoveryMetadata.has_value()) {
         if (!hasHadEdits ||

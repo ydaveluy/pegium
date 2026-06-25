@@ -124,19 +124,9 @@ private:
       }
     };
 
-    const auto hasImmediateVisibleContinuation =
-        [&ctx](const char *position) constexpr noexcept {
-          if (position == nullptr || position >= ctx.end) {
-            return false;
-          }
-          if constexpr (requires { ctx.skip_without_builder(position); }) {
-            return ctx.skip_without_builder(position) == position;
-          }
-          return true;
-        };
-
     const bool splitInsertConsidered =
-        matchedEnd != nullptr && hasImmediateVisibleContinuation(matchedEnd);
+        matchedEnd != nullptr &&
+        detail::has_immediate_visible_continuation(ctx, matchedEnd);
     if (splitInsertConsidered) {
       considerChoice(detail::evaluate_insert_synthetic_gap_terminal_candidate(
           ctx, cursorStart, matchedEnd, this, 3u));
@@ -258,15 +248,7 @@ private:
     const auto effectiveRecoveryFacts =
         detail::effective_terminal_recovery_facts(ctx, terminalRecoveryFacts);
     const char *const cursorStart = ctx.cursor();
-    const bool hasHadEdits = []<typename Ctx>(const Ctx &currentCtx) constexpr
-                                 noexcept {
-                                   if constexpr (requires {
-                                                   currentCtx.hasHadEdits();
-                                                 }) {
-                                     return currentCtx.hasHadEdits();
-                                   }
-                                   return false;
-                                 }(ctx);
+    const bool hasHadEdits = detail::context_has_had_edits(ctx);
     const char *const matchedEnd = terminal(cursorStart);
     const auto applyFuzzyRecovery = [&]() -> bool {
       const auto fuzzyCandidates =
@@ -429,22 +411,12 @@ public:
   }
 
   bool probeRecoverable(RecoveryContext &ctx) const noexcept {
-    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
-        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
-    };
+    const auto localRecoveryFacts =
+        detail::local_skip_terminal_recovery_facts(ctx);
     const char *const cursorStart = ctx.cursor();
-    const auto hasImmediateVisibleContinuation =
-        [&ctx](const char *position) constexpr noexcept {
-          if (position == nullptr || position >= ctx.end) {
-            return false;
-          }
-          if constexpr (requires { ctx.skip_without_builder(position); }) {
-            return ctx.skip_without_builder(position) == position;
-          }
-          return true;
-        };
     if (const char *const matchedEnd = terminal(cursorStart);
-        matchedEnd != nullptr && hasImmediateVisibleContinuation(matchedEnd)) {
+        matchedEnd != nullptr &&
+        detail::has_immediate_visible_continuation(ctx, matchedEnd)) {
       return true;
     }
     if (ctx.hasHadEdits() &&
@@ -467,9 +439,8 @@ public:
   }
 
   bool probeRecoverableAtEntry(RecoveryContext &ctx) const noexcept {
-    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
-        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
-    };
+    const auto localRecoveryFacts =
+        detail::local_skip_terminal_recovery_facts(ctx);
     if constexpr (allow_insert) {
       if (detail::allows_terminal_entry_probe(ctx, terminalShape)) {
         return true;
@@ -481,18 +452,9 @@ public:
       return false;
     }
     const char *const cursorStart = ctx.cursor();
-    const auto hasImmediateVisibleContinuation =
-        [&ctx](const char *position) constexpr noexcept {
-          if (position == nullptr || position >= ctx.end) {
-            return false;
-          }
-          if constexpr (requires { ctx.skip_without_builder(position); }) {
-            return ctx.skip_without_builder(position) == position;
-          }
-          return true;
-        };
     if (const char *const matchedEnd = terminal(cursorStart);
-        matchedEnd != nullptr && hasImmediateVisibleContinuation(matchedEnd)) {
+        matchedEnd != nullptr &&
+        detail::has_immediate_visible_continuation(ctx, matchedEnd)) {
       return true;
     }
     if constexpr (allow_replace) {
@@ -514,9 +476,8 @@ public:
 
   bool
   probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const noexcept {
-    const auto localRecoveryFacts = detail::TerminalRecoveryFacts{
-        .triviaGap = detail::current_local_skip_trivia_gap_profile(ctx),
-    };
+    const auto localRecoveryFacts =
+        detail::local_skip_terminal_recovery_facts(ctx);
     if (ctx.hasHadEdits() &&
         !detail::allows_fuzzy_replace_after_prior_edits(
             terminalShape)) {

@@ -5,13 +5,10 @@
 #include <cassert>
 #include <utility>
 
-#include <pegium/lsp/services/SharedServices.hpp>
 #include <pegium/core/utils/TransparentStringHash.hpp>
 
 namespace pegium {
 using namespace pegium::provider_detail;
-
-
 
 std::vector<::lsp::FoldingRange>
 DefaultFoldingRangeProvider::getFoldingRanges(

@@ -1,7 +1,6 @@
 #include <pegium/core/references/DefaultScopeProvider.hpp>
 
 #include <algorithm>
-#include <cassert>
 #include <memory>
 #include <typeindex>
 #include <typeinfo>

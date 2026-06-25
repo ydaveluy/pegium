@@ -3,12 +3,8 @@
 
 #include <algorithm>
 
-#include <pegium/lsp/services/SharedServices.hpp>
-
 namespace pegium {
 using namespace pegium::provider_detail;
-
-
 
 std::vector<::lsp::SelectionRange>
 DefaultSelectionRangeProvider::getSelectionRanges(

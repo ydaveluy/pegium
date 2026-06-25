@@ -22,7 +22,6 @@ namespace pegium {
 /// without a separate finalize pass.
 class CstBuilder {
 public:
-  using Iterator = RootCstNode::Iterator;
   using StackIndex = std::uint32_t;
 
   static_assert(std::numeric_limits<StackIndex>::max() >= kMaxNodeCount,

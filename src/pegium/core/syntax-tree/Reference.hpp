@@ -229,14 +229,4 @@ struct is_reference<std::vector<MultiReference<T>>> : std::true_type {};
 template <typename T>
 inline constexpr bool is_reference_v = is_reference<T>::value;
 
-template <typename T> struct is_multi_reference : std::false_type {};
-template <typename T>
-struct is_multi_reference<MultiReference<T>> : std::true_type {};
-template <typename T>
-struct is_multi_reference<std::optional<MultiReference<T>>> : std::true_type {};
-template <typename T>
-struct is_multi_reference<std::vector<MultiReference<T>>> : std::true_type {};
-template <typename T>
-inline constexpr bool is_multi_reference_v = is_multi_reference<T>::value;
-
 } // namespace pegium

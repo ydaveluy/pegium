@@ -1,6 +1,5 @@
 #include <pegium/lsp/support/Diagnostics.hpp>
 
-#include <algorithm>
 #include <limits>
 #include <string>
 #include <utility>

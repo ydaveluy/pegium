@@ -127,6 +127,35 @@ template <typename Context>
   return facts;
 }
 
+template <typename Context>
+[[nodiscard]] TerminalRecoveryFacts
+local_skip_terminal_recovery_facts(const Context &ctx) noexcept {
+  return TerminalRecoveryFacts{
+      .triviaGap = current_local_skip_trivia_gap_profile(ctx),
+  };
+}
+
+template <typename Context>
+[[nodiscard]] constexpr bool context_has_had_edits(const Context &ctx) noexcept {
+  if constexpr (requires { ctx.hasHadEdits(); }) {
+    return ctx.hasHadEdits();
+  }
+  return false;
+}
+
+template <typename Context>
+[[nodiscard]] constexpr bool
+has_immediate_visible_continuation(const Context &ctx,
+                                   const char *position) noexcept {
+  if (position == nullptr || position >= ctx.end) {
+    return false;
+  }
+  if constexpr (requires { ctx.skip_without_builder(position); }) {
+    return ctx.skip_without_builder(position) == position;
+  }
+  return true;
+}
+
 [[nodiscard]] constexpr bool
 allows_nearby_delete_scan(const TerminalRecoveryFacts &facts,
                           const TerminalShape &shape) noexcept {

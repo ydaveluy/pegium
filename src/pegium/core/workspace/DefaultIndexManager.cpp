@@ -201,8 +201,7 @@ void DefaultIndexManager::rebuildReferenceTargetCacheLocked() const {
   }
 
   _referencesByTargetKeyCache.clear();
-  for (const auto &[sourceDocumentId, references] : _referencesByDocument) {
-    (void)sourceDocumentId;
+  for (const auto &references : std::views::values(_referencesByDocument)) {
     for (const auto &reference : references) {
       const auto targetKey = reference.targetKey();
       if (!targetKey.has_value()) {

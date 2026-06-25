@@ -155,8 +155,7 @@ struct ReferenceDescription {
   }
 
   [[nodiscard]] std::optional<NodeKey> targetKey() const {
-    if (!isResolved() || !targetDocumentId.has_value() ||
-        *targetDocumentId == InvalidDocumentId) {
+    if (!isResolved()) {
       return std::nullopt;
     }
     return NodeKey{.documentId = *targetDocumentId,

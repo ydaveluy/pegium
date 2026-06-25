@@ -222,12 +222,6 @@ auto adapt_async_result(LanguageServerHandlerContext &server, T &&value,
       });
 }
 
-template <typename F>
-/// Dispatches background work for one LSP request.
-auto dispatch_async(F &&task) -> std::future<std::invoke_result_t<F>> {
-  return std::async(std::launch::deferred, std::forward<F>(task));
-}
-
 template <typename Result, typename F>
 /// Wraps one handler with cancellation registration and cleanup.
 auto make_async_request(LanguageServerHandlerContext &owner, F &&handler) {
@@ -249,7 +243,8 @@ auto make_async_request(LanguageServerHandlerContext &owner, F &&handler) {
       requestKey = next_anonymous_request_key();
     }
     owner.registerRequestCancellation(requestKey, cancellation);
-    return dispatch_async(
+    return std::async(
+        std::launch::deferred,
         [&owner, requestKey, cancellation, handlerPtr,
          ownedParams = std::move(ownedParams)]() mutable -> Result {
           const auto cleanup = [&owner, &requestKey, &cancellation]() {

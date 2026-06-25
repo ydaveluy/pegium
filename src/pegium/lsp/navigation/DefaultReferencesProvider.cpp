@@ -1,8 +1,6 @@
 #include <pegium/lsp/navigation/DefaultReferencesProvider.hpp>
 #include <pegium/lsp/support/LspProviderUtils.hpp>
-#include <pegium/core/syntax-tree/CstUtils.hpp>
 
-#include <unordered_set>
 #include <utility>
 
 #include <pegium/lsp/services/SharedServices.hpp>

@@ -1,7 +1,6 @@
 #include <pegium/lsp/support/JsonValue.hpp>
 
 #include <cassert>
-#include <cmath>
 #include <limits>
 
 namespace pegium {

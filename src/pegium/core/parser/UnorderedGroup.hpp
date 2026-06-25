@@ -67,11 +67,10 @@ private:
         ctx.rewind(entryCheckpoint);
       }
 
+      PEGIUM_STEP_TRACE_INC(UnorderedEditablePasses);
       if (parse_group(ctx)) {
-        PEGIUM_STEP_TRACE_INC(UnorderedEditablePasses);
         return true;
       }
-      PEGIUM_STEP_TRACE_INC(UnorderedEditablePasses);
       ctx.rewind(entryCheckpoint);
       return false;
     } else {
@@ -86,9 +85,8 @@ private:
     std::size_t matchedCount = 0;
 
     while (matchedCount < sizeof...(Elements)) {
-      auto betweenCheckpoint = ctx.mark();
+      const auto betweenCheckpoint = ctx.mark();
       if (matchedCount > 0) {
-        betweenCheckpoint = ctx.mark();
         ctx.skip();
       }
 

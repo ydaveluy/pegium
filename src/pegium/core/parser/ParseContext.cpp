@@ -145,10 +145,9 @@ bool RecoveryContext::deleteOneCodepoint() noexcept {
     return false;
   }
   auto *mergedDeleteEdit = pendingHiddenTriviaDeleteEdit();
-  if (const auto *window = currentEditWindow();
-      !canDelete() ||
+  if (!canDelete() ||
       destructiveEditOutsideActiveWindow(
-          window, recoveryState.editBudget.consecutiveDeletes == 0u) ||
+          recoveryState.editBudget.consecutiveDeletes == 0u) ||
       !canAffordEdit(ParseDiagnosticKind::Deleted)) {
     clearPendingDeleteHiddenTriviaBridge();
     PEGIUM_RECOVERY_TRACE("[rule] delete blocked offset=", cursorOffset(),

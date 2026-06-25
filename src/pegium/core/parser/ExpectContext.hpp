@@ -11,7 +11,6 @@
 #include <pegium/core/parser/Skipper.hpp>
 #include <span>
 #include <pegium/core/utils/Cancellation.hpp>
-#include <utility>
 #include <vector>
 
 namespace pegium::parser {
