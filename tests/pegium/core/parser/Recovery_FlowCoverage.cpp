@@ -56,27 +56,23 @@ namespace {
 
 // A bare visible terminal: the classifier returns `Unguarded` for `Literal`.
 struct FakeLiteral final : pegium::grammar::AbstractElement {
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Literal;
-  }
+  constexpr FakeLiteral() noexcept : AbstractElement(ElementKind::Literal) {}
   constexpr bool isNullable() const noexcept override { return false; }
   void print(std::ostream &os) const override { os << "lit"; }
 };
 
 // A positive-lookahead predicate guard: classifier returns `PredicateGuarded`.
 struct FakeAndPredicate final : pegium::grammar::AbstractElement {
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::AndPredicate;
-  }
+  constexpr FakeAndPredicate() noexcept
+      : AbstractElement(ElementKind::AndPredicate) {}
   constexpr bool isNullable() const noexcept override { return true; }
   void print(std::ostream &os) const override { os << "&pred"; }
 };
 
 // A negative-lookahead predicate guard: classifier returns `PredicateGuarded`.
 struct FakeNotPredicate final : pegium::grammar::AbstractElement {
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::NotPredicate;
-  }
+  constexpr FakeNotPredicate() noexcept
+      : AbstractElement(ElementKind::NotPredicate) {}
   constexpr bool isNullable() const noexcept override { return true; }
   void print(std::ostream &os) const override { os << "!pred"; }
 };
@@ -140,9 +136,7 @@ struct FakeGroup final : pegium::grammar::Group {
 // parse/value overrides are inert (never invoked by the static classifier).
 struct FakeParserRule final : pegium::grammar::ParserRule {
   const pegium::grammar::AbstractElement *child = nullptr;
-  ElementKind kind = ElementKind::ParserRule;
 
-  constexpr ElementKind getKind() const noexcept override { return kind; }
   constexpr bool isNullable() const noexcept override { return false; }
   std::string_view getTypeName() const noexcept override { return "Fake"; }
   std::string_view getName() const noexcept override { return "Fake"; }
@@ -298,16 +292,12 @@ TEST(RecoveryFlowCoverageTest, ClassifierShapeOutcomes) {
   }
 }
 
-// Non-ParserRule entries are classified `false` by contract. We build a fake
-// rule whose reported kind is NOT ParserRule to exercise the early-return.
-TEST(RecoveryFlowCoverageTest, NonParserRuleEntryIsNeverUnguarded) {
-  FakeLiteral literal;
-  FakeParserRule notARule;
-  notARule.child = std::addressof(literal);
-  notARule.kind = pegium::grammar::ElementKind::DataTypeRule;
-
-  EXPECT_FALSE(detail::entry_rule_has_unguarded_leading_visible_entry(notARule));
-}
+// NOTE: the early-return `entryRule.getKind() != ParserRule` in
+// entry_rule_has_unguarded_leading_visible_entry is now unreachable for a
+// genuine `grammar::ParserRule`: ElementKind is fixed at construction, so any
+// real ParserRule reports ParserRule. The former test (which mutated a mock's
+// kind to DataTypeRule) tested an unconstructible state and was removed; the
+// guard is retained defensively.
 
 // ===========================================================================
 // Target #2 — multibyte resync skip budget (#9 bytes-vs-codepoints contract)

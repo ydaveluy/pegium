@@ -199,6 +199,50 @@ void register_scope_benchmarks(BenchmarkRegistry &registry) {
       return total;
     });
   }, /*fullBuildOnly=*/true);
+
+  // M4 guardrail: resolving a name against the global index (the inline doc
+  // {@link} path). `index-find-by-name` is the new single-copy scan;
+  // `index-all-elements-scan` is the old path that deep-copied the entire index
+  // per lookup. Both resolve the same (last) global name on the large index, so
+  // their throughput is directly comparable — find-by-name should win by the
+  // avoided per-element copies, and must never regress below the scan path.
+  registry.add("index-find-by-name", bytes, [source] {
+    auto fixture = build_scope_fixture(source.text);
+    auto *indexManager = fixture->sharedServices->workspace.indexManager.get();
+    const auto iterations =
+        get_env_int("PEGIUM_INDEX_LOOKUP_ITERATIONS", 2000, 1);
+
+    return measure_scope_operation(fixture, [&] {
+      std::size_t total = 0;
+      for (int iteration = 0; iteration < iterations; ++iteration) {
+        const auto entry = indexManager->findByName(source.globalReferenceName);
+        if (entry.has_value()) {
+          total += entry->name.size();
+        }
+      }
+      return total;
+    });
+  }, /*fullBuildOnly=*/true);
+
+  registry.add("index-all-elements-scan", bytes, [source] {
+    auto fixture = build_scope_fixture(source.text);
+    auto *indexManager = fixture->sharedServices->workspace.indexManager.get();
+    const auto iterations =
+        get_env_int("PEGIUM_INDEX_LOOKUP_ITERATIONS", 2000, 1);
+
+    return measure_scope_operation(fixture, [&] {
+      std::size_t total = 0;
+      for (int iteration = 0; iteration < iterations; ++iteration) {
+        for (const auto &entry : indexManager->allElements()) {
+          if (entry.name == source.globalReferenceName) {
+            total += entry.name.size();
+            break;
+          }
+        }
+      }
+      return total;
+    });
+  }, /*fullBuildOnly=*/true);
 }
 
 } // namespace pegium::bench

@@ -15,7 +15,7 @@
 #include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
 #include <pegium/lsp/runtime/LanguageServerHandlerContext.hpp>
 #include <pegium/lsp/runtime/LanguageServerRequestHandlerParts.hpp>
-#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/navigation/RenameProvider.hpp>
 #include <pegium/lsp/support/JsonValue.hpp>
 #include <pegium/lsp/navigation/TypeDefinitionProvider.hpp>

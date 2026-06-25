@@ -7,6 +7,7 @@
 #include <pegium/core/ParseSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/syntax-tree/RootCstNode.hpp>
+#include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/workspace/Document.hpp>
 
 namespace pegium::workspace {
@@ -24,7 +25,6 @@ struct IndexedRoot final : AstNode {
 
 class DocumentIndexParser final : public PegiumParser {
 public:
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -125,6 +125,28 @@ TEST(DocumentTest, FindsAstNodesBySymbolId) {
   EXPECT_EQ(document.findAstNode(firstSymbolId), root->nodes[0]);
   EXPECT_EQ(document.findAstNode(secondSymbolId), root->nodes[1]);
   EXPECT_EQ(document.findAstNode(unknownSymbolId), nullptr);
+}
+
+TEST(DocumentTest, GetAstNodeThrowsOnStaleSymbolIdInsteadOfDereferencingNull) {
+  Document document(test::make_text_document("file:///document.test", "test",
+                                             "node alpha\nnode beta\n"));
+
+  DocumentIndexParser parser;
+  pegium::test::apply_parse_result(
+      document, parser.parse(document.textDocument().getText()));
+
+  auto *root = dynamic_cast<IndexedRoot *>(document.parseResult.value);
+  ASSERT_NE(root, nullptr);
+
+  const auto validSymbolId = document.makeSymbolId(*root->nodes[0]);
+  EXPECT_EQ(&document.getAstNode(validSymbolId), root->nodes[0]);
+
+  // A symbol id that no longer resolves (e.g. a stale cross-document reference
+  // after the target shrank) must throw, not dereference null in release.
+  const auto staleSymbolId =
+      document.makeSymbolId(*root->nodes[1]) + 1000u;
+  EXPECT_THROW((void)document.getAstNode(staleSymbolId),
+               utils::MissingAstDocumentError);
 }
 
 TEST(DocumentTest, ExistingCstTextRemainsValidAfterReplacingEquivalentSnapshot) {

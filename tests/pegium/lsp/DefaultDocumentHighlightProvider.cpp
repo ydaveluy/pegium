@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <typeindex>
-
 #include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/references/References.hpp>
@@ -17,15 +15,13 @@ using namespace pegium::parser;
 
 struct DefinitionType {};
 
-struct HighlightEntry : AstNode {
-  string name;
+struct HighlightEntry : pegium::NamedAstNode {
   string other;
 };
 
 class HighlightParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -74,7 +70,6 @@ public:
           .sourceDocumentId = document.id,
           .sourceOffset = declarationNode.getBegin(),
           .sourceLength = declarationNode.getEnd() - declarationNode.getBegin(),
-          .referenceType = std::type_index(typeid(void)),
           .local = true,
           .targetDocumentId = document.id,
           .targetSymbolId = document.makeSymbolId(targetNode),
@@ -108,7 +103,6 @@ TEST(DefaultDocumentHighlightProviderTest,
       .sourceDocumentId = 1,
       .sourceOffset = 6,
       .sourceLength = 5,
-      .referenceType = std::type_index(typeid(DefinitionType)),
       .targetDocumentId = 1,
       .targetSymbolId = 0,
   });

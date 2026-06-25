@@ -1,14 +1,31 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
 #include <lsp/connection.h>
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
+#include <pegium/core/workspace/TextDocumentProvider.hpp>
 #include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/support/Diagnostics.hpp>
 
 namespace pegium {
 namespace {
+
+class SingleDocumentProvider final : public workspace::TextDocumentProvider {
+public:
+  explicit SingleDocumentProvider(std::shared_ptr<workspace::TextDocument> doc)
+      : _doc(std::move(doc)) {}
+
+  [[nodiscard]] std::shared_ptr<workspace::TextDocument>
+  getNormalized(std::string_view normalizedUri) const override {
+    return (_doc != nullptr && _doc->uri() == normalizedUri) ? _doc : nullptr;
+  }
+
+private:
+  std::shared_ptr<workspace::TextDocument> _doc;
+};
 
 TEST(DiagnosticsTest, PublishDiagnosticsSerializesExtendedDiagnosticFields) {
   test::MemoryStream stream;
@@ -117,6 +134,37 @@ TEST(DiagnosticsTest, PublishDiagnosticsSkipsInvalidCodeDescriptionUri) {
       message.get("params").object().get("diagnostics").array();
   ASSERT_EQ(diagnostics.size(), 1u);
   EXPECT_FALSE(diagnostics.front().object().contains("codeDescription"));
+}
+
+TEST(DiagnosticsTest, RelatedInformationRangeUsesCrossFileTargetDocument) {
+  const auto uriA = test::make_file_uri("diag-a.test");
+  const auto uriB = test::make_file_uri("diag-b.test");
+  auto docA = workspace::TextDocument::create(uriA, "", 1, "alpha\nbeta\n");
+  auto docB = std::make_shared<workspace::TextDocument>(
+      workspace::TextDocument::create(uriB, "", 1, "x\ny\nz\nWORD\n"));
+  SingleDocumentProvider provider(docB);
+
+  Diagnostic diagnostic{
+      .severity = pegium::DiagnosticSeverity::Error,
+      .message = "cross-file",
+      .relatedInformation = {{
+          .uri = uriB,
+          .message = "see other file",
+          .begin = 6,
+          .end = 10,
+      }},
+      .begin = 6,
+      .end = 10,
+  };
+
+  const auto lsp = to_lsp_diagnostic(docA, diagnostic, &provider);
+  ASSERT_TRUE(lsp.relatedInformation.has_value());
+  ASSERT_EQ(lsp.relatedInformation->size(), 1u);
+  // Offset 6 is line 3 in docB ("x\\ny\\nz\\nWORD") but line 1 in docA: the range
+  // must be computed against the target document named by the entry.
+  EXPECT_EQ(lsp.relatedInformation->front().location.range.start.line, 3u);
+  // The diagnostic's own range still maps against docA (offset 6 -> line 1).
+  EXPECT_EQ(lsp.range.start.line, 1u);
 }
 
 } // namespace

@@ -82,6 +82,11 @@ TEST(DocCommentTest, RendersInlineLinksToMarkdown) {
 
   // A non-URI link target falls back to its display text.
   EXPECT_EQ(parse_doc_comment("/** {@link Value} */").toMarkdown(), "Value");
+
+  // The hook-less path must split target|display on '|' (matching the provider's
+  // split_link_content), not only on whitespace.
+  EXPECT_EQ(parse_doc_comment("/** {@link https://x/|shown} */").toMarkdown(),
+            "[shown](https://x/)");
 }
 
 TEST(DocCommentTest, RendersBlockTagToMarkdownAndString) {

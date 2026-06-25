@@ -180,7 +180,6 @@ std::string decode_string_literal(std::string_view text) {
 class StressLanguageParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   [[nodiscard]] const pegium::grammar::ParserRule &

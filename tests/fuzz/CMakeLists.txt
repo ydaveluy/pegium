@@ -8,7 +8,7 @@ set(PEGIUM_FUZZ_TARGET_SOURCES
 add_executable(PegiumWorkspaceFuzzTest ${PEGIUM_FUZZ_TARGET_SOURCES})
 target_link_libraries(PegiumWorkspaceFuzzTest PRIVATE
     pegium::lsp
-    pegium_test_support_lsp
+    pegium::test_support_lsp
     ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )
 link_fuzztest(PegiumWorkspaceFuzzTest)
@@ -58,7 +58,7 @@ if(PEGIUM_BUILD_EXAMPLES)
         pegium_example_domainmodel_core
         pegium_example_statemachine_core
         pegium_example_requirements_core
-        pegium_test_support_examples
+        pegium::test_support_examples
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
     )
     link_fuzztest(PegiumExampleKeywordFuzzTest)

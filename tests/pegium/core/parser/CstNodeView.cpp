@@ -10,13 +10,10 @@
 namespace {
 
 struct DummyElement final : pegium::grammar::AbstractElement {
-  explicit DummyElement(ElementKind kind) : kind(kind) {}
+  explicit DummyElement(ElementKind kind) : AbstractElement(kind) {}
 
-  constexpr ElementKind getKind() const noexcept override { return kind; }
   constexpr bool isNullable() const noexcept override { return false; }
   void print(std::ostream &os) const override { os << "dummy"; }
-
-  ElementKind kind;
 };
 
 #if defined(__clang__)

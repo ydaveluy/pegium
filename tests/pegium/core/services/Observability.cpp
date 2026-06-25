@@ -87,6 +87,23 @@ TEST(ObservabilityTest, FanoutSinkPublishesToAllChildrenAndAvoidsDuplicates) {
   EXPECT_EQ(second->observations().size(), 1u);
 }
 
+TEST(ObservabilityTest, FanoutSinkConstructorDeduplicatesAndDropsNullSinks) {
+  auto recorder = std::make_shared<test::RecordingObservabilitySink>();
+  // Duplicate (and a null) supplied at construction must be filtered the same
+  // way addSink() filters them — otherwise the duplicate is published to twice.
+  FanoutObservabilitySink sink({recorder, nullptr, recorder});
+
+  sink.publish(Observation{
+      .severity = ObservationSeverity::Info,
+      .code = ObservationCode::ReferenceResolutionProblem,
+      .message = "once",
+  });
+
+  ASSERT_TRUE(recorder->waitForCount(1));
+  EXPECT_EQ(sink.snapshot().size(), 1u);
+  EXPECT_EQ(recorder->observations().size(), 1u);
+}
+
 TEST(ObservabilityTest, FanoutSinkSupportsConcurrentPublish) {
   auto recorder = std::make_shared<test::RecordingObservabilitySink>();
   FanoutObservabilitySink sink({recorder});

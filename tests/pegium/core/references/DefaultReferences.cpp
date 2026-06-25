@@ -9,14 +9,11 @@ namespace {
 
 using namespace pegium::parser;
 
-struct ReferenceEntry : AstNode {
-  string name;
-};
+struct ReferenceEntry : pegium::NamedAstNode {};
 
 class ReferenceParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -39,7 +36,6 @@ protected:
 class CanonicalReferenceParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {

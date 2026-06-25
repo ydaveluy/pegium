@@ -8,7 +8,7 @@
 #include <pegium/lsp/support/JsonValue.hpp>
 #include <pegium/lsp/navigation/DocumentLinkProvider.hpp>
 #include <pegium/lsp/formatting/Formatter.hpp>
-#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/symbols/WorkspaceSymbolProvider.hpp>
 
 namespace pegium {

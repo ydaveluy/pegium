@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <chrono>
 #include <sstream>
 #include <string>
 
@@ -54,30 +53,22 @@ std::string make_missing_semicolon_module(std::size_t statementCount,
 TEST_F(RecoveryPerfFixture,
        MultiSiteRecoveryAttemptRunsScaleLinearlyAcrossMissingSemicolons) {
   const auto text = make_missing_semicolon_module(20, 4);
-  const auto start = std::chrono::steady_clock::now();
   const auto result = pegium::test::Parse(module, text, skipper, {});
-  const auto elapsed = std::chrono::steady_clock::now() - start;
 
   EXPECT_TRUE(result.fullMatch);
   EXPECT_TRUE(result.recoveryReport.hasRecovered);
+  // Bound the deterministic work metric (attempt runs), not wall-clock time:
+  // a latency assertion is inherently flaky and fails under ASan/valgrind.
   EXPECT_LT(result.recoveryReport.recoveryAttemptRuns, 512u);
-  EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed)
-                .count(),
-            200);
 }
 
 TEST_F(RecoveryPerfFixture,
        DenseMissingSemicolonRecoveryStaysUnderGlobalAttemptBudget) {
   const auto text = make_missing_semicolon_module(16, 1);
-  const auto start = std::chrono::steady_clock::now();
   const auto result = pegium::test::Parse(module, text, skipper, {});
-  const auto elapsed = std::chrono::steady_clock::now() - start;
 
   EXPECT_TRUE(result.recoveryReport.hasRecovered);
   EXPECT_LT(result.recoveryReport.recoveryAttemptRuns, 1024u);
-  EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed)
-                .count(),
-            250);
 }
 
 TEST_F(RecoveryPerfFixture, WellFormedInputPaysNoRecoveryCost) {

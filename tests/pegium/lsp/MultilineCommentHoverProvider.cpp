@@ -14,9 +14,7 @@ namespace {
 using pegium::as_services;
 using namespace pegium::parser;
 
-struct HoverEntry : AstNode {
-  string name;
-};
+struct HoverEntry : pegium::NamedAstNode {};
 
 struct HoverUse : AstNode {
   multi_reference<HoverEntry> targets;
@@ -31,7 +29,6 @@ struct HoverModel : AstNode {
 class HoverParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {

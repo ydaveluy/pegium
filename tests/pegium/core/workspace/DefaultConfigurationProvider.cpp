@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <future>
+#include <memory>
+#include <string>
 #include <variant>
+#include <vector>
 
 #include <pegium/core/CoreTestSupport.hpp>
 #include <pegium/core/workspace/DefaultConfigurationProvider.hpp>
@@ -100,6 +104,57 @@ TEST(DefaultConfigurationProviderTest,
       test::make_file_uri("configuration.test"));
   ASSERT_TRUE(std::holds_alternative<bool>(configuration.validation));
   EXPECT_FALSE(std::get<bool>(configuration.validation));
+}
+
+// Regression: when the provider is shared_ptr-managed (the production case),
+// the async initialized() task writes back into the provider's members after a
+// slow client round-trip. If SharedServices is torn down meanwhile, a task that
+// captured a raw `this` would use freed memory. The task must keep the provider
+// alive for its whole duration.
+TEST(DefaultConfigurationProviderTest,
+     InitializedKeepsSharedOwnedProviderAliveUntilAsyncCompletes) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+
+  auto provider = std::make_shared<DefaultConfigurationProvider>(*shared);
+  const std::weak_ptr<DefaultConfigurationProvider> weak = provider;
+
+  InitializeParams initializeParams{};
+  initializeParams.capabilities.workspaceConfiguration = true;
+  provider->initialize(initializeParams);
+
+  std::promise<void> fetchEntered;
+  std::promise<void> releaseFetch;
+  auto fetchEnteredFuture = fetchEntered.get_future();
+  auto releaseFetchFuture = releaseFetch.get_future();
+
+  InitializedParams initializedParams{};
+  initializedParams.fetchConfiguration =
+      [&](std::vector<std::string>) {
+        return std::async(std::launch::async,
+                          [&]() -> std::vector<pegium::JsonValue> {
+                            fetchEntered.set_value();
+                            releaseFetchFuture.wait();
+                            return {};
+                          });
+      };
+
+  auto future = provider->initialized(initializedParams);
+
+  // The async task is now blocked inside fetchConfiguration.
+  fetchEnteredFuture.wait();
+
+  // Drop the only owning reference, mirroring SharedServices teardown while the
+  // task is still in flight. The running task must keep the provider alive.
+  provider.reset();
+  EXPECT_FALSE(weak.expired());
+
+  // Let the task finish, then release the async shared state (which holds the
+  // task's strong reference). Only then may the provider be destroyed.
+  releaseFetch.set_value();
+  future.get();
+  future = std::future<void>{};
+  EXPECT_TRUE(weak.expired());
 }
 
 TEST(DefaultConfigurationProviderTest,

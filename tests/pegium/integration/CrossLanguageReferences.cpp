@@ -24,13 +24,11 @@ bool has_diagnostic_message(const workspace::Document &document,
   return false;
 }
 
-struct CrossLanguageAbstractElement : AstNode {
+struct CrossLanguageAbstractElement : pegium::NamedAstNode {
   [[nodiscard]] virtual std::string_view kind() const noexcept = 0;
 };
 
 struct CrossLanguageProvidedElement final : CrossLanguageAbstractElement {
-  string name;
-
   [[nodiscard]] std::string_view kind() const noexcept override {
     return "provided";
   }
@@ -162,6 +160,49 @@ TEST_P(CrossLanguageReferencesIntegrationTest,
   ASSERT_NE(provided, nullptr);
   EXPECT_EQ(provided->name, "Alpha");
   EXPECT_EQ(provided->kind(), "provided");
+}
+
+TEST_P(CrossLanguageReferencesIntegrationTest,
+       CrossDocumentReferenceDescriptionSurvivesUnrelatedRebuild) {
+  registerLanguages();
+
+  auto providerDocument =
+      openValidatedDocument("uaf.provider", "cross-provider", "def Alpha;");
+  ASSERT_NE(providerDocument, nullptr);
+  ASSERT_TRUE(providerDocument->parseSucceeded());
+
+  auto consumerDocument =
+      openValidatedDocument("uaf.consumer", "cross-consumer", "use Alpha;");
+  ASSERT_NE(consumerDocument, nullptr);
+  auto *consumer = dynamic_cast<CrossLanguageConsumerRoot *>(
+      consumerDocument->parseResult.value);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(consumer->target.get(), nullptr); // resolved across documents
+
+  // Build an unrelated second provider the consumer does NOT reference. This
+  // invalidates the scope provider's global cache; the consumer is not relinked,
+  // so its already-resolved reference must still own a valid description.
+  // Regression: the description used to be a raw pointer into the freed global
+  // cache -> heap-use-after-free under ASan on the read below.
+  auto otherProvider =
+      openValidatedDocument("uaf-other.provider", "cross-provider", "def Beta;");
+  ASSERT_NE(otherProvider, nullptr);
+
+  auto refreshedConsumer =
+      shared->workspace.documents->getDocument(consumerDocument->id);
+  ASSERT_NE(refreshedConsumer, nullptr);
+  const auto &services =
+      shared->serviceRegistry->getServices(refreshedConsumer->uri);
+  ASSERT_NE(services.workspace.referenceDescriptionProvider, nullptr);
+
+  // createDescriptions() reads the resolved reference's description
+  // (resolvedDescription()), which is the access that used to dangle.
+  const auto descriptions =
+      services.workspace.referenceDescriptionProvider->createDescriptions(
+          *refreshedConsumer);
+  ASSERT_EQ(descriptions.size(), 1u);
+  EXPECT_TRUE(descriptions.front().isResolved());
+  EXPECT_EQ(descriptions.front().targetDocumentId, providerDocument->id);
 }
 
 INSTANTIATE_TEST_SUITE_P(

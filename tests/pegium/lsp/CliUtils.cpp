@@ -68,14 +68,16 @@ RegisteredLanguage register_language(
 }
 
 TEST(CliUtilsTest, MakeSharedServicesReadiesStandaloneConfigurationProvider) {
-  auto shared = cli::make_shared_services();
+  auto sharedServices = cli::make_shared_services();
+  auto &shared = *sharedServices;
 
   ASSERT_NE(shared.workspace.configurationProvider, nullptr);
   EXPECT_TRUE(shared.workspace.configurationProvider->isReady());
 }
 
 TEST(CliUtilsTest, BuildDocumentFromPathReusesExistingDocumentForSameUri) {
-  auto shared = cli::make_shared_services();
+  auto sharedServices = cli::make_shared_services();
+  auto &shared = *sharedServices;
   const auto language =
       register_language(shared, "cli-language", {".cli"});
 
@@ -128,7 +130,8 @@ TEST(CliUtilsTest, BuildDocumentFromPathRejectsBadInputsClearly) {
   for (const auto &testCase : kCases) {
     SCOPED_TRACE(testCase.name);
 
-    auto shared = cli::make_shared_services();
+    auto sharedServices = cli::make_shared_services();
+    auto &shared = *sharedServices;
     const auto language = register_language(
         shared, "cli-language", testCase.fileExtensions, testCase.fileNames);
 
@@ -151,8 +154,46 @@ TEST(CliUtilsTest, BuildDocumentFromPathRejectsBadInputsClearly) {
   }
 }
 
+TEST(CliUtilsTest, BuildDocumentFromPathRejectsDirectory) {
+  auto sharedServices = cli::make_shared_services();
+  auto &shared = *sharedServices;
+  const auto language = register_language(shared, "cli-language", {".cli"});
+
+  const auto tempDirectory = make_temp_directory();
+  // A directory whose name matches the language extension must be rejected with
+  // a clear usage error, not silently parsed as an empty document.
+  const auto directoryPath = tempDirectory / "demo.cli";
+  std::filesystem::create_directories(directoryPath);
+
+  try {
+    (void)cli::build_document_from_path(directoryPath.string(),
+                                        *language.services);
+    FAIL() << "Expected a usage error for a directory path";
+  } catch (const std::invalid_argument &error) {
+    EXPECT_NE(std::string(error.what()).find("is not a regular file"),
+              std::string::npos);
+  }
+
+  std::filesystem::remove_all(tempDirectory);
+}
+
+TEST(CliUtilsTest, BuildDocumentFromPathRejectsEmptyPath) {
+  auto sharedServices = cli::make_shared_services();
+  auto &shared = *sharedServices;
+  const auto language = register_language(shared, "cli-language", {".cli"});
+
+  try {
+    (void)cli::build_document_from_path("", *language.services);
+    FAIL() << "Expected a usage error for an empty path";
+  } catch (const std::invalid_argument &error) {
+    EXPECT_NE(std::string(error.what()).find("No file path"),
+              std::string::npos);
+  }
+}
+
 TEST(CliUtilsTest, BuildDocumentFromPathSkipsValidationWhenRequested) {
-  auto shared = cli::make_shared_services();
+  auto sharedServices = cli::make_shared_services();
+  auto &shared = *sharedServices;
   const auto language =
       register_language(shared, "cli-language", {".cli"});
 

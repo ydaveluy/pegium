@@ -6,7 +6,7 @@ add_executable(PegiumIntegrationTest ${PEGIUM_INTEGRATION_TEST_SOURCES})
 
 target_link_libraries(PegiumIntegrationTest PRIVATE
     pegium::lsp
-    pegium_test_support_lsp
+    pegium::test_support_lsp
     GTest::gtest_main
     ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )

@@ -18,8 +18,9 @@
 #include <lsp/types.h>
 
 #include <pegium/lsp/LspTestSupport.hpp>
-#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/testing/LspProbe.hpp>
 
 namespace pegium::test {
 
@@ -124,101 +125,51 @@ ReplacedIndices replaceIndices(const Expected &base) {
   return result;
 }
 
+// These low-level probe helpers are a single implementation shared with the
+// public harness: forward to pegium::testing (pegium/testing/LspProbe.hpp).
 inline ::lsp::TextDocumentPositionParams
 textDocumentPositionParams(const workspace::Document &document, TextOffset offset) {
-  ::lsp::TextDocumentPositionParams params{};
-  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document.uri));
-  params.position = document.textDocument().positionAt(offset);
-  return params;
+  return pegium::testing::textDocumentPositionParams(document, offset);
 }
 
 inline ::lsp::CompletionParams
 completionParams(const workspace::Document &document, TextOffset offset) {
-  ::lsp::CompletionParams params{};
-  params.textDocument = textDocumentPositionParams(document, offset).textDocument;
-  params.position = textDocumentPositionParams(document, offset).position;
-  return params;
+  return pegium::testing::completionParams(document, offset);
 }
 
 inline ::lsp::DefinitionParams definitionParams(const workspace::Document &document,
                                                 TextOffset offset) {
-  ::lsp::DefinitionParams params{};
-  params.textDocument = textDocumentPositionParams(document, offset).textDocument;
-  params.position = textDocumentPositionParams(document, offset).position;
-  return params;
+  return pegium::testing::definitionParams(document, offset);
 }
 
 inline ::lsp::HoverParams hoverParams(const workspace::Document &document,
                                       TextOffset offset) {
-  ::lsp::HoverParams params{};
-  params.textDocument = textDocumentPositionParams(document, offset).textDocument;
-  params.position = textDocumentPositionParams(document, offset).position;
-  return params;
+  return pegium::testing::hoverParams(document, offset);
 }
 
 inline ::lsp::DocumentHighlightParams
 highlightParams(const workspace::Document &document, TextOffset offset) {
-  ::lsp::DocumentHighlightParams params{};
-  params.textDocument = textDocumentPositionParams(document, offset).textDocument;
-  params.position = textDocumentPositionParams(document, offset).position;
-  return params;
+  return pegium::testing::documentHighlightParams(document, offset);
 }
 
 inline ::lsp::ReferenceParams
 referenceParams(const workspace::Document &document, TextOffset offset,
                 bool includeDeclaration) {
-  ::lsp::ReferenceParams params{};
-  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document.uri));
-  params.position = document.textDocument().positionAt(offset);
-  params.context.includeDeclaration = includeDeclaration;
-  return params;
+  return pegium::testing::referenceParams(document, offset, includeDeclaration);
 }
 
 inline std::string applyTextEdits(const workspace::Document &document,
                                   std::vector<::lsp::TextEdit> edits) {
-  const auto &textDocument = document.textDocument();
-  auto text = std::string(textDocument.getText());
-  std::ranges::sort(edits, [&document](const auto &left, const auto &right) {
-    return document.textDocument().offsetAt(left.range.start) >
-           document.textDocument().offsetAt(right.range.start);
-  });
-
-  for (const auto &edit : edits) {
-    const auto begin = textDocument.offsetAt(edit.range.start);
-    const auto end = textDocument.offsetAt(edit.range.end);
-    text.replace(begin, end - begin, edit.newText);
-  }
-  return text;
+  return pegium::testing::applyTextEdits(document, std::move(edits));
 }
 
 inline std::string hoverText(const ::lsp::Hover &hover) {
-  return std::visit(
-      []<typename T>(const T &value) -> std::string {
-        using Value = std::remove_cvref_t<T>;
-        if constexpr (std::same_as<Value, ::lsp::MarkupContent>) {
-          return value.value;
-        } else if constexpr (std::same_as<Value, ::lsp::MarkedString>) {
-          return std::holds_alternative<std::string>(value)
-                     ? std::get<std::string>(value)
-                     : std::get<::lsp::MarkedString_Language_Value>(value).value;
-        } else {
-          std::string combined;
-          for (const auto &entry : value) {
-            if (!combined.empty()) {
-              combined += '\n';
-            }
-            combined += hoverText(::lsp::Hover{.contents = entry});
-          }
-          return combined;
-        }
-      },
-      hover.contents);
+  return pegium::testing::hoverText(hover);
 }
 
 inline bool samePosition(const ::lsp::Position &actual,
                          const text::Position &expected) {
-  return actual.line == expected.line &&
-         actual.character == expected.character;
+  return pegium::testing::samePosition(actual, expected);
 }
 
 struct ExpectedSymbols {

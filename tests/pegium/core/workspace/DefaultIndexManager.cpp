@@ -140,6 +140,75 @@ TEST(DefaultIndexManagerTest, FiltersElementsBySubtypeAndDocumentSubset) {
       (std::vector<std::string>{"base"}));
 }
 
+TEST(DefaultIndexManagerTest, FindByNameReturnsFirstMatchingDescription) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  DefaultIndexManager indexManager(*shared);
+  IndexSubtypeBootstrapParser parser;
+  bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
+                         *shared->astReflection);
+
+  auto services =
+      test::make_uninstalled_core_services(*shared, "test", {".test"});
+  pegium::installDefaultCoreServices(*services);
+  auto scopeComputation = std::make_unique<TestScopeComputation>();
+  auto *scopeComputationPtr = scopeComputation.get();
+  services->references.scopeComputation = std::move(scopeComputation);
+  shared->serviceRegistry->registerServices(std::move(services));
+
+  scopeComputationPtr->exportsByDocument[1] = {
+      {.name = "derived",
+       .type = std::type_index(typeid(DerivedNode)),
+       .documentId = 1},
+      {.name = "shared",
+       .type = std::type_index(typeid(BaseNode)),
+       .documentId = 1},
+  };
+  scopeComputationPtr->exportsByDocument[2] = {
+      {.name = "base",
+       .type = std::type_index(typeid(BaseNode)),
+       .documentId = 2},
+      {.name = "other",
+       .type = std::type_index(typeid(OtherNode)),
+       .documentId = 2},
+      {.name = "shared",
+       .type = std::type_index(typeid(OtherNode)),
+       .documentId = 2},
+  };
+
+  auto firstDocument = make_document(1);
+  auto secondDocument = make_document(2);
+  indexManager.updateContent(*firstDocument, {});
+  indexManager.updateContent(*secondDocument, {});
+
+  const auto base = indexManager.findByName("base");
+  ASSERT_TRUE(base.has_value());
+  EXPECT_EQ(base->name, "base");
+  EXPECT_EQ(base->documentId, 2);
+
+  EXPECT_FALSE(indexManager.findByName("missing").has_value());
+
+  // First match wins in allElements() order (documents sorted by id), so the
+  // duplicate "shared" resolves to document 1, not document 2.
+  const auto sharedEntry = indexManager.findByName("shared");
+  ASSERT_TRUE(sharedEntry.has_value());
+  EXPECT_EQ(sharedEntry->documentId, 1);
+
+  // Type filter mirrors allElements(type).
+  EXPECT_TRUE(indexManager.findByName("base", std::type_index(typeid(BaseNode)))
+                  .has_value());
+  EXPECT_FALSE(indexManager.findByName("other", std::type_index(typeid(BaseNode)))
+                   .has_value());
+
+  // Skip-and-continue: a typed query must skip doc1's BaseNode "shared" (fails
+  // the OtherNode filter) and keep scanning to doc2's OtherNode "shared" — this
+  // fails a naive return-nullopt-on-first-name-match implementation.
+  const auto sharedTyped =
+      indexManager.findByName("shared", std::type_index(typeid(OtherNode)));
+  ASSERT_TRUE(sharedTyped.has_value());
+  EXPECT_EQ(sharedTyped->documentId, 2);
+}
+
 TEST(DefaultIndexManagerTest, InvalidatesTypedExportCacheOnContentUpdateAndRemove) {
   auto shared = test::make_empty_shared_core_services();
   pegium::installDefaultSharedCoreServices(*shared);
@@ -250,12 +319,10 @@ TEST(DefaultIndexManagerTest,
   auto document = make_document(1);
   referenceProviderPtr->referencesByDocument[1] = {
       {.sourceDocumentId = 1,
-       .referenceType = std::type_index(typeid(BaseNode)),
        .local = true,
        .targetDocumentId = 1,
        .targetSymbolId = 11},
       {.sourceDocumentId = 1,
-       .referenceType = std::type_index(typeid(BaseNode)),
        .local = false,
        .targetDocumentId = 2,
        .targetSymbolId = 22},

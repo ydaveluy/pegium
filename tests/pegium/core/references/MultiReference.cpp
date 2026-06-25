@@ -13,9 +13,7 @@ namespace {
 
 using namespace pegium::parser;
 
-struct Person : AstNode {
-  string name;
-};
+struct Person : pegium::NamedAstNode {};
 
 struct Greeting : AstNode {
   multi_reference<Person> person;
@@ -34,7 +32,6 @@ struct Model : AstNode {
 class MultiReferenceParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -129,7 +126,7 @@ TEST(MultiReferenceTest, ResolvesAllMatchingDeclarationsInSameDocument) {
   std::unordered_set<const Person *> uniqueTargets;
   for (const auto &item : reference) {
     ASSERT_NE(item.ref, nullptr);
-    ASSERT_NE(item.description, nullptr);
+    EXPECT_EQ(item.description.name, "Alice");
     EXPECT_EQ(item.ref->name, "Alice");
     uniqueTargets.insert(item.ref);
   }

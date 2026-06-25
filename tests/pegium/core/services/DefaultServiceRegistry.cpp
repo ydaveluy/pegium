@@ -119,6 +119,22 @@ TEST(DefaultServiceRegistryTest, ThrowsWhenRegistryIsEmptyOrUriIsUnknown) {
             nullptr);
 }
 
+TEST(DefaultServiceRegistryTest, NormalizesDotlessRegisteredExtension) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+
+  // Register a dot-less extension; normalize_extension prepends the '.' so a
+  // ".calc" file still resolves (exercises the dot-insertion branch).
+  auto registeredServices =
+      test::make_uninstalled_core_services(*shared, "calc", {"calc"});
+  pegium::installDefaultCoreServices(*registeredServices);
+  shared->serviceRegistry->registerServices(std::move(registeredServices));
+
+  EXPECT_NE(
+      shared->serviceRegistry->findServices(test::make_file_uri("main.calc")),
+      nullptr);
+}
+
 TEST(DefaultServiceRegistryTest, PrefersOpenedDocumentLanguageIdOverFileExtension) {
   auto shared = test::make_empty_shared_core_services();
   pegium::installDefaultSharedCoreServices(*shared);

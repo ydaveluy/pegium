@@ -13,9 +13,7 @@ namespace {
 using pegium::as_services;
 using namespace pegium::parser;
 
-struct SymbolEntry : AstNode {
-  string name;
-};
+struct SymbolEntry : pegium::NamedAstNode {};
 
 struct SymbolModel : AstNode {
   vector<pointer<SymbolEntry>> entries;
@@ -24,7 +22,6 @@ struct SymbolModel : AstNode {
 class SymbolParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {

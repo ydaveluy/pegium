@@ -102,9 +102,9 @@ struct LeafValueElement final : pegium::grammar::AbstractElement {
   static constexpr bool nullable = false;
   static constexpr bool isFailureSafe = true;
 
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Literal;
-  }
+  constexpr LeafValueElement() noexcept
+      : AbstractElement(ElementKind::Literal) {}
+
   constexpr bool isNullable() const noexcept override {
     return nullable;
   }
@@ -158,9 +158,8 @@ struct NullValueElement final : pegium::grammar::AbstractElement {
 
   static constexpr bool nullable = false;
   static constexpr bool isFailureSafe = true;
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Literal;
-  }
+  constexpr NullValueElement() noexcept
+      : AbstractElement(ElementKind::Literal) {}
   constexpr bool isNullable() const noexcept override {
     return nullable;
   }

@@ -92,6 +92,24 @@ TEST(ParserRuleTest, SuperCarriesForwardOverriddenAlternatives) {
   EXPECT_TRUE(parse_rule(rule, "d").fullMatch);
 }
 
+TEST(ParserRuleTest, SuperExtensionIsVisibleThroughAReferencingRule) {
+  // A sub-rule referenced by a parent rule — the shape a derived parser
+  // extends when it inherits a base grammar.
+  ParserRule<LeafNode> leaf{"Leaf", assign<&LeafNode::name>("a"_kw)};
+  ParserRule<RootNode> root{"Root", assign<&RootNode::leaf>(leaf)};
+
+  EXPECT_TRUE(parse_rule(root, "a").fullMatch);
+  EXPECT_FALSE(parse_rule(root, "b").fullMatch);
+
+  // Extend the sub-rule in place, exactly as a derived parser's constructor
+  // would: `leaf = leaf.super() | <new alternative>`.
+  leaf = leaf.super() | assign<&LeafNode::name>("b"_kw);
+
+  // The parent rule sees the extension because it references `leaf` by address.
+  EXPECT_TRUE(parse_rule(root, "a").fullMatch);
+  EXPECT_TRUE(parse_rule(root, "b").fullMatch);
+}
+
 TEST(ParserRuleTest, NestedParserRuleAssignmentSetsContainer) {
   ParserRule<LeafNode> leafRule{"Leaf", assign<&LeafNode::name>("leaf"_kw)};
   ParserRule<RootNode> rootRule{"Root", assign<&RootNode::leaf>(leafRule)};

@@ -11,9 +11,7 @@ namespace {
 using pegium::as_services;
 using namespace pegium::parser;
 
-struct Package : AstNode {
-  string name;
-};
+struct Package : pegium::NamedAstNode {};
 
 struct Use : AstNode {
   reference<Package> target;
@@ -27,7 +25,6 @@ struct DefinitionModel : AstNode {
 class DefinitionParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {

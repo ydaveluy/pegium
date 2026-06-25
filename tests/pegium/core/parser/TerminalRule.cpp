@@ -628,9 +628,9 @@ TEST(TerminalRuleTest, DeleteStrayPrefixRecovery) {
          row.hasValue = static_cast<bool>(parsed.value);
          row.fullMatch = parsed.fullMatch;
          row.diagnosticCount = parsed.parseDiagnostics.size();
-         row.kind = parsed.parseDiagnostics.front().kind;
-         row.beginOffset = parsed.parseDiagnostics.front().beginOffset;
-         row.endOffset = parsed.parseDiagnostics.front().endOffset;
+         row.kind = parsed.parseDiagnostics.at(0).kind;
+         row.beginOffset = parsed.parseDiagnostics.at(0).beginOffset;
+         row.endOffset = parsed.parseDiagnostics.at(0).endOffset;
          auto *typed = pegium::ast_ptr_cast<TerminalValueNode<std::string>>(
              parsed.value);
          row.typedNonNull = typed != nullptr;
@@ -648,9 +648,9 @@ TEST(TerminalRuleTest, DeleteStrayPrefixRecovery) {
          row.hasValue = static_cast<bool>(parsed.value);
          row.fullMatch = parsed.fullMatch;
          row.diagnosticCount = parsed.parseDiagnostics.size();
-         row.kind = parsed.parseDiagnostics.front().kind;
-         row.beginOffset = parsed.parseDiagnostics.front().beginOffset;
-         row.endOffset = parsed.parseDiagnostics.front().endOffset;
+         row.kind = parsed.parseDiagnostics.at(0).kind;
+         row.beginOffset = parsed.parseDiagnostics.at(0).beginOffset;
+         row.endOffset = parsed.parseDiagnostics.at(0).endOffset;
          auto *typed =
              pegium::ast_ptr_cast<TerminalValueNode<std::string_view>>(
                  parsed.value);
@@ -670,9 +670,9 @@ TEST(TerminalRuleTest, DeleteStrayPrefixRecovery) {
          row.hasValue = static_cast<bool>(parsed.value);
          row.fullMatch = parsed.fullMatch;
          row.diagnosticCount = parsed.parseDiagnostics.size();
-         row.kind = parsed.parseDiagnostics.front().kind;
-         row.beginOffset = parsed.parseDiagnostics.front().beginOffset;
-         row.endOffset = parsed.parseDiagnostics.front().endOffset;
+         row.kind = parsed.parseDiagnostics.at(0).kind;
+         row.beginOffset = parsed.parseDiagnostics.at(0).beginOffset;
+         row.endOffset = parsed.parseDiagnostics.at(0).endOffset;
          // Original asserted endOffset == text.size() (9); the shared loop
          // covers this via kExpected[2].endOffset == 9u.
          auto *typed =
@@ -694,9 +694,9 @@ TEST(TerminalRuleTest, DeleteStrayPrefixRecovery) {
          row.hasValue = static_cast<bool>(parsed.value);
          row.fullMatch = parsed.fullMatch;
          row.diagnosticCount = parsed.parseDiagnostics.size();
-         row.kind = parsed.parseDiagnostics.front().kind;
-         row.beginOffset = parsed.parseDiagnostics.front().beginOffset;
-         row.endOffset = parsed.parseDiagnostics.front().endOffset;
+         row.kind = parsed.parseDiagnostics.at(0).kind;
+         row.beginOffset = parsed.parseDiagnostics.at(0).beginOffset;
+         row.endOffset = parsed.parseDiagnostics.at(0).endOffset;
          auto *typed = pegium::ast_ptr_cast<TerminalValueNode<std::string>>(
              parsed.value);
          row.typedNonNull = typed != nullptr;

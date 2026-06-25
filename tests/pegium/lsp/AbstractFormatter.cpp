@@ -39,7 +39,6 @@ struct Model : pegium::AstNode {
 class MiniParser final : public parser::PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -191,6 +190,24 @@ protected:
     auto formatter = builder.getNodeFormatter(item);
     formatter.keyword("entity").append(spaces(3));
     formatter.property<&mini::ast::Item::name>().prepend(oneSpace);
+  }
+};
+
+class AdjacentGapFormatter final : public AbstractFormatter {
+public:
+  explicit AdjacentGapFormatter(const pegium::Services &services)
+      : AbstractFormatter(services) {
+    on<mini::ast::Field>(&AdjacentGapFormatter::formatField);
+  }
+
+protected:
+  virtual void formatField(FormattingBuilder &builder,
+                           const mini::ast::Field *field) const {
+    auto formatter = builder.getNodeFormatter(field);
+    // Both rules target the same zero-width gap between an adjacent `name` and
+    // `:` (input "a:b"): the name's trailing edit and the colon's leading edit.
+    formatter.property<&mini::ast::Field::name>().append(oneSpace);
+    formatter.keyword(":").prepend(oneSpace);
   }
 };
 
@@ -707,6 +724,21 @@ TEST(AbstractFormatterTest, OverlappingEditsKeepTheLaterSpecificFormatting) {
 
   ASSERT_EQ(edits.size(), 1u);
   EXPECT_EQ(apply_text_edits(*parsed.document, edits), "entity Alpha {}");
+}
+
+TEST(AbstractFormatterTest, ZeroWidthOverlappingEditsCollapseToOneInsertion) {
+  ::lsp::DocumentFormattingParams params{};
+  auto parsed = open_mini_document("entity X {a:b}");
+  ASSERT_NE(parsed.document, nullptr);
+
+  AdjacentGapFormatter provider(lookup_services(*parsed.shared, "mini"));
+  const auto edits =
+      provider.formatDocument(*parsed.document, params,
+                              utils::default_cancel_token);
+
+  // The name's append and the colon's prepend hit the same zero-width gap;
+  // exactly one space must be inserted, not two.
+  EXPECT_EQ(apply_text_edits(*parsed.document, edits), "entity X {a :b}");
 }
 
 TEST(AbstractFormatterTest, AllowMoreAndAllowLessCanSuppressEdits) {

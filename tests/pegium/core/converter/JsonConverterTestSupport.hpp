@@ -11,9 +11,7 @@ namespace pegium::converter::test_support {
 
 using namespace pegium::parser;
 
-struct Person : AstNode {
-  string name;
-};
+struct Person : pegium::NamedAstNode {};
 
 struct Greeting : AstNode {
   reference<Person> person;
@@ -27,7 +25,6 @@ struct Model : AstNode {
 class JsonConverterParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {

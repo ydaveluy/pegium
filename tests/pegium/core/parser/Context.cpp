@@ -27,12 +27,10 @@ struct ContextDispatchExpr final : pegium::grammar::AbstractElement {
 
   ContextDispatchExpr(bool &parseContextFlag,
                       bool &trackedParseContextFlag) noexcept
-      : parseContextUsed(&parseContextFlag),
+      : AbstractElement(ElementKind::Literal),
+        parseContextUsed(&parseContextFlag),
         trackedParseContextUsed(&trackedParseContextFlag) {}
 
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Literal;
-  }
   constexpr bool isNullable() const noexcept override { return nullable; }
   void print(std::ostream &os) const override { os << "<context-dispatch>"; }
   constexpr const char *terminal(const char *begin) const noexcept {
@@ -215,6 +213,41 @@ TEST(ContextTest,
   ASSERT_EQ(snapshot.failureLeafHistory.size(), 1u);
   EXPECT_EQ(snapshot.failureLeafHistory.front().beginOffset, 0u);
   EXPECT_EQ(snapshot.failureLeafHistory.front().endOffset, 1u);
+}
+
+TEST(ContextTest, SkipWithoutBuilderCacheIsKeyedOnTheActiveSkipper) {
+  // Two skippers that disagree at the same offset: A ignores only whitespace and
+  // stops at the comment; B also ignores the line comment and skips past it.
+  TerminalRule<> ws{"WS", some(s)};
+  TerminalRule<> comment{"COMMENT", "//"_kw <=> &(eol | eof)};
+  const auto skipperA = skip(ignored(ws));
+  const auto skipperB = skip(ignored(ws), ignored(comment));
+
+  auto builderHarness = pegium::test::makeCstBuilderHarness("  // c\nx");
+  auto &builder = builderHarness.builder;
+  const auto input = builder.getText();
+  const char *const begin = input.begin();
+
+  // Sanity: the skippers genuinely produce different ends at `begin`.
+  ASSERT_NE(skipperA.skip(begin), skipperB.skip(begin));
+  const char *const expectedA = skipperA.skip(begin);
+
+  detail::FailureHistoryRecorder recorder(begin);
+  TrackedParseContext ctx{builder, skipperA, recorder,
+                          pegium::utils::default_cancel_token};
+
+  // Populate the 1-entry no-builder skip cache under skipper A.
+  EXPECT_EQ(ctx.skip_without_builder(begin), expectedA);
+
+  {
+    // A local-skipper scope recomputes the cache under skipper B.
+    auto guard = ctx.with_skipper(skipperB);
+    EXPECT_EQ(ctx.skip_without_builder(begin), skipperB.skip(begin));
+  }
+
+  // The scope has exited, so the active skipper is A again. The cache must not
+  // hand back the value it computed under B for the same offset.
+  EXPECT_EQ(ctx.skip_without_builder(begin), expectedA);
 }
 
 TEST(ContextTest,

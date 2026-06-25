@@ -12,9 +12,7 @@ namespace pegium::test_navigation {
 
 using namespace pegium::parser;
 
-struct NavigationEntry : AstNode {
-  string name;
-};
+struct NavigationEntry : pegium::NamedAstNode {};
 
 struct NavigationUse : AstNode {
   reference<NavigationEntry> target;
@@ -33,7 +31,6 @@ struct NavigationModel : AstNode {
 class NavigationParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {

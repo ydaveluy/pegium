@@ -11,14 +11,6 @@ namespace {
 
 struct NamedNode : pegium::NamedAstNode {};
 
-struct LegacyNamedNode : pegium::AstNode {
-  string name;
-};
-
-struct NumericNamedNode : pegium::AstNode {
-  int32_t name = 0;
-};
-
 struct UnnamedNode : pegium::AstNode {
   string id;
 };
@@ -58,25 +50,6 @@ TEST(DefaultNameProviderTest, ReturnsNameAndNameNodeForNamedAstNode) {
   EXPECT_EQ(nameNode->getText(), "value");
 }
 
-TEST(DefaultNameProviderTest, FallsBackToNameAssignmentForLegacyAstNode) {
-  ParserRule<LegacyNamedNode> rule{
-      "Legacy", assign<&LegacyNamedNode::name>("value"_kw)};
-
-  auto result = parse_rule(rule, "value");
-  ASSERT_TRUE(result.value);
-  auto *node = pegium::ast_ptr_cast<LegacyNamedNode>(result.value);
-  ASSERT_NE(node, nullptr);
-
-  DefaultNameProvider provider;
-  const auto name = provider.getName(*node);
-  ASSERT_TRUE(name.has_value());
-  EXPECT_EQ(*name, "value");
-
-  const auto nameNode = provider.getNameNode(*node);
-  ASSERT_TRUE(nameNode.has_value());
-  EXPECT_EQ(nameNode->getText(), "value");
-}
-
 TEST(DefaultNameProviderTest, ReturnsNulloptWhenNameFeatureIsMissing) {
   ParserRule<UnnamedNode> rule{"Unnamed", assign<&UnnamedNode::id>("value"_kw)};
 
@@ -88,23 +61,6 @@ TEST(DefaultNameProviderTest, ReturnsNulloptWhenNameFeatureIsMissing) {
   DefaultNameProvider provider;
   EXPECT_FALSE(provider.getName(*node).has_value());
   EXPECT_FALSE(provider.getNameNode(*node).has_value());
-}
-
-TEST(DefaultNameProviderTest, ReturnsNulloptWhenNameValueIsNotStringBacked) {
-  ParserRule<NumericNamedNode> rule{
-      "Named",
-      assign<&NumericNamedNode::name>(TerminalRule<int32_t>{"INT", some(d)})};
-
-  auto result = parse_rule(rule, "42");
-  ASSERT_TRUE(result.value);
-  auto *node = pegium::ast_ptr_cast<NumericNamedNode>(result.value);
-  ASSERT_NE(node, nullptr);
-
-  DefaultNameProvider provider;
-  EXPECT_FALSE(provider.getName(*node).has_value());
-  const auto nameNode = provider.getNameNode(*node);
-  ASSERT_TRUE(nameNode.has_value());
-  EXPECT_EQ(nameNode->getText(), "42");
 }
 
 TEST(DefaultNameProviderTest, ReturnsNulloptWhenStringValueIsEmpty) {

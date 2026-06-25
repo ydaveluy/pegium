@@ -154,6 +154,17 @@ public:
     return result;
   }
 
+  std::optional<workspace::AstNodeDescription>
+  findByName(std::string_view name,
+             std::optional<std::type_index> type = std::nullopt) const override {
+    for (const auto &description : allElements(type)) {
+      if (description.name == name) {
+        return description;
+      }
+    }
+    return std::nullopt;
+  }
+
   std::vector<workspace::ReferenceDescription>
   findAllReferences(const workspace::NodeKey &) const override {
     return {};
@@ -494,27 +505,23 @@ TEST(DefaultScopeProviderTest,
       workspace::AstNodeDescription{.name = "outer",
                                     .type = std::type_index(typeid(TargetNode)),
                                     .documentId = fixture.document->id,
-                                    .symbolId = 1,
-                                    .nameLength = 5});
+                                    .symbolId = 1});
   fixture.document->localSymbols.emplace(
       fixture.inner,
       workspace::AstNodeDescription{.name = "inner",
                                     .type = std::type_index(typeid(TargetNode)),
                                     .documentId = fixture.document->id,
-                                    .symbolId = 2,
-                                    .nameLength = 5});
+                                    .symbolId = 2});
   indexManager->setExports(
       fixture.document->id,
       {{.name = "global-1",
         .type = std::type_index(typeid(TargetNode)),
         .documentId = fixture.document->id,
-        .symbolId = 3,
-        .nameLength = 8},
+        .symbolId = 3},
        {.name = "global-2",
         .type = std::type_index(typeid(TargetNode)),
         .documentId = fixture.document->id,
-        .symbolId = 4,
-        .nameLength = 8}});
+        .symbolId = 4}});
 
   auto info = makeReferenceInfo(fixture.holder->ref);
   info.referenceText = {};
@@ -581,15 +588,13 @@ TEST(DefaultScopeProviderTest, StopsVisitingAsSoonAsVisitorReturnsFalse) {
       workspace::AstNodeDescription{.name = "first",
                                     .type = std::type_index(typeid(TargetNode)),
                                     .documentId = fixture.document->id,
-                                    .symbolId = 1,
-                                    .nameLength = 5});
+                                    .symbolId = 1});
   fixture.document->localSymbols.emplace(
       fixture.outer,
       workspace::AstNodeDescription{.name = "second",
                                     .type = std::type_index(typeid(TargetNode)),
                                     .documentId = fixture.document->id,
-                                    .symbolId = 2,
-                                    .nameLength = 6});
+                                    .symbolId = 2});
 
   auto info = makeReferenceInfo(fixture.holder->ref);
   info.referenceText = {};
@@ -620,8 +625,7 @@ TEST(DefaultScopeProviderTest, AllowsDerivedProviderToOverrideGlobalEntriesHook)
               {.name = "hooked",
                .type = std::type_index(typeid(TargetNode)),
                .documentId = 1,
-               .symbolId = 1,
-               .nameLength = 6}});
+               .symbolId = 1}});
   auto *scopeProvider = services->references.scopeProvider.get();
   auto *linker = services->references.linker.get();
   ASSERT_NE(scopeProvider, nullptr);

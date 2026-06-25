@@ -55,6 +55,16 @@ TEST(DefaultDocumentsTest, GetOrCreateDocumentPropagatesFactoryFailures) {
       std::runtime_error);
 }
 
+TEST(DefaultDocumentsTest, GetOrCreateDocumentReturnsNullForEmptyUri) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  shared->workspace.documentFactory = std::make_unique<test::FakeDocumentFactory>();
+
+  // A malformed (empty) URI returns the documented nullptr like every sibling
+  // accessor, instead of forwarding "" to the factory/filesystem and throwing.
+  EXPECT_EQ(shared->workspace.documents->getOrCreateDocument(""), nullptr);
+}
+
 TEST(DefaultDocumentsTest, RejectsDuplicateUris) {
   auto shared = test::make_empty_shared_core_services();
   pegium::installDefaultSharedCoreServices(*shared);

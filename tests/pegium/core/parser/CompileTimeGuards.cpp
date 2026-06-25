@@ -47,9 +47,9 @@ struct TypedRawValueExpr final : pegium::grammar::AbstractElement {
   static constexpr bool nullable = false;
   static constexpr bool isFailureSafe = true;
 
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Literal;
-  }
+  constexpr TypedRawValueExpr() noexcept
+      : AbstractElement(ElementKind::Literal) {}
+
   constexpr bool isNullable() const noexcept override {
     return nullable;
   }
@@ -73,9 +73,9 @@ struct GenericRawValueExpr final : pegium::grammar::AbstractElement {
   static constexpr bool nullable = false;
   static constexpr bool isFailureSafe = true;
 
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Literal;
-  }
+  constexpr GenericRawValueExpr() noexcept
+      : AbstractElement(ElementKind::Literal) {}
+
   constexpr bool isNullable() const noexcept override {
     return nullable;
   }
@@ -101,9 +101,9 @@ struct VariantRawValueExpr final : pegium::grammar::AbstractElement {
   static constexpr bool nullable = false;
   static constexpr bool isFailureSafe = true;
 
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Literal;
-  }
+  constexpr VariantRawValueExpr() noexcept
+      : AbstractElement(ElementKind::Literal) {}
+
   constexpr bool isNullable() const noexcept override {
     return nullable;
   }
@@ -130,9 +130,9 @@ struct LegacyRecoverSignatureExpr final : pegium::grammar::AbstractElement {
   static constexpr bool nullable = false;
   static constexpr bool isFailureSafe = true;
 
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Literal;
-  }
+  constexpr LegacyRecoverSignatureExpr() noexcept
+      : AbstractElement(ElementKind::Literal) {}
+
   constexpr bool isNullable() const noexcept override {
     return nullable;
   }
@@ -153,9 +153,9 @@ struct MissingStrictProbeSafeExpr final : pegium::grammar::AbstractElement {
   static constexpr bool nullable = false;
   static constexpr bool isFailureSafe = true;
 
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Literal;
-  }
+  constexpr MissingStrictProbeSafeExpr() noexcept
+      : AbstractElement(ElementKind::Literal) {}
+
   constexpr bool isNullable() const noexcept override {
     return nullable;
   }

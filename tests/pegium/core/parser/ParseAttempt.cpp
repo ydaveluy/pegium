@@ -15,9 +15,8 @@ struct FastProbeOnlyExpression : pegium::grammar::AbstractElement {
   mutable std::size_t strictParseCalls = 0;
   mutable std::size_t fastProbeCalls = 0;
 
-  [[nodiscard]] constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::ParserRule;
-  }
+  constexpr FastProbeOnlyExpression() noexcept
+      : AbstractElement(ElementKind::ParserRule) {}
 
   [[nodiscard]] constexpr bool isNullable() const noexcept override {
     return false;
@@ -65,9 +64,8 @@ struct StartedWithoutEditsExpression : pegium::grammar::AbstractElement {
   mutable std::size_t strictParseCalls = 0;
   mutable std::size_t fastProbeCalls = 0;
 
-  [[nodiscard]] constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::ParserRule;
-  }
+  constexpr StartedWithoutEditsExpression() noexcept
+      : AbstractElement(ElementKind::ParserRule) {}
 
   [[nodiscard]] constexpr bool isNullable() const noexcept override {
     return false;
@@ -116,9 +114,8 @@ struct EntryRecoverableExpression : pegium::grammar::AbstractElement {
 
   mutable std::size_t probeCalls = 0;
 
-  [[nodiscard]] constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::ParserRule;
-  }
+  constexpr EntryRecoverableExpression() noexcept
+      : AbstractElement(ElementKind::ParserRule) {}
 
   [[nodiscard]] constexpr bool isNullable() const noexcept override {
     return false;
@@ -145,9 +142,8 @@ struct ActiveRecoverySensitiveExpression : pegium::grammar::AbstractElement {
 
   mutable std::size_t probeCalls = 0;
 
-  [[nodiscard]] constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::ParserRule;
-  }
+  constexpr ActiveRecoverySensitiveExpression() noexcept
+      : AbstractElement(ElementKind::ParserRule) {}
 
   [[nodiscard]] constexpr bool isNullable() const noexcept override {
     return false;

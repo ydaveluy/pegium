@@ -9,13 +9,10 @@
 namespace {
 
 struct DummyElement final : pegium::grammar::AbstractElement {
-  explicit DummyElement(ElementKind kind) : kind(kind) {}
+  explicit DummyElement(ElementKind kind) : AbstractElement(kind) {}
 
-  constexpr ElementKind getKind() const noexcept override { return kind; }
   constexpr bool isNullable() const noexcept override { return false; }
   void print(std::ostream &os) const override { os << "dummy"; }
-
-  ElementKind kind;
 };
 
 } // namespace
@@ -47,7 +44,7 @@ TEST(CstSearchTest, FindFirstMatchingNodeSkipsHiddenAndSearchesDepthFirst) {
   EXPECT_EQ(firstRoot->getText(), "d");
 }
 
-TEST(CstSearchTest, FirstVisibleChildReturnsFirstVisibleOrNullopt) {
+TEST(CstSearchTest, FindFirstMatchingNodeReturnsVisibleLeafSkippingHidden) {
   DummyElement target{pegium::grammar::ElementKind::Literal};
   DummyElement group{pegium::grammar::ElementKind::Group};
   DummyElement missing{pegium::grammar::ElementKind::AnyCharacter};
@@ -64,10 +61,6 @@ TEST(CstSearchTest, FirstVisibleChildReturnsFirstVisibleOrNullopt) {
   ASSERT_NE(it, root->end());
   auto parent = *it;
 
-  auto firstVisible = pegium::parser::detail::firstVisibleChild(parent);
-  ASSERT_TRUE(firstVisible.has_value());
-  EXPECT_EQ(firstVisible->getText(), "y");
-
   auto foundInParent =
       pegium::parser::detail::findFirstMatchingNode(parent, &target);
   ASSERT_TRUE(foundInParent.has_value());
@@ -75,17 +68,6 @@ TEST(CstSearchTest, FirstVisibleChildReturnsFirstVisibleOrNullopt) {
 
   auto notFound = pegium::parser::detail::findFirstMatchingNode(parent, &missing);
   EXPECT_FALSE(notFound.has_value());
-
-  auto hiddenOnlyBuilderHarness = pegium::test::makeCstBuilderHarness("z");
-  auto &hiddenOnlyBuilder = hiddenOnlyBuilderHarness.builder;
-  hiddenOnlyBuilder.enter();
-  hiddenOnlyBuilder.leaf(0, 1, &target, true);
-  hiddenOnlyBuilder.exit(0, 1, &group);
-  auto hiddenOnlyRoot = hiddenOnlyBuilder.getRootCstNode();
-  auto hiddenParent = *hiddenOnlyRoot->begin();
-
-  auto noneVisible = pegium::parser::detail::firstVisibleChild(hiddenParent);
-  EXPECT_FALSE(noneVisible.has_value());
 }
 
 TEST(CstSearchTest, RootLevelSearchReturnsNulloptWhenNoVisibleMatchExists) {

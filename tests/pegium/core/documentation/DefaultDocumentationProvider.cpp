@@ -10,19 +10,15 @@ namespace {
 
 using namespace pegium::parser;
 
-struct DocumentationEntry : AstNode {
-  string name;
-};
+struct DocumentationEntry : pegium::NamedAstNode {};
 
-struct DocumentationModel : AstNode {
-  string name;
+struct DocumentationModel : pegium::NamedAstNode {
   vector<pointer<DocumentationEntry>> entries;
 };
 
 class DocumentationParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -148,6 +144,41 @@ TEST(DefaultDocumentationProviderTest,
                 "[The Value](file:///tmp/pegium-tests/documentation.docs#L6,7)"),
             std::string::npos);
   EXPECT_NE(documentation->find("*@param* — p first value"), std::string::npos);
+}
+
+TEST(DefaultDocumentationProviderTest,
+     RendersExternalUrlAndLinkcodeThroughDefaultProvider) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices =
+      test::make_uninstalled_core_services<DocumentationParser>(*shared, "docs",
+                                                    {".docs"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = parse_docs_document(
+      *shared,
+      "/**\n"
+      " * See {@link https://example.org/|Example} and {@linkcode Value}.\n"
+      " */\n"
+      "entry Value\n");
+  ASSERT_NE(document, nullptr);
+  auto *model =
+      dynamic_cast<DocumentationModel *>(document->parseResult.value);
+  ASSERT_NE(model, nullptr);
+
+  const auto &services = shared->serviceRegistry->getServices(document->uri);
+  const auto documentation =
+      services.documentation.documentationProvider->getDocumentation(
+          *model->entries.front());
+  ASSERT_TRUE(documentation.has_value());
+  // An external URL target renders as a clickable markdown link, not bare text.
+  EXPECT_NE(documentation->find("[Example](https://example.org/)"),
+            std::string::npos);
+  // {@linkcode} keeps its code styling in the resolved link's label.
+  EXPECT_NE(documentation->find("[`Value`]("), std::string::npos);
 }
 
 TEST(DefaultDocumentationProviderTest,

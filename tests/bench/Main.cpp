@@ -8,6 +8,7 @@ void register_requirements_benchmarks(BenchmarkRegistry &registry);
 void register_scope_benchmarks(BenchmarkRegistry &registry);
 void register_statemachine_benchmarks(BenchmarkRegistry &registry);
 void register_workspace_benchmarks(BenchmarkRegistry &registry);
+void register_lspquery_benchmarks(BenchmarkRegistry &registry);
 } // namespace pegium::bench
 
 int main(int argc, char **argv) {
@@ -19,6 +20,7 @@ int main(int argc, char **argv) {
   pegium::bench::register_scope_benchmarks(registry);
   pegium::bench::register_statemachine_benchmarks(registry);
   pegium::bench::register_workspace_benchmarks(registry);
+  pegium::bench::register_lspquery_benchmarks(registry);
 
   std::string filter;
   if (argc > 1) {

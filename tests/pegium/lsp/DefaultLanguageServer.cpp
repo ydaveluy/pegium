@@ -822,6 +822,41 @@ TEST(DefaultLanguageServerTest, OptInServicesAdvertiseCapabilitiesWhenInstalledE
       1u);
 }
 
+// A signature-help provider that advertises no trigger characters (the base
+// signatureHelpOptions() default), used to verify the capability is still
+// advertised so manual-invocation signature help works.
+class NoTriggerSignatureHelpProvider final
+    : public ::pegium::SignatureHelpProvider {
+public:
+  std::optional<::lsp::SignatureHelp>
+  provideSignatureHelp(const workspace::Document &,
+                       const ::lsp::SignatureHelpParams &,
+                       const utils::CancellationToken &) const override {
+    return ::lsp::SignatureHelp{};
+  }
+};
+
+TEST(DefaultLanguageServerTest,
+     InitializeAdvertisesSignatureHelpWithoutTriggerCharacters) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  auto services = test::make_uninstalled_services(*shared, "test", {".test"});
+  pegium::installDefaultCoreServices(*services);
+  pegium::installDefaultLspServices(*services);
+  services->lsp.signatureHelp =
+      std::make_unique<NoTriggerSignatureHelpProvider>();
+  shared->serviceRegistry->registerServices(std::move(services));
+
+  DefaultLanguageServer server(*shared);
+  const auto result = server.initialize(::lsp::InitializeParams{});
+
+  ASSERT_TRUE(result.capabilities.signatureHelpProvider.has_value());
+  EXPECT_FALSE(
+      result.capabilities.signatureHelpProvider->triggerCharacters.has_value());
+}
+
 TEST(DefaultLanguageServerTest, InitializeAndInitializedEmitCallbacks) {
   auto shared = test::make_empty_shared_services();
   pegium::installDefaultSharedCoreServices(*shared);

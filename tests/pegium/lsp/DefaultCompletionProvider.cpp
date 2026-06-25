@@ -18,9 +18,7 @@ namespace {
 
 using namespace pegium::parser;
 
-struct CompletionEntry : AstNode {
-  string name;
-};
+struct CompletionEntry : pegium::NamedAstNode {};
 
 struct CompletionUse : AstNode {
   reference<CompletionEntry> target;
@@ -34,7 +32,6 @@ struct CompletionModel : AstNode {
 class CompletionParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -60,9 +57,7 @@ protected:
 #pragma clang diagnostic pop
 };
 
-struct FqnPackage : AstNode {
-  string name;
-};
+struct FqnPackage : pegium::NamedAstNode {};
 
 struct FqnUse : AstNode {
   reference<FqnPackage> target;
@@ -76,7 +71,6 @@ struct FqnModel : AstNode {
 class FqnCompletionParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -106,7 +100,6 @@ struct KeywordChoiceModel : AstNode {};
 class KeywordChoiceParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -132,7 +125,6 @@ struct UnorderedItem : AstNode {
 class UnorderedCompletionParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -174,7 +166,6 @@ struct BinaryExpression : ExpressionNode {
 class InfixCompletionParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -201,7 +192,6 @@ protected:
 class PunctuationCompletionParser final : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -235,9 +225,8 @@ struct TestLiteral final : grammar::Literal {
 };
 
 struct TestNonLiteral final : grammar::AbstractElement {
-  constexpr ElementKind getKind() const noexcept override {
-    return ElementKind::Group;
-  }
+  constexpr TestNonLiteral() noexcept : AbstractElement(ElementKind::Group) {}
+
   constexpr bool isNullable() const noexcept override { return false; }
 
   void print(std::ostream &os) const override { os << "<group>"; }

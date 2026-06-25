@@ -41,12 +41,17 @@ struct ScopeRoot final : NamedScopeNode {
 
 class TestNameProvider final : public NameProvider {
 public:
-  [[nodiscard]] AstNodeName nameOf(const AstNode &node) const override {
+  [[nodiscard]] std::optional<std::string>
+  getName(const AstNode &node) const override {
     if (const auto *named = dynamic_cast<const NamedScopeNode *>(&node);
         named != nullptr && !named->name.empty()) {
-      return {named->name, {}};
+      return named->name;
     }
-    return {};
+    return std::nullopt;
+  }
+  [[nodiscard]] std::optional<CstNodeView>
+  getNameNode(const AstNode &) const override {
+    return std::nullopt;
   }
 };
 
@@ -54,12 +59,17 @@ class PrefixNameProvider final : public NameProvider {
 public:
   explicit PrefixNameProvider(std::string prefix) : _prefix(std::move(prefix)) {}
 
-  [[nodiscard]] AstNodeName nameOf(const AstNode &node) const override {
+  [[nodiscard]] std::optional<std::string>
+  getName(const AstNode &node) const override {
     if (const auto *named = dynamic_cast<const NamedScopeNode *>(&node);
         named != nullptr && !named->name.empty()) {
-      return {_prefix + named->name, {}};
+      return _prefix + named->name;
     }
-    return {};
+    return std::nullopt;
+  }
+  [[nodiscard]] std::optional<CstNodeView>
+  getNameNode(const AstNode &) const override {
+    return std::nullopt;
   }
 
 private:
@@ -72,12 +82,12 @@ public:
       : _prefix(std::move(prefix)) {}
 
   [[nodiscard]] std::optional<workspace::AstNodeDescription>
-  createDescription(const AstNode &node, const workspace::Document &document,
-                    AstNodeName nameInfo) const override {
-    if (nameInfo.empty()) {
+  createDescription(const AstNode &node, std::string name,
+                    const workspace::Document &document) const override {
+    if (name.empty()) {
       return std::nullopt;
     }
-    auto fullName = _prefix + nameInfo.name;
+    auto fullName = _prefix + name;
 
     auto symbolId =
         static_cast<workspace::SymbolId>(reinterpret_cast<std::uintptr_t>(&node));
@@ -90,7 +100,6 @@ public:
         .type = std::type_index(typeid(node)),
         .documentId = document.id,
         .symbolId = symbolId,
-        .nameLength = static_cast<TextOffset>(_prefix.size() + nameInfo.name.size()),
     };
   }
 

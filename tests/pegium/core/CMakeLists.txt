@@ -16,7 +16,7 @@ add_executable(PegiumCoreUnitTest ${PEGIUM_CORE_UNIT_TEST_SOURCES})
 target_link_libraries(PegiumCoreUnitTest PRIVATE
     pegium::core
     pegium::converters
-    pegium_test_support_core
+    pegium::test_support_core
     GTest::gtest_main
     ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )

@@ -1003,7 +1003,6 @@ TEST(RecoveryTest,
 
 TEST(RecoveryTest, LegacyOrderedChoiceOperatorRecoveryDoesNotThrow) {
   struct LegacyRecoveryParser final : PegiumParser {
-    using PegiumParser::parse;
 
     TerminalRule<> ws{"WS", some(s)};
     Skipper skipper = SkipperBuilder().ignore(ws).build();

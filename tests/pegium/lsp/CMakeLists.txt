@@ -7,7 +7,7 @@ add_executable(PegiumLspUnitTest ${PEGIUM_LSP_UNIT_TEST_SOURCES})
 target_link_libraries(PegiumLspUnitTest PRIVATE
     pegium::lsp
     pegium::cli
-    pegium_test_support_lsp
+    pegium::test_support_lsp
     GTest::gtest_main
     ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )

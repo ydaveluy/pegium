@@ -18,7 +18,11 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pegium)
 
-foreach(targetName IN ITEMS PegiumCore PegiumConverters PegiumLsp PegiumCli)
+# PegiumTesting is the reusable test-harness library; it builds for consumers by
+# default (PEGIUM_BUILD_TESTING_SUPPORT defaults ON off-master) even though this
+# consumer sets BUILD_TESTING OFF, so a downstream project can link pegium::testing
+# from its test target. Like the runtime libraries it must stay EXCLUDE_FROM_ALL.
+foreach(targetName IN ITEMS PegiumCore PegiumConverters PegiumLsp PegiumCli PegiumTesting)
     get_target_property(targetExcluded ${targetName} EXCLUDE_FROM_ALL)
     if(NOT targetExcluded)
         message(FATAL_ERROR
@@ -27,7 +31,7 @@ foreach(targetName IN ITEMS PegiumCore PegiumConverters PegiumLsp PegiumCli)
     endif()
 endforeach()
 
-foreach(targetName IN ITEMS pegium::core pegium::converters pegium::lsp pegium::cli)
+foreach(targetName IN ITEMS pegium::core pegium::converters pegium::lsp pegium::cli pegium::testing)
     if(NOT TARGET ${targetName})
         message(FATAL_ERROR "Expected public target '${targetName}' to exist.")
     endif()
@@ -44,3 +48,6 @@ target_link_libraries(pegium_fetchcontent_lsp INTERFACE pegium::lsp)
 
 add_library(pegium_fetchcontent_cli INTERFACE)
 target_link_libraries(pegium_fetchcontent_cli INTERFACE pegium::cli)
+
+add_library(pegium_fetchcontent_testing INTERFACE)
+target_link_libraries(pegium_fetchcontent_testing INTERFACE pegium::testing)
