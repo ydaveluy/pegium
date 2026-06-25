@@ -11,7 +11,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   try {
-    auto shared = pegium::cli::make_shared_services();
+    auto sharedServices = pegium::cli::make_shared_services();
+    auto &shared = *sharedServices;
     auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@Services(shared);
     auto &langServices = *services;
     shared.serviceRegistry->registerServices(std::move(services));

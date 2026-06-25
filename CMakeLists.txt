@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.15)
 
-project(pegium LANGUAGES CXX)
+project(pegium VERSION 0.1.0 LANGUAGES CXX)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(PEGIUM_MASTER_PROJECT ON)
@@ -28,6 +28,18 @@ option(PEGIUM_ENABLE_FUZZ_CORPUS
     "Register exhaustive language-specific fuzz corpus tests (default ON for optimized non-sanitizer builds; cheap there, slow under Debug/ASan)"
     ${PEGIUM_FUZZ_CORPUS_DEFAULT})
 option(PEGIUM_BUILD_EXAMPLES "Build pegium examples" ${PEGIUM_MASTER_PROJECT})
+
+# pegium::testing is the reusable test-harness library. pegium's own build gets
+# it through BUILD_TESTING; downstream consumers get it by default so they can
+# link `pegium::testing` from their test target without extra flags.
+if(PEGIUM_MASTER_PROJECT)
+    set(PEGIUM_BUILD_TESTING_SUPPORT_DEFAULT OFF)
+else()
+    set(PEGIUM_BUILD_TESTING_SUPPORT_DEFAULT ON)
+endif()
+option(PEGIUM_BUILD_TESTING_SUPPORT
+    "Build the pegium::testing reusable test-harness library"
+    ${PEGIUM_BUILD_TESTING_SUPPORT_DEFAULT})
 
 if(NOT PEGIUM_MASTER_PROJECT AND NOT DEFINED BUILD_TESTING)
     set(BUILD_TESTING OFF CACHE BOOL "Build the test suite")
@@ -60,19 +72,24 @@ if(BUILD_TESTING)
         FetchContent_MakeAvailable(googletest)
     endif()
 
+    # In-tree test-support (header-only) libraries. Use the pegium::test_support_*
+    # aliases everywhere, matching the pegium::core / pegium::testing style.
     add_library(pegium_test_support_core INTERFACE)
+    add_library(pegium::test_support_core ALIAS pegium_test_support_core)
     target_include_directories(pegium_test_support_core INTERFACE
         $<BUILD_INTERFACE:${PEGIUM_TEST_ROOT_DIR}>
     )
 
     add_library(pegium_test_support_lsp INTERFACE)
+    add_library(pegium::test_support_lsp ALIAS pegium_test_support_lsp)
     target_link_libraries(pegium_test_support_lsp INTERFACE
-        pegium_test_support_core
+        pegium::test_support_core
     )
 
     add_library(pegium_test_support_examples INTERFACE)
+    add_library(pegium::test_support_examples ALIAS pegium_test_support_examples)
     target_link_libraries(pegium_test_support_examples INTERFACE
-        pegium_test_support_lsp
+        pegium::test_support_lsp
     )
 
     function(pegium_register_gtest_target target)

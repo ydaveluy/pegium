@@ -13,7 +13,6 @@ using namespace pegium::parser;
 class @PEGIUM_NEW_CLASS@Parser : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {

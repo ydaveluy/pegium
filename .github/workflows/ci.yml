@@ -98,11 +98,11 @@ jobs:
           - name: asan
             cxx: clang++
             flags: -DPEGIUM_ENABLE_ASAN=ON
-            test_regex: PegiumCoreParserFocusedSanitizer|PegiumLspSemanticTokenSanitizer
+            test_regex: PegiumCoreParserFocusedSanitizer|PegiumLspSemanticTokenSanitizer|CrossDocumentReferenceDescriptionSurvivesUnrelatedRebuild
           - name: tsan
             cxx: clang++
             flags: -DPEGIUM_ENABLE_TSAN=ON
-            test_regex: DefaultWorkspaceLockTest|TaskSchedulerTest|UtilsTest\.(DisposableAndEventEmitterSupportSubscriptionLifecycle|EventEmitterPreservesRegistrationOrder|EventEmitterSupportsConcurrentSubscriptionAndEmit)|DefaultDocumentUpdateHandlerTest\.(DidChangeContentPropagatesWorkspaceLockCancellationToBuilderUpdate|DidChangeContentWaitsForWorkspaceManagerReadyBeforeUpdating)
+            test_regex: ConcurrentReferenceResolution\.|DefaultWorkspaceLockTest|TaskSchedulerTest|UtilsTest\.(DisposableAndEventEmitterSupportSubscriptionLifecycle|EventEmitterPreservesRegistrationOrder|EventEmitterSupportsConcurrentSubscriptionAndEmit)|DefaultDocumentUpdateHandlerTest\.(DidChangeContentPropagatesWorkspaceLockCancellationToBuilderUpdate|DidChangeContentWaitsForWorkspaceManagerReadyBeforeUpdating)
           - name: ubsan
             cxx: clang++
             flags: -DPEGIUM_ENABLE_UBSAN=ON
@@ -120,6 +120,6 @@ jobs:
             -DPEGIUM_BUILD_FUZZ_TARGETS=OFF \
             ${{ matrix.flags }}
       - name: Build
-        run: cmake --build build --config Debug -j4 --target PegiumCoreUnitTest PegiumLspUnitTest
+        run: cmake --build build --config Debug -j4 --target PegiumCoreUnitTest PegiumLspUnitTest PegiumIntegrationTest
       - name: Run sanitizer-focused tests
         run: ctest --test-dir build -R '${{ matrix.test_regex }}' --output-on-failure

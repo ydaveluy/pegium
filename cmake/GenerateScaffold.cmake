@@ -1,5 +1,6 @@
 # Run: cmake -DPEGIUM_TAG=<tag> -P cmake/GenerateScaffold.cmake
-# Embeds templates/project/** into a self-contained docs/pegium-new.cmake.
+# Generates the published scaffolder docs/pegium-new.cmake from the skeleton
+# cmake/pegium-new.cmake.in plus every file under templates/project/.
 cmake_minimum_required(VERSION 3.14)
 
 if(NOT DEFINED PEGIUM_TAG)
@@ -31,5 +32,13 @@ endforeach()
 
 configure_file("${CMAKE_CURRENT_LIST_DIR}/pegium-new.cmake.in" "${_out}" @ONLY)
 file(READ "${_out}" _head)
-file(WRITE "${_out}" "${_head}\n${_body}\n_pegium_new_finish()\n")
+set(_banner
+"# =============================================================================
+# GENERATED FILE — DO NOT EDIT.
+# Produced by cmake/GenerateScaffold.cmake from cmake/pegium-new.cmake.in and the
+# templates under templates/project/. To change the scaffolder, edit those and
+# regenerate:  cmake -DPEGIUM_TAG=main -P cmake/GenerateScaffold.cmake
+# =============================================================================
+")
+file(WRITE "${_out}" "${_banner}${_head}\n${_body}\n_pegium_new_finish()\n")
 message(STATUS "Wrote ${_out} (${PEGIUM_TAG})")

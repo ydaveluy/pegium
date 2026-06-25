@@ -10,3 +10,15 @@ package-lock.json
 __pycache__
 /dist
 .fuzz/
+
+# Agent/process working docs (design specs, audit reports) — not project files.
+docs/superpowers/
+
+# CMake artifacts from an accidental in-source configure. Always build
+# out-of-tree (cmake -B build); these should never appear in the source tree.
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+*_include.cmake
+DartConfiguration.tcl
