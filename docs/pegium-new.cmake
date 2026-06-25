@@ -1,3 +1,9 @@
+# =============================================================================
+# GENERATED FILE — DO NOT EDIT.
+# Produced by cmake/GenerateScaffold.cmake from cmake/pegium-new.cmake.in and the
+# templates under templates/project/. To change the scaffolder, edit those and
+# regenerate:  cmake -DPEGIUM_TAG=main -P cmake/GenerateScaffold.cmake
+# =============================================================================
 # pegium-new.cmake — scaffold a new pegium language. CMake only.
 # Usage: cmake -DNAME=MyLang [-DEXT=.ml] [-DDIR=mylang] [-DLSP=ON] [-DVSCODE=ON]
 #               [-DCLI=ON] [-DPEGIUM_TAG=main] -P pegium-new.cmake
@@ -251,7 +257,7 @@ _pegium_new_emit([==[.vscode/tasks.json]==] [==[vscode]==] [==[{
     ]
 }
 ]==])
-_pegium_new_emit([==[CMakeLists.txt]==] [==[always]==] [==[cmake_minimum_required(VERSION 3.14)
+_pegium_new_emit([==[CMakeLists.txt]==] [==[always]==] [==[cmake_minimum_required(VERSION 3.15)
 project(@PEGIUM_NEW_LANGUAGE_ID@ LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -265,40 +271,88 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pegium)
 
-add_library(@PEGIUM_NEW_LANGUAGE_ID@-core
-    src/@PEGIUM_NEW_LANGUAGE_ID@/core/Module.cpp
-)
-target_include_directories(@PEGIUM_NEW_LANGUAGE_ID@-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-core PUBLIC pegium::core)
+# Sources are discovered by globbing, so adding a .cpp under src/ (or a test under
+# test/) needs no edit here. CONFIGURE_DEPENDS re-globs when files are added/removed.
+set(_src "${CMAKE_CURRENT_SOURCE_DIR}/src/@PEGIUM_NEW_LANGUAGE_ID@")
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/@PEGIUM_NEW_LANGUAGE_ID@/cli/main.cpp")
-  add_executable(@PEGIUM_NEW_LANGUAGE_ID@-cli src/@PEGIUM_NEW_LANGUAGE_ID@/cli/main.cpp)
-  target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-cli PRIVATE @PEGIUM_NEW_LANGUAGE_ID@-core pegium::cli)
+# Each consumable library also gets a `@PEGIUM_NEW_LANGUAGE_ID@::` namespaced
+# alias, mirroring pegium's own `pegium::core` / `pegium::lsp` targets. Link the
+# aliases (not the raw names): a parent project that pulls this in with
+# add_subdirectory(...) then consumes `@PEGIUM_NEW_LANGUAGE_ID@::core` /
+# `@PEGIUM_NEW_LANGUAGE_ID@::lsp` exactly as it would any installed package.
+
+# Core library: every source under core/.
+file(GLOB_RECURSE _core_sources CONFIGURE_DEPENDS "${_src}/core/*.cpp")
+if(_core_sources)
+  add_library(@PEGIUM_NEW_LANGUAGE_ID@-core ${_core_sources})
+  add_library(@PEGIUM_NEW_LANGUAGE_ID@::core ALIAS @PEGIUM_NEW_LANGUAGE_ID@-core)
+  target_include_directories(@PEGIUM_NEW_LANGUAGE_ID@-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-core PUBLIC pegium::core)
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/Module.cpp")
-  add_library(@PEGIUM_NEW_LANGUAGE_ID@-lsp-lib src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/Module.cpp)
-  target_include_directories(@PEGIUM_NEW_LANGUAGE_ID@-lsp-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-  target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-lsp-lib PUBLIC @PEGIUM_NEW_LANGUAGE_ID@-core pegium::lsp)
+# CLI tool: every source under cli/ (main.cpp plus any helpers).
+file(GLOB_RECURSE _cli_sources CONFIGURE_DEPENDS "${_src}/cli/*.cpp")
+if(_cli_sources)
+  add_executable(@PEGIUM_NEW_LANGUAGE_ID@-cli ${_cli_sources})
+  target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-cli PRIVATE @PEGIUM_NEW_LANGUAGE_ID@::core pegium::cli)
+endif()
 
-  add_executable(@PEGIUM_NEW_LANGUAGE_ID@-lsp src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/main.cpp)
-  target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-lsp PRIVATE @PEGIUM_NEW_LANGUAGE_ID@-lsp-lib)
+# LSP: the server library is every lsp/ source except the executable entry point,
+# which becomes the -lsp server.
+file(GLOB_RECURSE _lsp_sources CONFIGURE_DEPENDS "${_src}/lsp/*.cpp")
+set(_lsp_main "${_src}/lsp/main.cpp")
+list(REMOVE_ITEM _lsp_sources "${_lsp_main}")
+if(_lsp_sources)
+  add_library(@PEGIUM_NEW_LANGUAGE_ID@-lsp-lib ${_lsp_sources})
+  add_library(@PEGIUM_NEW_LANGUAGE_ID@::lsp ALIAS @PEGIUM_NEW_LANGUAGE_ID@-lsp-lib)
+  target_include_directories(@PEGIUM_NEW_LANGUAGE_ID@-lsp-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-lsp-lib PUBLIC @PEGIUM_NEW_LANGUAGE_ID@::core pegium::lsp)
+endif()
+
+# The LSP server is built whenever lsp/main.cpp exists — even when it is the only
+# lsp/ source (so there is no separate server library). Link the server library
+# when it exists, otherwise link core + pegium::lsp directly.
+if(EXISTS "${_lsp_main}")
+  add_executable(@PEGIUM_NEW_LANGUAGE_ID@-lsp ${_lsp_main})
+  if(TARGET @PEGIUM_NEW_LANGUAGE_ID@-lsp-lib)
+    target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-lsp PRIVATE @PEGIUM_NEW_LANGUAGE_ID@::lsp)
+  else()
+    target_include_directories(@PEGIUM_NEW_LANGUAGE_ID@-lsp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-lsp PRIVATE @PEGIUM_NEW_LANGUAGE_ID@::core pegium::lsp)
+  endif()
 endif()
 
 enable_testing()
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.15.2
-)
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+# pegium already fetches GoogleTest for pegium::testing, so only declare it if a
+# parent project (or pegium) has not provided it. Guard the CRT setting too
+# instead of FORCE-ing it, so a parent project's choice is respected.
+if(NOT TARGET GTest::gtest_main)
+  FetchContent_Declare(
+      googletest
+      GIT_REPOSITORY https://github.com/google/googletest.git
+      GIT_TAG v1.17.0  # keep in sync with the version pegium pins
+  )
+  if(NOT DEFINED gtest_force_shared_crt)
+    set(gtest_force_shared_crt ON CACHE BOOL "")
+  endif()
+  FetchContent_MakeAvailable(googletest)
+endif()
 
-add_executable(@PEGIUM_NEW_LANGUAGE_ID@-test test/parsing_test.cpp)
-target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-test PRIVATE @PEGIUM_NEW_LANGUAGE_ID@-core pegium::cli GTest::gtest_main)
-target_compile_definitions(@PEGIUM_NEW_LANGUAGE_ID@-test PRIVATE
-    PEGIUM_NEW_SAMPLE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/example/hello@PEGIUM_NEW_EXT@")
-add_test(NAME @PEGIUM_NEW_LANGUAGE_ID@-parse COMMAND @PEGIUM_NEW_LANGUAGE_ID@-test)
+# Tests: every source under test/. The parsing smoke test needs only the core
+# pipeline; the LSP feature tests (test/lsp/) use the reusable pegium::testing
+# harness, so they and pegium::testing are linked only when the LSP server is built.
+file(GLOB_RECURSE _test_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp")
+if(_test_sources)
+  add_executable(@PEGIUM_NEW_LANGUAGE_ID@-test ${_test_sources})
+  set(_test_libs @PEGIUM_NEW_LANGUAGE_ID@::core pegium::cli GTest::gtest_main)
+  if(TARGET @PEGIUM_NEW_LANGUAGE_ID@-lsp-lib)
+    list(APPEND _test_libs @PEGIUM_NEW_LANGUAGE_ID@::lsp pegium::testing)
+  endif()
+  target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-test PRIVATE ${_test_libs})
+  target_compile_definitions(@PEGIUM_NEW_LANGUAGE_ID@-test PRIVATE
+      PEGIUM_NEW_SAMPLE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/example/hello@PEGIUM_NEW_EXT@")
+  add_test(NAME @PEGIUM_NEW_LANGUAGE_ID@-parse COMMAND @PEGIUM_NEW_LANGUAGE_ID@-test)
+endif()
 ]==])
 _pegium_new_emit([==[README.md]==] [==[always]==] [==[# @PEGIUM_NEW_LANGUAGE_ID@
 
@@ -416,7 +470,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   try {
-    auto shared = pegium::cli::make_shared_services();
+    auto sharedServices = pegium::cli::make_shared_services();
+    auto &shared = *sharedServices;
     auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@Services(shared);
     auto &langServices = *services;
     shared.serviceRegistry->registerServices(std::move(services));
@@ -504,7 +559,6 @@ using namespace pegium::parser;
 class @PEGIUM_NEW_CLASS@Parser : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -640,13 +694,70 @@ int main(int argc, char **argv) {
                                        @PEGIUM_NEW_LANGUAGE_ID@::lsp::register@PEGIUM_NEW_CLASS@Services);
 }
 ]==])
+_pegium_new_emit([==[test/lsp/lsp_features_test.cpp]==] [==[lsp]==] [==[// LSP feature tests using the reusable `pegium::testing` harness. It builds
+// a marked-up source string through the
+// whole pipeline and drives the LSP services through pegium's public API, so it
+// is only built when the language server is scaffolded (LSP=ON).
+//
+// Markers in the source: `<|>` is a cursor index, `<| … |>` marks a range.
+#include <@PEGIUM_NEW_LANGUAGE_ID@/lsp/Module.hpp>
+
+#include <pegium/testing/Testing.hpp>
+
+#include <algorithm>
+#include <string_view>
+
+#include <gtest/gtest.h>
+#include <lsp/types.h>
+
+namespace {
+
+// Builds a workspace with the @PEGIUM_NEW_CLASS@ LSP services registered.
+pegium::testing::TestWorkspace make@PEGIUM_NEW_CLASS@Workspace() {
+  pegium::testing::TestWorkspace ws;
+  ws.registerLanguage(
+      @PEGIUM_NEW_LANGUAGE_ID@::lsp::create@PEGIUM_NEW_CLASS@Services(ws.shared()));
+  return ws;
+}
+
+// Validation: an unresolved cross-reference is reported as a diagnostic. The
+// message is matched as a substring, so the assertion stays readable.
+TEST(@PEGIUM_NEW_CLASS@Lsp, ReportsUnresolvedReference) {
+  auto ws = make@PEGIUM_NEW_CLASS@Workspace();
+  pegium::testing::expectValidation(
+      ws, "@PEGIUM_NEW_LANGUAGE_ID@",
+      {.text = "Hello Ghost!\n",
+       .diagnostics = {{.message = "Could not resolve reference"}}});
+}
+
+// Completion: at the cursor of a greeting, the names of the declared persons are
+// proposed. `.check` lets us assert a subset without pinning the full list.
+TEST(@PEGIUM_NEW_CLASS@Lsp, CompletesDeclaredNames) {
+  auto ws = make@PEGIUM_NEW_CLASS@Workspace();
+  pegium::testing::expectCompletion(
+      ws, "@PEGIUM_NEW_LANGUAGE_ID@",
+      {.text = "person John\nperson Jane\nHello <|>",
+       .check = [](const ::lsp::CompletionList &list) {
+         const auto proposes = [&](std::string_view label) {
+           return std::ranges::any_of(list.items, [&](const auto &item) {
+             return item.label == label;
+           });
+         };
+         EXPECT_TRUE(proposes("John"));
+         EXPECT_TRUE(proposes("Jane"));
+       }});
+}
+
+} // namespace
+]==])
 _pegium_new_emit([==[test/parsing_test.cpp]==] [==[always]==] [==[#include <@PEGIUM_NEW_LANGUAGE_ID@/core/Module.hpp>
 #include <pegium/cli/CliUtils.hpp>
 
 #include <gtest/gtest.h>
 
 TEST(@PEGIUM_NEW_CLASS@Parsing, SampleParsesWithoutErrors) {
-  auto shared = pegium::cli::make_shared_services();
+  auto sharedServices = pegium::cli::make_shared_services();
+  auto &shared = *sharedServices;
   auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@Services(shared);
   auto &langServices = *services;
   shared.serviceRegistry->registerServices(std::move(services));

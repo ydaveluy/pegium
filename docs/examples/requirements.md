@@ -6,7 +6,7 @@ Study `requirements` once one language is no longer enough. It shows how Pegium 
 
 ## Entry points
 
-- CLI: `./build/examples/requirements/pegium-example-requirements-cli`
+- CLI: `./build/examples/requirements/pegium-example-requirements-cli generate examples/requirements/example/requirements.req`
 - LSP: `./build/examples/requirements/pegium-example-requirements-lsp`
 
 ## What to read first

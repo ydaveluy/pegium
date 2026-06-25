@@ -10,13 +10,6 @@ A quick high-level model of how Pegium fits together, so the subsystem pages mak
 4. Services assemble the language behavior.
 5. The same document model powers parsing, diagnostics, and editor features.
 
-## Main differences
-
-- You write grammars as C++ expressions, not external grammar files.
-- A PEG-based parser DSL is the foundation of the grammar layer.
-- C++ types and member pointers drive AST construction and formatter selections.
-- Service composition happens through explicit service wiring.
-
 ## How to translate your intuition
 
 If you come from other language tooling frameworks:

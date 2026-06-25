@@ -18,7 +18,6 @@ using namespace pegium::parser;
 class DomainModelParser : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -63,6 +62,61 @@ Use `Rule<T>` when the construct is part of the language structure:
 - qualified names that should allow hidden tokens between parts
 
 The consequence: rules use the current skipper, terminals do not.
+
+## Combinators
+
+A grammar body is an expression built from these combinators.
+
+Matching primitives:
+
+| Combinator | Meaning |
+| --- | --- |
+| `"…"_kw` | a literal: keyword, punctuation, or operator. Add `.i()` for case-insensitive, `.doc("…")` for hover text |
+| `"…"_cr` | a character range/class, e.g. `"a-zA-Z0-9_"_cr`. A leading `^` negates it (`"^0-9"_cr`) |
+| `dot` | any single UTF-8 code point, **including newline** (like regex `.` with the DOTALL flag) |
+| `s` / `S` | whitespace / non-whitespace (`\s` / `\S`) |
+| `w` / `W` | word / non-word character (`\w` / `\W`) |
+| `d` / `D` | digit / non-digit (`\d` / `\D`) |
+| `eol` / `eof` | end of line / end of input |
+
+Sequencing and choice:
+
+| Combinator | Meaning |
+| --- | --- |
+| `a + b` | sequence: `a` then `b` |
+| `a \| b` | ordered choice: the first matching alternative wins, with no backtracking once one matches — put specific cases first |
+| `a & b` | unordered group: `a` and `b` in any order |
+
+Repetition:
+
+| Combinator | Meaning |
+| --- | --- |
+| `option(a)` | zero or one |
+| `many(a)` | zero or more |
+| `some(a)` | one or more |
+| `many(a, sep)` / `some(a, sep)` | repetition separated by `sep`, e.g. `some(ID, "."_kw)` |
+| `repeat<N>(a)` | exactly `N` times |
+| `repeat<Min, Max>(a)` | between `Min` and `Max` times (inclusive) |
+
+Lookahead and until:
+
+| Combinator | Meaning |
+| --- | --- |
+| `&a` | positive lookahead: require `a` ahead without consuming it |
+| `!a` | negative lookahead: succeed only if `a` does not match (also negates a class, as in `!s + dot`) |
+| `a <=> b` | non-greedy until: `a`, then everything up to and including the first `b` (used for block comments) |
+
+They compose freely:
+
+```cpp
+"a-zA-Z_"_cr + many(w)                  // an identifier terminal body
+some(ID, "."_kw)                        // a dotted qualified name
+option("extends"_kw + assign<&ast::Entity::superType>(QualifiedName))
+"/*"_kw <=> "*/"_kw                     // a block comment
+```
+
+Matching text is not the same as building the AST — turn matched input into AST
+data with the assignment combinators below.
 
 ## Use grammar assignments to shape the model
 
@@ -124,6 +178,45 @@ Use it when:
 
 If the language has only one or two operator forms, a small explicit rule stack is easier to read.
 
+## Extend a base grammar with `super()`
+
+A parser is an ordinary C++ class, so one language can inherit another: derive from the base parser to reuse its rules, terminals, and skipper, then change only what differs.
+
+Every rule exposes `super()`, which returns its current definition. Reassigning a rule **with** `super()` *extends* it (the previous body is folded in); reassigning **without** `super()` *replaces* it.
+
+```cpp
+class BaseParser : public PegiumParser {
+public:
+  using PegiumParser::PegiumParser;
+
+protected:
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override { return Model; }
+  const Skipper &getSkipper() const noexcept override { return skipper; }
+
+  Skipper skipper = skip(ignored(some(s)));
+  Terminal<std::string> ID{"ID", "a-zA-Z_"_cr + many(w)};
+  Rule<ast::Statement> Statement{"Statement", "let"_kw + assign<&ast::Statement::name>(ID)};
+  Rule<ast::Model> Model{"Model", some(append<&ast::Model::statements>(Statement))};
+};
+
+class ExtendedParser : public BaseParser {
+public:
+  ExtendedParser() {
+    // Add an alternative to the inherited rule. `Model` keeps matching it
+    // because rules reference each other by address.
+    Statement = Statement.super() | ("const"_kw + assign<&ast::Statement::name>(ID));
+  }
+};
+```
+
+Reassign rules in the derived constructor, after the base has initialized them. Because rules reference one another by address, extending an inherited rule in place is seen by every rule that uses it — including the entry rule. To override a rule completely, reassign it without `super()`:
+
+```cpp
+Statement = "fn"_kw + assign<&ast::Statement::name>(ID);  // replaces the base body
+```
+
+`super()` works the same on `Rule<T>`, `Terminal<T>`, and data-type rules. Override `getEntryRule()` / `getSkipper()` in the derived class when the entry point or whitespace handling also changes.
+
 ## Practical advice
 
 A small, stable first grammar beats an ambitious one:
@@ -138,4 +231,4 @@ A small, stable first grammar beats an ambitious one:
 
 - [Build a Language End-to-End](../learn/walkthrough.md)
 - [Grammar Reference](../reference/grammar-reference.md)
-- [AST and CST](ast-and-cst.md)
+- [Define the AST](ast-and-cst.md)

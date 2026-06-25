@@ -55,7 +55,7 @@ The example walks each definition, collects nested `FunctionCall` nodes, and fol
 
 ```cpp
 for (const auto &statement : module.statements) {
-  const auto *definition = dynamic_cast<const Definition *>(statement.get());
+  const auto *definition = pegium::ast_ptr_cast<const Definition>(statement);
   if (definition == nullptr) {
     continue;
   }

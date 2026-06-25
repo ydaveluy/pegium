@@ -30,7 +30,7 @@ Source: [examples/arithmetics](https://github.com/ydaveluy/pegium/tree/main/exam
 
 - your language is expression-heavy
 - you need precedence and associativity
-- you want to study `Infix` rules
+- you want to study `InfixRule` (precedence-climbing infix expressions)
 - you want the smallest full formatter example
 
 ## Related pages

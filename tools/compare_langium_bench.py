@@ -355,8 +355,8 @@ def print_summary(pegium: dict[str, BenchResult], langium: dict[str, BenchResult
                 title = f"{title} ({shown} files built simultaneously at startup)"
         print(f"## {title}")
         print()
-        header = ("| language | size | pegium | pegium MiB/s | langium | "
-                  "langium MiB/s | speedup |")
+        header = ("| language | size | pegium time | pegium throughput | "
+                  "langium time | langium throughput | speedup |")
         divider = "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"
         if with_memory:
             header += " pegium RSS | langium RSS | RSS ratio |"
@@ -367,8 +367,8 @@ def print_summary(pegium: dict[str, BenchResult], langium: dict[str, BenchResult
             p, l = pegium[key], langium[key]
             p_ms, l_ms = p.steps["full-build"], l.steps["full-build"]
             row = (f"| {label} | {fmt_size(p.size_bytes)} | "
-                   f"{p_ms:.2f} ms | {mib_per_second(p.size_bytes, p_ms):.1f} | "
-                   f"{l_ms:.2f} ms | {mib_per_second(l.size_bytes, l_ms):.1f} | "
+                   f"{p_ms:.2f} ms | {mib_per_second(p.size_bytes, p_ms):.1f} MiB/s | "
+                   f"{l_ms:.2f} ms | {mib_per_second(l.size_bytes, l_ms):.1f} MiB/s | "
                    f"{ratio(l_ms, p_ms)} |")
             if with_memory:
                 p_kib, l_kib = (memory or {}).get(key, (None, None))
@@ -392,12 +392,12 @@ def print_summary(pegium: dict[str, BenchResult], langium: dict[str, BenchResult
     for key in SINGLE_BENCHMARKS:
         print(f"## {key} (per phase)")
         print()
-        print("| phase | pegium (ms) | langium (ms) | speedup |")
+        print("| phase | pegium time | langium time | speedup |")
         print("| --- | ---: | ---: | ---: |")
         for step in STEPS:
             p_ms = pegium[key].steps[step]
             l_ms = langium[key].steps[step]
-            print(f"| {step} | {p_ms:.2f} | {l_ms:.2f} | {ratio(l_ms, p_ms)} |")
+            print(f"| {step} | {p_ms:.2f} ms | {l_ms:.2f} ms | {ratio(l_ms, p_ms)} |")
         print()
 
 

@@ -13,7 +13,7 @@ Source: [examples/domainmodel](https://github.com/ydaveluy/pegium/tree/main/exam
 
 ## Entry points
 
-- CLI: `./build/examples/domainmodel/pegium-example-domainmodel-cli`
+- CLI: `./build/examples/domainmodel/pegium-example-domainmodel-cli generate examples/domainmodel/example/blog.dmodel`
 - LSP: `./build/examples/domainmodel/pegium-example-domainmodel-lsp`
 
 ## What to read first

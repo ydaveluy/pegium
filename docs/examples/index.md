@@ -45,7 +45,7 @@ After building the repository, each example exposes matching CLI and LSP entrypo
 ./build/examples/arithmetics/pegium-example-arithmetics-lsp
 ```
 
-The CLI takes a subcommand (`eval`) before the file path. Run it with no arguments to see the usage string.
+The arithmetics CLI takes an `eval` subcommand; the domainmodel, requirements, and statemachine CLIs take a `generate` subcommand instead. Run any CLI with no arguments to see its usage string.
 
 ## Related pages
 

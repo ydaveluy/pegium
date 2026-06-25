@@ -13,7 +13,7 @@ A compact modeling example where semantic rules matter more than expression pars
 
 ## Useful entry points
 
-- CLI: `./build/examples/statemachine/pegium-example-statemachine-cli`
+- CLI: `./build/examples/statemachine/pegium-example-statemachine-cli generate examples/statemachine/example/trafficlight.statemachine`
 - LSP: `./build/examples/statemachine/pegium-example-statemachine-lsp`
 
 ## What to read first

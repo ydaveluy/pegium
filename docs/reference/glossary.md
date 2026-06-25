@@ -60,7 +60,7 @@ The output of one parser invocation. Contains the AST root, the CST root, the pa
 
 ## AstNodeDescription
 
-A workspace-level description of one declaration: its name, kind, source range, and originating document. The index manager exposes descriptions for cross-document lookups; scope computation produces them.
+A workspace-level description of one declaration: its name, type, and originating document (documentId + symbolId). The index manager exposes descriptions for cross-document lookups; scope computation produces them.
 
 ## LocalSymbols
 

@@ -22,9 +22,8 @@ See `examples/requirements/src/requirements/core/Module.cpp`. It builds one serv
 std::unique_ptr<RequirementsCoreServices>
 createRequirementsServices(const pegium::SharedCoreServices &sharedServices,
                            std::string languageId) {
-  auto services = std::make_unique<RequirementsCoreServices>(sharedServices);
-  services->languageMetaData.languageId = std::move(languageId);
-  pegium::installDefaultCoreServices(*services);
+  auto services = pegium::makeDefaultCoreServices<RequirementsCoreServices>(
+      sharedServices, std::move(languageId));
   installRequirementsCoreModule(*services);
   return services;
 }

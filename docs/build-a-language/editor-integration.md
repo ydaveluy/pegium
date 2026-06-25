@@ -1,6 +1,6 @@
-# Integrate with an Editor
+# Integrate with VS Code
 
-A Pegium language server starts with one function call; the editor client is thin glue. The shipped examples include a full VS Code client under `examples/<language>/vscode/` plus a `package.json` — use them as a template.
+A Pegium language server starts with one function call; the editor client is thin glue. This page walks through the shipped **VS Code** client (under `examples/<language>/vscode/` plus a `package.json`) — use it as a template. The server itself is a standard language server, so any LSP-capable editor connects the same way (see [Adapting it to your language](#adapting-it-to-your-language)).
 
 ## The server side
 

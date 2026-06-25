@@ -16,10 +16,11 @@ Three services each solve a different problem:
 | scope computation | which symbols are exported and indexed |
 | scope provider | which symbols are visible at a given reference site |
 
-A custom name provider overrides the single primary lookup:
+A custom name provider overrides two independent lookups:
 
-- `nameOf(...)`: returns the exported symbol name and the CST node that marks the
-  declaration (the `getName` / `getNameNode` helpers delegate to it)
+- `getName(...)`: returns the exported symbol name (no CST lookup)
+- `getNameNode(...)`: returns the CST node that marks the declaration (paid only
+  when a source range is needed)
 
 When your AST already stores declaration names in a shared base type, prefer
 the default naming pattern described in

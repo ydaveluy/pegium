@@ -12,6 +12,8 @@ theme:
   name: material
   language: en
   custom_dir: overrides
+  logo: assets/icon.svg
+  favicon: assets/icon.svg
   features:
     - navigation.tabs
     - navigation.sections
@@ -66,15 +68,14 @@ nav:
       - Run a Language Headlessly: learn/consume-the-ast.md
       - Build a Language:
           - build-a-language/index.md
+          - Define the AST: build-a-language/ast-and-cst.md
           - Grammar Essentials: build-a-language/grammar.md
           - Debugging a Grammar: build-a-language/debugging-grammar.md
-          - AST and CST: build-a-language/ast-and-cst.md
           - References and Scoping: build-a-language/references-and-scoping.md
           - Validation: build-a-language/validation.md
-          - Error Recovery: build-a-language/error-recovery.md
           - Formatting: build-a-language/formatting.md
           - LSP Services: build-a-language/lsp-services.md
-          - Integrate with an Editor: build-a-language/editor-integration.md
+          - Integrate with VS Code: build-a-language/editor-integration.md
           - Workspace Lifecycle: build-a-language/workspace.md
   - Recipes:
       - recipes/index.md

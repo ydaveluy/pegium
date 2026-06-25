@@ -1,5 +1,8 @@
 <div align="center">
-  <h1>Pegium</h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img alt="Pegium" src="docs/assets/logo.svg" width="440">
+  </picture>
   <h3>C++20 language engineering toolkit</h3>
 </div>
 
@@ -62,6 +65,28 @@ CLI, LSP server, and VS Code extension, pulling Pegium in via `FetchContent`.
 | `VSCODE` | `ON` | Scaffold the VS Code extension; pass `-DVSCODE=OFF` to skip |
 | `CLI` | `ON` | Build the CLI tool; pass `-DCLI=OFF` to skip |
 | `PEGIUM_TAG` | `main` | Pegium tag/commit to pin (e.g. `-DPEGIUM_TAG=v1.2.0`) |
+
+### Add Pegium to an existing CMake project
+
+Pegium is consumed via CMake **FetchContent** (or `add_subdirectory`). As of
+v0.1.0 it intentionally ships **no `install()` rules and no `find_package(pegium)`
+config** — pin a tag and pull it into your build:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+  pegium
+  GIT_REPOSITORY https://github.com/ydaveluy/pegium.git
+  GIT_TAG v0.1.0
+)
+FetchContent_MakeAvailable(pegium)
+
+target_link_libraries(my_language PUBLIC pegium::core)
+```
+
+Available targets: `pegium::core` (parser, workspace, references), `pegium::lsp`
+(language server), `pegium::cli` (CLI/test helpers), `pegium::converters`.
+Requires a C++20 compiler.
 
 ### Try the shipped examples
 
@@ -139,30 +164,30 @@ alongside how it grows with input size. Langium 4.3.0 / Node.js 26.
 
 Single-file full build (64 KiB):
 
-| language | pegium | pegium MiB/s | langium | langium MiB/s | speedup |
+| language | pegium time | pegium throughput | langium time | langium throughput | speedup |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| arithmetics | 3.28 ms | 19.1 | 272 ms | 0.2 | ~83× |
-| domainmodel | 1.12 ms | 55.8 | 151 ms | 0.4 | ~134× |
-| requirements | 1.00 ms | 62.6 | 39 ms | 1.6 | ~39× |
-| statemachine | 1.29 ms | 48.5 | 78 ms | 0.8 | ~61× |
+| arithmetics | 2.83 ms | 22.1 MiB/s | 276 ms | 0.2 MiB/s | ~98× |
+| domainmodel | 0.95 ms | 65.8 MiB/s | 153 ms | 0.4 MiB/s | ~161× |
+| requirements | 0.93 ms | 67.3 MiB/s | 39 ms | 1.6 MiB/s | ~42× |
+| statemachine | 1.24 ms | 50.4 MiB/s | 80 ms | 0.8 MiB/s | ~64× |
 
 Workspace full build, ~250 KB (all files built simultaneously at startup):
 
-| language | pegium | pegium MiB/s | langium | langium MiB/s | speedup | pegium RSS | langium RSS | RSS ratio |
+| language | pegium time | pegium throughput | langium time | langium throughput | speedup | pegium RSS | langium RSS | RSS ratio |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| arithmetics | 1.66 ms | 150.8 | 491 ms | 0.5 | ~296× | 18 MiB | 209 MiB | ~12× |
-| domainmodel | 1.12 ms | 223.9 | 230 ms | 1.1 | ~206× | 18 MiB | 185 MiB | ~10× |
-| statemachine | 1.18 ms | 214.9 | 209 ms | 1.2 | ~177× | 18 MiB | 186 MiB | ~10× |
-| requirements | 2.21 ms | 113.6 | 133 ms | 1.9 | ~60× | 18 MiB | 174 MiB | ~10× |
+| arithmetics | 1.69 ms | 148.1 MiB/s | 498 ms | 0.5 MiB/s | ~295× | 18 MiB | 211 MiB | ~12× |
+| domainmodel | 1.20 ms | 208.9 MiB/s | 232 ms | 1.1 MiB/s | ~193× | 18 MiB | 186 MiB | ~10× |
+| requirements | 3.03 ms | 82.8 MiB/s | 134 ms | 1.9 MiB/s | ~44× | 18 MiB | 174 MiB | ~10× |
+| statemachine | 1.34 ms | 189.2 MiB/s | 212 ms | 1.2 MiB/s | ~158× | 18 MiB | 187 MiB | ~10× |
 
 Workspace full build, ~12 MB (all files built simultaneously at startup):
 
-| language | pegium | pegium MiB/s | langium | langium MiB/s | speedup | pegium RSS | langium RSS | RSS ratio |
+| language | pegium time | pegium throughput | langium time | langium throughput | speedup | pegium RSS | langium RSS | RSS ratio |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| arithmetics | 48 ms | 247.9 | 24.3 s | 0.5 | ~502× | 602 MiB | 3.1 GiB | ~5× |
-| domainmodel | 33 ms | 365.0 | 10.1 s | 1.2 | ~308× | 346 MiB | 2.1 GiB | ~6× |
-| statemachine | 38 ms | 312.4 | 10.2 s | 1.2 | ~265× | 390 MiB | 2.2 GiB | ~6× |
-| requirements | 103 ms | 116.5 | 51.8 s | 0.2 | ~503× | 328 MiB | 1.8 GiB | ~6× |
+| arithmetics | 43 ms | 278.9 MiB/s | 23.8 s | 0.5 MiB/s | ~553× | 615 MiB | 3.1 GiB | ~5× |
+| domainmodel | 30 ms | 401.2 MiB/s | 10.1 s | 1.2 MiB/s | ~338× | 365 MiB | 2.1 GiB | ~6× |
+| requirements | 98 ms | 122.5 MiB/s | 51.6 s | 0.2 MiB/s | ~527× | 338 MiB | 1.6 GiB | ~5× |
+| statemachine | 30 ms | 397.1 MiB/s | 10.1 s | 1.2 MiB/s | ~336× | 404 MiB | 2.2 GiB | ~6× |
 
 Numbers are indicative and hardware-dependent; reproduce them on your own machine
 with:

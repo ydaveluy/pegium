@@ -1,6 +1,6 @@
 # Build a Language End-to-End
 
-Build a complete, working Pegium language by following the smallest full example in the repository: **`statemachine`**. Every file shown here lives under [`examples/statemachine/`](https://github.com/ydaveluy/pegium/tree/main/examples/statemachine), so you can read, run, copy, and adapt it.
+Build a complete, working Pegium language by following the smallest complete language in the repository — AST + grammar + validation + formatter: **`statemachine`**. The code shown here is drawn from [`examples/statemachine/`](https://github.com/ydaveluy/pegium/tree/main/examples/statemachine) — trimmed for brevity but faithful to the on-disk files, so you can read, run, copy, and adapt it.
 
 A statemachine document looks like this:
 
@@ -57,7 +57,7 @@ struct Statemachine : pegium::NamedAstNode {
 
 The member-type aliases come from `AstNode`:
 
-- `NamedAstNode` supplies the `name` field that the default naming, scoping, and linking services read. Always use it for named declarations — deriving plain `AstNode` with a hand-written `name` compiles but is invisible to the default `NameProvider`.
+- `NamedAstNode` supplies the `name` field that the default naming, scoping, and linking services read. It is **required** for named declarations: a plain `AstNode` is unnamed even if its grammar assigns a `name` field. (To name a type that cannot derive `NamedAstNode`, override the `NameProvider` service.)
 - `pointer<T>` is an arena-owned child node; `vector<>` holds repeated members.
 - `reference<T>` is a cross-link to another node, resolved later by the linker.
 
@@ -66,7 +66,7 @@ The member-type aliases come from `AstNode`:
 Subclass `pegium::parser::PegiumParser`, override `getEntryRule()` and `getSkipper()`, and declare your terminals and rules with the PEG DSL. The grammar shapes the AST directly through the `assign`/`append` actions.
 
 ```cpp
-// examples/statemachine/src/statemachine/core/Parser.hpp
+// From examples/statemachine/src/statemachine/core/Parser.hpp (comments trimmed).
 #include <statemachine/core/ast.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 
@@ -76,7 +76,6 @@ using namespace pegium::parser;
 class StateMachineParser : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
@@ -92,33 +91,38 @@ protected:
 
   Terminal<std::string> ID{"ID", "a-zA-Z_"_cr + many(w)};
 
-  Rule<ast::Event> EventRule{"Event", assign<&ast::Event::name>(ID)};
-  Rule<ast::Command> CommandRule{"Command", assign<&ast::Command::name>(ID)};
+  // A name is any ID that is not a reserved section keyword, so a list of names
+  // can never swallow the next section's keyword.
+  Rule<std::string> ReservedKeywords{
+      "ReservedKeywords",
+      "statemachine"_kw.i() | "events"_kw.i() | "commands"_kw.i() |
+          "initialState"_kw.i() | "state"_kw.i() | "actions"_kw.i() |
+          "end"_kw.i()};
+  Rule<std::string> ValidID{"ValidID", !ReservedKeywords + ID};
+
+  Rule<ast::Event> EventRule{"Event", assign<&ast::Event::name>(ValidID)};
+  Rule<ast::Command> CommandRule{"Command", assign<&ast::Command::name>(ValidID)};
 
   Rule<ast::Transition> TransitionRule{
-      "Transition", assign<&ast::Transition::event>(ID) + "=>"_kw +
-                        assign<&ast::Transition::state>(ID)};
+      "Transition", assign<&ast::Transition::event>(ValidID) + "=>"_kw +
+                        assign<&ast::Transition::state>(ValidID)};
 
   Rule<ast::State> StateRule{
       "State",
-      "state"_kw.i() + assign<&ast::State::name>(ID) +
+      "state"_kw.i() + assign<&ast::State::name>(ValidID) +
           option("actions"_kw.i() + "{"_kw +
-                 some(append<&ast::State::actions>(ID)) + "}"_kw) +
+                 some(append<&ast::State::actions>(ValidID)) + "}"_kw) +
           many(append<&ast::State::transitions>(TransitionRule)) +
           "end"_kw.i()};
 
   Rule<ast::Statemachine> StatemachineRule{
       "Statemachine",
-      "statemachine"_kw.i() + assign<&ast::Statemachine::name>(ID) +
+      "statemachine"_kw.i() + assign<&ast::Statemachine::name>(ValidID) +
           option("events"_kw.i() +
-                 append<&ast::Statemachine::events>(EventRule) +
-                 many(!("commands"_kw.i() | "initialState"_kw.i()) +
-                      append<&ast::Statemachine::events>(EventRule))) +
+                 some(append<&ast::Statemachine::events>(EventRule))) +
           option("commands"_kw.i() +
-                 append<&ast::Statemachine::commands>(CommandRule) +
-                 many(!"initialState"_kw.i() +
-                      append<&ast::Statemachine::commands>(CommandRule))) +
-          "initialState"_kw.i() + assign<&ast::Statemachine::init>(ID) +
+                 some(append<&ast::Statemachine::commands>(CommandRule))) +
+          "initialState"_kw.i() + assign<&ast::Statemachine::init>(ValidID) +
           many(append<&ast::Statemachine::states>(StateRule))};
 };
 
@@ -129,7 +133,7 @@ The DSL building blocks:
 
 - `assign<&T::member>(...)` writes one value into a field; `append<&T::vec>(...)` adds a repeated member or child.
 - `"kw"_kw` matches a keyword (`.i()` makes it case-insensitive); `"a-zA-Z_"_cr` is a character range; `s`, `w`, `eol`, `eof` are predefined terminals.
-- `+` sequences, `|` chooses, `option(...)` / `many(...)` / `some(...)` repeat, and `!x` is a negative lookahead. In `StatemachineRule`, the `!("commands"_kw.i() | "initialState"_kw.i())` guard stops the `events` list as soon as the next section keyword appears.
+- `+` sequences, `|` chooses, `option(...)` / `many(...)` / `some(...)` repeat, and `!x` is a negative lookahead. `ValidID = !ReservedKeywords + ID` uses it so a section keyword (e.g. `commands`, `initialState`) can never be consumed as a name — that is what bounds the `events`/`commands`/`states` lists.
 - The skipper's `ignored(...)` text disappears from the CST entirely; `hidden(...)` (comments) stays available to source-aware features such as formatting and hover.
 
 ## 3. Add validation — `core/validation/`
@@ -197,7 +201,7 @@ struct StatemachineCoreServices final : pegium::CoreServices,
 Then assemble it in a module function: install the Pegium defaults, then set your parser, file extension, validator, and checks.
 
 ```cpp
-// core/Module.cpp
+// core/ModuleImpl.hpp — a template in `detail` so the LSP container reuses it
 template <typename Services>
 void applyStatemachineCoreModule(Services &services) {
   services.parser = std::make_unique<const parser::StateMachineParser>(services);
@@ -206,12 +210,16 @@ void applyStatemachineCoreModule(Services &services) {
   validation::registerValidationChecks(services);
 }
 
+// core/Module.cpp — the public entry point forwards to it
+void installStatemachineCoreModule(StatemachineCoreServices &services) {
+  detail::applyStatemachineCoreModule(services);
+}
+
 std::unique_ptr<StatemachineCoreServices>
 createStatemachineServices(const pegium::SharedCoreServices &shared,
                            std::string languageId) {
-  auto services = std::make_unique<StatemachineCoreServices>(shared);
-  services->languageMetaData.languageId = std::move(languageId);
-  pegium::installDefaultCoreServices(*services);
+  auto services = pegium::makeDefaultCoreServices<StatemachineCoreServices>(
+      shared, std::move(languageId));
   installStatemachineCoreModule(*services);
   return services;
 }
@@ -224,7 +232,8 @@ The wiring is ordinary C++ you can read, so it stays obvious what your language 
 The CLI parses a file, checks for errors, then walks the typed AST:
 
 ```cpp
-auto shared = pegium::cli::make_shared_services();
+auto sharedServices = pegium::cli::make_shared_services();
+auto &shared = *sharedServices;
 auto services = statemachine::createStatemachineServices(shared);
 auto &languageServices = *services;
 shared.serviceRegistry->registerServices(std::move(services));

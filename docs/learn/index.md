@@ -6,8 +6,8 @@ Start with the [end-to-end walkthrough](walkthrough.md). It builds a complete, w
 
 Prefer a slower, concept-by-concept tour? Read the [Build a Language](../build-a-language/index.md) guides — one subsystem per page:
 
+- the AST
 - grammar
-- AST and CST
 - references and scoping
 - validation
 - formatting

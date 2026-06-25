@@ -24,6 +24,8 @@ It already tells the framework a lot:
 - `superType` is a link to another node
 - `features` are owned nested children
 
+The short field aliases (`reference<>`, `multi_reference<>`, `pointer<>`, `optional<>`, `variant<>`, `vector<>`) are inherited from `pegium::AstNode`, so they only resolve unqualified inside the body of an AstNode-derived struct — see [Field types](../build-a-language/ast-and-cst.md#field-types). (In the domainmodel example, `Entity` inherits `name` transitively through `Type` and `AbstractElement`, which derive from `NamedAstNode`.)
+
 The parser decides how those fields are populated:
 
 ```cpp

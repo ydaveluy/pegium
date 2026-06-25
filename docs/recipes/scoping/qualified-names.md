@@ -45,13 +45,30 @@ std::string QualifiedNameProvider::getQualifiedName(
 
 ## Step 2: export global symbols under qualified names
 
-`DomainModelScopeComputation::collectExportedSymbols(...)` walks every type in the document and prefixes the local name with the enclosing package chain before publishing it:
+`QualifiedNameProvider` is a language-added service, so the scope computation — invoked by the framework through a base reference — needs a typed way to reach it. `DomainModelScopeComputation` does this by inheriting `pegium::LanguageServiceMixin<DomainModelAddedServices>`, which captures a typed back-reference at construction so the service is reachable directly as `languageServices.qualifiedNameProvider`, with no `dynamic_cast` and no null branch (see [Adding your own services](../../reference/configuration-services.md#adding-your-own-services)):
 
 ```cpp
+class DomainModelScopeComputation final
+    : public pegium::references::DefaultScopeComputation,
+      public pegium::LanguageServiceMixin<DomainModelAddedServices> {
+public:
+  template <typename Container>
+  explicit DomainModelScopeComputation(const Container &services)
+      : pegium::references::DefaultScopeComputation(services),
+        pegium::LanguageServiceMixin<DomainModelAddedServices>(services) {}
+  // ...
+};
+```
+
+`DomainModelScopeComputation::collectExportedSymbols(...)` then walks every type in the document and prefixes the local name with the enclosing package chain before publishing it:
+
+```cpp
+const auto *qualifiedNameProvider = languageServices.qualifiedNameProvider.get();
+// ... for each exported type, with `name` from nameProvider->getName(*type):
 if (const auto *package =
-        dynamic_cast<const PackageDeclaration *>(type->getContainer());
+        pegium::ast_ptr_cast<const PackageDeclaration>(type->getContainer());
     package != nullptr && qualifiedNameProvider != nullptr) {
-  info.name = qualifiedNameProvider->getQualifiedName(*package, info.name);
+  *name = qualifiedNameProvider->getQualifiedName(*package, *name);
 }
 ```
 

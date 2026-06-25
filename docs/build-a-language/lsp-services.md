@@ -74,7 +74,7 @@ Do not replace several providers at once unless the language needs it. A safer o
 2. hover or completion
 3. definition/references/rename only if the default behavior is not enough
 
-For completion, extend `lsp::DefaultCompletionProvider` rather than rewriting it from scratch. The hooks are documented in the [completion provider reference](../reference/completion-provider.md).
+For completion, extend `pegium::DefaultCompletionProvider` rather than rewriting it from scratch. The hooks are documented in the [completion provider reference](../reference/completion-provider.md).
 
 ## Related pages
 

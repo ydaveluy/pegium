@@ -39,8 +39,12 @@ You get:
 - `src/mylang/` — AST, parser (grammar), core services, LSP services
 - `example/hello.<ext>` — sample input the smoke test parses
 - `CMakeLists.txt` — `FetchContent_Declare(pegium ...)` (one place to bump
-  the pinned tag)
-- `test/parsing_test.cpp` — CTest smoke test
+  the pinned tag); sources are **globbed**, so adding a `.cpp` under `src/` or a
+  test under `test/` needs no edit here
+- `test/parsing_test.cpp` — a CTest smoke test (core pipeline). With the LSP
+  server, `test/lsp/` adds feature tests built on the reusable
+  [`pegium::testing`](../test-your-language.md#testing-lsp-features-with-pegiumtesting)
+  harness, already linked for you
 - `.vscode/launch.json` — F5 launches the language extension in an Extension Development Host
 - `vscode/` — VS Code extension (omitted when `-DVSCODE=OFF`)
 
@@ -65,6 +69,7 @@ You get:
 | `src/mylang/core/Module.cpp`            | core service wiring (parser, validator…)   |
 | `src/mylang/lsp/Module.cpp`             | LSP feature wiring (formatter, hover…)     |
 | `example/hello.<ext>`                   | sample input the smoke test parses         |
+| `test/`                                 | add tests (globbed — new files need no CMake change) |
 | `CMakeLists.txt`                        | the Pegium tag this project pins           |
 
 ## Related pages

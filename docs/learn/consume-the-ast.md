@@ -13,7 +13,8 @@ source file, builds the typed AST, and walks it, following the statemachine CLI
 
 int run(const std::string &fileName) {
   // 1. A shared runtime plus your registered language.
-  auto shared = pegium::cli::make_shared_services();
+  auto sharedServices = pegium::cli::make_shared_services();
+  auto &shared = *sharedServices;
   auto services = statemachine::createStatemachineServices(shared);
   auto &languageServices = *services;
   shared.serviceRegistry->registerServices(std::move(services));

@@ -25,7 +25,7 @@ services->parser = std::make_unique<const my::parser::MyParser>(*services);
 services->lsp.hoverProvider = std::make_unique<lsp::MyHoverProvider>(*services);
 ```
 
-For completion, subclass `lsp::DefaultCompletionProvider` and override its narrow hooks rather than rewriting the whole provider. The [completion provider reference](../reference/completion-provider.md) lists the available extension points.
+For completion, subclass `pegium::DefaultCompletionProvider` and override its narrow hooks rather than rewriting the whole provider. The [completion provider reference](../reference/completion-provider.md) lists the available extension points.
 
 ## When to write a custom provider
 
