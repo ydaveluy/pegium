@@ -23,7 +23,7 @@
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/cli/CliUtils.hpp>
 #include <pegium/core/references/DefaultNameProvider.hpp>
-#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 #include <pegium/core/utils/UriUtils.hpp>

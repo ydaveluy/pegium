@@ -2,33 +2,15 @@
 
 #include <utility>
 
-#include <domainmodel/core/references/DomainModelScopeComputation.hpp>
-#include <domainmodel/core/references/QualifiedNameProvider.hpp>
-#include <domainmodel/core/validation/DomainModelValidator.hpp>
+#include <domainmodel/core/ModuleImpl.hpp>
 #include <domainmodel/lsp/DomainModelFormatter.hpp>
 #include <domainmodel/lsp/DomainModelRenameProvider.hpp>
-#include <domainmodel/core/Parser.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace domainmodel {
 
-namespace {
-template <typename Services>
-void applyDomainModelCoreModule(Services &services) {
-  services.parser =
-      std::make_unique<const parser::DomainModelParser>(services);
-  services.languageMetaData.fileExtensions = {".dmodel"};
-  services.qualifiedNameProvider =
-      std::make_shared<const references::QualifiedNameProvider>();
-  services.references.scopeComputation =
-      std::make_unique<references::DomainModelScopeComputation>(services);
-  services.validator = std::make_unique<validation::DomainModelValidator>();
-  validation::registerValidationChecks(services);
-}
-} // namespace
-
 void installDomainModelCoreModule(lsp::DomainModelServices &services) {
-  applyDomainModelCoreModule(services);
+  detail::applyDomainModelCoreModule(services);
 }
 
 } // namespace domainmodel

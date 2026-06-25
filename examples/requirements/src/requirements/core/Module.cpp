@@ -2,46 +2,23 @@
 
 #include <utility>
 
-#include <requirements/core/validation/RequirementsValidator.hpp>
-#include <requirements/core/validation/TestsValidator.hpp>
-#include <requirements/core/Parser.hpp>
+#include <requirements/core/ModuleImpl.hpp>
 
 namespace requirements {
 
-namespace {
-template <typename Services>
-void applyRequirementsCoreModule(Services &services) {
-  services.parser =
-      std::make_unique<const parser::RequirementsParser>(services);
-  services.languageMetaData.fileExtensions = {".req"};
-  services.validator =
-      std::make_unique<validation::RequirementsValidator>(services.shared);
-  validation::registerRequirementsValidationChecks(services);
-}
-
-template <typename Services>
-void applyTestsCoreModule(Services &services) {
-  services.parser = std::make_unique<const parser::TestsParser>(services);
-  services.languageMetaData.fileExtensions = {".tst"};
-  services.validator = std::make_unique<validation::TestsValidator>();
-  validation::registerTestsValidationChecks(services);
-}
-} // namespace
-
 void installRequirementsCoreModule(RequirementsCoreServices &services) {
-  applyRequirementsCoreModule(services);
+  detail::applyRequirementsCoreModule(services);
 }
 
 void installTestsCoreModule(TestsCoreServices &services) {
-  applyTestsCoreModule(services);
+  detail::applyTestsCoreModule(services);
 }
 
 std::unique_ptr<RequirementsCoreServices>
 createRequirementsServices(const pegium::SharedCoreServices &sharedServices,
                            std::string languageId) {
-  auto services = std::make_unique<RequirementsCoreServices>(sharedServices);
-  services->languageMetaData.languageId = std::move(languageId);
-  pegium::installDefaultCoreServices(*services);
+  auto services = pegium::makeDefaultCoreServices<RequirementsCoreServices>(
+      sharedServices, std::move(languageId));
   installRequirementsCoreModule(*services);
   return services;
 }
@@ -49,9 +26,8 @@ createRequirementsServices(const pegium::SharedCoreServices &sharedServices,
 std::unique_ptr<TestsCoreServices>
 createTestsServices(const pegium::SharedCoreServices &sharedServices,
                     std::string languageId) {
-  auto services = std::make_unique<TestsCoreServices>(sharedServices);
-  services->languageMetaData.languageId = std::move(languageId);
-  pegium::installDefaultCoreServices(*services);
+  auto services = pegium::makeDefaultCoreServices<TestsCoreServices>(
+      sharedServices, std::move(languageId));
   installTestsCoreModule(*services);
   return services;
 }

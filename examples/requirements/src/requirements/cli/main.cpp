@@ -36,7 +36,8 @@ std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
 }
 
 int generate_cli(const GenerateOptions &options) {
-  auto shared = pegium::cli::make_shared_services();
+  auto sharedServices = pegium::cli::make_shared_services();
+  auto &shared = *sharedServices;
   auto services = requirements::createRequirementsAndTestsServices(shared);
   auto &requirementsServices = *services.requirements;
   shared.serviceRegistry->registerServices(std::move(services.requirements));

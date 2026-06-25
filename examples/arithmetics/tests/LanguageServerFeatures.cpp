@@ -14,8 +14,10 @@
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/lsp/LspExpectTestSupport.hpp>
-#include <pegium/lsp/runtime/internal/LanguageServerFeatureDispatch.hpp>
+#include <pegium/lsp/navigation/DefaultReferencesProvider.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/support/LspProviderUtils.hpp>
 
 namespace pegium::integration {
 namespace {
@@ -117,7 +119,7 @@ std::string apply_completion_choice(
   const auto labels = completion_labels(probe.completion);
   if (itemIt == probe.completion.items.end()) {
     ADD_FAILURE() << "Expected completion item " << label
-                  << " in " << testing::PrintToString(labels);
+                  << " in " << ::testing::PrintToString(labels);
     auto text = probe.document != nullptr
                     ? std::string(probe.document->textDocument().getText())
                     : std::string{};
@@ -194,7 +196,7 @@ protected:
   }
 
   static std::string completionLabelDump(const ::lsp::CompletionList &completion) {
-    return testing::PrintToString(completion_labels(completion));
+    return ::testing::PrintToString(completion_labels(completion));
   }
 
   static void expectHasCompletionLabel(const ::lsp::CompletionList &completion,
@@ -347,6 +349,97 @@ TEST_F(LanguageServerFeaturesIntegrationTest,
         },
         symbol.location);
   }));
+}
+
+// --- Regression: index entries can outlive their document in the store ---
+//
+// The document builder removes a deleted document from the store
+// (deleteDocument) before it drops the document's contributions from the index
+// (cleanUpDeleted). A concurrent reader that snapshots the index in that window
+// observes an entry whose documentId no longer resolves to a stored document.
+// These three tests reproduce that window deterministically (delete from the
+// store, leave the index intact) and assert the LSP providers skip the stale
+// entry instead of dereferencing a null document.
+
+TEST_F(LanguageServerFeaturesIntegrationTest,
+       WorkspaceSymbolsSkipDocumentDeletedFromStore) {
+  auto document = openArithmeticsDocument(
+      "stale-workspace-symbols.calc",
+      "module Demo\n"
+      "def value: 1;\n");
+  ASSERT_NE(document, nullptr);
+
+  ::lsp::WorkspaceSymbolParams params{};
+  params.query = "val";
+
+  // Pre-deletion: the index advertises `value`, so the post-deletion check below
+  // is known to reflect the guard skipping a still-indexed entry (not a vacuous
+  // empty result).
+  const auto before = pegium::getWorkspaceSymbols(*shared, params);
+  ASSERT_TRUE(std::ranges::any_of(
+      before, [](const auto &symbol) { return symbol.name == "value"; }));
+
+  const auto documentId = document->id;
+  const auto removed = shared->workspace.documents->deleteDocument(documentId);
+  ASSERT_NE(removed, nullptr);
+  ASSERT_EQ(shared->workspace.documents->getDocument(documentId), nullptr);
+
+  const auto symbols = pegium::getWorkspaceSymbols(*shared, params);
+  EXPECT_TRUE(std::ranges::none_of(symbols, [](const auto &symbol) {
+    return symbol.name == "value";
+  }));
+}
+
+TEST_F(LanguageServerFeaturesIntegrationTest,
+       ReferencesSkipDocumentDeletedFromStore) {
+  auto document = openArithmeticsDocument(
+      "stale-references.calc",
+      "module Demo\n"
+      "def value: 1;\n"
+      "value;\n");
+  ASSERT_NE(document, nullptr);
+
+  const auto *services = arithmeticsServices();
+  ASSERT_NE(services, nullptr);
+
+  ::lsp::ReferenceParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+  params.position.line = 2;
+  params.position.character = 1;
+  params.context.includeDeclaration = true;
+
+  const auto documentId = document->id;
+  const auto removed = shared->workspace.documents->deleteDocument(documentId);
+  ASSERT_NE(removed, nullptr);
+  ASSERT_EQ(shared->workspace.documents->getDocument(documentId), nullptr);
+
+  const pegium::DefaultReferencesProvider provider{*services};
+  const auto locations =
+      provider.findReferences(*document, params, utils::default_cancel_token);
+  EXPECT_TRUE(locations.empty());
+}
+
+TEST_F(LanguageServerFeaturesIntegrationTest,
+       WorkspaceEditSkipsDocumentDeletedFromStore) {
+  auto document = openArithmeticsDocument(
+      "stale-rename.calc",
+      "module Demo\n"
+      "def value: 1;\n");
+  ASSERT_NE(document, nullptr);
+
+  const auto documentId = document->id;
+  const auto removed = shared->workspace.documents->deleteDocument(documentId);
+  ASSERT_NE(removed, nullptr);
+  ASSERT_EQ(shared->workspace.documents->getDocument(documentId), nullptr);
+
+  pegium::provider_detail::WorkspaceEditData editData{};
+  editData.changes[documentId].push_back(
+      pegium::provider_detail::WorkspaceTextEdit{
+          .begin = 16, .end = 21, .newText = "renamed"});
+
+  const auto edit = pegium::provider_detail::to_lsp_workspace_edit(
+      editData, *shared, utils::default_cancel_token);
+  EXPECT_FALSE(edit.has_value());
 }
 
 TEST_F(LanguageServerFeaturesIntegrationTest,
@@ -521,6 +614,44 @@ TEST_F(LanguageServerFeaturesIntegrationTest,
   const auto probe = probeCompletion(text);
   expectHasCompletionLabel(probe.completion, "def");
   expectHasCompletionLabel(probe.completion, "NUMBER");
+}
+
+TEST_F(LanguageServerFeaturesIntegrationTest,
+       CompletionReplacesWholeReferenceTokenNotJustUpToCursor) {
+  auto document = openArithmeticsDocument(
+      "completion-mid-reference.calc",
+      "module Demo\n"
+      "def value: 1;\n"
+      "value;\n");
+  ASSERT_NE(document, nullptr);
+
+  const auto &textDocument = document->textDocument();
+  // Cursor in the middle of the `value` usage on line 2 (va|lue).
+  ::lsp::Position position{};
+  position.line = 2;
+  position.character = 2;
+  const auto offset = textDocument.offsetAt(position);
+
+  const auto completion =
+      pegium::getCompletion(*shared, test::completionParams(*document, offset));
+  ASSERT_TRUE(completion.has_value());
+
+  // The replaced range must cover the whole `value` token [2:0, 2:5), not stop
+  // at the cursor (character 2) — otherwise accepting a candidate leaves the
+  // "lue" suffix behind.
+  bool sawEdit = false;
+  for (const auto &item : completion->items) {
+    const auto edit = completion_text_edit(item);
+    if (!edit.has_value()) {
+      continue;
+    }
+    sawEdit = true;
+    EXPECT_EQ(edit->range.start.line, 2u);
+    EXPECT_EQ(edit->range.start.character, 0u);
+    EXPECT_EQ(edit->range.end.line, 2u);
+    EXPECT_EQ(edit->range.end.character, 5u);
+  }
+  EXPECT_TRUE(sawEdit);
 }
 
 } // namespace

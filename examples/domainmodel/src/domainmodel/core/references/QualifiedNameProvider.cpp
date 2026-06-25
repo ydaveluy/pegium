@@ -5,7 +5,7 @@ namespace domainmodel::references {
 std::string QualifiedNameProvider::getQualifiedName(
     const ast::PackageDeclaration &qualifier, std::string_view name) const {
   if (const auto *parent =
-          dynamic_cast<const ast::PackageDeclaration *>(qualifier.getContainer());
+          pegium::ast_ptr_cast<const ast::PackageDeclaration>(qualifier.getContainer());
       parent != nullptr) {
     return getQualifiedName(getQualifiedName(*parent, qualifier.name), name);
   }

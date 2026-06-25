@@ -97,7 +97,7 @@ if(BUILD_TESTING)
         pegium_example_domainmodel_core
         pegium_example_domainmodel_lsp
         pegium_example_domainmodel_cli
-        pegium_test_support_examples
+        pegium::test_support_examples
         GTest::gtest_main
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
     )

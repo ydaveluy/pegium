@@ -1,8 +1,8 @@
 #include <arithmetics/core/Parser.hpp>
 #include <arithmetics/Operator.hpp>
+#include <pegium/core/utils/TextUtils.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -14,20 +14,23 @@ namespace {
 using namespace ast;
 
 std::string get_definition_name(const AbstractDefinition *definition) {
-  if (const auto *typedDefinition = dynamic_cast<const Definition *>(definition)) {
+  if (const auto *typedDefinition = pegium::ast_ptr_cast<const Definition>(definition)) {
     return typedDefinition->name;
   }
   if (const auto *parameter =
-          dynamic_cast<const DeclaredParameter *>(definition)) {
+          pegium::ast_ptr_cast<const DeclaredParameter>(definition)) {
     return parameter->name;
   }
   throw std::runtime_error("Unsupported abstract definition type.");
 }
 
+// Resolves an identifier to its definition or parameter by scanning the module.
+// Used instead of the linked cross-reference because the interpreter also runs
+// on parse-only (unlinked) documents (tests / recovery harnesses).
 pegium::AstNode *resolve_definition(Module &module,
                                     const std::string &identifier) {
   for (auto &statement : module.statements) {
-    auto *definition = dynamic_cast<Definition *>(statement);
+    auto *definition = pegium::ast_ptr_cast<Definition>(statement);
     if (!definition) {
       continue;
     }
@@ -54,18 +57,6 @@ struct InterpreterContext {
 
 double evaluate_expression(const Expression &expression, InterpreterContext &ctx);
 
-void evaluate_definition(InterpreterContext &ctx, const Definition &definition) {
-  if (definition.args.empty()) {
-    if (!definition.expr) {
-      throw std::runtime_error("Definition has no expression: " +
-                               definition.name);
-    }
-    ctx.symbols[definition.name] = evaluate_expression(*definition.expr, ctx);
-  } else {
-    ctx.symbols[definition.name] = &definition;
-  }
-}
-
 void evaluate_evaluation(InterpreterContext &ctx, const Evaluation &evaluation) {
   if (!evaluation.expression) {
     throw std::runtime_error("Evaluation has no expression.");
@@ -73,30 +64,26 @@ void evaluate_evaluation(InterpreterContext &ctx, const Evaluation &evaluation) 
   ctx.results[&evaluation] = evaluate_expression(*evaluation.expression, ctx);
 }
 
-void evaluate_statement(InterpreterContext &ctx,
-                        const pegium::AstNode &statement) {
-  if (const auto *definition = dynamic_cast<const Definition *>(&statement)) {
-    evaluate_definition(ctx, *definition);
-    return;
-  }
-  if (const auto *evaluation = dynamic_cast<const Evaluation *>(&statement)) {
-    evaluate_evaluation(ctx, *evaluation);
-    return;
-  }
-  throw std::runtime_error("Unsupported statement type.");
-}
-
 EvaluationResult evaluate_module_impl(InterpreterContext &ctx) {
+  // Register every definition up front so forward references resolve; each is
+  // evaluated on demand from the FunctionCall path when first referenced.
   for (const auto &statement : ctx.module->statements) {
-    if (statement) {
-      evaluate_statement(ctx, *statement);
+    if (const auto *definition =
+            pegium::ast_ptr_cast<const Definition>(statement)) {
+      ctx.symbols[definition->name] = definition;
+    }
+  }
+  for (const auto &statement : ctx.module->statements) {
+    if (const auto *evaluation =
+            pegium::ast_ptr_cast<const Evaluation>(statement)) {
+      evaluate_evaluation(ctx, *evaluation);
     }
   }
   return ctx.results;
 }
 
 double evaluate_expression(const Expression &expression, InterpreterContext &ctx) {
-  if (const auto *binary = dynamic_cast<const BinaryExpression *>(&expression)) {
+  if (const auto *binary = pegium::ast_ptr_cast<const BinaryExpression>(&expression)) {
     if (!binary->left || !binary->right) {
       throw std::runtime_error("Invalid binary expression.");
     }
@@ -105,19 +92,19 @@ double evaluate_expression(const Expression &expression, InterpreterContext &ctx
     return apply_operator(binary->op)(left, right);
   }
 
-  if (const auto *grouped = dynamic_cast<const GroupedExpression *>(&expression)) {
+  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(&expression)) {
     if (!grouped->expression) {
       throw std::runtime_error("Grouped expression has no inner expression.");
     }
     return evaluate_expression(*grouped->expression, ctx);
   }
 
-  if (const auto *literal = dynamic_cast<const NumberLiteral *>(&expression)) {
+  if (const auto *literal = pegium::ast_ptr_cast<const NumberLiteral>(&expression)) {
     return literal->value;
   }
 
-  if (const auto *call = dynamic_cast<const FunctionCall *>(&expression)) {
-    const auto *resolved = dynamic_cast<const AbstractDefinition *>(
+  if (const auto *call = pegium::ast_ptr_cast<const FunctionCall>(&expression)) {
+    const auto *resolved = pegium::ast_ptr_cast<const AbstractDefinition>(
         resolve_definition(*ctx.module, canonical_identifier(call->func.getRefText())));
     if (!resolved) {
       throw std::runtime_error("Unknown reference in function call.");
@@ -172,8 +159,10 @@ double evaluate_expression(const Expression &expression, InterpreterContext &ctx
 std::string canonical_identifier(std::string_view text) {
   std::string value;
   value.reserve(text.size());
-  for (const unsigned char c : text) {
-    value.push_back(static_cast<char>(std::tolower(c)));
+  // Identifiers are ASCII ([A-Za-z0-9_]); pegium::utils::tolower is a branch-free
+  // 256-byte table fold, vs std::tolower's per-byte locale-facet indirection.
+  for (const char c : text) {
+    value.push_back(pegium::utils::tolower(c));
   }
   return value;
 }
@@ -194,7 +183,7 @@ std::vector<double> evaluate_module(ast::Module &module) {
   std::vector<double> orderedResults;
   for (const auto &statement : module.statements) {
     if (const auto *evaluation =
-            dynamic_cast<const ast::Evaluation *>(statement)) {
+            pegium::ast_ptr_cast<const ast::Evaluation>(statement)) {
       orderedResults.push_back(results.at(evaluation));
     }
   }

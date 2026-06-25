@@ -34,10 +34,10 @@ using namespace domainmodel::ast;
 }
 
 [[nodiscard]] std::string resolved_type_name(const Type &type) {
-  if (const auto *entity = dynamic_cast<const Entity *>(&type)) {
+  if (const auto *entity = pegium::ast_ptr_cast<const Entity>(&type)) {
     return entity->name;
   }
-  if (const auto *dataType = dynamic_cast<const DataType *>(&type)) {
+  if (const auto *dataType = pegium::ast_ptr_cast<const DataType>(&type)) {
     return dataType->name;
   }
   throw std::runtime_error("Unsupported domainmodel type.");
@@ -134,23 +134,20 @@ struct FeatureData {
 
 void generate_abstract_elements(const std::filesystem::path &destination,
                                 const std::vector<AbstractElement*> &elements,
-                                std::string filePath,
-                                std::string &lastGeneratedPath) {
+                                std::string filePath) {
   const auto fullPath = destination / filePath;
   std::filesystem::create_directories(fullPath);
-  lastGeneratedPath = fullPath.string();
 
   const auto packagePath = package_path_from_file_path(filePath);
   for (const auto &element : elements) {
-    if (const auto *package = dynamic_cast<const PackageDeclaration *>(element)) {
+    if (const auto *package = pegium::ast_ptr_cast<const PackageDeclaration>(element)) {
       auto packagePath = package->name;
       std::ranges::replace(packagePath, '.', '/');
       generate_abstract_elements(destination, package->elements,
                                  (std::filesystem::path(filePath) /
                                   std::filesystem::path(packagePath))
-                                     .string(),
-                                 lastGeneratedPath);
-    } else if (const auto *entity = dynamic_cast<const Entity *>(element)) {
+                                     .string());
+    } else if (const auto *entity = pegium::ast_ptr_cast<const Entity>(element)) {
       const auto filePathValue = fullPath / (entity->name + ".java");
       std::ofstream out(filePathValue, std::ios::binary);
       if (!out.is_open()) {
@@ -169,9 +166,7 @@ std::string generate_java(const ast::DomainModel &model, std::string_view filePa
   const auto data = extract_destination_and_name(filePath, destination);
   std::filesystem::create_directories(data.destination);
 
-  std::string lastGeneratedPath;
-  generate_abstract_elements(data.destination, model.elements, data.name,
-                             lastGeneratedPath);
+  generate_abstract_elements(data.destination, model.elements, data.name);
   return (std::filesystem::path(data.destination) / data.name).string();
 }
 

@@ -16,8 +16,6 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
   pegium::utils::throw_if_cancelled(cancelToken);
 
   const auto &textDocument = document.textDocument();
-  const auto begin = textDocument.offsetAt(params.range.start);
-  const auto end = textDocument.offsetAt(params.range.end);
 
   for (const auto &diagnostic : params.context.diagnostics) {
     if (!diagnostic.code.has_value() ||
@@ -34,8 +32,10 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
       continue;
     }
 
-    const auto replaceBegin = begin;
-    const auto replaceEnd = end > begin ? end : begin;
+    // Size the edit from the diagnostic's own range, not the request's
+    // cursor/selection range (which is empty on a cursor-only invocation).
+    const auto replaceBegin = textDocument.offsetAt(diagnostic.range.start);
+    const auto replaceEnd = textDocument.offsetAt(diagnostic.range.end);
     if (replaceEnd <= replaceBegin ||
         replaceEnd > static_cast<pegium::TextOffset>(textDocument.getText().size())) {
       continue;
@@ -49,8 +49,7 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
     ::lsp::WorkspaceEdit edit{};
     ::lsp::Map<::lsp::DocumentUri, ::lsp::Array<::lsp::TextEdit>> changes;
     ::lsp::TextEdit textEdit{};
-    textEdit.range.start = textDocument.positionAt(replaceBegin);
-    textEdit.range.end = textDocument.positionAt(replaceEnd);
+    textEdit.range = diagnostic.range;
     textEdit.newText = std::format("{}", constant->number());
     auto &documentChanges = changes[::lsp::Uri::parse(document.uri)];
     documentChanges.push_back(std::move(textEdit));

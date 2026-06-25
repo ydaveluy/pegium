@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace statemachine::cli {
 namespace {
@@ -19,6 +20,9 @@ using namespace statemachine::ast;
   const auto [newEnd, end] =
       std::ranges::remove_if(stem, [](char ch) { return ch == '.' || ch == '-'; });
   stem.erase(newEnd, end);
+  if (stem.empty()) {
+    stem = "generated";
+  }
   return stem;
 }
 
@@ -28,20 +32,26 @@ using namespace statemachine::ast;
                                  : std::string("generated");
 }
 
-[[nodiscard]] const std::string &
-event_name(const Transition &transition) {
-  if (!transition.event) {
-    throw std::runtime_error("Cannot generate C++ for unresolved transition event.");
+// Returns one transition per distinct event name (first occurrence), skipping
+// any whose event or target state is unresolved. Both generator passes use this
+// so a state with two transitions on the same event yields exactly one method
+// (a redeclared override / duplicate definition would not compile).
+[[nodiscard]] std::vector<const Transition *>
+distinct_event_transitions(const State &state) {
+  std::vector<const Transition *> result;
+  std::vector<std::string_view> seenEvents;
+  for (const auto &transition : state.transitions) {
+    if (!transition || !transition->event || !transition->state) {
+      continue;
+    }
+    const std::string_view eventName = transition->event->name;
+    if (std::ranges::find(seenEvents, eventName) != seenEvents.end()) {
+      continue;
+    }
+    seenEvents.push_back(eventName);
+    result.push_back(transition);
   }
-  return transition.event->name;
-}
-
-[[nodiscard]] const std::string &
-state_name(const Transition &transition) {
-  if (!transition.state) {
-    throw std::runtime_error("Cannot generate C++ for unresolved transition target.");
-  }
-  return transition.state->name;
+  return result;
 }
 
 void write_state_base(std::ostringstream &out, const Statemachine &model) {
@@ -118,10 +128,7 @@ void write_state_declarations(std::ostringstream &out, const Statemachine &model
     out << "public:\n";
     out << "    std::string get_name() override { return \"" << state->name
         << "\"; }\n";
-    for (const auto &transition : state->transitions) {
-      if (!transition || !transition->event) {
-        continue;
-      }
+    for (const auto *transition : distinct_event_transitions(*state)) {
       out << "    void " << transition->event->name << "() override;\n";
     }
     out << "};\n";
@@ -135,21 +142,16 @@ void write_state_definitions(std::ostringstream &out, const Statemachine &model)
     }
     out << "\n";
     out << "// " << state->name << "\n";
-    if (state->transitions.empty()) {
-      continue;
-    }
-    for (std::size_t index = 0; index < state->transitions.size(); ++index) {
-      const auto &transition = state->transitions[index];
-      if (!transition) {
-        continue;
-      }
-      out << "void " << state->name << "::" << event_name(*transition)
+    const auto transitions = distinct_event_transitions(*state);
+    for (std::size_t index = 0; index < transitions.size(); ++index) {
+      const auto *transition = transitions[index];
+      out << "void " << state->name << "::" << transition->event->name
           << "() {\n";
-      out << "    statemachine->transition_to(new "
-          << state_name(*transition) << ");\n";
+      out << "    statemachine->transition_to(new " << transition->state->name
+          << ");\n";
       out << "}\n";
       out << "\n";
-      if (index + 1 < state->transitions.size()) {
+      if (index + 1 < transitions.size()) {
         out << "\n";
       }
     }

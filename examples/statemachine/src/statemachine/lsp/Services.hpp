@@ -1,6 +1,7 @@
 #pragma once
 
 #include <statemachine/core/Services.hpp>
+#include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
 namespace statemachine::lsp {
@@ -13,7 +14,7 @@ struct StatemachineServices final : pegium::Services,
 
 [[nodiscard]] inline const StatemachineServices *
 asStatemachineServices(const pegium::Services &services) noexcept {
-  return dynamic_cast<const StatemachineServices *>(&services);
+  return pegium::service_cast<StatemachineServices>(services);
 }
 
 } // namespace statemachine::lsp

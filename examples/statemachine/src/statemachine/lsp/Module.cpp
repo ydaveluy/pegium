@@ -2,26 +2,14 @@
 
 #include <utility>
 
-#include <statemachine/core/validation/StatemachineValidator.hpp>
+#include <statemachine/core/ModuleImpl.hpp>
 #include <statemachine/lsp/StatemachineFormatter.hpp>
-#include <statemachine/core/Parser.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace statemachine {
 
-namespace {
-template <typename Services>
-void applyStatemachineCoreModule(Services &services) {
-  services.parser =
-      std::make_unique<const parser::StateMachineParser>(services);
-  services.languageMetaData.fileExtensions = {".statemachine"};
-  services.validator = std::make_unique<validation::StatemachineValidator>();
-  validation::registerValidationChecks(services);
-}
-} // namespace
-
 void installStatemachineCoreModule(lsp::StatemachineServices &services) {
-  applyStatemachineCoreModule(services);
+  detail::applyStatemachineCoreModule(services);
 }
 
 } // namespace statemachine

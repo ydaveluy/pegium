@@ -2,32 +2,19 @@
 
 #include <utility>
 
-#include <statemachine/core/validation/StatemachineValidator.hpp>
-#include <statemachine/core/Parser.hpp>
+#include <statemachine/core/ModuleImpl.hpp>
 
 namespace statemachine {
 
-namespace {
-template <typename Services>
-void applyStatemachineCoreModule(Services &services) {
-  services.parser =
-      std::make_unique<const parser::StateMachineParser>(services);
-  services.languageMetaData.fileExtensions = {".statemachine"};
-  services.validator = std::make_unique<validation::StatemachineValidator>();
-  validation::registerValidationChecks(services);
-}
-} // namespace
-
 void installStatemachineCoreModule(StatemachineCoreServices &services) {
-  applyStatemachineCoreModule(services);
+  detail::applyStatemachineCoreModule(services);
 }
 
 std::unique_ptr<StatemachineCoreServices>
 createStatemachineServices(const pegium::SharedCoreServices &sharedServices,
                            std::string languageId) {
-  auto services = std::make_unique<StatemachineCoreServices>(sharedServices);
-  services->languageMetaData.languageId = std::move(languageId);
-  pegium::installDefaultCoreServices(*services);
+  auto services = pegium::makeDefaultCoreServices<StatemachineCoreServices>(
+      sharedServices, std::move(languageId));
   installStatemachineCoreModule(*services);
   return services;
 }

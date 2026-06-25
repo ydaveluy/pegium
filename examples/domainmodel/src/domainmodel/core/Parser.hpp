@@ -17,7 +17,6 @@ using namespace pegium::parser;
 class DomainModelParser : public PegiumParser {
 public:
   using PegiumParser::PegiumParser;
-  using PegiumParser::parse;
 
 protected:
   const pegium::grammar::ParserRule &getEntryRule() const noexcept override {

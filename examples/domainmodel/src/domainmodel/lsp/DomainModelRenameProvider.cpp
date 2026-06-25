@@ -27,18 +27,8 @@ namespace {
 using namespace domainmodel::ast;
 using namespace pegium::provider_detail;
 
-const domainmodel::references::QualifiedNameProvider *qualified_name_provider(
-    const pegium::Services &services) {
-  const auto *domainModelServices =
-      domainmodel::lsp::asDomainModelServices(services);
-  if (domainModelServices == nullptr) {
-    return nullptr;
-  }
-  return domainModelServices->qualifiedNameProvider.get();
-}
-
 const ast::PackageDeclaration *parent_package(const pegium::AstNode &node) {
-  return dynamic_cast<const ast::PackageDeclaration *>(node.getContainer());
+  return pegium::ast_ptr_cast<const ast::PackageDeclaration>(node.getContainer());
 }
 
 std::string package_qualified_name(
@@ -63,7 +53,9 @@ std::string package_qualified_name(
 bool has_qualified_name_text(const pegium::workspace::Documents &documents,
                              const pegium::workspace::ReferenceDescription &reference) {
   const auto document = documents.getDocument(reference.sourceDocumentId);
-  assert(document != nullptr);
+  if (document == nullptr) {
+    return false;
+  }
   return reference.sourceText(document->textDocument().getText()).find('.') !=
          std::string_view::npos;
 }
@@ -134,7 +126,7 @@ std::optional<::lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
 
   WorkspaceEditData editData;
   pegium::utils::TransparentStringSet seen;
-  const auto *qualifiedNameProvider = qualified_name_provider(services);
+  const auto *qualifiedNameProvider = languageServices.qualifiedNameProvider.get();
 
   for (const auto *target : targetNodes) {
     pegium::utils::throw_if_cancelled(cancelToken);

@@ -236,6 +236,27 @@ TEST(ArithmeticsLanguageTest, ParsesAndEvaluatesModule) {
   EXPECT_DOUBLE_EQ(results.front(), 3.0);
 }
 
+TEST(ArithmeticsLanguageTest, EvaluatesForwardReferences) {
+  parser::ArithmeticParser parser;
+  auto document = pegium::test::parse_document(
+      parser,
+      "module Demo\n"
+      "def b: a;\n"
+      "def a: 5;\n"
+      "b;\n",
+      pegium::test::make_file_uri("forward.calc"), "arithmetics");
+
+  ASSERT_TRUE(document->parseSucceeded());
+  auto *module = dynamic_cast<ast::Module *>(document->parseResult.value);
+  ASSERT_NE(module, nullptr);
+
+  // `b` references `a` before it is defined: a valid program must evaluate, not
+  // throw "Unknown symbol".
+  const auto results = evaluate_module(*module);
+  ASSERT_EQ(results.size(), 1u);
+  EXPECT_DOUBLE_EQ(results.front(), 5.0);
+}
+
 TEST(ArithmeticsLanguageTest,
      RecoveryKeepsFollowingStatementAfterMalformedStandaloneOperatorRunInLargerModule) {
   parser::ArithmeticParser parser;

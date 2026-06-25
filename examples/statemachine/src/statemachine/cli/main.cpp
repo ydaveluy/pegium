@@ -34,7 +34,8 @@ std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
 }
 
 int generate_cpp_cli(const GenerateOptions &options) {
-  auto shared = pegium::cli::make_shared_services();
+  auto sharedServices = pegium::cli::make_shared_services();
+  auto &shared = *sharedServices;
   auto services = statemachine::createStatemachineServices(shared);
   auto &statemachineServices = *services;
   shared.serviceRegistry->registerServices(std::move(services));
@@ -49,22 +50,13 @@ int generate_cpp_cli(const GenerateOptions &options) {
 
   auto *model =
       pegium::ast_ptr_cast<statemachine::ast::Statemachine>(document->parseResult.value);
-  if (model == nullptr || !model->init) {
+  if (model == nullptr) {
     std::cerr << "Unable to generate C++ for invalid statemachine.\n";
     return 2;
   }
-  for (const auto &state : model->states) {
-    if (!state) {
-      continue;
-    }
-    for (const auto &transition : state->transitions) {
-      if (transition == nullptr || !transition->event || !transition->state) {
-        std::cerr << "Unable to generate C++ for invalid statemachine.\n";
-        return 2;
-      }
-    }
-  }
 
+  // The error-diagnostics gate above rejects unresolved references; the
+  // generator throws (caught in main) for any remaining precondition.
   const auto outputPath = statemachine::cli::generate_cpp(
       *model, options.fileName,
       options.destination.has_value()

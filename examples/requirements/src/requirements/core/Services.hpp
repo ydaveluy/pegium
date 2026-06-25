@@ -29,14 +29,4 @@ struct TestsCoreServices final : pegium::CoreServices, TestsAddedServices {
   using pegium::CoreServices::CoreServices;
 };
 
-[[nodiscard]] inline const RequirementsCoreServices *
-asRequirementsCoreServices(const pegium::CoreServices &services) noexcept {
-  return dynamic_cast<const RequirementsCoreServices *>(&services);
-}
-
-[[nodiscard]] inline const TestsCoreServices *
-asTestsCoreServices(const pegium::CoreServices &services) noexcept {
-  return dynamic_cast<const TestsCoreServices *>(&services);
-}
-
 } // namespace requirements

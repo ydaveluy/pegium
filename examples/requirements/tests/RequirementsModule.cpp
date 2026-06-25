@@ -77,18 +77,18 @@ std::string expected_example_html() {
   html += "<table border=\"1\">\n";
   html += "<TR><TH>Requirement ID</TH><TH>Testcase ID</TH></TR>\n";
   html += "<TR><TD>ReqId000</TD><TD>\n";
-  html += "<div>T005_generator (from " + testsPart2Path + ")<div>\n";
+  html += "<div>T005_generator (from " + testsPart2Path + ")</div>\n";
   html += "</TD></TR>\n";
   html += "<TR><TD>ReqId001_tstID</TD><TD>\n";
-  html += "<div>T001_good_case (from " + testsPart1Path + ")<div>\n";
-  html += "<div>T003_badTstId (from " + testsPart1Path + ")<div>\n";
+  html += "<div>T001_good_case (from " + testsPart1Path + ")</div>\n";
+  html += "<div>T003_badTstId (from " + testsPart1Path + ")</div>\n";
   html += "</TD></TR>\n";
   html += "<TR><TD>ReqId002_reqID</TD><TD>\n";
-  html += "<div>T001_good_case (from " + testsPart1Path + ")<div>\n";
-  html += "<div>T002_badReqId (from " + testsPart1Path + ")<div>\n";
+  html += "<div>T001_good_case (from " + testsPart1Path + ")</div>\n";
+  html += "<div>T002_badReqId (from " + testsPart1Path + ")</div>\n";
   html += "</TD></TR>\n";
   html += "<TR><TD>ReqId003_reqCov</TD><TD>\n";
-  html += "<div>T004_cov (from " + testsPart1Path + ")<div>\n";
+  html += "<div>T004_cov (from " + testsPart1Path + ")</div>\n";
   html += "</TD></TR>\n";
   html += "</table>\n";
   html += "</body>\n";
@@ -234,6 +234,10 @@ TEST(RequirementsModuleTest, RegistersRequirementsAndTestsLanguages) {
   EXPECT_NE(requirements::lsp::asRequirementsServices(*requirementsServices),
             nullptr);
   EXPECT_NE(requirements::lsp::asTestsServices(*testsServices), nullptr);
+  // ...and a container of one language must NOT be mistaken for the other:
+  // service_cast disambiguates the two sibling languages on the same registry.
+  EXPECT_EQ(requirements::lsp::asTestsServices(*requirementsServices), nullptr);
+  EXPECT_EQ(requirements::lsp::asRequirementsServices(*testsServices), nullptr);
 }
 
 TEST(RequirementsModuleTest, GoodFixturePublishesNoDiagnosticsAcrossDocuments) {

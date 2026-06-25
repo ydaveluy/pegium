@@ -6,13 +6,21 @@
 #include <domainmodel/core/references/QualifiedNameProvider.hpp>
 #include <domainmodel/lsp/Services.hpp>
 
+#include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/navigation/DefaultRenameProvider.hpp>
 
 namespace domainmodel::lsp {
 
-class DomainModelRenameProvider final : public pegium::DefaultRenameProvider {
+class DomainModelRenameProvider final
+    : public pegium::DefaultRenameProvider,
+      public pegium::LanguageServiceMixin<domainmodel::DomainModelAddedServices> {
 public:
-  using pegium::DefaultRenameProvider::DefaultRenameProvider;
+  /// Captures both the Pegium LSP back-reference (for `services.*`) and the
+  /// typed domain-model back-reference (for `languageServices.*`).
+  explicit DomainModelRenameProvider(const DomainModelServices &services)
+      : pegium::DefaultRenameProvider(services),
+        pegium::LanguageServiceMixin<domainmodel::DomainModelAddedServices>(
+            services) {}
 
   std::optional<::lsp::WorkspaceEdit>
   rename(const pegium::workspace::Document &document,

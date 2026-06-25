@@ -1,6 +1,7 @@
 #pragma once
 
 #include <requirements/core/Services.hpp>
+#include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
 namespace requirements::lsp {
@@ -18,12 +19,12 @@ struct TestsServices final : pegium::Services, requirements::TestsAddedServices 
 
 [[nodiscard]] inline const RequirementsServices *
 asRequirementsServices(const pegium::Services &services) noexcept {
-  return dynamic_cast<const RequirementsServices *>(&services);
+  return pegium::service_cast<RequirementsServices>(services);
 }
 
 [[nodiscard]] inline const TestsServices *
 asTestsServices(const pegium::Services &services) noexcept {
-  return dynamic_cast<const TestsServices *>(&services);
+  return pegium::service_cast<TestsServices>(services);
 }
 
 } // namespace requirements::lsp

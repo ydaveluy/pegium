@@ -28,14 +28,4 @@ struct DomainModelCoreServices final : pegium::CoreServices,
   using pegium::CoreServices::CoreServices;
 };
 
-[[nodiscard]] inline const DomainModelCoreServices *
-asDomainModelCoreServices(const pegium::CoreServices &services) noexcept {
-  return dynamic_cast<const DomainModelCoreServices *>(&services);
-}
-
-[[nodiscard]] inline const DomainModelAddedServices *
-asDomainModelAddedServices(const pegium::CoreServices &services) noexcept {
-  return dynamic_cast<const DomainModelAddedServices *>(&services);
-}
-
 } // namespace domainmodel

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <domainmodel/core/Services.hpp>
+#include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
 namespace domainmodel::lsp {
@@ -13,7 +14,7 @@ struct DomainModelServices final : pegium::Services,
 
 [[nodiscard]] inline const DomainModelServices *
 asDomainModelServices(const pegium::Services &services) noexcept {
-  return dynamic_cast<const DomainModelServices *>(&services);
+  return pegium::service_cast<DomainModelServices>(services);
 }
 
 } // namespace domainmodel::lsp

@@ -617,14 +617,18 @@ TEST(ArithmeticsModuleTest, CodeActionsKeepRecoveryAndLanguageSpecificFixes) {
 
   ::lsp::CodeActionParams params{};
   params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+  // Cursor-only request: each quick-fix must size its edit from its own
+  // diagnostic range, not the (empty) request range.
   params.range.start = document->textDocument().positionAt(0);
-  params.range.end = document->textDocument().positionAt(3);
+  params.range.end = document->textDocument().positionAt(0);
   params.context.diagnostics.push_back(make_default_recovery_diagnostic());
 
   ::lsp::Diagnostic normalization{};
   normalization.code = ::lsp::OneOf<int, ::lsp::String>(
       ::lsp::String(
           std::string(arithmetics::validation::IssueCodes::ExpressionNormalizable)));
+  normalization.range.start = document->textDocument().positionAt(0);
+  normalization.range.end = document->textDocument().positionAt(3);
   ::lsp::LSPObject normalizationData{};
   normalizationData["constant"] = ::lsp::LSPAny(3.0);
   normalization.data = std::move(normalizationData);

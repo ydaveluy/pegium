@@ -18,9 +18,4 @@ struct ArithmeticsCoreServices final : pegium::CoreServices,
   using pegium::CoreServices::CoreServices;
 };
 
-[[nodiscard]] inline const ArithmeticsCoreServices *
-asArithmeticsCoreServices(const pegium::CoreServices &services) noexcept {
-  return dynamic_cast<const ArithmeticsCoreServices *>(&services);
-}
-
 } // namespace arithmetics

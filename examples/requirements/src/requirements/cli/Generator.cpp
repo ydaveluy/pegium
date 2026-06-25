@@ -21,6 +21,30 @@ using namespace requirements::ast;
   return pegium::utils::file_uri_to_path(document.uri).value_or(document.uri);
 }
 
+// Escapes text for safe inclusion in the generated HTML body (paths can contain
+// '&', '<', '>').
+[[nodiscard]] std::string html_escape(std::string_view text) {
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : text) {
+    switch (c) {
+    case '&':
+      out += "&amp;";
+      break;
+    case '<':
+      out += "&lt;";
+      break;
+    case '>':
+      out += "&gt;";
+      break;
+    default:
+      out.push_back(c);
+      break;
+    }
+  }
+  return out;
+}
+
 } // namespace
 
 std::string generate_summary_file_html_content(
@@ -30,7 +54,7 @@ std::string generate_summary_file_html_content(
   out << "<html>\n";
   out << "<body>\n";
   out << "<h1>Requirement coverage (demo generator)</h1>\n";
-  out << "<div>Source: " << document_source_path(model) << "</div>\n";
+  out << "<div>Source: " << html_escape(document_source_path(model)) << "</div>\n";
   out << "<table border=\"1\">\n";
   out << "<TR><TH>Requirement ID</TH><TH>Testcase ID</TH></TR>\n";
   for (const auto &requirement : model.requirements) {
@@ -56,7 +80,7 @@ std::string generate_summary_file_html_content(
         }
 
         out << "<div>" << test->name << " (from "
-            << document_source_path(*testModel) << ")<div>\n";
+            << html_escape(document_source_path(*testModel)) << ")</div>\n";
       }
     }
     out << "</TD></TR>\n";

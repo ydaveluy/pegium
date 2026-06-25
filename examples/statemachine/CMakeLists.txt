@@ -92,7 +92,8 @@ if(BUILD_TESTING)
         pegium_example_statemachine_core
         pegium_example_statemachine_lsp
         pegium_example_statemachine_cli
-        pegium_test_support_examples
+        pegium::test_support_examples
+        pegium::testing
         GTest::gtest_main
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
     )

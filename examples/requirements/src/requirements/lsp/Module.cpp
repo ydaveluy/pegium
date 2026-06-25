@@ -2,40 +2,18 @@
 
 #include <utility>
 
-#include <requirements/core/validation/RequirementsValidator.hpp>
-#include <requirements/core/validation/TestsValidator.hpp>
+#include <requirements/core/ModuleImpl.hpp>
 #include <requirements/lsp/RequirementsFormatter.hpp>
-#include <requirements/core/Parser.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace requirements {
 
-namespace {
-template <typename Services>
-void applyRequirementsCoreModule(Services &services) {
-  services.parser =
-      std::make_unique<const parser::RequirementsParser>(services);
-  services.languageMetaData.fileExtensions = {".req"};
-  services.validator =
-      std::make_unique<validation::RequirementsValidator>(services.shared);
-  validation::registerRequirementsValidationChecks(services);
-}
-
-template <typename Services>
-void applyTestsCoreModule(Services &services) {
-  services.parser = std::make_unique<const parser::TestsParser>(services);
-  services.languageMetaData.fileExtensions = {".tst"};
-  services.validator = std::make_unique<validation::TestsValidator>();
-  validation::registerTestsValidationChecks(services);
-}
-} // namespace
-
 void installRequirementsCoreModule(lsp::RequirementsServices &services) {
-  applyRequirementsCoreModule(services);
+  detail::applyRequirementsCoreModule(services);
 }
 
 void installTestsCoreModule(lsp::TestsServices &services) {
-  applyTestsCoreModule(services);
+  detail::applyTestsCoreModule(services);
 }
 
 } // namespace requirements

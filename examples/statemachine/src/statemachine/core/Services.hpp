@@ -18,9 +18,4 @@ struct StatemachineCoreServices final : pegium::CoreServices,
   using pegium::CoreServices::CoreServices;
 };
 
-[[nodiscard]] inline const StatemachineCoreServices *
-asStatemachineCoreServices(const pegium::CoreServices &services) noexcept {
-  return dynamic_cast<const StatemachineCoreServices *>(&services);
-}
-
 } // namespace statemachine

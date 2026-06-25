@@ -1,6 +1,7 @@
 #pragma once
 
 #include <arithmetics/core/Services.hpp>
+#include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
 namespace arithmetics::lsp {
@@ -13,7 +14,7 @@ struct ArithmeticsServices final : pegium::Services,
 
 [[nodiscard]] inline const ArithmeticsServices *
 asArithmeticsServices(const pegium::Services &services) noexcept {
-  return dynamic_cast<const ArithmeticsServices *>(&services);
+  return pegium::service_cast<ArithmeticsServices>(services);
 }
 
 } // namespace arithmetics::lsp

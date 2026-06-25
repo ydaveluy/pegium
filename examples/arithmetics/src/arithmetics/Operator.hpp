@@ -26,6 +26,9 @@ inline double exponent_operator(double left, double right) {
 }
 
 inline double modulo_operator(double left, double right) {
+  if (right == 0.0) {
+    throw std::runtime_error("Modulo by zero");
+  }
   return std::fmod(left, right);
 }
 

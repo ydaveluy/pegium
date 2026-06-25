@@ -7,20 +7,8 @@
 #include <pegium/core/utils/Cancellation.hpp>
 
 namespace domainmodel::references {
-namespace {
 
 using namespace domainmodel::ast;
-
-const QualifiedNameProvider *qualified_name_provider(
-    const pegium::CoreServices &services) {
-  const auto *added = domainmodel::asDomainModelAddedServices(services);
-  if (added == nullptr) {
-    return nullptr;
-  }
-  return added->qualifiedNameProvider.get();
-}
-
-} // namespace
 
 std::vector<pegium::workspace::AstNodeDescription>
 DomainModelScopeComputation::collectExportedSymbols(
@@ -31,27 +19,27 @@ DomainModelScopeComputation::collectExportedSymbols(
   }
 
   std::vector<pegium::workspace::AstNodeDescription> symbols;
-  const auto *qualifiedNameProvider = qualified_name_provider(services);
+  const auto *qualifiedNameProvider = languageServices.qualifiedNameProvider.get();
   for (const auto *node : document.parseResult.value->getAllContent()) {
     pegium::utils::throw_if_cancelled(cancelToken);
-    const auto *type = dynamic_cast<const Type *>(node);
+    const auto *type = pegium::ast_ptr_cast<const Type>(node);
     if (type == nullptr) {
       continue;
     }
 
-    auto info = services.references.nameProvider->nameOf(*type);
-    if (info.empty()) {
+    auto name = services.references.nameProvider->getName(*type);
+    if (!name.has_value()) {
       continue;
     }
 
     if (const auto *package =
-            dynamic_cast<const PackageDeclaration *>(type->getContainer());
+            pegium::ast_ptr_cast<const PackageDeclaration>(type->getContainer());
         package != nullptr && qualifiedNameProvider != nullptr) {
-      info.name = qualifiedNameProvider->getQualifiedName(*package, info.name);
+      *name = qualifiedNameProvider->getQualifiedName(*package, *name);
     }
     if (auto description =
             services.workspace.astNodeDescriptionProvider->createDescription(
-                *type, document, std::move(info));
+                *type, std::move(*name), document);
         description.has_value()) {
       symbols.push_back(std::move(*description));
     }
@@ -67,13 +55,13 @@ pegium::workspace::LocalSymbols DomainModelScopeComputation::collectLocalSymbols
     return symbols;
   }
 
-  const auto *model = dynamic_cast<const DomainModel *>(document.parseResult.value);
+  const auto *model = pegium::ast_ptr_cast<const DomainModel>(document.parseResult.value);
   if (model == nullptr) {
     return symbols;
   }
 
   (void)processContainer(*model, model->elements, document, symbols,
-                         cancelToken, qualified_name_provider(services));
+                         cancelToken, languageServices.qualifiedNameProvider.get());
   return symbols;
 }
 
@@ -94,21 +82,21 @@ DomainModelScopeComputation::processContainer(
       continue;
     }
 
-    if (const auto *type = dynamic_cast<const Type *>(element)) {
-      auto info = services.references.nameProvider->nameOf(*type);
-      if (info.empty()) {
+    if (const auto *type = pegium::ast_ptr_cast<const Type>(element)) {
+      auto name = services.references.nameProvider->getName(*type);
+      if (!name.has_value()) {
         continue;
       }
       if (auto description =
               services.workspace.astNodeDescriptionProvider->createDescription(
-                  *type, document, std::move(info));
+                  *type, std::move(*name), document);
           description.has_value()) {
         localDescriptions.push_back(std::move(*description));
       }
       continue;
     }
 
-    const auto *package = dynamic_cast<const PackageDeclaration *>(element);
+    const auto *package = pegium::ast_ptr_cast<const PackageDeclaration>(element);
     if (package == nullptr) {
       continue;
     }
@@ -133,7 +121,7 @@ pegium::workspace::AstNodeDescription
 DomainModelScopeComputation::createQualifiedDescription(
     const PackageDeclaration &package,
     pegium::workspace::AstNodeDescription description,
-    const QualifiedNameProvider *qualifiedNameProvider) const {
+    const QualifiedNameProvider *qualifiedNameProvider) {
   description.name =
       qualifiedNameProvider != nullptr
           ? qualifiedNameProvider->getQualifiedName(package.name, description.name)

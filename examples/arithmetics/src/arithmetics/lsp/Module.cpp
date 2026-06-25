@@ -2,27 +2,15 @@
 
 #include <utility>
 
-#include <arithmetics/core/validation/ArithmeticsValidator.hpp>
+#include <arithmetics/core/ModuleImpl.hpp>
 #include <arithmetics/lsp/ArithmeticsCodeActionProvider.hpp>
 #include <arithmetics/lsp/ArithmeticsFormatter.hpp>
-#include <arithmetics/core/Parser.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace arithmetics {
 
-namespace {
-template <typename Services>
-void applyArithmeticsCoreModule(Services &services) {
-  services.parser =
-      std::make_unique<const parser::ArithmeticParser>(services);
-  services.languageMetaData.fileExtensions = {".calc"};
-  services.validator = std::make_unique<validation::ArithmeticsValidator>();
-  validation::registerValidationChecks(services);
-}
-} // namespace
-
 void installArithmeticsCoreModule(lsp::ArithmeticsServices &services) {
-  applyArithmeticsCoreModule(services);
+  detail::applyArithmeticsCoreModule(services);
 }
 
 } // namespace arithmetics

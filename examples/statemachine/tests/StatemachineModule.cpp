@@ -410,6 +410,58 @@ TEST(StatemachineModuleTest, GeneratorMatchesExpectedExampleOutput) {
             "}\n");
 }
 
+TEST(StatemachineModuleTest, GeneratorDedupesTransitionsSharingAnEvent) {
+  auto shared = pegium::test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  ASSERT_TRUE(statemachine::lsp::registerStatemachineServices(*shared));
+
+  auto document = shared->workspace.documents->createDocument(
+      pegium::test::make_file_uri("dup-event.statemachine"),
+      "statemachine M\n"
+      "\n"
+      "events\n"
+      "    go\n"
+      "\n"
+      "initialState A\n"
+      "\n"
+      "state A\n"
+      "    go => B\n"
+      "    go => C\n"
+      "end\n"
+      "\n"
+      "state B\n"
+      "end\n"
+      "\n"
+      "state C\n"
+      "end\n");
+  ASSERT_NE(document, nullptr);
+
+  pegium::workspace::BuildOptions options;
+  options.validation = true;
+  const std::array<std::shared_ptr<pegium::workspace::Document>, 1> documents{
+      document};
+  shared->workspace.documentBuilder->build(documents, options);
+
+  auto *model = pegium::ast_ptr_cast<ast::Statemachine>(document->parseResult.value);
+  ASSERT_NE(model, nullptr);
+
+  const auto content = statemachine::cli::generate_cpp_content(*model);
+  const auto count = [&content](std::string_view needle) {
+    std::size_t found = 0;
+    for (auto pos = content.find(needle); pos != std::string::npos;
+         pos = content.find(needle, pos + needle.size())) {
+      ++found;
+    }
+    return found;
+  };
+  // A's two transitions on `go` must collapse to exactly one method; a
+  // duplicate override/definition would not compile.
+  EXPECT_EQ(count("void A::go()"), 1u);
+  EXPECT_EQ(count("void go() override;"), 1u);
+}
+
 TEST(StatemachineModuleTest, CliGenerateCreatesExpectedFile) {
   const auto tempDirectory = make_temp_directory();
   const auto outputDirectory = tempDirectory / "generated-output";
