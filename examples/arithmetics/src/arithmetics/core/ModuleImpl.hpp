@@ -2,9 +2,15 @@
 
 #include <memory>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
 #include <arithmetics/core/Services.hpp>
 #include <arithmetics/core/validation/ArithmeticsValidator.hpp>
+
+namespace arithmetics::parser {
+
+std::unique_ptr<const pegium::parser::Parser>
+makeArithmeticParser(const pegium::CoreServices &services);
+
+} // namespace arithmetics::parser
 
 namespace arithmetics::detail {
 
@@ -15,7 +21,7 @@ namespace arithmetics::detail {
 /// Defined once here so the `core/` and `lsp/` translation units share it.
 template <typename Services>
 void applyArithmeticsCoreModule(Services &services) {
-  services.parser = std::make_unique<const parser::ArithmeticParser>(services);
+  services.parser = parser::makeArithmeticParser(services);
   services.languageMetaData.fileExtensions = {".calc"};
   services.validator = std::make_unique<validation::ArithmeticsValidator>();
   validation::registerValidationChecks(services);

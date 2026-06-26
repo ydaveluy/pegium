@@ -204,7 +204,7 @@ Then assemble it in a module function: install the Pegium defaults, then set you
 // core/ModuleImpl.hpp — a template in `detail` so the LSP container reuses it
 template <typename Services>
 void applyStatemachineCoreModule(Services &services) {
-  services.parser = std::make_unique<const parser::StateMachineParser>(services);
+  services.parser = parser::makeStateMachineParser(services);
   services.languageMetaData.fileExtensions = {".statemachine"};
   services.validator = std::make_unique<validation::StatemachineValidator>();
   validation::registerValidationChecks(services);
@@ -225,7 +225,17 @@ createStatemachineServices(const pegium::SharedCoreServices &shared,
 }
 ```
 
-The wiring is ordinary C++ you can read, so it stays obvious what your language depends on.
+`makeStateMachineParser` is declared in `core/ModuleImpl.hpp` and defined in `core/ModuleImpl.cpp` — the one translation unit that includes the grammar header:
+
+```cpp
+// core/ModuleImpl.cpp
+std::unique_ptr<const pegium::parser::Parser>
+parser::makeStateMachineParser(const pegium::CoreServices &services) {
+  return std::make_unique<const StateMachineParser>(services);
+}
+```
+
+Building the parser through this factory keeps the grammar's heavy template instantiations in that single TU, so the core and LSP modules don't each re-instantiate them. The rest of the wiring is ordinary C++ you can read, so it stays obvious what your language depends on.
 
 ## 5. Run it headlessly — `cli/main.cpp`
 

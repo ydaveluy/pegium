@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include <@PEGIUM_NEW_LANGUAGE_ID@/core/@PEGIUM_NEW_CLASS@Parser.hpp>
+#include <@PEGIUM_NEW_LANGUAGE_ID@/core/ModuleImpl.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace @PEGIUM_NEW_LANGUAGE_ID@::lsp {
@@ -12,8 +12,7 @@ create@PEGIUM_NEW_CLASS@Services(const pegium::SharedServices &sharedServices,
                      std::string languageId) {
   auto services = pegium::makeDefaultServices<@PEGIUM_NEW_CLASS@Services>(
       sharedServices, std::move(languageId));
-  services->parser = std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(*services);
-  services->languageMetaData.fileExtensions = {"@PEGIUM_NEW_EXT@"};
+  detail::apply@PEGIUM_NEW_CLASS@CoreModule(*services);
   return services;
 }
 

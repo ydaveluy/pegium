@@ -1,9 +1,5 @@
-add_library(pegium_example_domainmodel_core
-    src/domainmodel/core/Module.cpp
-    src/domainmodel/core/references/DomainModelScopeComputation.cpp
-    src/domainmodel/core/references/QualifiedNameProvider.cpp
-    src/domainmodel/core/validation/DomainModelValidator.cpp
-)
+file(GLOB_RECURSE _core_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/domainmodel/core/*.cpp")
+add_library(pegium_example_domainmodel_core ${_core_sources})
 
 target_include_directories(pegium_example_domainmodel_core
     PUBLIC
@@ -18,11 +14,9 @@ target_link_libraries(pegium_example_domainmodel_core
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )
 
-add_library(pegium_example_domainmodel_lsp
-    src/domainmodel/lsp/DomainModelFormatter.cpp
-    src/domainmodel/lsp/DomainModelRenameProvider.cpp
-    src/domainmodel/lsp/Module.cpp
-)
+file(GLOB_RECURSE _lsp_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/domainmodel/lsp/*.cpp")
+list(REMOVE_ITEM _lsp_sources "${CMAKE_CURRENT_SOURCE_DIR}/src/domainmodel/lsp/main.cpp")
+add_library(pegium_example_domainmodel_lsp ${_lsp_sources})
 
 target_include_directories(pegium_example_domainmodel_lsp
     PUBLIC
@@ -38,10 +32,9 @@ target_link_libraries(pegium_example_domainmodel_lsp
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )
 
-add_library(pegium_example_domainmodel_cli
-    src/domainmodel/cli/CliUtils.cpp
-    src/domainmodel/cli/Generator.cpp
-)
+file(GLOB_RECURSE _cli_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/domainmodel/cli/*.cpp")
+list(REMOVE_ITEM _cli_sources "${CMAKE_CURRENT_SOURCE_DIR}/src/domainmodel/cli/main.cpp")
+add_library(pegium_example_domainmodel_cli ${_cli_sources})
 
 target_include_directories(pegium_example_domainmodel_cli
     PUBLIC

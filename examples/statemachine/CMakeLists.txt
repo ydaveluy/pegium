@@ -1,7 +1,5 @@
-add_library(pegium_example_statemachine_core
-    src/statemachine/core/Module.cpp
-    src/statemachine/core/validation/StatemachineValidator.cpp
-)
+file(GLOB_RECURSE _core_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/statemachine/core/*.cpp")
+add_library(pegium_example_statemachine_core ${_core_sources})
 
 target_include_directories(pegium_example_statemachine_core
     PUBLIC
@@ -16,10 +14,9 @@ target_link_libraries(pegium_example_statemachine_core
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )
 
-add_library(pegium_example_statemachine_lsp
-    src/statemachine/lsp/Module.cpp
-    src/statemachine/lsp/StatemachineFormatter.cpp
-)
+file(GLOB_RECURSE _lsp_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/statemachine/lsp/*.cpp")
+list(REMOVE_ITEM _lsp_sources "${CMAKE_CURRENT_SOURCE_DIR}/src/statemachine/lsp/main.cpp")
+add_library(pegium_example_statemachine_lsp ${_lsp_sources})
 
 target_include_directories(pegium_example_statemachine_lsp
     PUBLIC
@@ -35,9 +32,9 @@ target_link_libraries(pegium_example_statemachine_lsp
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )
 
-add_library(pegium_example_statemachine_cli
-    src/statemachine/cli/Generator.cpp
-)
+file(GLOB_RECURSE _cli_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/statemachine/cli/*.cpp")
+list(REMOVE_ITEM _cli_sources "${CMAKE_CURRENT_SOURCE_DIR}/src/statemachine/cli/main.cpp")
+add_library(pegium_example_statemachine_cli ${_cli_sources})
 
 target_include_directories(pegium_example_statemachine_cli
     PUBLIC

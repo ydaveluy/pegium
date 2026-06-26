@@ -1,9 +1,5 @@
-add_library(pegium_example_requirements_core
-    src/requirements/core/Language.cpp
-    src/requirements/core/Module.cpp
-    src/requirements/core/validation/RequirementsValidator.cpp
-    src/requirements/core/validation/TestsValidator.cpp
-)
+file(GLOB_RECURSE _core_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/requirements/core/*.cpp")
+add_library(pegium_example_requirements_core ${_core_sources})
 
 target_include_directories(pegium_example_requirements_core
     PUBLIC
@@ -18,10 +14,9 @@ target_link_libraries(pegium_example_requirements_core
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )
 
-add_library(pegium_example_requirements_lsp
-    src/requirements/lsp/Module.cpp
-    src/requirements/lsp/RequirementsFormatter.cpp
-)
+file(GLOB_RECURSE _lsp_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/requirements/lsp/*.cpp")
+list(REMOVE_ITEM _lsp_sources "${CMAKE_CURRENT_SOURCE_DIR}/src/requirements/lsp/main.cpp")
+add_library(pegium_example_requirements_lsp ${_lsp_sources})
 
 target_include_directories(pegium_example_requirements_lsp
     PUBLIC
@@ -37,10 +32,9 @@ target_link_libraries(pegium_example_requirements_lsp
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )
 
-add_library(pegium_example_requirements_cli
-    src/requirements/cli/CliUtils.cpp
-    src/requirements/cli/Generator.cpp
-)
+file(GLOB_RECURSE _cli_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/requirements/cli/*.cpp")
+list(REMOVE_ITEM _cli_sources "${CMAKE_CURRENT_SOURCE_DIR}/src/requirements/cli/main.cpp")
+add_library(pegium_example_requirements_cli ${_cli_sources})
 
 target_include_directories(pegium_example_requirements_cli
     PUBLIC

@@ -1,8 +1,5 @@
-add_library(pegium_example_arithmetics_core
-    src/arithmetics/core/Language.cpp
-    src/arithmetics/core/Module.cpp
-    src/arithmetics/core/validation/ArithmeticsValidator.cpp
-)
+file(GLOB_RECURSE _core_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/arithmetics/core/*.cpp")
+add_library(pegium_example_arithmetics_core ${_core_sources})
 
 target_include_directories(pegium_example_arithmetics_core
     PUBLIC
@@ -17,11 +14,9 @@ target_link_libraries(pegium_example_arithmetics_core
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )
 
-add_library(pegium_example_arithmetics_lsp
-    src/arithmetics/lsp/ArithmeticsCodeActionProvider.cpp
-    src/arithmetics/lsp/ArithmeticsFormatter.cpp
-    src/arithmetics/lsp/Module.cpp
-)
+file(GLOB_RECURSE _lsp_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/arithmetics/lsp/*.cpp")
+list(REMOVE_ITEM _lsp_sources "${CMAKE_CURRENT_SOURCE_DIR}/src/arithmetics/lsp/main.cpp")
+add_library(pegium_example_arithmetics_lsp ${_lsp_sources})
 
 target_include_directories(pegium_example_arithmetics_lsp
     PUBLIC
@@ -37,9 +32,9 @@ target_link_libraries(pegium_example_arithmetics_lsp
         ${PEGIUM_INTERNAL_OPTION_TARGETS}
 )
 
-add_library(pegium_example_arithmetics_cli
-    src/arithmetics/cli/Evaluator.cpp
-)
+file(GLOB_RECURSE _cli_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/arithmetics/cli/*.cpp")
+list(REMOVE_ITEM _cli_sources "${CMAKE_CURRENT_SOURCE_DIR}/src/arithmetics/cli/main.cpp")
+add_library(pegium_example_arithmetics_cli ${_cli_sources})
 
 target_include_directories(pegium_example_arithmetics_cli
     PUBLIC
