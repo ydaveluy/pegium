@@ -185,7 +185,7 @@ if(PEGIUM_OPTIMIZE_SIZE)
         # no exported shared-library ABI to preserve), split every function and
         # data item into its own section so the linker can drop the unreferenced
         # ones, and let the optimizer work across translation units with LTO.
-        target_compile_options(pegium_internal_build_options INTERFACE
+        set(PEGIUM_SIZE_COMPILE_OPTIONS
             -fvisibility=hidden
             -fvisibility-inlines-hidden
             -ffunction-sections
@@ -193,6 +193,8 @@ if(PEGIUM_OPTIMIZE_SIZE)
             $<$<CXX_COMPILER_ID:Clang>:-flto=thin>
             $<$<CXX_COMPILER_ID:GNU>:-flto>
         )
+        target_compile_options(pegium_internal_build_options INTERFACE
+            ${PEGIUM_SIZE_COMPILE_OPTIONS})
         # Link flags must also reach downstream executables: pegium's static
         # libraries are LTO bitcode, so a consumer linking pegium::lsp needs the
         # matching -flto (and benefits from folding/dead-stripping). These are
@@ -322,12 +324,20 @@ add_subdirectory(src/pegium)
 # INTERFACE so anything linking pegium::core / pegium::lsp / ... (pegium's own
 # executables and downstream FetchContent consumers alike) links the LTO bitcode
 # correctly and folds/strips its own binary.
-if(PEGIUM_OPTIMIZE_SIZE)
+if(PEGIUM_OPTIMIZE_SIZE AND DEFINED PEGIUM_SIZE_LINK_OPTIONS)
     foreach(_pegium_lib IN ITEMS PegiumCore PegiumConverters PegiumLsp PegiumCli PegiumTesting)
         if(TARGET ${_pegium_lib})
             target_link_options(${_pegium_lib} INTERFACE ${PEGIUM_SIZE_LINK_OPTIONS})
         endif()
     endforeach()
+
+    # Build the one bundled dependency that has compiled code — the LSP framework
+    # (taskflow is header-only and already LTO'd inside pegium's TUs) — with the
+    # same size flags, so the server binary's framework code is optimized and
+    # folded like pegium's own.
+    if(TARGET lsp)
+        target_compile_options(lsp PRIVATE ${PEGIUM_SIZE_COMPILE_OPTIONS})
+    endif()
 endif()
 
 if(PEGIUM_BUILD_EXAMPLES)
