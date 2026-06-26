@@ -1,6 +1,6 @@
 #include <arithmetics/core/validation/ArithmeticsValidator.hpp>
 
-#include <arithmetics/Operator.hpp>
+#include <arithmetics/core/Operator.hpp>
 #include <arithmetics/core/ast.hpp>
 
 #include <cmath>
