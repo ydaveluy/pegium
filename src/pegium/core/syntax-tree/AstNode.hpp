@@ -373,13 +373,16 @@ template <typename T>
   requires std::derived_from<T, AstNode>
 [[nodiscard]] bool is_a(const AstNode &node) noexcept {
   if (const auto *reflection = ast_reflection_of(node);
-      reflection != nullptr) {
+      reflection != nullptr &&
+      reflection->isKnown(std::type_index(typeid(T)))) {
     // Call isSubtype directly (rather than the out-of-line isInstance) so the
     // whole type check inlines on this hot path; typeid(node) is resolved here,
     // where AstNode is a complete type.
     return reflection->isSubtype(std::type_index(typeid(node)),
                                  std::type_index(typeid(T)));
   }
+  // No reflection, or `T` is an abstract base the grammar never names: fall back
+  // to C++ RTTI, which can answer where the grammar-derived table cannot.
   return dynamic_cast<const T *>(&node) != nullptr;
 }
 
@@ -400,12 +403,15 @@ template <typename T, typename U>
     return nullptr;
   }
   if (const auto *reflection = ast_reflection_of(*ptr);
-      reflection != nullptr) {
+      reflection != nullptr &&
+      reflection->isKnown(std::type_index(typeid(T)))) {
     return reflection->isSubtype(std::type_index(typeid(*ptr)),
                                  std::type_index(typeid(T)))
                ? static_cast<T *>(ptr)
                : nullptr;
   }
+  // No reflection, or `T` is an abstract base the grammar never names (so the
+  // reflection cannot answer): C++ RTTI always can.
   return dynamic_cast<T *>(ptr);
 }
 

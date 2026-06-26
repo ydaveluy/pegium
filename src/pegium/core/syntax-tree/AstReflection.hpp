@@ -69,6 +69,14 @@ public:
     return false;
   }
 
+  /// Returns whether `type` was registered at all. A type the grammar never
+  /// names (rule result / vector element / reference target) — typically an
+  /// abstract C++ base — is absent here, so `isSubtype` cannot answer for it
+  /// and callers fall back to `dynamic_cast`.
+  [[nodiscard]] bool isKnown(std::type_index type) const noexcept {
+    return _types.contains(type);
+  }
+
   /// Returns `type` and every currently known subtype of `type`.
   ///
   /// Asking for `pegium::AstNode` returns the registered AST root type plus all
