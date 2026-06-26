@@ -117,30 +117,30 @@ ParseDocument(const Parseable &parseable, std::string_view text) {
 
 inline std::string
 AstJson(const workspace::Document &document,
-        const converter::AstJsonConversionOptions &options = {}) {
+        const pegium::AstJsonConversionOptions &options = {}) {
   EXPECT_NE(document.parseResult.value, nullptr);
   if (document.parseResult.value == nullptr) {
     return {};
   }
-  return converter::AstJsonConverter::convert(*document.parseResult.value,
+  return pegium::AstJsonConverter::convert(*document.parseResult.value,
                                               options)
       .toJsonString();
 }
 
 inline std::string
 AstJson(const parser::ParseResult &result,
-        const converter::AstJsonConversionOptions &options = {}) {
+        const pegium::AstJsonConversionOptions &options = {}) {
   EXPECT_NE(result.value, nullptr);
   if (result.value == nullptr) {
     return {};
   }
-  return converter::AstJsonConverter::convert(*result.value, options)
+  return pegium::AstJsonConverter::convert(*result.value, options)
       .toJsonString();
 }
 
 inline std::string
 CstJson(const workspace::Document &document,
-        const converter::CstJsonConversionOptions &options = {}) {
+        const pegium::CstJsonConversionOptions &options = {}) {
   const auto root =
       document.parseResult.cst != nullptr
           ? std::addressof(*document.parseResult.cst)
@@ -152,12 +152,12 @@ CstJson(const workspace::Document &document,
   if (root == nullptr) {
     return {};
   }
-  return converter::CstJsonConverter::convert(*root, options).toJsonString();
+  return pegium::CstJsonConverter::convert(*root, options).toJsonString();
 }
 
 inline std::string
 CstJson(const parser::ParseResult &result,
-        const converter::CstJsonConversionOptions &options = {}) {
+        const pegium::CstJsonConversionOptions &options = {}) {
   const auto root =
       result.cst != nullptr
           ? std::addressof(*result.cst)
@@ -168,42 +168,42 @@ CstJson(const parser::ParseResult &result,
   if (root == nullptr) {
     return {};
   }
-  return converter::CstJsonConverter::convert(*root, options).toJsonString();
+  return pegium::CstJsonConverter::convert(*root, options).toJsonString();
 }
 
 inline std::string
 CstJson(const RootCstNode &root,
-        const converter::CstJsonConversionOptions &options = {}) {
-  return converter::CstJsonConverter::convert(root, options).toJsonString();
+        const pegium::CstJsonConversionOptions &options = {}) {
+  return pegium::CstJsonConverter::convert(root, options).toJsonString();
 }
 
 inline void
 ExpectAst(const workspace::Document &document, std::string_view expectedJson,
-          const converter::AstJsonConversionOptions &options = {}) {
+          const pegium::AstJsonConversionOptions &options = {}) {
   EXPECT_EQ(AstJson(document, options), std::string(expectedJson));
 }
 
 inline void
 ExpectAst(const parser::ParseResult &result, std::string_view expectedJson,
-          const converter::AstJsonConversionOptions &options = {}) {
+          const pegium::AstJsonConversionOptions &options = {}) {
   EXPECT_EQ(AstJson(result, options), std::string(expectedJson));
 }
 
 inline void
 ExpectCst(const workspace::Document &document, std::string_view expectedJson,
-          const converter::CstJsonConversionOptions &options = {}) {
+          const pegium::CstJsonConversionOptions &options = {}) {
   EXPECT_EQ(CstJson(document, options), std::string(expectedJson));
 }
 
 inline void
 ExpectCst(const parser::ParseResult &result, std::string_view expectedJson,
-          const converter::CstJsonConversionOptions &options = {}) {
+          const pegium::CstJsonConversionOptions &options = {}) {
   EXPECT_EQ(CstJson(result, options), std::string(expectedJson));
 }
 
 inline void
 ExpectCst(const RootCstNode &root, std::string_view expectedJson,
-          const converter::CstJsonConversionOptions &options = {}) {
+          const pegium::CstJsonConversionOptions &options = {}) {
   EXPECT_EQ(CstJson(root, options), std::string(expectedJson));
 }
 
@@ -213,7 +213,7 @@ ExpectAst(const Parseable &parseable, std::string_view text,
           std::string_view expectedJson,
           const parser::Skipper &skipper,
           const parser::ParseOptions &options = {},
-          const converter::AstJsonConversionOptions &jsonOptions = {}) {
+          const pegium::AstJsonConversionOptions &jsonOptions = {}) {
   auto document = ParseDocument(parseable, text, skipper, options);
   ExpectAst(*document, expectedJson, jsonOptions);
   return document;
@@ -224,7 +224,7 @@ parser::ParseResult
 ExpectParsedAst(const Parseable &parseable, std::string_view text,
                 std::string_view expectedJson, const parser::Skipper &skipper,
                 const parser::ParseOptions &options = {},
-                const converter::AstJsonConversionOptions &jsonOptions = {}) {
+                const pegium::AstJsonConversionOptions &jsonOptions = {}) {
   auto result = Parse(parseable, text, skipper, options);
   ExpectAst(result, expectedJson, jsonOptions);
   return result;
@@ -235,7 +235,7 @@ parser::ParseResult
 ExpectParsedAst(const Parseable &parseable, std::string_view text,
                 std::string_view expectedJson,
                 const parser::ParseOptions &options,
-                const converter::AstJsonConversionOptions &jsonOptions = {}) {
+                const pegium::AstJsonConversionOptions &jsonOptions = {}) {
   return ExpectParsedAst(parseable, text, expectedJson, detail::default_skipper(),
                          options, jsonOptions);
 }
@@ -244,7 +244,7 @@ template <typename Parseable>
 parser::ParseResult
 ExpectParsedAst(const Parseable &parseable, std::string_view text,
                 std::string_view expectedJson,
-                const converter::AstJsonConversionOptions &jsonOptions = {}) {
+                const pegium::AstJsonConversionOptions &jsonOptions = {}) {
   return ExpectParsedAst(parseable, text, expectedJson, detail::default_skipper(),
                          {}, jsonOptions);
 }
@@ -254,7 +254,7 @@ std::unique_ptr<workspace::Document>
 ExpectAst(const Parseable &parseable, std::string_view text,
           std::string_view expectedJson,
           const parser::ParseOptions &options,
-          const converter::AstJsonConversionOptions &jsonOptions = {}) {
+          const pegium::AstJsonConversionOptions &jsonOptions = {}) {
   return ExpectAst(parseable, text, expectedJson, detail::default_skipper(),
                    options, jsonOptions);
 }
@@ -263,7 +263,7 @@ template <typename Parseable>
 std::unique_ptr<workspace::Document>
 ExpectAst(const Parseable &parseable, std::string_view text,
           std::string_view expectedJson,
-          const converter::AstJsonConversionOptions &jsonOptions = {}) {
+          const pegium::AstJsonConversionOptions &jsonOptions = {}) {
   return ExpectAst(parseable, text, expectedJson, detail::default_skipper(), {},
                    jsonOptions);
 }
@@ -274,7 +274,7 @@ ExpectCst(const Parseable &parseable, std::string_view text,
           std::string_view expectedJson,
           const parser::Skipper &skipper,
           const parser::ParseOptions &options = {},
-          const converter::CstJsonConversionOptions &jsonOptions = {}) {
+          const pegium::CstJsonConversionOptions &jsonOptions = {}) {
   auto document = ParseDocument(parseable, text, skipper, options);
   ExpectCst(*document, expectedJson, jsonOptions);
   return document;
@@ -284,7 +284,7 @@ template <typename Parseable>
 std::unique_ptr<workspace::Document>
 ExpectCst(const Parseable &parseable, std::string_view text,
           std::string_view expectedJson, const parser::ParseOptions &options,
-          const converter::CstJsonConversionOptions &jsonOptions = {}) {
+          const pegium::CstJsonConversionOptions &jsonOptions = {}) {
   return ExpectCst(parseable, text, expectedJson, detail::default_skipper(),
                    options, jsonOptions);
 }
@@ -293,7 +293,7 @@ template <typename Parseable>
 std::unique_ptr<workspace::Document>
 ExpectCst(const Parseable &parseable, std::string_view text,
           std::string_view expectedJson,
-          const converter::CstJsonConversionOptions &jsonOptions = {}) {
+          const pegium::CstJsonConversionOptions &jsonOptions = {}) {
   return ExpectCst(parseable, text, expectedJson, detail::default_skipper(), {},
                    jsonOptions);
 }

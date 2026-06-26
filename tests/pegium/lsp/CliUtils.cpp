@@ -68,7 +68,7 @@ RegisteredLanguage register_language(
 }
 
 TEST(CliUtilsTest, MakeSharedServicesReadiesStandaloneConfigurationProvider) {
-  auto sharedServices = cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
 
   ASSERT_NE(shared.workspace.configurationProvider, nullptr);
@@ -76,7 +76,7 @@ TEST(CliUtilsTest, MakeSharedServicesReadiesStandaloneConfigurationProvider) {
 }
 
 TEST(CliUtilsTest, BuildDocumentFromPathReusesExistingDocumentForSameUri) {
-  auto sharedServices = cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
   const auto language =
       register_language(shared, "cli-language", {".cli"});
@@ -86,9 +86,9 @@ TEST(CliUtilsTest, BuildDocumentFromPathReusesExistingDocumentForSameUri) {
       write_file(tempDirectory / "demo.cli", "content");
 
   const auto firstDocument =
-      cli::build_document_from_path(inputPath.string(), *language.services);
+      pegium::build_document_from_path(inputPath.string(), *language.services);
   const auto secondDocument =
-      cli::build_document_from_path(inputPath.string(), *language.services);
+      pegium::build_document_from_path(inputPath.string(), *language.services);
 
   ASSERT_NE(firstDocument, nullptr);
   ASSERT_NE(secondDocument, nullptr);
@@ -130,7 +130,7 @@ TEST(CliUtilsTest, BuildDocumentFromPathRejectsBadInputsClearly) {
   for (const auto &testCase : kCases) {
     SCOPED_TRACE(testCase.name);
 
-    auto sharedServices = cli::make_shared_services();
+    auto sharedServices = pegium::make_shared_services();
     auto &shared = *sharedServices;
     const auto language = register_language(
         shared, "cli-language", testCase.fileExtensions, testCase.fileNames);
@@ -142,7 +142,7 @@ TEST(CliUtilsTest, BuildDocumentFromPathRejectsBadInputsClearly) {
     const auto inputPath = tempDirectory / testCase.inputFileName;
 
     try {
-      (void)cli::build_document_from_path(inputPath.string(),
+      (void)pegium::build_document_from_path(inputPath.string(),
                                           *language.services);
       FAIL() << "Expected invalid_argument";
     } catch (const std::invalid_argument &error) {
@@ -155,7 +155,7 @@ TEST(CliUtilsTest, BuildDocumentFromPathRejectsBadInputsClearly) {
 }
 
 TEST(CliUtilsTest, BuildDocumentFromPathRejectsDirectory) {
-  auto sharedServices = cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
   const auto language = register_language(shared, "cli-language", {".cli"});
 
@@ -166,7 +166,7 @@ TEST(CliUtilsTest, BuildDocumentFromPathRejectsDirectory) {
   std::filesystem::create_directories(directoryPath);
 
   try {
-    (void)cli::build_document_from_path(directoryPath.string(),
+    (void)pegium::build_document_from_path(directoryPath.string(),
                                         *language.services);
     FAIL() << "Expected a usage error for a directory path";
   } catch (const std::invalid_argument &error) {
@@ -178,12 +178,12 @@ TEST(CliUtilsTest, BuildDocumentFromPathRejectsDirectory) {
 }
 
 TEST(CliUtilsTest, BuildDocumentFromPathRejectsEmptyPath) {
-  auto sharedServices = cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
   const auto language = register_language(shared, "cli-language", {".cli"});
 
   try {
-    (void)cli::build_document_from_path("", *language.services);
+    (void)pegium::build_document_from_path("", *language.services);
     FAIL() << "Expected a usage error for an empty path";
   } catch (const std::invalid_argument &error) {
     EXPECT_NE(std::string(error.what()).find("No file path"),
@@ -192,7 +192,7 @@ TEST(CliUtilsTest, BuildDocumentFromPathRejectsEmptyPath) {
 }
 
 TEST(CliUtilsTest, BuildDocumentFromPathSkipsValidationWhenRequested) {
-  auto sharedServices = cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
   const auto language =
       register_language(shared, "cli-language", {".cli"});
@@ -201,7 +201,7 @@ TEST(CliUtilsTest, BuildDocumentFromPathSkipsValidationWhenRequested) {
   const auto inputPath =
       write_file(tempDirectory / "demo.cli", "content");
 
-  auto document = cli::build_document_from_path(inputPath.string(),
+  auto document = pegium::build_document_from_path(inputPath.string(),
                                                 *language.services, false);
 
   ASSERT_NE(document, nullptr);

@@ -470,17 +470,17 @@ int main(int argc, char **argv) {
     return 1;
   }
   try {
-    auto sharedServices = pegium::cli::make_shared_services();
+    auto sharedServices = pegium::make_shared_services();
     auto &shared = *sharedServices;
     auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@CoreServices(shared);
     auto &langServices = *services;
     shared.serviceRegistry->registerServices(std::move(services));
 
     auto document =
-        pegium::cli::build_document_from_path(argv[1], langServices);
-    if (pegium::cli::has_error_diagnostics(*document)) {
+        pegium::build_document_from_path(argv[1], langServices);
+    if (pegium::has_error_diagnostics(*document)) {
       std::cerr << "Validation errors:\n";
-      pegium::cli::print_error_diagnostics(*document, std::cerr);
+      pegium::print_error_diagnostics(*document, std::cerr);
       return 2;
     }
     std::cout << "Parsed " << argv[1] << " successfully.\n";
@@ -764,15 +764,15 @@ _pegium_new_emit([==[test/parsing_test.cpp]==] [==[always]==] [==[#include <@PEG
 #include <gtest/gtest.h>
 
 TEST(@PEGIUM_NEW_CLASS@Parsing, SampleParsesWithoutErrors) {
-  auto sharedServices = pegium::cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
   auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@CoreServices(shared);
   auto &langServices = *services;
   shared.serviceRegistry->registerServices(std::move(services));
 
-  auto document = pegium::cli::build_document_from_path(
+  auto document = pegium::build_document_from_path(
       PEGIUM_NEW_SAMPLE_PATH, langServices);
-  EXPECT_FALSE(pegium::cli::has_error_diagnostics(*document));
+  EXPECT_FALSE(pegium::has_error_diagnostics(*document));
 }
 ]==])
 _pegium_new_emit([==[vscode/esbuild.mjs]==] [==[vscode]==] [==[import { rmSync } from 'node:fs';

@@ -236,16 +236,16 @@ Because `core/CoreModule.cpp` is the only translation unit that includes the gra
 The CLI parses a file, checks for errors, then walks the typed AST:
 
 ```cpp
-auto sharedServices = pegium::cli::make_shared_services();
+auto sharedServices = pegium::make_shared_services();
 auto &shared = *sharedServices;
 auto services = statemachine::createStatemachineCoreServices(shared);
 auto &languageServices = *services;
 shared.serviceRegistry->registerServices(std::move(services));
 
 auto document =
-    pegium::cli::build_document_from_path(fileName, languageServices);
-if (pegium::cli::has_error_diagnostics(*document)) {
-  pegium::cli::print_error_diagnostics(*document, std::cerr);
+    pegium::build_document_from_path(fileName, languageServices);
+if (pegium::has_error_diagnostics(*document)) {
+  pegium::print_error_diagnostics(*document, std::cerr);
   return 2;
 }
 

@@ -151,7 +151,7 @@ std::string dump_parse_diagnostics(
   return dump;
 }
 
-constexpr pegium::converter::CstJsonConversionOptions kRecoveryCstJsonOptions{
+constexpr pegium::CstJsonConversionOptions kRecoveryCstJsonOptions{
     .includeText = true,
     .includeGrammarSource = true,
     .includeHidden = false,

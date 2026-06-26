@@ -24,7 +24,7 @@ std::optional<EvalOptions> parse_eval_args(int argc, char **argv) {
 }
 
 int eval_cli(const EvalOptions &options) {
-  auto sharedServices = pegium::cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
   auto services = arithmetics::createArithmeticsCoreServices(shared);
   auto &arithmeticsServices = *services;

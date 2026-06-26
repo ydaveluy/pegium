@@ -11,7 +11,7 @@
 #include <pegium/core/grammar/Nest.hpp>
 #include <pegium/core/grammar/OrderedChoice.hpp>
 
-namespace pegium::converter {
+namespace pegium {
 namespace {
 
 std::string assignment_operator_source(grammar::AssignmentOperator op) {
@@ -168,4 +168,4 @@ CstJsonConverter::convert(const RootCstNode &root, const Options &options) {
   return pegium::JsonValue(std::move(object));
 }
 
-} // namespace pegium::converter
+} // namespace pegium

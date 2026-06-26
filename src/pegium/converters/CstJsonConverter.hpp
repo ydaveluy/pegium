@@ -3,7 +3,7 @@
 #include <pegium/core/services/JsonValue.hpp>
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
 
-namespace pegium::converter {
+namespace pegium {
 
 /// Controls which CST metadata is emitted in JSON output.
 struct CstJsonConversionOptions {
@@ -26,4 +26,4 @@ public:
                                                    const Options &options = {});
 };
 
-} // namespace pegium::converter
+} // namespace pegium

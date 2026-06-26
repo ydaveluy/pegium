@@ -16,7 +16,7 @@
 #include <pegium/core/workspace/Document.hpp>
 #include <pegium/core/workspace/Symbol.hpp>
 
-namespace pegium::converter {
+namespace pegium {
 namespace {
 
 using FeatureAssignments = std::vector<const grammar::Assignment *>;
@@ -217,4 +217,4 @@ pegium::JsonValue AstJsonConverter::convert(const AstNode &node,
   return pegium::JsonValue(std::move(object));
 }
 
-} // namespace pegium::converter
+} // namespace pegium

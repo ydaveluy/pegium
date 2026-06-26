@@ -54,7 +54,7 @@ TEST(AstJsonConverterTest,
 
   const auto observationCount = recordingSink->observations().size();
   const auto json =
-      converter::AstJsonConverter::convert(*document->parseResult.value)
+      pegium::AstJsonConverter::convert(*document->parseResult.value)
           .toJsonString();
 
   const auto expected = R"({

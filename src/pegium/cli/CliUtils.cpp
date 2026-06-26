@@ -82,7 +82,7 @@ void validate_language_path(
 
 } // namespace
 
-namespace pegium::cli {
+namespace pegium {
 
 std::unique_ptr<pegium::SharedCoreServices> make_shared_services() {
   // Heap-construct so the object stays at a fixed address: installed services
@@ -173,4 +173,4 @@ void print_error_diagnostics(const workspace::Document &document,
   }
 }
 
-} // namespace pegium::cli
+} // namespace pegium

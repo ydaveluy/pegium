@@ -7,7 +7,7 @@
 #include <pegium/core/CoreTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 
-namespace pegium::converter::test_support {
+namespace pegium::test_support {
 
 using namespace pegium::parser;
 
@@ -78,4 +78,4 @@ open_reference_cst_document(pegium::SharedCoreServices &sharedServices) {
       "json-converter", std::string(kReferenceCstInput));
 }
 
-} // namespace pegium::converter::test_support
+} // namespace pegium::test_support

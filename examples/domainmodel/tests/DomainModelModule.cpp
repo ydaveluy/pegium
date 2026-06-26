@@ -604,7 +604,7 @@ TEST(DomainModelModuleTest, GeneratorCreatesExpectedJavaFiles) {
   domainmodel::set_root_folder(absoluteInputPath.string(),
                                     domainmodelServices,
                                     std::filesystem::absolute(example_root()).string());
-  auto document = pegium::cli::build_document_from_path(
+  auto document = pegium::build_document_from_path(
       absoluteInputPath.string(), domainmodelServices);
   ASSERT_NE(document, nullptr);
   ASSERT_TRUE(document->diagnostics.empty());

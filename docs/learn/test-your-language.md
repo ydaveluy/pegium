@@ -22,7 +22,7 @@ pipeline, then assert on diagnostics and the typed AST:
 TEST(MyLanguage, ParsesAndValidates) {
   // 1. Build a shared runtime and register your language on it (the same calls
   //    your cli/lsp main() makes).
-  auto sharedServices = pegium::cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
   auto services = statemachine::createStatemachineCoreServices(shared);
   auto &langServices = *services;
@@ -31,11 +31,11 @@ TEST(MyLanguage, ParsesAndValidates) {
   // 2. Build a source file through every phase. The scaffold injects an absolute
   //    path to a sample input via the PEGIUM_NEW_SAMPLE_PATH compile definition.
   auto document =
-      pegium::cli::build_document_from_path(PEGIUM_NEW_SAMPLE_PATH, langServices);
+      pegium::build_document_from_path(PEGIUM_NEW_SAMPLE_PATH, langServices);
   ASSERT_NE(document, nullptr);
 
   // 3a. Assert on diagnostics (parse, linking, and validation problems).
-  EXPECT_FALSE(pegium::cli::has_error_diagnostics(*document));
+  EXPECT_FALSE(pegium::has_error_diagnostics(*document));
 
   // 3b. Or assert on the typed AST.
   auto *model = pegium::ast_ptr_cast<statemachine::ast::Statemachine>(

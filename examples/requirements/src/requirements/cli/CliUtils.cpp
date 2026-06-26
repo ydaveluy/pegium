@@ -60,7 +60,7 @@ ExtractedRequirementModelWithTests extract_requirement_model_with_test_models(
   buildOptions.validation = true;
   services.shared.workspace.documentBuilder->build(documents, buildOptions);
 
-  auto mainDocument = pegium::cli::build_document_from_path(fileName, services);
+  auto mainDocument = pegium::build_document_from_path(fileName, services);
   const auto hasMainDocument =
       std::ranges::any_of(documents, [&mainDocument](const auto &document) {
         return document->uri == mainDocument->uri;

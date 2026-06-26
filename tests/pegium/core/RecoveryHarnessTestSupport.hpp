@@ -11,7 +11,7 @@
 
 namespace pegium::test {
 
-inline converter::CstJsonConversionOptions recovery_cst_json_options() {
+inline pegium::CstJsonConversionOptions recovery_cst_json_options() {
   return {
       .includeText = true,
       .includeGrammarSource = true,

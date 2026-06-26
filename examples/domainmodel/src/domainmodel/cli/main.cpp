@@ -47,7 +47,7 @@ std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
 }
 
 int generate_cli(const GenerateOptions &options) {
-  auto sharedServices = pegium::cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
   auto services = domainmodel::createDomainModelCoreServices(shared);
   auto &domainmodelServices = *services;
@@ -58,14 +58,14 @@ int generate_cli(const GenerateOptions &options) {
       absoluteInputPath.string(), domainmodelServices,
       options.root.has_value() ? std::optional<std::string_view>(*options.root)
                                : std::nullopt);
-  auto document = pegium::cli::build_document_from_path(
+  auto document = pegium::build_document_from_path(
       absoluteInputPath.string(), domainmodelServices);
 
   for (const auto &candidate : shared.workspace.documents->all()) {
-    if (pegium::cli::has_error_diagnostics(*candidate)) {
+    if (pegium::has_error_diagnostics(*candidate)) {
       if (!options.quiet) {
         std::cerr << "There are validation errors:\n";
-        pegium::cli::print_error_diagnostics(*candidate, std::cerr);
+        pegium::print_error_diagnostics(*candidate, std::cerr);
       }
       return 2;
     }

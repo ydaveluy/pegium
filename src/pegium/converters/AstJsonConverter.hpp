@@ -3,7 +3,7 @@
 #include <pegium/core/services/JsonValue.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
 
-namespace pegium::converter {
+namespace pegium {
 
 /// Controls which AST metadata is emitted in JSON output.
 struct AstJsonConversionOptions {
@@ -22,4 +22,4 @@ public:
                                                    const Options &options = {});
 };
 
-} // namespace pegium::converter
+} // namespace pegium

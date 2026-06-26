@@ -4,13 +4,13 @@
 #include <gtest/gtest.h>
 
 TEST(@PEGIUM_NEW_CLASS@Parsing, SampleParsesWithoutErrors) {
-  auto sharedServices = pegium::cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
   auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@CoreServices(shared);
   auto &langServices = *services;
   shared.serviceRegistry->registerServices(std::move(services));
 
-  auto document = pegium::cli::build_document_from_path(
+  auto document = pegium::build_document_from_path(
       PEGIUM_NEW_SAMPLE_PATH, langServices);
-  EXPECT_FALSE(pegium::cli::has_error_diagnostics(*document));
+  EXPECT_FALSE(pegium::has_error_diagnostics(*document));
 }

@@ -13,7 +13,7 @@ source file, builds the typed AST, and walks it, following the statemachine CLI
 
 int run(const std::string &fileName) {
   // 1. A shared runtime plus your registered language.
-  auto sharedServices = pegium::cli::make_shared_services();
+  auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;
   auto services = statemachine::createStatemachineCoreServices(shared);
   auto &languageServices = *services;
@@ -21,9 +21,9 @@ int run(const std::string &fileName) {
 
   // 2. Parse + build + validate the file in one call.
   auto document =
-      pegium::cli::build_document_from_path(fileName, languageServices);
-  if (pegium::cli::has_error_diagnostics(*document)) {
-    pegium::cli::print_error_diagnostics(*document, std::cerr);
+      pegium::build_document_from_path(fileName, languageServices);
+  if (pegium::has_error_diagnostics(*document)) {
+    pegium::print_error_diagnostics(*document, std::cerr);
     return 2;
   }
 

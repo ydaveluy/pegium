@@ -13,10 +13,10 @@ namespace arithmetics {
 
 int eval_file(std::string_view fileName,
               const pegium::CoreServices &services) {
-  auto document = pegium::cli::build_document_from_path(fileName, services);
-  if (pegium::cli::has_error_diagnostics(*document)) {
+  auto document = pegium::build_document_from_path(fileName, services);
+  if (pegium::has_error_diagnostics(*document)) {
     std::cerr << "There are validation errors:\n";
-    pegium::cli::print_error_diagnostics(*document, std::cerr);
+    pegium::print_error_diagnostics(*document, std::cerr);
     return 2;
   }
 

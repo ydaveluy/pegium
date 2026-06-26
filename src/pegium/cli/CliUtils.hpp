@@ -11,7 +11,7 @@ namespace pegium::workspace {
 struct Document;
 }
 
-namespace pegium::cli {
+namespace pegium {
 
 /// Creates shared services for standalone CLI execution.
 ///
@@ -33,4 +33,4 @@ has_error_diagnostics(const workspace::Document &document) noexcept;
 void print_error_diagnostics(const workspace::Document &document,
                              std::ostream &out);
 
-} // namespace pegium::cli
+} // namespace pegium

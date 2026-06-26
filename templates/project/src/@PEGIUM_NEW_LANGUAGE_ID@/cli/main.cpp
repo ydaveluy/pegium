@@ -11,17 +11,17 @@ int main(int argc, char **argv) {
     return 1;
   }
   try {
-    auto sharedServices = pegium::cli::make_shared_services();
+    auto sharedServices = pegium::make_shared_services();
     auto &shared = *sharedServices;
     auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@CoreServices(shared);
     auto &langServices = *services;
     shared.serviceRegistry->registerServices(std::move(services));
 
     auto document =
-        pegium::cli::build_document_from_path(argv[1], langServices);
-    if (pegium::cli::has_error_diagnostics(*document)) {
+        pegium::build_document_from_path(argv[1], langServices);
+    if (pegium::has_error_diagnostics(*document)) {
       std::cerr << "Validation errors:\n";
-      pegium::cli::print_error_diagnostics(*document, std::cerr);
+      pegium::print_error_diagnostics(*document, std::cerr);
       return 2;
     }
     std::cout << "Parsed " << argv[1] << " successfully.\n";
