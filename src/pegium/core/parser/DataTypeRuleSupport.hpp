@@ -7,6 +7,7 @@
 #include <format>
 #include <pegium/core/grammar/AnyCharacter.hpp>
 #include <pegium/core/grammar/CharacterRange.hpp>
+#include <pegium/core/grammar/DataTypeRule.hpp>
 #include <pegium/core/grammar/Literal.hpp>
 #include <pegium/core/grammar/TerminalRule.hpp>
 #include <pegium/core/parser/RuleOptions.hpp>
@@ -15,6 +16,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace pegium::parser::detail {
 
@@ -37,8 +39,11 @@ template <typename T> struct DataTypeRuleValueSupport {
 
   [[nodiscard]] static std::string
   unsupported_element_conversion_message(grammar::ElementKind kind) {
-    return std::format("ValueConvert not provided for rule {}",
-                       static_cast<int>(kind));
+    return std::format(
+        "a string data-type rule can only concatenate literals, character "
+        "ranges, terminals and string-valued data-type rules (got element "
+        "kind {}); flatten it to those, or provide a with_converter(...)",
+        static_cast<int>(kind));
   }
 
   template <typename Rule>
@@ -86,6 +91,26 @@ template <typename T> struct DataTypeRuleValueSupport {
           static_cast<const grammar::TerminalRule *>(grammarElement)
               ->appendTextValue(value, it, context);
           break;
+        case DataTypeRule: {
+          // A nested data-type rule composes: append its own converted string,
+          // built recursively through the grammar getValue (which honours the
+          // sub-rule's converter). Lets a rule like `Modifiers = Visibility | Flags`
+          // concatenate the values of its sub-rules.
+          const auto nested =
+              static_cast<const grammar::DataTypeRule *>(grammarElement)
+                  ->getValue(it, context);
+          if (const auto *str = std::get_if<std::string>(&nested)) {
+            append_text_fragment(value, *str);
+          } else if (const auto *view = std::get_if<std::string_view>(&nested)) {
+            append_text_fragment(value, *view);
+          } else {
+            report_conversion_failure(rule, node, context,
+                                      "a string data-type rule can only "
+                                      "concatenate string-valued sub-rules");
+            return {};
+          }
+          break;
+        }
         default:
           report_conversion_failure(
               rule, node, context,

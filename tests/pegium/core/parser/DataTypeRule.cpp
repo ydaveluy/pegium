@@ -346,3 +346,25 @@ TEST(DataTypeRuleTest, ArithmeticChainCstRangesAreCorrect) {
     EXPECT_EQ(numberRanges[index], expectedNumberRanges[index]);
   }
 }
+
+TEST(DataTypeRuleTest, NestedDataTypeRuleConcatenatesValue) {
+  // A string data-type rule whose body references other string data-type rules
+  // (composition) — the value is built recursively, no
+  // conversion diagnostic.
+  DataTypeRule<std::string> visibility{"Visibility", "private"_kw | "public"_kw};
+  DataTypeRule<std::string> flags{"Flags", "input"_kw | "output"_kw};
+  DataTypeRule<std::string> modifiers{"Modifiers", visibility | flags};
+  const auto skipper = SkipperBuilder().build();
+
+  for (const auto [text, want] :
+       {std::pair{"public", "public"}, {"input", "input"}}) {
+    auto result = parseDataTypeRule(modifiers, text, skipper);
+    ASSERT_TRUE(result.value) << text;
+    EXPECT_TRUE(result.fullMatch) << text;
+    EXPECT_TRUE(result.parseDiagnostics.empty()) << text;
+    auto *typed =
+        pegium::ast_ptr_cast<DataValueNode<std::string>>(result.value);
+    ASSERT_NE(typed, nullptr) << text;
+    EXPECT_EQ(typed->value, want);
+  }
+}
