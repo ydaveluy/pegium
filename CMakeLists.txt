@@ -9,6 +9,7 @@ else()
 endif()
 
 option(PEGIUM_PROFILE_BUILD "Enable profiling-friendly flags (no LTO, visible symbols, frame pointers)" OFF)
+option(PEGIUM_OPTIMIZE_SIZE "Minimize binary size: thin-LTO, hidden visibility, --gc-sections and identical-code folding. ICF needs lld/gold/mold (auto-detected). Off by default since LTO slows compiles." OFF)
 option(PEGIUM_ENABLE_ASAN "Enable AddressSanitizer for supported toolchains" OFF)
 option(PEGIUM_ENABLE_TSAN "Enable ThreadSanitizer for supported toolchains" OFF)
 option(PEGIUM_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer for supported toolchains" OFF)
@@ -166,6 +167,72 @@ if(PEGIUM_PROFILE_BUILD)
     )
 endif()
 
+if(PEGIUM_OPTIMIZE_SIZE)
+    if(PEGIUM_PROFILE_BUILD)
+        message(FATAL_ERROR
+            "PEGIUM_OPTIMIZE_SIZE and PEGIUM_PROFILE_BUILD are mutually exclusive "
+            "(size optimization hides symbols and enables LTO, which defeat profiling).")
+    endif()
+    # The size levers below are GCC/Clang + GNU/Apple-linker specific. On other
+    # toolchains (notably MSVC) the option is accepted but is a no-op, so build
+    # scripts can pass -DPEGIUM_OPTIMIZE_SIZE=ON unconditionally.
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        message(STATUS
+            "PEGIUM_OPTIMIZE_SIZE: no-op for ${CMAKE_CXX_COMPILER_ID} "
+            "(size levers require GCC or Clang).")
+    else()
+        # Hide internal symbols (pegium is static / FetchContent-only, so there is
+        # no exported shared-library ABI to preserve), split every function and
+        # data item into its own section so the linker can drop the unreferenced
+        # ones, and let the optimizer work across translation units with LTO.
+        target_compile_options(pegium_internal_build_options INTERFACE
+            -fvisibility=hidden
+            -fvisibility-inlines-hidden
+            -ffunction-sections
+            -fdata-sections
+            $<$<CXX_COMPILER_ID:Clang>:-flto=thin>
+            $<$<CXX_COMPILER_ID:GNU>:-flto>
+        )
+        # Link flags must also reach downstream executables: pegium's static
+        # libraries are LTO bitcode, so a consumer linking pegium::lsp needs the
+        # matching -flto (and benefits from folding/dead-stripping). These are
+        # propagated through the public library targets' INTERFACE below, after
+        # they are defined.
+        set(PEGIUM_SIZE_LINK_OPTIONS
+            $<$<CXX_COMPILER_ID:Clang>:-flto=thin>
+            $<$<CXX_COMPILER_ID:GNU>:-flto>
+        )
+        if(APPLE)
+            # Apple's linker garbage-collects unreachable code with -dead_strip and
+            # folds identical code by default; the GNU --gc-sections / --icf
+            # spellings do not apply here.
+            list(APPEND PEGIUM_SIZE_LINK_OPTIONS -Wl,-dead_strip)
+        else()
+            list(APPEND PEGIUM_SIZE_LINK_OPTIONS -Wl,--gc-sections)
+
+            # Identical-code folding collapses the duplicate template
+            # instantiations the grammar DSL emits per language — the dominant
+            # size cost. It needs lld, gold or mold; plain GNU ld (bfd) has no
+            # --icf, so probe for a capable linker and fold only when available.
+            find_program(PEGIUM_ICF_MOLD mold)
+            find_program(PEGIUM_ICF_LLD ld.lld)
+            find_program(PEGIUM_ICF_GOLD ld.gold)
+            if(PEGIUM_ICF_MOLD)
+                list(APPEND PEGIUM_SIZE_LINK_OPTIONS -fuse-ld=mold -Wl,--icf=all)
+            elseif(PEGIUM_ICF_LLD)
+                list(APPEND PEGIUM_SIZE_LINK_OPTIONS -fuse-ld=lld -Wl,--icf=all)
+            elseif(PEGIUM_ICF_GOLD)
+                list(APPEND PEGIUM_SIZE_LINK_OPTIONS -fuse-ld=gold -Wl,--icf=all)
+            else()
+                message(STATUS
+                    "PEGIUM_OPTIMIZE_SIZE: no ICF-capable linker (mold/lld/gold) "
+                    "found; building without identical-code folding.")
+            endif()
+        endif()
+        target_link_options(pegium_internal_build_options INTERFACE ${PEGIUM_SIZE_LINK_OPTIONS})
+    endif()
+endif()
+
 option(PEGIUM_ENABLE_CODECOVERAGE   "Enable code coverage testing support"            OFF)
 option(PEGIUM_ENABLE_RECOVERY_TRACE "Enable verbose recovery traces"                   OFF)
 option(PEGIUM_ENABLE_STEP_TRACE     "Enable step counters for recovery instrumentation" OFF)
@@ -250,6 +317,19 @@ if(PEGIUM_BUILD_FUZZ_TARGETS)
 endif()
 
 add_subdirectory(src/pegium)
+
+# Propagate the size-optimization link flags through the public library targets'
+# INTERFACE so anything linking pegium::core / pegium::lsp / ... (pegium's own
+# executables and downstream FetchContent consumers alike) links the LTO bitcode
+# correctly and folds/strips its own binary.
+if(PEGIUM_OPTIMIZE_SIZE)
+    foreach(_pegium_lib IN ITEMS PegiumCore PegiumConverters PegiumLsp PegiumCli PegiumTesting)
+        if(TARGET ${_pegium_lib})
+            target_link_options(${_pegium_lib} INTERFACE ${PEGIUM_SIZE_LINK_OPTIONS})
+        endif()
+    endforeach()
+endif()
+
 if(PEGIUM_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()

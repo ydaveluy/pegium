@@ -39,14 +39,16 @@ function run(cmd, args) {
     execFileSync(cmd, args, { stdio: 'inherit' });
 }
 
-// Build the server Release. -O2/NDEBUG make it fast; on POSIX, splitting into
-// per-function sections lets the linker garbage-collect unused code.
+// Build the server Release. PEGIUM_OPTIMIZE_SIZE turns on LTO, hidden symbol
+// visibility, dead-code stripping and identical-code folding to shrink the
+// bundled server on GCC/Clang (using lld/gold/mold when present for folding); it
+// is a harmless no-op on MSVC, which ships its symbols in a separate .pdb we do
+// not bundle, so it is passed unconditionally.
 console.log(`Building ${serverName} (Release)...`);
-const configure = ['-S', projectRoot, '-B', buildDir, '-DCMAKE_BUILD_TYPE=Release'];
-if (!isWindows) {
-    configure.push('-DCMAKE_CXX_FLAGS=-ffunction-sections -fdata-sections');
-    configure.push(`-DCMAKE_EXE_LINKER_FLAGS=${process.platform === 'darwin' ? '-Wl,-dead_strip' : '-Wl,--gc-sections'}`);
-}
+const configure = [
+    '-S', projectRoot, '-B', buildDir,
+    '-DCMAKE_BUILD_TYPE=Release', '-DPEGIUM_OPTIMIZE_SIZE=ON',
+];
 run('cmake', configure);
 run('cmake', ['--build', buildDir, '--config', 'Release', '--target', serverName, '-j']);
 
