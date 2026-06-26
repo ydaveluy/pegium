@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <limits>
-
 #include <lsp/types.h>
 
 #include <pegium/lsp/support/JsonValue.hpp>
@@ -49,16 +47,22 @@ TEST(JsonValueTest, RoundTripsNestedValuesBetweenPegiumAndLsp) {
   EXPECT_FALSE(array.array()[2].object().at("flag").boolean());
 }
 
-TEST(JsonValueTest, ClampsIntegersToLspIntegerRange) {
-  const auto largest = to_lsp_any(
-      pegium::JsonValue{std::numeric_limits<std::int64_t>::max()});
-  const auto smallest = to_lsp_any(
-      pegium::JsonValue{std::numeric_limits<std::int64_t>::min()});
+TEST(JsonValueTest, PromotesOutOfRangeIntegersToDecimal) {
+  // Within the 32-bit LSP wire range -> typed Integer, exact.
+  const auto inRange = to_lsp_any(pegium::JsonValue{std::int64_t{123456}});
+  ASSERT_TRUE(inRange.isInteger());
+  EXPECT_EQ(inRange.integer(), 123456);
 
-  ASSERT_TRUE(largest.isInteger());
-  ASSERT_TRUE(smallest.isInteger());
-  EXPECT_EQ(largest.integer(), std::numeric_limits<::lsp::json::Integer>::max());
-  EXPECT_EQ(smallest.integer(), std::numeric_limits<::lsp::json::Integer>::min());
+  // Outside int32 but exact as a double -> Decimal, value preserved (not
+  // saturated to the int32 boundary).
+  constexpr std::int64_t big = std::int64_t{1} << 40; // > int32, < 2^53
+  const auto large = to_lsp_any(pegium::JsonValue{big});
+  ASSERT_TRUE(large.isDecimal());
+  EXPECT_EQ(large.decimal(), static_cast<::lsp::json::Decimal>(big));
+
+  const auto small = to_lsp_any(pegium::JsonValue{-big});
+  ASSERT_TRUE(small.isDecimal());
+  EXPECT_EQ(small.decimal(), static_cast<::lsp::json::Decimal>(-big));
 }
 
 TEST(JsonValueTest, ConvertsDiagnosticSeverityToLsp) {

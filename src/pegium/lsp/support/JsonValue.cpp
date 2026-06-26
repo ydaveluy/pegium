@@ -1,30 +1,8 @@
 #include <pegium/lsp/support/JsonValue.hpp>
 
-#include <cassert>
 #include <limits>
 
 namespace pegium {
-
-namespace {
-
-// LSP wire integers are 32-bit; pegium ids/offsets reaching here must fit.
-// Out-of-range values saturate as a defensive fallback but violate the wire
-// contract, so the mismatch is caught in Debug.
-constexpr ::lsp::json::Integer
-to_lsp_integer(std::int64_t value) noexcept {
-  assert(value >= std::numeric_limits<::lsp::json::Integer>::min() &&
-         value <= std::numeric_limits<::lsp::json::Integer>::max() &&
-         "value exceeds the LSP 32-bit wire range");
-  if (value < std::numeric_limits<::lsp::json::Integer>::min()) {
-    return std::numeric_limits<::lsp::json::Integer>::min();
-  }
-  if (value > std::numeric_limits<::lsp::json::Integer>::max()) {
-    return std::numeric_limits<::lsp::json::Integer>::max();
-  }
-  return static_cast<::lsp::json::Integer>(value);
-}
-
-} // namespace
 
 pegium::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
   if (value.isNull()) {
@@ -71,7 +49,16 @@ pegium::JsonValue from_lsp_any(const ::lsp::LSPAny &value) {
     return ::lsp::String(value.string());
   }
   if (value.isInteger()) {
-    return to_lsp_integer(value.integer());
+    // LSP `integer` is 32-bit on the wire; a 64-bit value outside that range
+    // round-trips through `decimal` (a double, exact up to 2^53) — mirroring how
+    // the JSON parser reads such literals back — instead of saturating to a
+    // wrong-but-bounded value.
+    const auto integer = value.integer();
+    if (integer < std::numeric_limits<::lsp::json::Integer>::min() ||
+        integer > std::numeric_limits<::lsp::json::Integer>::max()) {
+      return static_cast<::lsp::json::Decimal>(integer);
+    }
+    return static_cast<::lsp::json::Integer>(integer);
   }
   if (value.isNumber()) {
     return value.number();
