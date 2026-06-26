@@ -1,7 +1,6 @@
 #include <pegium/core/observability/ObservationFormat.hpp>
 
 #include <algorithm>
-#include <format>
 #include <string>
 
 #include <pegium/core/workspace/Document.hpp>
@@ -40,7 +39,8 @@ std::string format_observation(const Observation &observation) {
   append_field(formatted, "languageId", observation.languageId);
   append_field(formatted, "category", observation.category);
   if (observation.documentId != workspace::InvalidDocumentId) {
-    formatted += std::format(" documentId={}", observation.documentId);
+    formatted += " documentId=";
+    formatted += std::to_string(observation.documentId);
   }
   if (observation.state.has_value()) {
     formatted.append(" state=");

@@ -1,7 +1,7 @@
 #include <pegium/core/utils/TextUtils.hpp>
 
 #include <cctype>
-#include <format>
+#include <string>
 
 namespace pegium::utils {
 
@@ -31,7 +31,10 @@ std::string escape_char(char c) {
     if (std::isprint(static_cast<unsigned char>(c))) {
       return std::string{c};
     }
-    return std::format("\\x{:02X}", static_cast<unsigned char>(c));
+    static constexpr char kHexDigits[] = "0123456789ABCDEF";
+    const auto byte = static_cast<unsigned char>(c);
+    return std::string{'\\', 'x', kHexDigits[byte >> 4],
+                       kHexDigits[byte & 0x0F]};
   }
 }
 

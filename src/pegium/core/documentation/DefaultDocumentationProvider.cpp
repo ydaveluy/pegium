@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cctype>
-#include <format>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -147,9 +146,10 @@ DefaultDocumentationProvider::documentationLinkRenderer(
 
   const auto position =
       targetDocument->textDocument().positionAt(site->getBegin());
-  const auto uri = std::format("{}#L{},{}", targetDocument->uri,
-                               position.line + 1, position.character + 1);
-  return std::format("[{}]({})", display, uri);
+  const auto uri = targetDocument->uri + "#L" +
+                   std::to_string(position.line + 1) + "," +
+                   std::to_string(position.character + 1);
+  return "[" + std::string(display) + "](" + uri + ")";
 }
 
 std::optional<std::string>

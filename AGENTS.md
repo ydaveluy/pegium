@@ -24,6 +24,9 @@ expectations for working in this repository.
   pointer; keep pointers only for genuinely optional data.
 - Never add a `nullptr` check for a pointer that is never null by design.
 - `const_cast` is forbidden.
+- Do not use `std::format` / `<format>`. It pulls in heavy formatting machinery
+  that bloats the binary. Build strings with concatenation and `std::to_string`
+  (or a small hand-rolled helper for anything fancier).
 - No `thread_local`.
 - Use `void*` for type erasure.
 - No wrappers that only add one more level of indirection / a trampoline.

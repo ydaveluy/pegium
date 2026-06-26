@@ -3,11 +3,11 @@
 #include <algorithm>
 #include <cassert>
 #include <condition_variable>
-#include <format>
 #include <memory>
 #include <ranges>
 #include <stop_token>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
@@ -654,11 +654,12 @@ DocumentId DefaultDocumentBuilder::awaitDocumentState(
 
   const auto make_failure = [&](DocumentState documentState,
                                 DocumentState workspaceState) {
-    return std::make_exception_ptr(utils::DocumentBuilderError(std::format(
-        "Document state of #{} is {}, requiring {}, but workspace state "
-        "is already {}.",
-        documentId, document_state_name(documentState), document_state_name(state),
-        document_state_name(workspaceState))));
+    return std::make_exception_ptr(utils::DocumentBuilderError(
+        "Document state of #" + std::to_string(documentId) + " is " +
+        std::string(document_state_name(documentState)) + ", requiring " +
+        std::string(document_state_name(state)) +
+        ", but workspace state is already " +
+        std::string(document_state_name(workspaceState)) + "."));
   };
   const auto check_now =
       [&](std::exception_ptr &error) {
@@ -666,7 +667,7 @@ DocumentId DefaultDocumentBuilder::awaitDocumentState(
         shared.workspace.documents->getDocument(documentId);
     if (document == nullptr) {
       error = std::make_exception_ptr(utils::DocumentBuilderError(
-          std::format("No document found for id: {}", documentId)));
+          "No document found for id: " + std::to_string(documentId)));
       return true;
     }
     if (document->state >= state) {

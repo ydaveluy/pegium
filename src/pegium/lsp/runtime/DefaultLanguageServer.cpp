@@ -5,12 +5,12 @@
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/workspace/WorkspaceAdapters.hpp>
 
-#include <format>
 #include <future>
 #include <lsp/messages.h>
 
 #include <functional>
 #include <optional>
+#include <string>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -45,9 +45,10 @@ void merge_indexed_strings(std::vector<std::string> &merged,
     if (merged[index].empty()) {
       merged[index] = value;
     } else if (merged[index] != value) {
-      throw utils::LanguageServerError(std::format(
-          "Cannot merge '{}' and '{}' {}. They use the same index {}.",
-          merged[index], std::string(value), label, index));
+      throw utils::LanguageServerError(
+          "Cannot merge '" + merged[index] + "' and '" + std::string(value) +
+          "' " + std::string(label) + ". They use the same index " +
+          std::to_string(index) + ".");
     }
   }
 }

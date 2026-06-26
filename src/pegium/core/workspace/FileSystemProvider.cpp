@@ -1,11 +1,11 @@
 #include <pegium/core/workspace/FileSystemProvider.hpp>
 
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <iterator>
-#include <stdexcept>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 
 #include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
@@ -23,9 +23,9 @@ std::filesystem::path resolve_path(std::string_view uri) {
 
 [[nodiscard]] utils::FileSystemError
 missing_file_system_node(std::string_view action, std::string_view uri) {
-  return utils::FileSystemError(std::format(
-      "Failed to {} '{}': file system node is missing or inaccessible.", action,
-      uri));
+  return utils::FileSystemError(
+      "Failed to " + std::string(action) + " '" + std::string(uri) +
+      "': file system node is missing or inaccessible.");
 }
 
 FileSystemNode
@@ -48,7 +48,7 @@ FileSystemNode make_file_system_node(const std::filesystem::path &path) {
 
 FileSystemNode EmptyFileSystemProvider::stat(std::string_view uri) const {
   throw utils::FileSystemError(
-      std::format("No file system is available for '{}'.", uri));
+      "No file system is available for '" + std::string(uri) + "'.");
 }
 
 bool EmptyFileSystemProvider::exists(std::string_view uri) const {
@@ -59,12 +59,12 @@ bool EmptyFileSystemProvider::exists(std::string_view uri) const {
 std::vector<std::uint8_t>
 EmptyFileSystemProvider::readBinary(std::string_view uri) const {
   throw utils::FileSystemError(
-      std::format("No file system is available for '{}'.", uri));
+      "No file system is available for '" + std::string(uri) + "'.");
 }
 
 std::string EmptyFileSystemProvider::readFile(std::string_view uri) const {
   throw utils::FileSystemError(
-      std::format("No file system is available for '{}'.", uri));
+      "No file system is available for '" + std::string(uri) + "'.");
 }
 
 std::vector<FileSystemNode>

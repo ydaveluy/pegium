@@ -11,9 +11,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -489,7 +489,7 @@ AbstractSemanticTokenProvider::buildSemanticTokens(
 
 std::string AbstractSemanticTokenProvider::nextSemanticTokenResultId() const {
   std::lock_guard lock(_semanticTokenCacheMutex);
-  return std::format("{}", _nextSemanticTokenResultId++);
+  return std::to_string(_nextSemanticTokenResultId++);
 }
 
 std::optional<AbstractSemanticTokenProvider::SemanticTokenCacheEntry>

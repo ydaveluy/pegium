@@ -4,7 +4,6 @@
 
 #include <cassert>
 #include <functional>
-#include <format>
 #include <pegium/core/grammar/AnyCharacter.hpp>
 #include <pegium/core/grammar/CharacterRange.hpp>
 #include <pegium/core/grammar/DataTypeRule.hpp>
@@ -39,11 +38,11 @@ template <typename T> struct DataTypeRuleValueSupport {
 
   [[nodiscard]] static std::string
   unsupported_element_conversion_message(grammar::ElementKind kind) {
-    return std::format(
-        "a string data-type rule can only concatenate literals, character "
-        "ranges, terminals and string-valued data-type rules (got element "
-        "kind {}); flatten it to those, or provide a with_converter(...)",
-        static_cast<int>(kind));
+    return "a string data-type rule can only concatenate literals, character "
+           "ranges, terminals and string-valued data-type rules (got element "
+           "kind " +
+           std::to_string(static_cast<int>(kind)) +
+           "); flatten it to those, or provide a with_converter(...)";
   }
 
   template <typename Rule>

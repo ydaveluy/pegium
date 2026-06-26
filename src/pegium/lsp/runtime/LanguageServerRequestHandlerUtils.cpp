@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <format>
 #include <memory>
 #include <optional>
 #include <string>
@@ -122,7 +121,7 @@ void wait_until_phase(pegium::SharedServices &sharedServices,
           return;
         }
         throw utils::LanguageServerError(
-            std::format("No document found for URI: {}", *uri));
+            "No document found for URI: " + std::string(*uri));
       }
       (void)sharedServices.workspace.documentBuilder->waitUntil(
           requiredState.state, document->id, cancelToken);
@@ -148,9 +147,9 @@ std::string request_key_from_message_id(const ::lsp::MessageId &id) {
         if constexpr (std::is_same_v<DecayedValue, std::nullptr_t>) {
           return {};
         } else if constexpr (std::is_integral_v<DecayedValue>) {
-          return std::format("i:{}", value);
+          return "i:" + std::to_string(value);
         } else {
-          return std::format("s:{}", std::string(value));
+          return "s:" + std::string(value);
         }
       },
       id);
@@ -159,13 +158,13 @@ std::string request_key_from_message_id(const ::lsp::MessageId &id) {
 std::string
 request_key_from_cancel_id(const ::lsp::OneOf<int, ::lsp::String> &id) {
   if (std::holds_alternative<int>(id)) {
-    return std::format("i:{}", std::get<int>(id));
+    return "i:" + std::to_string(std::get<int>(id));
   }
-  return std::format("s:{}", std::string(std::get<::lsp::String>(id)));
+  return "s:" + std::string(std::get<::lsp::String>(id));
 }
 
 std::string next_anonymous_request_key() {
-  return std::format("anon:{}", ++g_anonymousRequestCounter);
+  return "anon:" + std::to_string(++g_anonymousRequestCounter);
 }
 
 } // namespace pegium

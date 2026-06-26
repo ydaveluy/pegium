@@ -2,7 +2,7 @@
 
 #include <cassert>
 #include <algorithm>
-#include <format>
+#include <string>
 
 #include <pegium/core/grammar/AbstractRule.hpp>
 #include <pegium/core/grammar/Assignment.hpp>
@@ -125,8 +125,8 @@ std::string display_type_name(std::type_index type) {
 }
 
 std::string location_key(const LocationData &location) {
-  return std::format("{}#{}:{}", location.documentId, location.begin,
-                     location.end);
+  return std::to_string(location.documentId) + "#" +
+         std::to_string(location.begin) + ":" + std::to_string(location.end);
 }
 
 LocationData to_location(const workspace::ReferenceDescription &reference) {
@@ -244,7 +244,7 @@ to_lsp_workspace_edit(const WorkspaceEditData &workspaceEdit,
 }
 
 std::string document_highlight_key(const DocumentHighlightData &highlight) {
-  return std::format("{}:{}", highlight.begin, highlight.end);
+  return std::to_string(highlight.begin) + ":" + std::to_string(highlight.end);
 }
 
 void collect_folding_ranges(const CstNodeView &node, std::string_view text,
@@ -255,7 +255,7 @@ void collect_folding_ranges(const CstNodeView &node, std::string_view text,
     if (end <= begin || !has_newline_between(text, begin, end)) {
       return;
     }
-    const auto key = std::format("{}:{}", begin, end);
+    const auto key = std::to_string(begin) + ":" + std::to_string(end);
     if (seen.insert(key).second) {
       ranges.push_back({.begin = begin, .end = end, .kind = kind});
     }
