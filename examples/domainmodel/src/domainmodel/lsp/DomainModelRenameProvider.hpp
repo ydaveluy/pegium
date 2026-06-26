@@ -4,12 +4,12 @@
 #include <string_view>
 
 #include <domainmodel/core/references/QualifiedNameProvider.hpp>
-#include <domainmodel/lsp/Services.hpp>
+#include <domainmodel/lsp/LspServices.hpp>
 
 #include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/navigation/DefaultRenameProvider.hpp>
 
-namespace domainmodel::lsp {
+namespace domainmodel {
 
 class DomainModelRenameProvider final
     : public pegium::DefaultRenameProvider,
@@ -35,4 +35,4 @@ private:
                          *qualifiedNameProvider) const;
 };
 
-} // namespace domainmodel::lsp
+} // namespace domainmodel

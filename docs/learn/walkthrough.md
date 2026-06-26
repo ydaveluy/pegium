@@ -170,10 +170,9 @@ void StatemachineValidator::checkStateNameStartsWithCapital(
 Register the checks on the language's `ValidationRegistry`:
 
 ```cpp
-template <typename TServices>
-void registerValidationChecks(TServices &services) {
+inline void registerValidationChecks(pegium::CoreServices &services,
+                                     StatemachineValidator &validator) {
   auto &registry = *services.validation.validationRegistry;
-  auto &validator = *services.validator;
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
            &StatemachineValidator::checkStateNameStartsWithCapital>(validator),
@@ -182,12 +181,12 @@ void registerValidationChecks(TServices &services) {
 }
 ```
 
-## 4. Assemble the services — `core/Services.hpp` + `core/Module.cpp`
+## 4. Assemble the services — `core/CoreServices.hpp` + `core/CoreModule.cpp`
 
 Pegium wires a language through explicit service containers. Define a container that grafts your language-specific members onto a Pegium base:
 
 ```cpp
-// core/Services.hpp
+// core/CoreServices.hpp
 struct StatemachineAddedServices {
   std::unique_ptr<validation::StatemachineValidator> validator;
 };
@@ -198,44 +197,39 @@ struct StatemachineCoreServices final : pegium::CoreServices,
 };
 ```
 
-Then assemble it in a module function: install the Pegium defaults, then set your parser, file extension, validator, and checks.
+Then wire it in one plain function. It takes the Pegium core base and your graft as two references, so it is an ordinary function (not a template) that both the headless and the LSP container reuse — each is-a `CoreServices` and is-a `StatemachineAddedServices`:
 
 ```cpp
-// core/ModuleImpl.hpp — a template in `detail` so the LSP container reuses it
-template <typename Services>
-void applyStatemachineCoreModule(Services &services) {
-  services.parser = parser::makeStateMachineParser(services);
-  services.languageMetaData.fileExtensions = {".statemachine"};
-  services.validator = std::make_unique<validation::StatemachineValidator>();
-  validation::registerValidationChecks(services);
-}
+// core/CoreModule.hpp — declarations only (no grammar header)
+void installStatemachineCoreModule(pegium::CoreServices &core,
+                                   StatemachineAddedServices &added);
 
-// core/Module.cpp — the public entry point forwards to it
-void installStatemachineCoreModule(StatemachineCoreServices &services) {
-  detail::applyStatemachineCoreModule(services);
+std::unique_ptr<StatemachineCoreServices>
+createStatemachineCoreServices(const pegium::SharedCoreServices &shared,
+                               std::string languageId = "statemachine");
+```
+
+```cpp
+// core/CoreModule.cpp — the ONE translation unit that includes the grammar
+void installStatemachineCoreModule(pegium::CoreServices &core,
+                                   StatemachineAddedServices &added) {
+  core.parser = std::make_unique<const parser::StateMachineParser>(core);
+  core.languageMetaData.fileExtensions = {".statemachine"};
+  added.validator = std::make_unique<validation::StatemachineValidator>();
+  validation::registerValidationChecks(core, *added.validator);
 }
 
 std::unique_ptr<StatemachineCoreServices>
-createStatemachineServices(const pegium::SharedCoreServices &shared,
-                           std::string languageId) {
+createStatemachineCoreServices(const pegium::SharedCoreServices &shared,
+                               std::string languageId) {
   auto services = pegium::makeDefaultCoreServices<StatemachineCoreServices>(
       shared, std::move(languageId));
-  installStatemachineCoreModule(*services);
+  installStatemachineCoreModule(*services, *services);
   return services;
 }
 ```
 
-`makeStateMachineParser` is declared in `core/ModuleImpl.hpp` and defined in `core/ModuleImpl.cpp` — the one translation unit that includes the grammar header:
-
-```cpp
-// core/ModuleImpl.cpp
-std::unique_ptr<const pegium::parser::Parser>
-parser::makeStateMachineParser(const pegium::CoreServices &services) {
-  return std::make_unique<const StateMachineParser>(services);
-}
-```
-
-Building the parser through this factory keeps the grammar's heavy template instantiations in that single TU, so the core and LSP modules don't each re-instantiate them. The rest of the wiring is ordinary C++ you can read, so it stays obvious what your language depends on.
+Because `core/CoreModule.cpp` is the only translation unit that includes the grammar header, the grammar's heavy template instantiations happen there once; the LSP module (`lsp/LspModule.cpp`) reuses the same `installStatemachineCoreModule` through its declaration, without re-instantiating anything. The wiring is ordinary C++ you can read, so it stays obvious what your language depends on.
 
 ## 5. Run it headlessly — `cli/main.cpp`
 
@@ -244,7 +238,7 @@ The CLI parses a file, checks for errors, then walks the typed AST:
 ```cpp
 auto sharedServices = pegium::cli::make_shared_services();
 auto &shared = *sharedServices;
-auto services = statemachine::createStatemachineServices(shared);
+auto services = statemachine::createStatemachineCoreServices(shared);
 auto &languageServices = *services;
 shared.serviceRegistry->registerServices(std::move(services));
 
@@ -273,7 +267,7 @@ For editor features, build the LSP container with `makeDefaultServices<...>` and
 int main(int argc, char **argv) {
   return pegium::runLanguageServerMain(
       argc, argv, "statemachine-lsp",
-      statemachine::lsp::registerStatemachineServices);
+      statemachine::registerStatemachineLspServices);
 }
 ```
 

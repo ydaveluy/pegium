@@ -1,6 +1,6 @@
 #include <domainmodel/cli/CliUtils.hpp>
 #include <domainmodel/cli/Generator.hpp>
-#include <domainmodel/core/Module.hpp>
+#include <domainmodel/core/CoreModule.hpp>
 
 #include <pegium/cli/CliUtils.hpp>
 #include <pegium/core/workspace/Documents.hpp>
@@ -49,12 +49,12 @@ std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
 int generate_cli(const GenerateOptions &options) {
   auto sharedServices = pegium::cli::make_shared_services();
   auto &shared = *sharedServices;
-  auto services = domainmodel::createDomainModelServices(shared);
+  auto services = domainmodel::createDomainModelCoreServices(shared);
   auto &domainmodelServices = *services;
   shared.serviceRegistry->registerServices(std::move(services));
 
   const auto absoluteInputPath = std::filesystem::absolute(options.fileName);
-  domainmodel::cli::set_root_folder(
+  domainmodel::set_root_folder(
       absoluteInputPath.string(), domainmodelServices,
       options.root.has_value() ? std::optional<std::string_view>(*options.root)
                                : std::nullopt);
@@ -71,8 +71,8 @@ int generate_cli(const GenerateOptions &options) {
     }
   }
 
-  const auto &model = domainmodel::cli::extract_ast_node(*document);
-  const auto generatedDir = domainmodel::cli::generate_java(
+  const auto &model = domainmodel::extract_ast_node(*document);
+  const auto generatedDir = domainmodel::generate_java(
       model, absoluteInputPath.string(),
       options.destination.has_value()
           ? std::optional<std::string_view>(*options.destination)

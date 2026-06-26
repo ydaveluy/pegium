@@ -13,7 +13,7 @@
 #include <pegium/lsp/semantic/AbstractSemanticTokenProvider.hpp>
 #include <pegium/testing/LspProbe.hpp>
 #include <pegium/testing/Testing.hpp>
-#include <statemachine/lsp/Module.hpp>
+#include <statemachine/lsp/LspModule.hpp>
 
 namespace {
 
@@ -46,7 +46,7 @@ protected:
 
 TEST(PegiumTestingHarness, ParsesValidDocument) {
   pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(statemachine::lsp::createStatemachineServices(ws.shared()));
+  ws.registerLanguage(statemachine::createStatemachineLspServices(ws.shared()));
 
   auto document = pegium::testing::parse(ws, "statemachine", kValidSource);
   ASSERT_NE(document, nullptr);
@@ -55,7 +55,7 @@ TEST(PegiumTestingHarness, ParsesValidDocument) {
 
 TEST(PegiumTestingHarness, ValidationProducesDiagnosticsForGarbage) {
   pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(statemachine::lsp::createStatemachineServices(ws.shared()));
+  ws.registerLanguage(statemachine::createStatemachineLspServices(ws.shared()));
 
   pegium::testing::expectValidation(
       ws, "statemachine",
@@ -67,7 +67,7 @@ TEST(PegiumTestingHarness, ValidationProducesDiagnosticsForGarbage) {
 
 TEST(PegiumTestingHarness, CompletionDispatchesThroughPublicApi) {
   pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(statemachine::lsp::createStatemachineServices(ws.shared()));
+  ws.registerLanguage(statemachine::createStatemachineLspServices(ws.shared()));
 
   bool produced = false;
   pegium::testing::expectCompletion(
@@ -80,7 +80,7 @@ TEST(PegiumTestingHarness, CompletionDispatchesThroughPublicApi) {
 // validate() + granular expect{Error,Issue,NoIssues}.
 TEST(PegiumTestingHarness, ValidationHelperAndGranularExpect) {
   pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(statemachine::lsp::createStatemachineServices(ws.shared()));
+  ws.registerLanguage(statemachine::createStatemachineLspServices(ws.shared()));
 
   auto valid = pegium::testing::validate(ws, "statemachine", kValidSource);
   pegium::testing::expectNoIssues(
@@ -109,7 +109,7 @@ TEST(PegiumTestingHarness, LspProbeMarkerParser) {
 // highlight + expectSemanticToken.
 TEST(PegiumTestingHarness, SemanticTokensHighlightAndExpect) {
   pegium::testing::TestWorkspace ws;
-  auto services = statemachine::lsp::createStatemachineServices(ws.shared());
+  auto services = statemachine::createStatemachineLspServices(ws.shared());
   services->lsp.semanticTokenProvider =
       std::make_unique<NameHighlighter>(*services);
   ws.registerLanguage(std::move(services));
@@ -129,7 +129,7 @@ TEST(PegiumTestingHarness, SemanticTokensHighlightAndExpect) {
 // assertions, so the helper must fail loudly instead of silently passing.
 TEST(PegiumTestingHarness, FindReferencesFailsWhenSourceHasNoCursorMarker) {
   pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(statemachine::lsp::createStatemachineServices(ws.shared()));
+  ws.registerLanguage(statemachine::createStatemachineLspServices(ws.shared()));
 
   EXPECT_NONFATAL_FAILURE(
       pegium::testing::expectFindReferences(ws, "statemachine",

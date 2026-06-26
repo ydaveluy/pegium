@@ -12,7 +12,7 @@ Your `lsp/main.cpp` is a single call:
 int main(int argc, char **argv) {
   return pegium::runLanguageServerMain(
       argc, argv, "statemachine-lsp",
-      statemachine::lsp::registerStatemachineServices);
+      statemachine::registerStatemachineLspServices);
 }
 ```
 

@@ -11,7 +11,7 @@
 #include <pegium/core/utils/UriUtils.hpp>
 #include <pegium/core/workspace/Document.hpp>
 
-namespace requirements::cli {
+namespace requirements {
 namespace {
 
 using namespace requirements::ast;
@@ -109,4 +109,4 @@ std::string generate_summary(
   return outputPath.string();
 }
 
-} // namespace requirements::cli
+} // namespace requirements

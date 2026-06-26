@@ -13,7 +13,7 @@
 #include <vector>
 
 #include <arithmetics/core/ast.hpp>
-#include <arithmetics/lsp/Module.hpp>
+#include <arithmetics/lsp/LspModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
@@ -81,7 +81,7 @@ protected:
 
   void SetUp() override {
     auto services =
-        arithmetics::lsp::createArithmeticsServices(*shared, "arithmetics");
+        arithmetics::createArithmeticsLspServices(*shared, "arithmetics");
     services->validation.validationRegistry->registerCheck<AstNode>(
         [this](const AstNode &node,
                const validation::ValidationAcceptor &acceptor,
@@ -112,7 +112,7 @@ protected:
   }
 
   void SetUp() override {
-    ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
+    ASSERT_TRUE(arithmetics::registerArithmeticsLspServices(*shared));
   }
 
   void TearDown() override {

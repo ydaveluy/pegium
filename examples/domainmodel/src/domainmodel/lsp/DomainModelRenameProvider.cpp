@@ -21,7 +21,7 @@
 #include <pegium/core/utils/TransparentStringHash.hpp>
 #include <pegium/core/workspace/Documents.hpp>
 
-namespace domainmodel::lsp {
+namespace domainmodel {
 namespace {
 
 using namespace domainmodel::ast;
@@ -200,4 +200,4 @@ std::optional<std::string> DomainModelRenameProvider::buildQualifiedName(
   return qualifier.empty() ? resolvedName : qualifier + "." + resolvedName;
 }
 
-} // namespace domainmodel::lsp
+} // namespace domainmodel

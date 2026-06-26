@@ -1,6 +1,6 @@
 #include <requirements/lsp/RequirementsFormatter.hpp>
 
-namespace requirements::lsp {
+namespace requirements {
 void RequirementsFormatter::formatContact(pegium::FormattingBuilder &builder,
                                           const ast::Contact *contact) const {
   auto formatter = builder.getNodeFormatter(contact);
@@ -87,4 +87,4 @@ TestsFormatter::TestsFormatter(const pegium::Services &services)
   on<ast::Test>(&TestsFormatter::formatTest);
 }
 
-} // namespace requirements::lsp
+} // namespace requirements

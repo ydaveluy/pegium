@@ -11,7 +11,7 @@ Study `requirements` once one language is no longer enough. It shows how Pegium 
 
 ## What to read first
 
-- `examples/requirements/src/requirements/core/Module.cpp` — multi-language registration
+- `examples/requirements/src/requirements/core/CoreModule.cpp` — multi-language registration
 - `examples/requirements/src/requirements/core/Language.cpp` — the language definitions
 - `examples/requirements/src/requirements/core/validation/RequirementsValidator.cpp` and `examples/requirements/src/requirements/core/validation/TestsValidator.cpp` — language-specific validation on both sides of the workspace
 - `examples/requirements/src/requirements/lsp/RequirementsFormatter.cpp` — shared editor-facing behavior

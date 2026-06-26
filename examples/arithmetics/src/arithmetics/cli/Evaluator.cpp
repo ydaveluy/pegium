@@ -9,7 +9,7 @@
 #include <pegium/core/syntax-tree/AstUtils.hpp>
 #include <pegium/core/validation/DiagnosticRanges.hpp>
 
-namespace arithmetics::cli {
+namespace arithmetics {
 
 int eval_file(std::string_view fileName,
               const pegium::CoreServices &services) {
@@ -52,4 +52,4 @@ int eval_file(std::string_view fileName,
   return 0;
 }
 
-} // namespace arithmetics::cli
+} // namespace arithmetics

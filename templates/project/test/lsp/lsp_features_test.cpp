@@ -4,7 +4,7 @@
 // is only built when the language server is scaffolded (LSP=ON).
 //
 // Markers in the source: `<|>` is a cursor index, `<| … |>` marks a range.
-#include <@PEGIUM_NEW_LANGUAGE_ID@/lsp/Module.hpp>
+#include <@PEGIUM_NEW_LANGUAGE_ID@/lsp/LspModule.hpp>
 
 #include <pegium/testing/Testing.hpp>
 
@@ -20,7 +20,7 @@ namespace {
 pegium::testing::TestWorkspace make@PEGIUM_NEW_CLASS@Workspace() {
   pegium::testing::TestWorkspace ws;
   ws.registerLanguage(
-      @PEGIUM_NEW_LANGUAGE_ID@::lsp::create@PEGIUM_NEW_CLASS@Services(ws.shared()));
+      @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@LspServices(ws.shared()));
   return ws;
 }
 

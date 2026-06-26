@@ -8,6 +8,8 @@
 namespace statemachine {
 
 /// Statemachine-specific services grafted onto any pegium service container.
+/// The `unique_ptr` members already make it move-only; it needs no destructor of
+/// its own — `service_cast` reaches it through the polymorphic `CoreServices`.
 struct StatemachineAddedServices {
   std::unique_ptr<validation::StatemachineValidator> validator;
 };

@@ -16,7 +16,7 @@
 #include <pegium/core/workspace/WorkspaceManager.hpp>
 #include <pegium/core/workspace/WorkspaceProtocol.hpp>
 
-namespace requirements::cli {
+namespace requirements {
 namespace {
 
 [[nodiscard]] std::string sanitize_file_stem(std::string_view filePath) {
@@ -92,4 +92,4 @@ ExtractedRequirementModelWithTests extract_requirement_model_with_test_models(
   };
 }
 
-} // namespace requirements::cli
+} // namespace requirements

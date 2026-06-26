@@ -3,19 +3,10 @@
 #include <memory>
 #include <string>
 
-#include <requirements/lsp/Services.hpp>
+#include <requirements/lsp/LspServices.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 
 namespace requirements {
-
-/// Core service overrides (LSP-enabled bundle overload).
-void installRequirementsCoreModule(requirements::lsp::RequirementsServices &services);
-/// Core service overrides for the tests language (LSP-enabled bundle overload).
-void installTestsCoreModule(requirements::lsp::TestsServices &services);
-
-} // namespace requirements
-
-namespace requirements::lsp {
 
 /// LSP service overrides for the requirements language.
 void installRequirementsLspModule(RequirementsServices &services);
@@ -25,13 +16,13 @@ void installTestsLspModule(TestsServices &services);
 
 /// Builds the LSP-enabled requirements language services.
 std::unique_ptr<RequirementsServices>
-createRequirementsServices(const pegium::SharedServices &sharedServices,
-                           std::string languageId = "requirements-lang");
+createRequirementsLspServices(const pegium::SharedServices &sharedServices,
+                              std::string languageId = "requirements-lang");
 
 /// Builds the LSP-enabled tests language services.
 std::unique_ptr<TestsServices>
-createTestsServices(const pegium::SharedServices &sharedServices,
-                    std::string languageId = "tests-lang");
+createTestsLspServices(const pegium::SharedServices &sharedServices,
+                       std::string languageId = "tests-lang");
 
 /// Aggregate of both languages' LSP-enabled services.
 struct RequirementsAndTestsServices {
@@ -41,9 +32,9 @@ struct RequirementsAndTestsServices {
 
 /// Builds the LSP-enabled requirements and tests language services together.
 RequirementsAndTestsServices
-createRequirementsAndTestsServices(const pegium::SharedServices &sharedServices);
+createRequirementsAndTestsLspServices(const pegium::SharedServices &sharedServices);
 
 /// Registers the LSP-enabled services for both languages.
-bool registerRequirementsServices(pegium::SharedServices &sharedServices);
+bool registerRequirementsLspServices(pegium::SharedServices &sharedServices);
 
-} // namespace requirements::lsp
+} // namespace requirements

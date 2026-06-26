@@ -1,21 +1,13 @@
-#include <domainmodel/lsp/Module.hpp>
+#include <domainmodel/lsp/LspModule.hpp>
 
 #include <utility>
 
-#include <domainmodel/core/ModuleImpl.hpp>
+#include <domainmodel/core/CoreModule.hpp>
 #include <domainmodel/lsp/DomainModelFormatter.hpp>
 #include <domainmodel/lsp/DomainModelRenameProvider.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace domainmodel {
-
-void installDomainModelCoreModule(lsp::DomainModelServices &services) {
-  detail::applyDomainModelCoreModule(services);
-}
-
-} // namespace domainmodel
-
-namespace domainmodel::lsp {
 
 void installDomainModelLspModule(DomainModelServices &services) {
   services.lsp.renameProvider =
@@ -24,19 +16,21 @@ void installDomainModelLspModule(DomainModelServices &services) {
 }
 
 std::unique_ptr<DomainModelServices>
-createDomainModelServices(const pegium::SharedServices &sharedServices,
+createDomainModelLspServices(const pegium::SharedServices &sharedServices,
                           std::string languageId) {
   auto services = pegium::makeDefaultServices<DomainModelServices>(
       sharedServices, std::move(languageId));
-  domainmodel::installDomainModelCoreModule(*services);
+  // The container is-a CoreServices and is-a DomainModelAddedServices, so it
+  // binds both parameters of the (non-template) core wiring.
+  installDomainModelCoreModule(*services, *services);
   installDomainModelLspModule(*services);
   return services;
 }
 
-bool registerDomainModelServices(pegium::SharedServices &sharedServices) {
+bool registerDomainModelLspServices(pegium::SharedServices &sharedServices) {
   sharedServices.serviceRegistry->registerServices(
-      createDomainModelServices(sharedServices));
+      createDomainModelLspServices(sharedServices));
   return true;
 }
 
-} // namespace domainmodel::lsp
+} // namespace domainmodel

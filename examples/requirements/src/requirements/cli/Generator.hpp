@@ -9,7 +9,7 @@
 
 #include <requirements/cli/CliUtils.hpp>
 
-namespace requirements::cli {
+namespace requirements {
 
 std::string generate_summary_file_html_content(
     const ast::RequirementModel &model,
@@ -21,4 +21,4 @@ std::string generate_summary(
     std::string_view filePath,
     std::optional<std::string_view> destination);
 
-} // namespace requirements::cli
+} // namespace requirements

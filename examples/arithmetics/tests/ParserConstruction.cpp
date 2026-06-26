@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/lsp/Module.hpp>
+#include <arithmetics/lsp/LspModule.hpp>
 #include <arithmetics/core/ArithmeticParser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
@@ -104,7 +104,7 @@ TEST(ArithmeticParserConstructionTest,
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
+  ASSERT_TRUE(arithmetics::registerArithmeticsLspServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("open-build-angle-garbage.calc"),
@@ -122,7 +122,7 @@ TEST(ArithmeticParserConstructionTest,
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
+  ASSERT_TRUE(arithmetics::registerArithmeticsLspServices(*shared));
 
   const auto uri = pegium::test::make_file_uri("did-change-angle-garbage.calc");
   auto documents = pegium::test::text_documents(*shared);
@@ -156,7 +156,7 @@ TEST(ArithmeticParserConstructionTest,
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
+  ASSERT_TRUE(arithmetics::registerArithmeticsLspServices(*shared));
 
   const auto &services =
       shared->serviceRegistry->getServices(

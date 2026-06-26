@@ -10,7 +10,7 @@
 #include <variant>
 #include <vector>
 
-#include <arithmetics/lsp/Module.hpp>
+#include <arithmetics/lsp/LspModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/lsp/LspExpectTestSupport.hpp>
@@ -162,7 +162,7 @@ protected:
   }
 
   void SetUp() override {
-    ASSERT_TRUE(arithmetics::lsp::registerArithmeticsServices(*shared));
+    ASSERT_TRUE(arithmetics::registerArithmeticsLspServices(*shared));
   }
 
   std::shared_ptr<workspace::Document> openArithmeticsDocument(

@@ -1,6 +1,6 @@
 #include "BenchmarkSupport.hpp"
 
-#include <requirements/core/Module.hpp>
+#include <requirements/core/CoreModule.hpp>
 
 namespace pegium::bench {
 namespace {
@@ -37,7 +37,7 @@ void register_requirements_benchmarks(BenchmarkRegistry &registry) {
       {.name = "requirements",
        .languageId = "requirements-lang",
        .extension = ".req",
-       .registerLanguages = requirements::registerRequirementsServices,
+       .registerLanguages = requirements::registerRequirementsCoreServices,
        .makeSource = make_source});
 }
 

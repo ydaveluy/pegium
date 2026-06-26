@@ -16,9 +16,9 @@
 #include <requirements/cli/Generator.hpp>
 #include <requirements/core/validation/RequirementsValidator.hpp>
 #include <requirements/core/validation/TestsValidator.hpp>
-#include <requirements/lsp/Module.hpp>
+#include <requirements/lsp/LspModule.hpp>
 #include <requirements/lsp/RequirementsFormatter.hpp>
-#include <requirements/lsp/Services.hpp>
+#include <requirements/lsp/LspServices.hpp>
 
 #include <pegium/core/references/DefaultNameProvider.hpp>
 
@@ -169,8 +169,8 @@ std::string apply_text_edits(const pegium::workspace::Document &document,
 }
 
 TEST(RequirementsModuleTest, ExposesTypedServicesAndDedicatedValidators) {
-  static_assert(std::is_class_v<requirements::lsp::RequirementsServices>);
-  static_assert(std::is_class_v<requirements::lsp::TestsServices>);
+  static_assert(std::is_class_v<requirements::RequirementsServices>);
+  static_assert(std::is_class_v<requirements::TestsServices>);
   static_assert(std::is_class_v<
                 requirements::validation::RequirementsValidator>);
   static_assert(std::is_class_v<
@@ -181,7 +181,7 @@ TEST(RequirementsModuleTest, ExposesTypedServicesAndDedicatedValidators) {
   pegium::test::initialize_shared_workspace_for_tests(*shared);
 
   auto services =
-      requirements::lsp::createRequirementsAndTestsServices(*shared);
+      requirements::createRequirementsAndTestsLspServices(*shared);
   auto &requirementsServices = services.requirements;
   auto &testsServices = services.tests;
 
@@ -195,10 +195,10 @@ TEST(RequirementsModuleTest, ExposesTypedServicesAndDedicatedValidators) {
   EXPECT_NE(dynamic_cast<pegium::references::DefaultNameProvider *>(
                 testsServices->references.nameProvider.get()),
             nullptr);
-  EXPECT_NE(dynamic_cast<requirements::lsp::RequirementsFormatter *>(
+  EXPECT_NE(dynamic_cast<requirements::RequirementsFormatter *>(
                 requirementsServices->lsp.formatter.get()),
             nullptr);
-  EXPECT_NE(dynamic_cast<requirements::lsp::TestsFormatter *>(
+  EXPECT_NE(dynamic_cast<requirements::TestsFormatter *>(
                 testsServices->lsp.formatter.get()),
             nullptr);
 
@@ -221,7 +221,7 @@ TEST(RequirementsModuleTest, RegistersRequirementsAndTestsLanguages) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(requirements::lsp::registerRequirementsServices(*shared));
+  ASSERT_TRUE(requirements::registerRequirementsLspServices(*shared));
 
   const auto &requirementsCoreServices =
       shared->serviceRegistry->getServices(pegium::test::make_file_uri("model.req"));
@@ -231,13 +231,13 @@ TEST(RequirementsModuleTest, RegistersRequirementsAndTestsLanguages) {
   const auto *testsServices = pegium::as_services(&testsCoreServices);
   ASSERT_NE(requirementsServices, nullptr);
   ASSERT_NE(testsServices, nullptr);
-  EXPECT_NE(requirements::lsp::asRequirementsServices(*requirementsServices),
+  EXPECT_NE(requirements::asRequirementsServices(*requirementsServices),
             nullptr);
-  EXPECT_NE(requirements::lsp::asTestsServices(*testsServices), nullptr);
+  EXPECT_NE(requirements::asTestsServices(*testsServices), nullptr);
   // ...and a container of one language must NOT be mistaken for the other:
   // service_cast disambiguates the two sibling languages on the same registry.
-  EXPECT_EQ(requirements::lsp::asTestsServices(*requirementsServices), nullptr);
-  EXPECT_EQ(requirements::lsp::asRequirementsServices(*testsServices), nullptr);
+  EXPECT_EQ(requirements::asTestsServices(*requirementsServices), nullptr);
+  EXPECT_EQ(requirements::asRequirementsServices(*testsServices), nullptr);
 }
 
 TEST(RequirementsModuleTest, GoodFixturePublishesNoDiagnosticsAcrossDocuments) {
@@ -245,7 +245,7 @@ TEST(RequirementsModuleTest, GoodFixturePublishesNoDiagnosticsAcrossDocuments) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(requirements::lsp::registerRequirementsServices(*shared));
+  ASSERT_TRUE(requirements::registerRequirementsLspServices(*shared));
 
   auto documents = open_fixture_set(*shared, "good");
 
@@ -279,7 +279,7 @@ TEST(RequirementsModuleTest, Bad1FixturePublishesExpectedSingleWarnings) {
     pegium::installDefaultSharedCoreServices(*shared);
     pegium::installDefaultSharedLspServices(*shared);
     pegium::test::initialize_shared_workspace_for_tests(*shared);
-    ASSERT_TRUE(requirements::lsp::registerRequirementsServices(*shared));
+    ASSERT_TRUE(requirements::registerRequirementsLspServices(*shared));
 
     auto documents = open_fixture_set(*shared, "bad1");
 
@@ -302,7 +302,7 @@ TEST(RequirementsModuleTest,
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(requirements::lsp::registerRequirementsServices(*shared));
+  ASSERT_TRUE(requirements::registerRequirementsLspServices(*shared));
 
   auto documents = open_fixture_set(*shared, "bad2");
 
@@ -337,8 +337,8 @@ TEST(RequirementsModuleTest, RequirementsFormatterFormatsCompactModel) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      requirements::lsp::createRequirementsServices(*shared,
-                                                    "requirements-lang");
+      requirements::createRequirementsLspServices(*shared,
+                                                  "requirements-lang");
 
   ASSERT_NE(registeredServices, nullptr);
   shared->serviceRegistry->registerServices(std::move(registeredServices));
@@ -375,7 +375,7 @@ TEST(RequirementsModuleTest, TestsFormatterFormatsCompactModel) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      requirements::lsp::createTestsServices(*shared, "tests-lang");
+      requirements::createTestsLspServices(*shared, "tests-lang");
 
   ASSERT_NE(registeredServices, nullptr);
   shared->serviceRegistry->registerServices(std::move(registeredServices));
@@ -408,27 +408,27 @@ TEST(RequirementsModuleTest, GeneratorMatchesExpectedCoverageRows) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
-      requirements::lsp::createRequirementsAndTestsServices(*shared);
+      requirements::createRequirementsAndTestsLspServices(*shared);
   auto &requirementsServices = *services.requirements;
   shared->serviceRegistry->registerServices(std::move(services.requirements));
   shared->serviceRegistry->registerServices(std::move(services.tests));
 
-  const auto extracted = requirements::cli::extract_requirement_model_with_test_models(
+  const auto extracted = requirements::extract_requirement_model_with_test_models(
       std::filesystem::absolute(example_root() / "requirements.req").string(),
       requirementsServices);
 
-  const auto html = requirements::cli::generate_summary_file_html_content(
+  const auto html = requirements::generate_summary_file_html_content(
       *extracted.requirementModel, extracted.testModels);
   EXPECT_EQ(html, expected_example_html());
 }
 
 TEST(RequirementsModuleTest, ExtractDestinationAndNameUsesDefaultCliConvention) {
-  const auto data = requirements::cli::extract_destination_and_name(
+  const auto data = requirements::extract_destination_and_name(
       "/tmp/some-dir/requirements.req", std::nullopt);
   EXPECT_EQ(data.destination, "generated");
   EXPECT_EQ(data.name, "requirements");
 
-  const auto overridden = requirements::cli::extract_destination_and_name(
+  const auto overridden = requirements::extract_destination_and_name(
       "/tmp/some-dir/requirements.req", "/tmp/out");
   EXPECT_EQ(overridden.destination, "/tmp/out");
   EXPECT_EQ(overridden.name, "requirements");

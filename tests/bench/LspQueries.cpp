@@ -1,6 +1,6 @@
 #include "BenchmarkSupport.hpp"
 
-#include <arithmetics/core/Module.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 #include <arithmetics/core/ast.hpp>
 
 #include <array>
@@ -45,7 +45,7 @@ std::shared_ptr<BenchmarkFixture> build_lspquery_fixture(std::string source) {
       .name = "lspquery",
       .languageId = "arithmetics",
       .extension = ".calc",
-      .registerLanguages = arithmetics::registerArithmeticsServices,
+      .registerLanguages = arithmetics::registerArithmeticsCoreServices,
       .makeSource = [](std::size_t) { return std::string{}; },
   };
 

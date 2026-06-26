@@ -4,7 +4,7 @@
 
 #include <pegium/lsp/formatting/AbstractFormatter.hpp>
 
-namespace domainmodel::lsp {
+namespace domainmodel {
 
 class DomainModelFormatter : public pegium::AbstractFormatter {
 public:
@@ -26,4 +26,4 @@ protected:
   virtual void formatLineComment(HiddenNodeFormatter &comment) const;
 };
 
-} // namespace domainmodel::lsp
+} // namespace domainmodel

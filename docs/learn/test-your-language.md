@@ -17,14 +17,14 @@ pipeline, then assert on diagnostics and the typed AST:
 #include <gtest/gtest.h>
 
 #include <pegium/cli/CliUtils.hpp>      // make_shared_services, build_document_from_path
-#include <statemachine/core/Module.hpp> // your createStatemachineServices
+#include <statemachine/core/CoreModule.hpp> // your createStatemachineCoreServices
 
 TEST(MyLanguage, ParsesAndValidates) {
   // 1. Build a shared runtime and register your language on it (the same calls
   //    your cli/lsp main() makes).
   auto sharedServices = pegium::cli::make_shared_services();
   auto &shared = *sharedServices;
-  auto services = statemachine::createStatemachineServices(shared);
+  auto services = statemachine::createStatemachineCoreServices(shared);
   auto &langServices = *services;
   shared.serviceRegistry->registerServices(std::move(services));
 
@@ -49,8 +49,8 @@ What the helpers do (all part of the public `pegium::cli` surface):
 
 - `make_shared_services()` creates the process-wide shared runtime — the same one
   your `main` would build.
-- `createStatemachineServices(shared)` / `registerServices(...)` is your own
-  language registration (the function from `core/Module.cpp`).
+- `createStatemachineCoreServices(shared)` / `registerServices(...)` is your own
+  language registration (the function from `core/CoreModule.cpp`).
 - `build_document_from_path(path, langServices)` reads the file and runs every
   build phase, so by the time it returns diagnostics are populated and references
   are linked. Pass `validation = false` to stop after linking.
@@ -97,11 +97,11 @@ Markers in the source: `<|>` is a cursor index (pick one with `.index`), and
 ```cpp
 #include <gtest/gtest.h>
 #include <pegium/testing/Testing.hpp>
-#include <statemachine/lsp/Module.hpp>
+#include <statemachine/lsp/LspModule.hpp>
 
 TEST(Statemachine, CompletesStateNames) {
   pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(statemachine::lsp::createStatemachineServices(ws.shared()));
+  ws.registerLanguage(statemachine::createStatemachineLspServices(ws.shared()));
 
   pegium::testing::expectValidation(ws, "statemachine", {
       .text = "state idle",

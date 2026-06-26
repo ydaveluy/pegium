@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/lsp/Module.hpp>
+#include <arithmetics/lsp/LspModule.hpp>
 #include <arithmetics/core/ArithmeticParser.hpp>
 
 #include "LanguageTestSupport.hpp"

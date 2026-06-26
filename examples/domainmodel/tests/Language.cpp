@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <domainmodel/core/Module.hpp>
+#include <domainmodel/core/CoreModule.hpp>
 #include <domainmodel/core/DomainModelParser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
@@ -29,7 +29,7 @@ TEST(DomainModelLanguageTest, ResolvesTypeReferenceToEntitySubtype) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::registerDomainModelServices(*shared));
+  ASSERT_TRUE(domainmodel::registerDomainModelCoreServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("types.dmodel"), "domain-model",

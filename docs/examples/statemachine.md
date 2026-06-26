@@ -18,7 +18,7 @@ A compact modeling example where semantic rules matter more than expression pars
 
 ## What to read first
 
-- `examples/statemachine/src/statemachine/core/Module.cpp` for the service setup
+- `examples/statemachine/src/statemachine/core/CoreModule.cpp` for the service setup
 - `examples/statemachine/src/statemachine/core/validation/StatemachineValidator.cpp` for typed validation checks
 - `examples/statemachine/src/statemachine/lsp/StatemachineFormatter.cpp` for the formatter
 

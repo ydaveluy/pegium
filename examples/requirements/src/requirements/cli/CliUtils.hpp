@@ -13,7 +13,7 @@ namespace pegium::workspace {
 class Document;
 }
 
-namespace requirements::cli {
+namespace requirements {
 
 struct FilePathData {
   std::string destination;
@@ -35,4 +35,4 @@ struct ExtractedRequirementModelWithTests {
 extract_requirement_model_with_test_models(
     std::string_view fileName, const pegium::CoreServices &services);
 
-} // namespace requirements::cli
+} // namespace requirements

@@ -14,7 +14,7 @@
 #include <pegium/core/workspace/WorkspaceManager.hpp>
 #include <pegium/core/workspace/WorkspaceProtocol.hpp>
 
-namespace domainmodel::cli {
+namespace domainmodel {
 namespace {
 
 [[nodiscard]] std::string sanitize_file_stem(std::string_view filePath) {
@@ -66,4 +66,4 @@ extract_ast_node(const pegium::workspace::Document &document) {
   return *model;
 }
 
-} // namespace domainmodel::cli
+} // namespace domainmodel

@@ -66,8 +66,8 @@ You get:
 |-----------------------------------------|--------------------------------------------|
 | `src/mylang/core/MyLangParser.hpp`          | grammar rules and terminals                |
 | `src/mylang/core/ast.hpp`                    | AST types and reference fields             |
-| `src/mylang/core/Module.cpp`            | core service wiring (parser, validator…)   |
-| `src/mylang/lsp/Module.cpp`             | LSP feature wiring (formatter, hover…)     |
+| `src/mylang/core/CoreModule.cpp`            | core service wiring (parser, validator…)   |
+| `src/mylang/lsp/LspModule.cpp`             | LSP feature wiring (formatter, hover…)     |
 | `example/hello.<ext>`                   | sample input the smoke test parses         |
 | `test/`                                 | add tests (globbed — new files need no CMake change) |
 | `CMakeLists.txt`                        | the Pegium tag this project pins           |

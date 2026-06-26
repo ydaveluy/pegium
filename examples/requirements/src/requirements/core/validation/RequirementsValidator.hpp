@@ -5,6 +5,7 @@
 
 #include <requirements/core/ast.hpp>
 
+#include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/utils/Caching.hpp>
 #include <pegium/core/validation/ValidationAcceptor.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
@@ -42,17 +43,17 @@ private:
       _coveredCache;
 };
 
-template <typename TServices>
-void registerRequirementsValidationChecks(TServices &services) {
+inline void
+registerRequirementsValidationChecks(pegium::CoreServices &services,
+                                     RequirementsValidator &validator) {
   auto &registry = *services.validation.validationRegistry;
-  auto &validator = *services.validator;
   auto *documents = services.shared.workspace.documents.get();
 
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
           &RequirementsValidator::checkRequirementNameContainsANumber>(
           validator)});
-  registry.template registerCheck<requirements::ast::Requirement>(
+  registry.registerCheck<requirements::ast::Requirement>(
       [validator = &validator, documents](
           const requirements::ast::Requirement &requirement,
           const pegium::validation::ValidationAcceptor &accept) {

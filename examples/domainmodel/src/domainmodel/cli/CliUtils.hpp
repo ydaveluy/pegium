@@ -12,7 +12,7 @@ namespace pegium::workspace {
 class Document;
 }
 
-namespace domainmodel::cli {
+namespace domainmodel {
 
 struct FilePathData {
   std::string destination;
@@ -30,4 +30,4 @@ void set_root_folder(std::string_view fileName,
 [[nodiscard]] const ast::DomainModel &
 extract_ast_node(const pegium::workspace::Document &document);
 
-} // namespace domainmodel::cli
+} // namespace domainmodel

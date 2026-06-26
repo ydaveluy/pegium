@@ -16,7 +16,7 @@ This means:
 
 ## A living example
 
-See `examples/requirements/src/requirements/core/Module.cpp`. It builds one service factory for requirements files and another for test files:
+See `examples/requirements/src/requirements/core/CoreModule.cpp`. It builds one service factory for requirements files and another for test files:
 
 ```cpp
 std::unique_ptr<RequirementsCoreServices>
@@ -31,7 +31,7 @@ createRequirementsServices(const pegium::SharedCoreServices &sharedServices,
 
 The second factory follows the same pattern but swaps parser, extensions, and validator for the `tests-lang` language.
 
-The LSP-specific formatters live separately in `examples/requirements/src/requirements/lsp/Module.cpp`, where the same core setup is reused and the formatter is added on top.
+The LSP-specific formatters live separately in `examples/requirements/src/requirements/lsp/LspModule.cpp`, where the same core setup is reused and the formatter is added on top.
 
 ## Registration
 

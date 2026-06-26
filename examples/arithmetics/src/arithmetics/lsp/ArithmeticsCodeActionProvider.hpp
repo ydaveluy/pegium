@@ -2,7 +2,7 @@
 
 #include <pegium/lsp/code-actions/DefaultCodeActionProvider.hpp>
 
-namespace arithmetics::lsp {
+namespace arithmetics {
 
 class ArithmeticsCodeActionProvider final
     : public pegium::DefaultCodeActionProvider {
@@ -13,4 +13,4 @@ protected:
       const pegium::utils::CancellationToken &cancelToken) const override;
 };
 
-} // namespace arithmetics::lsp
+} // namespace arithmetics

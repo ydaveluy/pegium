@@ -1,9 +1,9 @@
 #include "BenchmarkSupport.hpp"
 
-#include <arithmetics/core/Module.hpp>
-#include <domainmodel/core/Module.hpp>
-#include <requirements/core/Module.hpp>
-#include <statemachine/core/Module.hpp>
+#include <arithmetics/core/CoreModule.hpp>
+#include <domainmodel/core/CoreModule.hpp>
+#include <requirements/core/CoreModule.hpp>
+#include <statemachine/core/CoreModule.hpp>
 
 // Per-language workspace benchmarks: build many self-contained files of one
 // language simultaneously at startup (a small ~250 KB workspace and a large
@@ -213,19 +213,19 @@ void register_language_workspaces(BenchmarkRegistry &registry,
 
 void register_workspace_benchmarks(BenchmarkRegistry &registry) {
   register_language_workspaces(registry, "arithmetics", "arithmetics", ".calc",
-                               arithmetics::registerArithmeticsServices,
+                               arithmetics::registerArithmeticsCoreServices,
                                arithmetics_file);
   register_language_workspaces(registry, "domainmodel", "domain-model",
                                ".dmodel",
-                               domainmodel::registerDomainModelServices,
+                               domainmodel::registerDomainModelCoreServices,
                                domainmodel_file);
   register_language_workspaces(registry, "requirements", "requirements-lang",
                                ".req",
-                               requirements::registerRequirementsServices,
+                               requirements::registerRequirementsCoreServices,
                                requirements_file);
   register_language_workspaces(registry, "statemachine", "statemachine",
                                ".statemachine",
-                               statemachine::registerStatemachineServices,
+                               statemachine::registerStatemachineCoreServices,
                                statemachine_file);
 }
 

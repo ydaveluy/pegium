@@ -21,7 +21,7 @@ Source: [examples/arithmetics](https://github.com/ydaveluy/pegium/tree/main/exam
 
 - `examples/arithmetics/src/arithmetics/core/ArithmeticParser.hpp` for the grammar and rule definitions
 - `examples/arithmetics/src/arithmetics/core/ast.hpp` for the AST shape
-- `examples/arithmetics/src/arithmetics/core/Module.cpp` for service wiring
+- `examples/arithmetics/src/arithmetics/core/CoreModule.cpp` for service wiring
 - `examples/arithmetics/src/arithmetics/core/Language.cpp` for evaluating the parsed AST
 - `examples/arithmetics/src/arithmetics/core/validation/ArithmeticsValidator.cpp` for semantic checks
 - `examples/arithmetics/src/arithmetics/lsp/ArithmeticsFormatter.cpp` for formatter rules

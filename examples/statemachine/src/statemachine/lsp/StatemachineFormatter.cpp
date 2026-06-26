@@ -1,6 +1,6 @@
 #include <statemachine/lsp/StatemachineFormatter.hpp>
 
-namespace statemachine::lsp {
+namespace statemachine {
 void StatemachineFormatter::formatStatemachine(
     pegium::FormattingBuilder &builder,
     const ast::Statemachine *model) const {
@@ -58,4 +58,4 @@ StatemachineFormatter::StatemachineFormatter(
   on<ast::Transition>(&StatemachineFormatter::formatTransition);
 }
 
-} // namespace statemachine::lsp
+} // namespace statemachine

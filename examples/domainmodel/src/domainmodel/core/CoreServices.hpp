@@ -9,15 +9,9 @@
 namespace domainmodel {
 
 /// Domain-model-specific services grafted onto any pegium service container.
+/// The `unique_ptr` members already make it move-only; it needs no destructor of
+/// its own — `service_cast` reaches it through the polymorphic `CoreServices`.
 struct DomainModelAddedServices {
-  DomainModelAddedServices() = default;
-  DomainModelAddedServices(DomainModelAddedServices &&) noexcept = default;
-  DomainModelAddedServices &operator=(DomainModelAddedServices &&) noexcept =
-      default;
-  DomainModelAddedServices(const DomainModelAddedServices &) = delete;
-  DomainModelAddedServices &operator=(const DomainModelAddedServices &) = delete;
-  virtual ~DomainModelAddedServices() noexcept = default;
-
   std::shared_ptr<const references::QualifiedNameProvider> qualifiedNameProvider;
   std::unique_ptr<validation::DomainModelValidator> validator;
 };

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <requirements/core/Module.hpp>
+#include <requirements/core/CoreModule.hpp>
 #include <requirements/core/RequirementsParser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>

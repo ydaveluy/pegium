@@ -18,7 +18,7 @@ Source: [examples/domainmodel](https://github.com/ydaveluy/pegium/tree/main/exam
 
 ## What to read first
 
-- `examples/domainmodel/src/domainmodel/core/Module.cpp` for service composition
+- `examples/domainmodel/src/domainmodel/core/CoreModule.cpp` for service composition
 - `examples/domainmodel/src/domainmodel/core/ast.hpp` for declarations built on
   `pegium::NamedAstNode`
 - `examples/domainmodel/src/domainmodel/core/references/QualifiedNameProvider.cpp` for

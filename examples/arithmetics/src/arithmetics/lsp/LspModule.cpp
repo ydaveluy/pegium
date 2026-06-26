@@ -1,21 +1,13 @@
-#include <arithmetics/lsp/Module.hpp>
+#include <arithmetics/lsp/LspModule.hpp>
 
 #include <utility>
 
-#include <arithmetics/core/ModuleImpl.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 #include <arithmetics/lsp/ArithmeticsCodeActionProvider.hpp>
 #include <arithmetics/lsp/ArithmeticsFormatter.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 
 namespace arithmetics {
-
-void installArithmeticsCoreModule(lsp::ArithmeticsServices &services) {
-  detail::applyArithmeticsCoreModule(services);
-}
-
-} // namespace arithmetics
-
-namespace arithmetics::lsp {
 
 void installArithmeticsLspModule(ArithmeticsServices &services) {
   services.lsp.codeActionProvider =
@@ -24,19 +16,21 @@ void installArithmeticsLspModule(ArithmeticsServices &services) {
 }
 
 std::unique_ptr<ArithmeticsServices>
-createArithmeticsServices(const pegium::SharedServices &sharedServices,
-                          std::string languageId) {
+createArithmeticsLspServices(const pegium::SharedServices &sharedServices,
+                             std::string languageId) {
   auto services = pegium::makeDefaultServices<ArithmeticsServices>(
       sharedServices, std::move(languageId));
-  arithmetics::installArithmeticsCoreModule(*services);
+  // The container is-a CoreServices and is-a ArithmeticsAddedServices, so it
+  // binds both parameters of the (non-template) core wiring.
+  installArithmeticsCoreModule(*services, *services);
   installArithmeticsLspModule(*services);
   return services;
 }
 
-bool registerArithmeticsServices(pegium::SharedServices &sharedServices) {
+bool registerArithmeticsLspServices(pegium::SharedServices &sharedServices) {
   sharedServices.serviceRegistry->registerServices(
-      createArithmeticsServices(sharedServices));
+      createArithmeticsLspServices(sharedServices));
   return true;
 }
 
-} // namespace arithmetics::lsp
+} // namespace arithmetics

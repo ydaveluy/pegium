@@ -1,6 +1,6 @@
 #include <requirements/cli/CliUtils.hpp>
 #include <requirements/cli/Generator.hpp>
-#include <requirements/core/Module.hpp>
+#include <requirements/core/CoreModule.hpp>
 
 #include <pegium/cli/CliUtils.hpp>
 
@@ -38,13 +38,13 @@ std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
 int generate_cli(const GenerateOptions &options) {
   auto sharedServices = pegium::cli::make_shared_services();
   auto &shared = *sharedServices;
-  auto services = requirements::createRequirementsAndTestsServices(shared);
+  auto services = requirements::createRequirementsAndTestsCoreServices(shared);
   auto &requirementsServices = *services.requirements;
   shared.serviceRegistry->registerServices(std::move(services.requirements));
   shared.serviceRegistry->registerServices(std::move(services.tests));
 
   const auto absoluteInputPath = std::filesystem::absolute(options.fileName);
-  const auto extracted = requirements::cli::extract_requirement_model_with_test_models(
+  const auto extracted = requirements::extract_requirement_model_with_test_models(
       absoluteInputPath.string(), requirementsServices);
 
   for (const auto &document : extracted.documents) {
@@ -55,7 +55,7 @@ int generate_cli(const GenerateOptions &options) {
     }
   }
 
-  const auto outputPath = requirements::cli::generate_summary(
+  const auto outputPath = requirements::generate_summary(
       *extracted.requirementModel, extracted.testModels, absoluteInputPath.string(),
       options.destination.has_value()
           ? std::optional<std::string_view>(*options.destination)

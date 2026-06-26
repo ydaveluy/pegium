@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace domainmodel::cli {
+namespace domainmodel {
 namespace {
 
 using namespace domainmodel::ast;
@@ -170,4 +170,4 @@ std::string generate_java(const ast::DomainModel &model, std::string_view filePa
   return (std::filesystem::path(data.destination) / data.name).string();
 }
 
-} // namespace domainmodel::cli
+} // namespace domainmodel

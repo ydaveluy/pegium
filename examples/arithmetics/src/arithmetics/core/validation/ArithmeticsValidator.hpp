@@ -4,6 +4,7 @@
 
 #include <string_view>
 
+#include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/validation/ValidationAcceptor.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
 
@@ -38,10 +39,9 @@ public:
       const pegium::validation::ValidationAcceptor &accept) const;
 };
 
-template <typename TServices>
-void registerValidationChecks(TServices &services) {
+inline void registerValidationChecks(pegium::CoreServices &services,
+                                     ArithmeticsValidator &validator) {
   auto &registry = *services.validation.validationRegistry;
-  auto &validator = *services.validator;
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
            &ArithmeticsValidator::checkDivByZero>(validator),

@@ -7,9 +7,9 @@
 #include <domainmodel/core/ast.hpp>
 #include <domainmodel/cli/CliUtils.hpp>
 
-namespace domainmodel::cli {
+namespace domainmodel {
 
 std::string generate_java(const ast::DomainModel &model, std::string_view filePath,
                           std::optional<std::string_view> destination);
 
-} // namespace domainmodel::cli
+} // namespace domainmodel

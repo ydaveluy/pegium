@@ -1,10 +1,10 @@
 #pragma once
 
-#include <domainmodel/core/Services.hpp>
+#include <domainmodel/core/CoreServices.hpp>
 #include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
-namespace domainmodel::lsp {
+namespace domainmodel {
 
 /// LSP-enabled domain-model language services.
 struct DomainModelServices final : pegium::Services,
@@ -17,4 +17,4 @@ asDomainModelServices(const pegium::Services &services) noexcept {
   return pegium::service_cast<DomainModelServices>(services);
 }
 
-} // namespace domainmodel::lsp
+} // namespace domainmodel

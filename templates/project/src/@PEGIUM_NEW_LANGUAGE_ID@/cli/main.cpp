@@ -1,4 +1,4 @@
-#include <@PEGIUM_NEW_LANGUAGE_ID@/core/Module.hpp>
+#include <@PEGIUM_NEW_LANGUAGE_ID@/core/CoreModule.hpp>
 
 #include <pegium/cli/CliUtils.hpp>
 
@@ -13,7 +13,7 @@ int main(int argc, char **argv) {
   try {
     auto sharedServices = pegium::cli::make_shared_services();
     auto &shared = *sharedServices;
-    auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@Services(shared);
+    auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@CoreServices(shared);
     auto &langServices = *services;
     shared.serviceRegistry->registerServices(std::move(services));
 

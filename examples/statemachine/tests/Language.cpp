@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <statemachine/core/StateMachineParser.hpp>
-#include <statemachine/core/Module.hpp>
+#include <statemachine/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 
@@ -30,7 +30,7 @@ TEST(StatemachineLanguageTest, LinksInitialStateTransitionAndActionReferences) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(statemachine::registerStatemachineServices(*shared));
+  ASSERT_TRUE(statemachine::registerStatemachineCoreServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("linked.statemachine"),

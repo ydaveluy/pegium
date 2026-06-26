@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-namespace statemachine::cli {
+namespace statemachine {
 namespace {
 
 using namespace statemachine::ast;
@@ -225,4 +225,4 @@ std::string generate_cpp(const ast::Statemachine &model,
   return outputPath.string();
 }
 
-} // namespace statemachine::cli
+} // namespace statemachine

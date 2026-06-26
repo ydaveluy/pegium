@@ -1,5 +1,5 @@
 #include <statemachine/cli/Generator.hpp>
-#include <statemachine/core/Module.hpp>
+#include <statemachine/core/CoreModule.hpp>
 
 #include <pegium/cli/CliUtils.hpp>
 
@@ -36,7 +36,7 @@ std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
 int generate_cpp_cli(const GenerateOptions &options) {
   auto sharedServices = pegium::cli::make_shared_services();
   auto &shared = *sharedServices;
-  auto services = statemachine::createStatemachineServices(shared);
+  auto services = statemachine::createStatemachineCoreServices(shared);
   auto &statemachineServices = *services;
   shared.serviceRegistry->registerServices(std::move(services));
 
@@ -57,7 +57,7 @@ int generate_cpp_cli(const GenerateOptions &options) {
 
   // The error-diagnostics gate above rejects unresolved references; the
   // generator throws (caught in main) for any remaining precondition.
-  const auto outputPath = statemachine::cli::generate_cpp(
+  const auto outputPath = statemachine::generate_cpp(
       *model, options.fileName,
       options.destination.has_value()
           ? std::optional<std::string_view>(*options.destination)

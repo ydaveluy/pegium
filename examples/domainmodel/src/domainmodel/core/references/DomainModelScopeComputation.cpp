@@ -1,6 +1,6 @@
 #include <domainmodel/core/references/DomainModelScopeComputation.hpp>
 
-#include <domainmodel/core/Services.hpp>
+#include <domainmodel/core/CoreServices.hpp>
 #include <domainmodel/core/references/QualifiedNameProvider.hpp>
 
 #include <pegium/core/services/CoreServices.hpp>

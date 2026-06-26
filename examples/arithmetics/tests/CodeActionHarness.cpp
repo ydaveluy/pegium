@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <arithmetics/core/validation/ArithmeticsValidator.hpp>
-#include <arithmetics/lsp/Module.hpp>
+#include <arithmetics/lsp/LspModule.hpp>
 
 #include <pegium/testing/Testing.hpp>
 
@@ -14,7 +14,7 @@ namespace {
 
 TEST(ArithmeticsCodeActionHarness, NormalizesConstantExpression) {
   pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(arithmetics::lsp::createArithmeticsServices(ws.shared()));
+  ws.registerLanguage(arithmetics::createArithmeticsLspServices(ws.shared()));
 
   const auto result = pegium::testing::testCodeAction(
       ws, "arithmetics",

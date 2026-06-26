@@ -1,10 +1,10 @@
 #pragma once
 
-#include <requirements/core/Services.hpp>
+#include <requirements/core/CoreServices.hpp>
 #include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
-namespace requirements::lsp {
+namespace requirements {
 
 /// LSP-enabled requirements language services.
 struct RequirementsServices final : pegium::Services,
@@ -27,4 +27,4 @@ asTestsServices(const pegium::Services &services) noexcept {
   return pegium::service_cast<TestsServices>(services);
 }
 
-} // namespace requirements::lsp
+} // namespace requirements

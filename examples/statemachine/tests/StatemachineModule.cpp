@@ -10,8 +10,8 @@
 #include <type_traits>
 
 #include <statemachine/cli/Generator.hpp>
-#include <statemachine/lsp/Module.hpp>
-#include <statemachine/lsp/Services.hpp>
+#include <statemachine/lsp/LspModule.hpp>
+#include <statemachine/lsp/LspServices.hpp>
 
 #include <pegium/core/references/DefaultNameProvider.hpp>
 #include <statemachine/lsp/StatemachineFormatter.hpp>
@@ -65,7 +65,7 @@ TEST(StatemachineModuleTest, SplitsValidationIntoDedicatedClass) {
   static_assert(std::is_class_v<
                 statemachine::validation::StatemachineValidator>);
   static_assert(std::is_base_of_v<pegium::Services,
-                                  statemachine::lsp::StatemachineServices>);
+                                  statemachine::StatemachineServices>);
   SUCCEED();
 }
 
@@ -75,7 +75,7 @@ TEST(StatemachineModuleTest, InstallsFormatterOverride) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
-      statemachine::lsp::createStatemachineServices(*shared, "statemachine");
+      statemachine::createStatemachineLspServices(*shared, "statemachine");
 
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->validator,
@@ -83,7 +83,7 @@ TEST(StatemachineModuleTest, InstallsFormatterOverride) {
   EXPECT_NE(dynamic_cast<pegium::references::DefaultNameProvider *>(
                 services->references.nameProvider.get()),
             nullptr);
-  EXPECT_NE(dynamic_cast<statemachine::lsp::StatemachineFormatter *>(
+  EXPECT_NE(dynamic_cast<statemachine::StatemachineFormatter *>(
                 services->lsp.formatter.get()),
             nullptr);
 
@@ -99,7 +99,7 @@ TEST(StatemachineModuleTest, ValidatorWarnsOnLowerCaseStateName) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(statemachine::lsp::registerStatemachineServices(*shared));
+  ASSERT_TRUE(statemachine::registerStatemachineLspServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("machine.statemachine"),
@@ -119,7 +119,7 @@ TEST(StatemachineModuleTest, ValidatorReportsDuplicateStatesAndEvents) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(statemachine::lsp::registerStatemachineServices(*shared));
+  ASSERT_TRUE(statemachine::registerStatemachineLspServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("machine-duplicates.statemachine"),
@@ -149,7 +149,7 @@ TEST(StatemachineModuleTest, FormatterFormatsCompactMachine) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto registeredServices =
-      statemachine::lsp::createStatemachineServices(*shared, "statemachine");
+      statemachine::createStatemachineLspServices(*shared, "statemachine");
 
   ASSERT_NE(registeredServices, nullptr);
   shared->serviceRegistry->registerServices(std::move(registeredServices));
@@ -196,12 +196,12 @@ TEST(StatemachineModuleTest, CreateLanguageServicesReturnsTypedServices) {
   pegium::installDefaultSharedLspServices(*shared);
 
   auto services =
-      statemachine::lsp::createStatemachineServices(*shared, "statemachine");
+      statemachine::createStatemachineLspServices(*shared, "statemachine");
 
   ASSERT_NE(services, nullptr);
   EXPECT_NE(services->validator,
             nullptr);
-  EXPECT_NE(statemachine::lsp::asStatemachineServices(*services),
+  EXPECT_NE(statemachine::asStatemachineServices(*services),
             nullptr);
 }
 
@@ -210,7 +210,7 @@ TEST(StatemachineModuleTest, GeneratorMatchesExpectedExampleOutput) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(statemachine::lsp::registerStatemachineServices(*shared));
+  ASSERT_TRUE(statemachine::registerStatemachineLspServices(*shared));
 
   auto document = shared->workspace.documents->createDocument(
       pegium::test::make_file_uri("trafficlight.statemachine"),
@@ -252,7 +252,7 @@ TEST(StatemachineModuleTest, GeneratorMatchesExpectedExampleOutput) {
   auto *model = pegium::ast_ptr_cast<ast::Statemachine>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
 
-  EXPECT_EQ(statemachine::cli::generate_cpp_content(*model),
+  EXPECT_EQ(statemachine::generate_cpp_content(*model),
             "#include <iostream>\n"
             "#include <map>\n"
             "#include <string>\n"
@@ -415,7 +415,7 @@ TEST(StatemachineModuleTest, GeneratorDedupesTransitionsSharingAnEvent) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(statemachine::lsp::registerStatemachineServices(*shared));
+  ASSERT_TRUE(statemachine::registerStatemachineLspServices(*shared));
 
   auto document = shared->workspace.documents->createDocument(
       pegium::test::make_file_uri("dup-event.statemachine"),
@@ -447,7 +447,7 @@ TEST(StatemachineModuleTest, GeneratorDedupesTransitionsSharingAnEvent) {
   auto *model = pegium::ast_ptr_cast<ast::Statemachine>(document->parseResult.value);
   ASSERT_NE(model, nullptr);
 
-  const auto content = statemachine::cli::generate_cpp_content(*model);
+  const auto content = statemachine::generate_cpp_content(*model);
   const auto count = [&content](std::string_view needle) {
     std::size_t found = 0;
     for (auto pos = content.find(needle); pos != std::string::npos;

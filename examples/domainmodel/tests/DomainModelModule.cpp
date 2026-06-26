@@ -12,8 +12,8 @@
 
 #include <domainmodel/cli/CliUtils.hpp>
 #include <domainmodel/cli/Generator.hpp>
-#include <domainmodel/lsp/Module.hpp>
-#include <domainmodel/lsp/Services.hpp>
+#include <domainmodel/lsp/LspModule.hpp>
+#include <domainmodel/lsp/LspServices.hpp>
 
 #include <domainmodel/lsp/DomainModelFormatter.hpp>
 #include <domainmodel/lsp/DomainModelRenameProvider.hpp>
@@ -167,7 +167,7 @@ TEST(DomainModelModuleTest, InstallsLanguageSpecificOverrides) {
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
   auto services =
-      domainmodel::lsp::createDomainModelServices(*shared, "domain-model");
+      domainmodel::createDomainModelLspServices(*shared, "domain-model");
 
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->qualifiedNameProvider, nullptr);
@@ -178,10 +178,10 @@ TEST(DomainModelModuleTest, InstallsLanguageSpecificOverrides) {
   EXPECT_NE(dynamic_cast<domainmodel::references::DomainModelScopeComputation *>(
                 services->references.scopeComputation.get()),
             nullptr);
-  EXPECT_NE(dynamic_cast<domainmodel::lsp::DomainModelRenameProvider *>(
+  EXPECT_NE(dynamic_cast<domainmodel::DomainModelRenameProvider *>(
                 services->lsp.renameProvider.get()),
             nullptr);
-  EXPECT_NE(dynamic_cast<domainmodel::lsp::DomainModelFormatter *>(
+  EXPECT_NE(dynamic_cast<domainmodel::DomainModelFormatter *>(
                 services->lsp.formatter.get()),
             nullptr);
 
@@ -205,7 +205,7 @@ TEST(DomainModelModuleTest, ValidatorWarnsOnLowerCaseTypeName) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::lsp::registerDomainModelServices(*shared));
+  ASSERT_TRUE(domainmodel::registerDomainModelLspServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("domainmodel-module.dmodel"),
@@ -221,7 +221,7 @@ TEST(DomainModelModuleTest, ValidatorWarnsOnLowerCaseDataTypeName) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::lsp::registerDomainModelServices(*shared));
+  ASSERT_TRUE(domainmodel::registerDomainModelLspServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("domainmodel-datatype.dmodel"),
@@ -237,7 +237,7 @@ TEST(DomainModelModuleTest, RegistersExampleSpecificServicesInRegistry) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::lsp::registerDomainModelServices(*shared));
+  ASSERT_TRUE(domainmodel::registerDomainModelLspServices(*shared));
 
   const auto *coreServices =
       &shared->serviceRegistry->getServices(
@@ -245,7 +245,7 @@ TEST(DomainModelModuleTest, RegistersExampleSpecificServicesInRegistry) {
   const auto *lspServices = as_services(coreServices);
   ASSERT_NE(lspServices, nullptr);
   const auto *services =
-      domainmodel::lsp::asDomainModelServices(*lspServices);
+      domainmodel::asDomainModelServices(*lspServices);
   ASSERT_NE(services, nullptr);
   EXPECT_NE(services->qualifiedNameProvider, nullptr);
   EXPECT_NE(services->validator, nullptr);
@@ -256,7 +256,7 @@ TEST(DomainModelModuleTest, ScopeComputationQualifiesExportsAndLocalSymbols) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::lsp::registerDomainModelServices(*shared));
+  ASSERT_TRUE(domainmodel::registerDomainModelLspServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("scope-names.dmodel"), "domain-model",
@@ -305,7 +305,7 @@ TEST(DomainModelModuleTest, FindsCrossReferencesFromDeclarations) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::lsp::registerDomainModelServices(*shared));
+  ASSERT_TRUE(domainmodel::registerDomainModelLspServices(*shared));
 
   auto datatypeDocument = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("datatypes.dmodel"), "domain-model",
@@ -350,7 +350,7 @@ TEST(DomainModelModuleTest, ReindexesCrossReferencesAfterDocumentUpdate) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::lsp::registerDomainModelServices(*shared));
+  ASSERT_TRUE(domainmodel::registerDomainModelLspServices(*shared));
 
   auto superDocument = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("super.dmodel"), "domain-model",
@@ -403,7 +403,7 @@ TEST(DomainModelModuleTest,
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::lsp::registerDomainModelServices(*shared));
+  ASSERT_TRUE(domainmodel::registerDomainModelLspServices(*shared));
 
   auto typesDocument = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("rename-types.dmodel"), "domain-model",
@@ -462,7 +462,7 @@ TEST(DomainModelModuleTest, RenameFeatureEditsOnlyFeatureDeclaration) {
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  ASSERT_TRUE(domainmodel::lsp::registerDomainModelServices(*shared));
+  ASSERT_TRUE(domainmodel::registerDomainModelLspServices(*shared));
 
   auto document = pegium::test::open_and_build_document(
       *shared, pegium::test::make_file_uri("rename-feature.dmodel"), "domain-model",
@@ -566,7 +566,7 @@ TEST(DomainModelModuleTest, FormatterFormatsDocument) {
     pegium::installDefaultSharedLspServices(*shared);
     pegium::test::initialize_shared_workspace_for_tests(*shared);
     auto registeredServices =
-        domainmodel::lsp::createDomainModelServices(*shared, "domain-model");
+        domainmodel::createDomainModelLspServices(*shared, "domain-model");
 
     ASSERT_NE(registeredServices, nullptr);
 
@@ -595,13 +595,13 @@ TEST(DomainModelModuleTest, GeneratorCreatesExpectedJavaFiles) {
   auto shared = pegium::test::make_empty_shared_services();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
-  auto services = domainmodel::lsp::createDomainModelServices(*shared);
+  auto services = domainmodel::createDomainModelLspServices(*shared);
   auto &domainmodelServices = *services;
   shared->serviceRegistry->registerServices(std::move(services));
 
   const auto inputPath = example_root() / "qualified-names.dmodel";
   const auto absoluteInputPath = std::filesystem::absolute(inputPath);
-  domainmodel::cli::set_root_folder(absoluteInputPath.string(),
+  domainmodel::set_root_folder(absoluteInputPath.string(),
                                     domainmodelServices,
                                     std::filesystem::absolute(example_root()).string());
   auto document = pegium::cli::build_document_from_path(
@@ -609,10 +609,10 @@ TEST(DomainModelModuleTest, GeneratorCreatesExpectedJavaFiles) {
   ASSERT_NE(document, nullptr);
   ASSERT_TRUE(document->diagnostics.empty());
 
-  const auto &model = domainmodel::cli::extract_ast_node(*document);
+  const auto &model = domainmodel::extract_ast_node(*document);
 
   const auto tempDirectory = make_temp_directory();
-  const auto generatedDir = domainmodel::cli::generate_java(
+  const auto generatedDir = domainmodel::generate_java(
       model, inputPath.string(), tempDirectory.string());
   const auto rootDir = std::filesystem::path(generatedDir);
   EXPECT_TRUE(std::filesystem::exists(rootDir / "E1.java"));
@@ -675,12 +675,12 @@ TEST(DomainModelModuleTest, CliGenerateAcceptsRelativeRoot) {
 }
 
 TEST(DomainModelModuleTest, ExtractDestinationAndNameUsesDefaultCliConvention) {
-  const auto data = domainmodel::cli::extract_destination_and_name(
+  const auto data = domainmodel::extract_destination_and_name(
       "/tmp/some-dir/qualified-names.dmodel", std::nullopt);
   EXPECT_EQ(data.destination, "generated");
   EXPECT_EQ(data.name, "qualifiednames");
 
-  const auto overridden = domainmodel::cli::extract_destination_and_name(
+  const auto overridden = domainmodel::extract_destination_and_name(
       "/tmp/some-dir/qualified-names.dmodel", "/tmp/out");
   EXPECT_EQ(overridden.destination, "/tmp/out");
   EXPECT_EQ(overridden.name, "qualifiednames");

@@ -6,7 +6,7 @@
 
 #include <statemachine/core/ast.hpp>
 
-namespace statemachine::cli {
+namespace statemachine {
 
 [[nodiscard]] std::string
 generate_cpp_content(const ast::Statemachine &model);
@@ -15,4 +15,4 @@ generate_cpp_content(const ast::Statemachine &model);
     const ast::Statemachine &model, std::string_view inputPath,
     std::optional<std::string_view> destination = std::nullopt);
 
-} // namespace statemachine::cli
+} // namespace statemachine

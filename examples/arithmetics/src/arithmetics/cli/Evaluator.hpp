@@ -4,9 +4,9 @@
 
 #include <pegium/core/services/CoreServices.hpp>
 
-namespace arithmetics::cli {
+namespace arithmetics {
 
 int eval_file(std::string_view fileName,
               const pegium::CoreServices &services);
 
-} // namespace arithmetics::cli
+} // namespace arithmetics

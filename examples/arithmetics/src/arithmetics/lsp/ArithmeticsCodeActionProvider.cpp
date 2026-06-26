@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace arithmetics::lsp {
+namespace arithmetics {
 
 void ArithmeticsCodeActionProvider::appendCodeActions(
     const pegium::workspace::Document &document,
@@ -59,4 +59,4 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
   }
 }
 
-} // namespace arithmetics::lsp
+} // namespace arithmetics
