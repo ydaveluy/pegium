@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include "LanguageTestSupport.hpp"
 
@@ -42,7 +42,7 @@ TEST(ArithmeticsLanguageTest,
   static const Case kCases[] = {
       {"MixedMissingSemicolonsKeepFollowingDefinitionsAndFunctionRecoverable",
        [] {
-         parser::ArithmeticParser parser;
+         auto parser = createArithmeticsParser();
          const std::string text =
              "//\n"
              "module basicMath\n"
@@ -58,7 +58,7 @@ TEST(ArithmeticsLanguageTest,
              "    x^(1/y);\n";
 
          auto document = pegium::test::parse_document(
-             parser, text,
+             *parser, text,
              pegium::test::make_file_uri(
                  "mixed-missing-semicolons-keep-following-definitions-and-function-recoverable.calc"),
              "arithmetics");
@@ -80,7 +80,7 @@ TEST(ArithmeticsLanguageTest,
        "def:a | def:b | def:c | def:d | def:root"},
       {"MissingFunctionBodySemicolonAtEofKeepsFinalFunctionRecoverable",
        [] {
-         parser::ArithmeticParser parser;
+         auto parser = createArithmeticsParser();
          const std::string text =
              "Module basicMath\n"
              "\n"
@@ -91,7 +91,7 @@ TEST(ArithmeticsLanguageTest,
              "    root(x, 2)\n";
 
          auto document = pegium::test::parse_document(
-             parser, text,
+             *parser, text,
              pegium::test::make_file_uri(
                  "missing-function-body-semicolon-at-eof-keeps-final-function-recoverable.calc"),
              "arithmetics");
@@ -113,7 +113,7 @@ TEST(ArithmeticsLanguageTest,
        "def:root | def:sqrt"},
       {"MissingSemicolonsAcrossDefinitionAndEvaluationsKeepTrailingCallsRecoverable",
        [] {
-         parser::ArithmeticParser parser;
+         auto parser = createArithmeticsParser();
          const std::string text =
              "Module basicMath\n"
              "\n"
@@ -137,7 +137,7 @@ TEST(ArithmeticsLanguageTest,
              "Sqrt(81) // 9\n";
 
          auto document = pegium::test::parse_document(
-             parser, text,
+             *parser, text,
              pegium::test::make_file_uri(
                  "missing-semicolons-across-definition-and-evaluations-keep-trailing-calls-recoverable.calc"),
              "arithmetics");
@@ -159,7 +159,7 @@ TEST(ArithmeticsLanguageTest,
        "def:a | def:b | def:c | def:d | def:root | def:sqrt | eval | eval | eval | eval | eval"},
       {"MissingDefinitionSemicolonsKeepTrailingFunctionsAndCallsRecoverable",
        [] {
-         parser::ArithmeticParser parser;
+         auto parser = createArithmeticsParser();
          const std::string text =
              "Module basicMath\n"
              "\n"
@@ -183,7 +183,7 @@ TEST(ArithmeticsLanguageTest,
              "Sqrt(81); // 9\n";
 
          auto document = pegium::test::parse_document(
-             parser, text,
+             *parser, text,
              pegium::test::make_file_uri(
                  "missing-definition-semicolons-keep-trailing-functions-and-calls-recoverable.calc"),
              "arithmetics");
@@ -205,7 +205,7 @@ TEST(ArithmeticsLanguageTest,
        "def:a | def:b | def:c | def:d | def:root | def:sqrt | eval | eval | eval | eval | eval"},
       {"MixedDefinitionSemicolonsKeepTrailingFunctionsAndCallsRecoverable",
        [] {
-         parser::ArithmeticParser parser;
+         auto parser = createArithmeticsParser();
          const std::string text =
              "Module basicMath\n"
              "\n"
@@ -231,7 +231,7 @@ TEST(ArithmeticsLanguageTest,
              "Sqrt(81); // 9\n";
 
          auto document = pegium::test::parse_document(
-             parser, text,
+             *parser, text,
              pegium::test::make_file_uri(
                  "mixed-definition-semicolons-keep-trailing-functions-and-calls-recoverable.calc"),
              "arithmetics");
@@ -253,7 +253,7 @@ TEST(ArithmeticsLanguageTest,
        "def:a | def:b | def:b1 | def:b2 | def:c | def:d | def:root | def:sqrt | eval | eval | eval | eval | eval"},
       {"MixedDefinitionColonSemicolonsKeepTrailingFunctionsAndCallsRecoverable",
        [] {
-         parser::ArithmeticParser parser;
+         auto parser = createArithmeticsParser();
          const std::string text =
              "Module basicMath\n"
              "\n"
@@ -279,7 +279,7 @@ TEST(ArithmeticsLanguageTest,
              "Sqrt(81); // 9\n";
 
          auto document = pegium::test::parse_document(
-             parser, text,
+             *parser, text,
              pegium::test::make_file_uri(
                  "mixed-definition-colon-semicolons-keep-trailing-functions-and-calls-recoverable.calc"),
              "arithmetics");
@@ -301,7 +301,7 @@ TEST(ArithmeticsLanguageTest,
        "def:a | def:b | def:b1 | def:b2 | def:c | def:d | def:root | def:sqrt | eval | eval | eval | eval | eval"},
       {"MixedMissingDefinitionColonKeepsTrailingFunctionsAndEvaluationsRecoverable",
        [] {
-         parser::ArithmeticParser parser;
+         auto parser = createArithmeticsParser();
          const std::string text =
              "Module basicMath\n"
              "\n"
@@ -322,7 +322,7 @@ TEST(ArithmeticsLanguageTest,
              "b % 2; // 1\n";
 
          auto document = pegium::test::parse_document(
-             parser, text,
+             *parser, text,
              pegium::test::make_file_uri(
                  "mixed-missing-definition-colon-keeps-trailing-functions-and-evaluations-recoverable.calc"),
              "arithmetics");
@@ -362,7 +362,7 @@ TEST(ArithmeticsLanguageTest,
 
 TEST(ArithmeticsLanguageTest,
      MissingDefinitionAndFunctionSemicolonsKeepTrailingFunctionRecoverable) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "Module basicMath\n"
       "\n"
@@ -378,7 +378,7 @@ TEST(ArithmeticsLanguageTest,
       "    root(x, 2)\n";
 
   auto document = pegium::test::parse_document(
-      parser, text,
+      *parser, text,
       pegium::test::make_file_uri(
           "missing-definition-and-function-semicolons-keep-trailing-function-recoverable.calc"),
       "arithmetics");

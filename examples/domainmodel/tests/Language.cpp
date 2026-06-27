@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <domainmodel/core/CoreModule.hpp>
-#include <domainmodel/core/DomainModelParser.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -10,9 +9,9 @@ namespace domainmodel::tests {
 namespace {
 
 TEST(DomainModelLanguageTest, ParsesEntityModel) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "package blog {\n"
       "  entity Person {}\n"
       "}\n",
@@ -58,9 +57,9 @@ TEST(DomainModelLanguageTest, ResolvesTypeReferenceToEntitySubtype) {
 
 TEST(DomainModelLanguageTest,
      RecoversMissingFeatureColonInFirstEntityWithoutDiscardingTheEntity) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "entity Post {\n"
       "  many comments Comment\n"
       "  title: String\n"

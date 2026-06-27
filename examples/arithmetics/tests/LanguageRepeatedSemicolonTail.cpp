@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include "LanguageTestSupport.hpp"
 
@@ -98,10 +98,10 @@ constexpr std::string_view kLongRepeatedMissingSemicolonTailText =
 
 TEST(ArithmeticsLanguageTest,
      RepeatedMissingSemicolonTailRecoversCompletelyWithInsertOnlyEdits) {
-  parser::ArithmeticParser defaultParser;
+  auto defaultParser = createArithmeticsParser();
 
   auto defaultDocument = pegium::test::parse_document(
-      defaultParser, std::string(kRepeatedMissingSemicolonTailText),
+      *defaultParser, std::string(kRepeatedMissingSemicolonTailText),
       pegium::test::make_file_uri("repeated-missing-semicolon-tail-default.calc"),
       "arithmetics");
 
@@ -130,10 +130,10 @@ TEST(ArithmeticsLanguageTest,
 
 TEST(ArithmeticsLanguageTest,
      LongRepeatedMissingSemicolonTailRecoversCompletelyWithDefaultPlanner) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
 
   auto document = pegium::test::parse_document(
-      parser, std::string(kLongRepeatedMissingSemicolonTailText),
+      *parser, std::string(kLongRepeatedMissingSemicolonTailText),
       pegium::test::make_file_uri("long-repeated-missing-semicolon-tail.calc"),
       "arithmetics");
 

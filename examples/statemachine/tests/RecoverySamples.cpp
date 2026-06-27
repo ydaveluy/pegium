@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <statemachine/core/StateMachineParser.hpp>
+#include <statemachine/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -123,9 +123,9 @@ TEST(StatemachineRecoverySampleCorpusTest, IsNotEmpty) {
 TEST_P(StatemachineRecoverySampleTest, RecoversCompletely) {
   const auto &sample = GetParam();
 
-  parser::StateMachineParser parser;
+  auto parser = createStatemachineParser();
   auto document = pegium::test::parse_document(
-      parser, pegium::test::read_text_file(sample.path),
+      *parser, pegium::test::read_text_file(sample.path),
       pegium::test::make_file_uri(sample.label), "statemachine");
 
   const auto &parsed = document->parseResult;

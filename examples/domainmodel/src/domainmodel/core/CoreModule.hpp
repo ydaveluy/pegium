@@ -8,6 +8,13 @@
 
 namespace domainmodel {
 
+/// Creates a standalone domain-model parser.
+std::unique_ptr<const pegium::parser::Parser> createDomainModelParser();
+
+/// Creates a domain-model parser bound to `core`.
+std::unique_ptr<const pegium::parser::Parser>
+createDomainModelParser(const pegium::CoreServices &core);
+
 /// Wires the domain-model core overrides onto a service container.
 ///
 /// Takes the pegium core base and the domain-model graft as two separate
@@ -21,7 +28,7 @@ void installDomainModelCoreModule(pegium::CoreServices &core,
 /// Builds the core-only domain-model language services.
 std::unique_ptr<DomainModelCoreServices>
 createDomainModelCoreServices(const pegium::SharedCoreServices &sharedServices,
-                          std::string languageId = "domain-model");
+                              std::string languageId = "domain-model");
 
 /// Registers the core-only domain-model services in `sharedServices`.
 bool registerDomainModelCoreServices(pegium::SharedCoreServices &sharedServices);

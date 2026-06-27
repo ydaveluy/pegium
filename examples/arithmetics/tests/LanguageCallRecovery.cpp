@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include "LanguageTestSupport.hpp"
 
@@ -11,7 +11,7 @@ namespace {
 
 TEST(ArithmeticsLanguageTest,
      EmptyCallOpenGroupAndMalformedCallsKeepFollowingStatementsDirectParse) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "Module basicMath\n"
       "\n"
@@ -42,7 +42,7 @@ TEST(ArithmeticsLanguageTest,
       "Sqrt(81/0); // 9\n";
 
   auto document = pegium::test::parse_document(
-      parser, text,
+      *parser, text,
       pegium::test::make_file_uri(
           "empty-call-open-group-and-malformed-calls-direct-parse.calc"),
       "arithmetics");

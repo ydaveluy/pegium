@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -19,9 +19,9 @@ TEST(ArithmeticsRecoveryProbeBatchTest, ReportsBatchBehavior) {
   const auto samples = probe_samples();
   ASSERT_EQ(samples.size(), 2u);
 
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const auto summary = pegium::test::run_recovery_probe_batch(
-      parser, samples, "arithmetics", "arithmetics");
+      *parser, samples, "arithmetics", "arithmetics");
   pegium::test::expect_recovery_probe_summary(
       "arithmetics", summary,
       {.total = 2u,
@@ -41,9 +41,9 @@ TEST(ArithmeticsRecoveryProbeBatchTest,
       });
   ASSERT_NE(sample, samples.end());
 
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   auto document = pegium::test::parse_document(
-      parser, pegium::test::read_text_file(sample->path),
+      *parser, pegium::test::read_text_file(sample->path),
       pegium::test::make_file_uri(sample->label), "arithmetics");
   const auto observation =
       pegium::test::observe_recovery_probe(sample->label, *document);

@@ -2,7 +2,7 @@
 
 #include <arithmetics/core/ast.hpp>
 
-#include <pegium/core/parser/PegiumParser.hpp>
+#include <pegium/core/parser/Parser.hpp>
 
 #include <sstream>
 #include <string>

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
+#include <arithmetics/core/Language.hpp>
 
 #include <pegium/core/grammar/AbstractRule.hpp>
 #include <pegium/core/grammar/Assignment.hpp>
@@ -341,10 +342,10 @@ TEST(ArithmeticsRecoverySampleCorpusTest, IsNotEmpty) {
 
 TEST_P(ArithmeticsRecoverySampleTest, RecoversCompletely) {
   const auto &sample = GetParam();
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const auto text = pegium::test::read_text_file(sample.path);
   auto document = pegium::test::parse_document(
-      parser, text, pegium::test::make_file_uri(sample.label), "arithmetics");
+      *parser, text, pegium::test::make_file_uri(sample.label), "arithmetics");
 
   const auto &parsed = document->parseResult;
   const auto parseDump =

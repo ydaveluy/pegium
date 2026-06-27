@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <statemachine/core/StateMachineParser.hpp>
 #include <statemachine/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
@@ -9,9 +8,9 @@ namespace statemachine::tests {
 namespace {
 
 TEST(StatemachineLanguageTest, ParsesSimpleStateMachine) {
-  parser::StateMachineParser parser;
+  auto parser = createStatemachineParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "statemachine Light\n"
       "events Start\n"
       "initialState Idle\n"

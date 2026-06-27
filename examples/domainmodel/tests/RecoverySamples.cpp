@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <domainmodel/core/DomainModelParser.hpp>
+#include <domainmodel/core/CoreModule.hpp>
 
 #include <pegium/core/text/TextSnapshot.hpp>
 #include <pegium/examples/ExampleTestSupport.hpp>
@@ -207,9 +207,9 @@ TEST(DomainModelRecoverySampleCorpusTest, IsNotEmpty) {
 TEST_P(DomainModelRecoverySampleTest, RecoversCompletely) {
   const auto &sample = GetParam();
 
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser, pegium::test::read_text_file(sample.path),
+      *parser, pegium::test::read_text_file(sample.path),
       pegium::test::make_file_uri(sample.label), "domain-model");
 
   const auto &parsed = document->parseResult;
@@ -236,9 +236,9 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversFirstEntityTypoAndLaterExtendsTypoInSameDocument) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "entit Blog {\n"
       "    title: String\n"
       "    date: complex.Date\n"
@@ -299,9 +299,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversPackageTypoAndNestedEntityMissingOpenBrace) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "packag blog.core {\n"
       "  datatype String\n"
       "  datatype Date\n"
@@ -366,9 +366,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversNestedEntityMissingOpenBraceWithoutEarlierRecovery) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "package blog.core {\n"
       "  datatype String\n"
       "  datatype Date\n"
@@ -423,9 +423,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversPackageAndNestedEntityMissingOpenBraces) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "package blog.core \n"
       "  datatype String\n"
       "  datatype Date\n"
@@ -480,9 +480,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversTwoNestedEntitiesMissingOpenBraces) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "package blog.core {\n"
       "  datatype String\n"
       "  datatype Date\n"
@@ -538,9 +538,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversEntityMissingOpenBraceAndManyKeywordTypo) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "package blog.core {\n"
       "  datatype String\n"
       "  datatype Date\n"
@@ -596,9 +596,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversFeatureColonTypoAndMissingTrailingBraces) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "package blog.core {\n"
       "  datatype String\n"
       "  datatype Date\n"
@@ -659,9 +659,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversPackageHeaderAndNestedKeywordDamage) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "packag blog.core \n"
       "  datatyp String\n"
       "  datatype Date\n"
@@ -702,9 +702,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversLargeKeywordFuzzCombination) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "packag blog.core \n"
       "  datatype String\n"
       "  datatyp Date\n"
@@ -745,9 +745,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversAdjacentMissingCloseAndOpenBraces) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "package blog.core {\n"
       "  datatype String\n"
       "  datatype Date\n"
@@ -807,9 +807,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversMissingCloseBraceAndLaterFeatureColon) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "package blog.core {\n"
       "  datatype String\n"
       "  datatype Date\n"
@@ -863,9 +863,9 @@ TEST(DomainModelRecoveryRegressionTest,
 
 TEST(DomainModelRecoveryRegressionTest,
      RecoversNestedEntityTyposWithMissingIntermediateClose) {
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "package blog.core {\n"
       "  datatype String\n"
       "  datatype Date\n"

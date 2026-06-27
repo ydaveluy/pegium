@@ -1,10 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include <pegium/examples/KeywordFuzzHarness.hpp>
 
 #include <array>
+#include <memory>
 #include <string_view>
 
 namespace arithmetics::tests {
@@ -38,8 +39,9 @@ constexpr std::string_view kFileSuffix = ".calc";
 constexpr std::string_view kLanguageId = "arithmetics";
 
 struct ParserFactory {
-  parser::ArithmeticParser parser;
-  parser::ArithmeticParser &operator()() noexcept { return parser; }
+  std::unique_ptr<const pegium::parser::Parser> parser =
+      createArithmeticsParser();
+  const pegium::parser::Parser &operator()() const noexcept { return *parser; }
 };
 
 TEST(ArithmeticsKeywordFuzzTest, SingleMutationAlwaysRecovers) {

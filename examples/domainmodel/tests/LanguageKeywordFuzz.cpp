@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <domainmodel/core/DomainModelParser.hpp>
+#include <domainmodel/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -160,7 +160,7 @@ std::string describe_mutations(const std::vector<Mutation> &mutations) {
   return out;
 }
 
-void expect_recovered(parser::DomainModelParser &parser,
+void expect_recovered(const pegium::parser::Parser &parser,
                       const std::vector<Mutation> &mutations) {
   const auto text = apply_mutations(mutations);
   if (text.empty()) {
@@ -211,11 +211,11 @@ TEST(DomainModelKeywordFuzzTest, SingleMutationAlwaysRecovers) {
   if (!fuzz_sweeps_enabled()) {
     GTEST_SKIP() << "Set PEGIUM_DOMAINMODEL_FUZZ_EXHAUSTIVE=1 to run.";
   }
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   const auto mutations = all_mutations();
   enumerate_combinations(mutations, 1u,
                          [&](const std::vector<Mutation> &pick) {
-                           expect_recovered(parser, pick);
+                           expect_recovered(*parser, pick);
                          });
 }
 
@@ -223,11 +223,11 @@ TEST(DomainModelKeywordFuzzTest, PairMutationsAlwaysRecover) {
   if (!fuzz_sweeps_enabled()) {
     GTEST_SKIP() << "Set PEGIUM_DOMAINMODEL_FUZZ_EXHAUSTIVE=1 to run.";
   }
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   const auto mutations = all_mutations();
   enumerate_combinations(mutations, 2u,
                          [&](const std::vector<Mutation> &pick) {
-                           expect_recovered(parser, pick);
+                           expect_recovered(*parser, pick);
                          });
 }
 
@@ -235,7 +235,7 @@ TEST(DomainModelKeywordFuzzTest, RandomTriples) {
   if (!fuzz_sweeps_enabled()) {
     GTEST_SKIP() << "Set PEGIUM_DOMAINMODEL_FUZZ_EXHAUSTIVE=1 to run.";
   }
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   const auto mutations = all_mutations();
 
   std::mt19937 rng(0xD0DE1);
@@ -244,7 +244,7 @@ TEST(DomainModelKeywordFuzzTest, RandomTriples) {
     std::vector<Mutation> shuffled = mutations;
     std::shuffle(shuffled.begin(), shuffled.end(), rng);
     shuffled.resize(3);
-    expect_recovered(parser, shuffled);
+    expect_recovered(*parser, shuffled);
   }
 }
 
@@ -252,7 +252,7 @@ TEST(DomainModelKeywordFuzzTest, RandomLargerMutationsRecover) {
   if (!fuzz_sweeps_enabled()) {
     GTEST_SKIP() << "Set PEGIUM_DOMAINMODEL_FUZZ_EXHAUSTIVE=1 to run.";
   }
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   const auto mutations = all_mutations();
 
   // Deterministic seed so CI failures are reproducible.
@@ -264,7 +264,7 @@ TEST(DomainModelKeywordFuzzTest, RandomLargerMutationsRecover) {
     std::vector<Mutation> shuffled = mutations;
     std::shuffle(shuffled.begin(), shuffled.end(), rng);
     shuffled.resize(k);
-    expect_recovered(parser, shuffled);
+    expect_recovered(*parser, shuffled);
   }
 }
 

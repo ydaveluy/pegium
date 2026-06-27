@@ -11,9 +11,18 @@
 
 namespace arithmetics {
 
+std::unique_ptr<const pegium::parser::Parser> createArithmeticsParser() {
+  return std::make_unique<const parser::ArithmeticParser>();
+}
+
+std::unique_ptr<const pegium::parser::Parser>
+createArithmeticsParser(const pegium::CoreServices &core) {
+  return std::make_unique<const parser::ArithmeticParser>(core);
+}
+
 void installArithmeticsCoreModule(pegium::CoreServices &core,
                                   ArithmeticsAddedServices &added) {
-  core.parser = std::make_unique<const parser::ArithmeticParser>(core);
+  core.parser = createArithmeticsParser(core);
   core.languageMetaData.fileExtensions = {".calc"};
   added.validator = std::make_unique<validation::ArithmeticsValidator>();
   validation::registerValidationChecks(core, *added.validator);

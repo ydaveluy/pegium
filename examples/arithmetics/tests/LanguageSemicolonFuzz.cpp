@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include "LanguageTestSupport.hpp"
 
@@ -77,7 +77,7 @@ std::string describe_deletions(const std::vector<std::size_t> &deletions) {
   return out;
 }
 
-void expect_recovered(parser::ArithmeticParser &parser,
+void expect_recovered(const pegium::parser::Parser &parser,
                       const std::vector<std::size_t> &deletions) {
   const auto text = apply_deletions(deletions);
   auto parsed = parser.parse(text);
@@ -120,11 +120,11 @@ TEST(ArithmeticsSemicolonColonFuzzTest, SingleDropAlwaysRecovers) {
   if (!fuzz_sweeps_enabled()) {
     GTEST_SKIP() << "Set PEGIUM_ARITHMETICS_FUZZ_EXHAUSTIVE=1 to run.";
   }
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const auto positions = deletable_positions();
   enumerate_combinations(positions, 1u,
                          [&](const std::vector<std::size_t> &pick) {
-                           expect_recovered(parser, pick);
+                           expect_recovered(*parser, pick);
                          });
 }
 
@@ -132,11 +132,11 @@ TEST(ArithmeticsSemicolonColonFuzzTest, PairDropAlwaysRecovers) {
   if (!fuzz_sweeps_enabled()) {
     GTEST_SKIP() << "Set PEGIUM_ARITHMETICS_FUZZ_EXHAUSTIVE=1 to run.";
   }
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const auto positions = deletable_positions();
   enumerate_combinations(positions, 2u,
                          [&](const std::vector<std::size_t> &pick) {
-                           expect_recovered(parser, pick);
+                           expect_recovered(*parser, pick);
                          });
 }
 
@@ -144,7 +144,7 @@ TEST(ArithmeticsSemicolonColonFuzzTest, RandomTriples) {
   if (!fuzz_sweeps_enabled()) {
     GTEST_SKIP() << "Set PEGIUM_ARITHMETICS_FUZZ_EXHAUSTIVE=1 to run.";
   }
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const auto positions = deletable_positions();
 
   std::mt19937 rng(0xBAD1C);
@@ -153,7 +153,7 @@ TEST(ArithmeticsSemicolonColonFuzzTest, RandomTriples) {
     std::vector<std::size_t> shuffled = positions;
     std::shuffle(shuffled.begin(), shuffled.end(), rng);
     shuffled.resize(3);
-    expect_recovered(parser, shuffled);
+    expect_recovered(*parser, shuffled);
   }
 }
 
@@ -161,7 +161,7 @@ TEST(ArithmeticsSemicolonColonFuzzTest, RandomLargerDropsRecover) {
   if (!fuzz_sweeps_enabled()) {
     GTEST_SKIP() << "Set PEGIUM_ARITHMETICS_FUZZ_EXHAUSTIVE=1 to run.";
   }
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const auto positions = deletable_positions();
 
   // Deterministic seed so CI failures are reproducible.
@@ -173,7 +173,7 @@ TEST(ArithmeticsSemicolonColonFuzzTest, RandomLargerDropsRecover) {
     std::vector<std::size_t> shuffled = positions;
     std::shuffle(shuffled.begin(), shuffled.end(), rng);
     shuffled.resize(k);
-    expect_recovered(parser, shuffled);
+    expect_recovered(*parser, shuffled);
   }
 }
 

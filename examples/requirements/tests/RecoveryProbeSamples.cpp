@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include <requirements/core/RequirementsParser.hpp>
+#include <requirements/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -26,9 +26,9 @@ TEST(RequirementsRecoveryProbeBatchTest, ReportsRequirementsBatchBehavior) {
   const auto samples = requirements_probe_samples();
   ASSERT_GE(samples.size(), 1u);
 
-  parser::RequirementsParser parser;
+  auto parser = createRequirementsParser();
   const auto summary = pegium::test::run_recovery_probe_batch(
-      parser, samples, "requirements-lang", "requirements");
+      *parser, samples, "requirements-lang", "requirements");
   pegium::test::expect_recovery_probe_summary(
       "requirements", summary,
       {.total = 3u,
@@ -43,9 +43,9 @@ TEST(RequirementsRecoveryProbeBatchTest, ReportsTestsBatchBehavior) {
   const auto samples = tests_probe_samples();
   ASSERT_GE(samples.size(), 1u);
 
-  parser::TestsParser parser;
+  auto parser = createTestsParser();
   const auto summary =
-      pegium::test::run_recovery_probe_batch(parser, samples, "tests-lang",
+      pegium::test::run_recovery_probe_batch(*parser, samples, "tests-lang",
                                              "tests");
   pegium::test::expect_recovery_probe_summary(
       "tests", summary,
@@ -67,9 +67,9 @@ TEST(RequirementsRecoveryProbeBatchTest,
       });
   ASSERT_NE(sample, samples.end());
 
-  parser::RequirementsParser parser;
+  auto parser = createRequirementsParser();
   auto document = pegium::test::parse_document(
-      parser, pegium::test::read_text_file(sample->path),
+      *parser, pegium::test::read_text_file(sample->path),
       pegium::test::make_file_uri(sample->label), "requirements-lang");
   const auto observation =
       pegium::test::observe_recovery_probe(sample->label, *document);

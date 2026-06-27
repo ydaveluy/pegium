@@ -23,10 +23,10 @@
 
 #include <pegium/examples/KeywordFuzzHarness.hpp>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
-#include <domainmodel/core/DomainModelParser.hpp>
-#include <requirements/core/RequirementsParser.hpp>
-#include <statemachine/core/StateMachineParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
+#include <domainmodel/core/CoreModule.hpp>
+#include <requirements/core/CoreModule.hpp>
+#include <statemachine/core/CoreModule.hpp>
 
 #include <pegium/core/text/TextSnapshot.hpp>
 
@@ -185,9 +185,8 @@ void expect_keyword_fuzz_recovery(
   // recovery outcomes here because the interesting failure modes
   // (crashes, leaks, UB, deadlocks) are detected by the runtime.
   try {
-    // Each example parser inherits from PegiumParser; the public
-    // `parse(std::string_view)` overload copies the input into a
-    // TextSnapshot internally.
+    // The public `parse(std::string_view)` overload copies the input into
+    // a TextSnapshot internally.
     auto result = parser.parse(std::string_view{mutated});
     // Touch the result to keep optimisers honest.
     (void)result.recoveryReport.recoveryCount;
@@ -205,8 +204,8 @@ void expect_keyword_fuzz_recovery(
 
 void ArithmeticsKeywordFuzz(
     const std::vector<std::pair<int, int>> &program) {
-  arithmetics::parser::ArithmeticParser parser;
-  expect_keyword_fuzz_recovery(parser,
+  auto parser = arithmetics::createArithmeticsParser();
+  expect_keyword_fuzz_recovery(*parser,
                                 LanguageDescriptor{
                                     .name = "arithmetics",
                                     .baseText = kArithmeticsBaseText,
@@ -220,8 +219,8 @@ void ArithmeticsKeywordFuzz(
 
 void DomainModelKeywordFuzz(
     const std::vector<std::pair<int, int>> &program) {
-  domainmodel::parser::DomainModelParser parser;
-  expect_keyword_fuzz_recovery(parser,
+  auto parser = domainmodel::createDomainModelParser();
+  expect_keyword_fuzz_recovery(*parser,
                                 LanguageDescriptor{
                                     .name = "domainmodel",
                                     .baseText = kDomainModelBaseText,
@@ -235,8 +234,8 @@ void DomainModelKeywordFuzz(
 
 void StateMachineKeywordFuzz(
     const std::vector<std::pair<int, int>> &program) {
-  statemachine::parser::StateMachineParser parser;
-  expect_keyword_fuzz_recovery(parser,
+  auto parser = statemachine::createStatemachineParser();
+  expect_keyword_fuzz_recovery(*parser,
                                 LanguageDescriptor{
                                     .name = "statemachine",
                                     .baseText = kStateMachineBaseText,
@@ -250,8 +249,8 @@ void StateMachineKeywordFuzz(
 
 void RequirementsKeywordFuzz(
     const std::vector<std::pair<int, int>> &program) {
-  requirements::parser::RequirementsParser parser;
-  expect_keyword_fuzz_recovery(parser,
+  auto parser = requirements::createRequirementsParser();
+  expect_keyword_fuzz_recovery(*parser,
                                 LanguageDescriptor{
                                     .name = "requirements",
                                     .baseText = kRequirementsBaseText,

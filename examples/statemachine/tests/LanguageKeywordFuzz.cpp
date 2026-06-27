@@ -1,10 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <statemachine/core/StateMachineParser.hpp>
+#include <statemachine/core/CoreModule.hpp>
 
 #include <pegium/examples/KeywordFuzzHarness.hpp>
 
 #include <array>
+#include <memory>
 #include <string_view>
 
 namespace statemachine::tests {
@@ -49,8 +50,9 @@ constexpr std::string_view kFileSuffix = ".statemachine";
 constexpr std::string_view kLanguageId = "statemachine";
 
 struct ParserFactory {
-  parser::StateMachineParser parser;
-  parser::StateMachineParser &operator()() noexcept { return parser; }
+  std::unique_ptr<const pegium::parser::Parser> parser =
+      createStatemachineParser();
+  const pegium::parser::Parser &operator()() const noexcept { return *parser; }
 };
 
 TEST(StatemachineKeywordFuzzTest, SingleMutationAlwaysRecovers) {

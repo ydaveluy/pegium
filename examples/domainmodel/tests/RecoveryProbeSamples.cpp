@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <domainmodel/core/DomainModelParser.hpp>
+#include <domainmodel/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -17,9 +17,9 @@ TEST(DomainModelRecoveryProbeBatchTest, ReportsBatchBehavior) {
   const auto samples = probe_samples();
   ASSERT_GE(samples.size(), 1u);
 
-  parser::DomainModelParser parser;
+  auto parser = createDomainModelParser();
   const auto summary = pegium::test::run_recovery_probe_batch(
-      parser, samples, "domain-model", "domainmodel");
+      *parser, samples, "domain-model", "domainmodel");
   pegium::test::expect_recovery_probe_summary(
       "domainmodel", summary,
       {.total = 1u,

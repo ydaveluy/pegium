@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include "LanguageTestSupport.hpp"
 
@@ -29,8 +29,8 @@ namespace {
 /// shape; the bound is intentionally loose.
 
 void expect_recovers_within(const std::string &text, std::size_t maxEdits) {
-  parser::ArithmeticParser parser;
-  auto parsed = parser.parse(text);
+  auto parser = createArithmeticsParser();
+  auto parsed = parser->parse(text);
   const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_LE(parsed.parseDiagnostics.size(), maxEdits)

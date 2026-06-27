@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <arithmetics/lsp/LspModule.hpp>
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
+#include <arithmetics/core/Language.hpp>
 
 #include "LanguageTestSupport.hpp"
 
@@ -18,7 +19,7 @@ using pegium::as_services;
 
 TEST(ArithmeticsLanguageTest,
      RecoveryAfterMissingSemicolonKeepsFollowingBrokenCallLocal) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string prefix =
       "Module basicMath\n"
       "\n"
@@ -45,11 +46,11 @@ TEST(ArithmeticsLanguageTest,
       "\n"
       "Root(64 3/0); // 4\n";
   auto missingSemicolonDocument = pegium::test::parse_document(
-      parser, prefix + "xx" + suffix,
+      *parser, prefix + "xx" + suffix,
       pegium::test::make_file_uri("missing-semicolon-before-broken-call.calc"),
       "arithmetics");
   auto explicitSemicolonDocument = pegium::test::parse_document(
-      parser, prefix + "xx;" + suffix,
+      *parser, prefix + "xx;" + suffix,
       pegium::test::make_file_uri("explicit-semicolon-before-broken-call.calc"),
       "arithmetics");
 
@@ -96,9 +97,9 @@ TEST(ArithmeticsLanguageTest,
 }
 
 TEST(ArithmeticsLanguageTest, SingleBrokenCallKeepsFunctionNameLocal) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "Module basicMath\n"
       "\n"
       "Root(64 3/0); // 4\n",
@@ -127,7 +128,7 @@ TEST(ArithmeticsLanguageTest, SingleBrokenCallKeepsFunctionNameLocal) {
 
 TEST(ArithmeticsLanguageTest,
      LateStandaloneTokenDoesNotDegradeEarlierRecoveredSemicolons) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string prefix =
       "Module basicMath\n"
       "\n"
@@ -157,10 +158,10 @@ TEST(ArithmeticsLanguageTest,
   const auto withStandalone = prefix + "xx" + suffix;
   const auto withCommentedStandalone = prefix + "//xx" + suffix;
   auto standaloneDocument = pegium::test::parse_document(
-      parser, withStandalone,
+      *parser, withStandalone,
       pegium::test::make_file_uri("late-standalone-token.calc"), "arithmetics");
   auto commentedDocument = pegium::test::parse_document(
-      parser, withCommentedStandalone,
+      *parser, withCommentedStandalone,
       pegium::test::make_file_uri("late-commented-token.calc"), "arithmetics");
 
   const auto &standaloneParsed = standaloneDocument->parseResult;
@@ -219,9 +220,9 @@ TEST(ArithmeticsLanguageTest,
 }
 
 TEST(ArithmeticsLanguageTest, ParsesAndEvaluatesModule) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "module Demo\n"
       "def value: 1 + 2;\n"
       "value;\n",
@@ -237,9 +238,9 @@ TEST(ArithmeticsLanguageTest, ParsesAndEvaluatesModule) {
 }
 
 TEST(ArithmeticsLanguageTest, EvaluatesForwardReferences) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "module Demo\n"
       "def b: a;\n"
       "def a: 5;\n"
@@ -259,7 +260,7 @@ TEST(ArithmeticsLanguageTest, EvaluatesForwardReferences) {
 
 TEST(ArithmeticsLanguageTest,
      RecoveryKeepsFollowingStatementAfterMalformedStandaloneOperatorRunInLargerModule) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "module m\n"
       "\n"
@@ -280,7 +281,7 @@ TEST(ArithmeticsLanguageTest,
       "\n"
       "b % 2;\n";
   auto document = pegium::test::parse_document(
-      parser, text,
+      *parser, text,
       pegium::test::make_file_uri("malformed-operator-run-large.calc"),
       "arithmetics");
 
@@ -306,7 +307,7 @@ TEST(ArithmeticsLanguageTest,
 
 TEST(ArithmeticsLanguageTest,
      MissingDefinitionColonInLargeModulePrefersLocalInsertRecovery) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "//\n"
       "Module basicMath\n"
@@ -332,7 +333,7 @@ TEST(ArithmeticsLanguageTest,
       "Root(D, 3/0); // 32\n"
       "Root(64, 3/0); // 4\n";
   auto document = pegium::test::parse_document(
-      parser, text, pegium::test::make_file_uri("missing-definition-colon-large.calc"),
+      *parser, text, pegium::test::make_file_uri("missing-definition-colon-large.calc"),
       "arithmetics");
 
   const auto &parsed = document->parseResult;
@@ -359,7 +360,7 @@ TEST(ArithmeticsLanguageTest,
 
 TEST(ArithmeticsLanguageTest,
      MissingSemicolonBeforeNextDefinitionWithTrailingSemicolonsPrefersLocalInsert) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "//\n"
       "Module basicMath\n"
@@ -370,7 +371,7 @@ TEST(ArithmeticsLanguageTest,
       ";\n"
       ";\n";
   auto document = pegium::test::parse_document(
-      parser, text,
+      *parser, text,
       pegium::test::make_file_uri(
           "missing-semicolon-before-next-definition-with-trailing-semicolons.calc"),
       "arithmetics");
@@ -438,7 +439,7 @@ TEST(ArithmeticsLanguageTest,
 
 TEST(ArithmeticsLanguageTest,
      TwoMissingDefinitionColonsPreferTwoLocalInsertions) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "Module basicMath\n"
       "\n"
@@ -446,7 +447,7 @@ TEST(ArithmeticsLanguageTest,
       "def a 5;\n"
       "def b 3;\n";
   auto document = pegium::test::parse_document(
-      parser, text,
+      *parser, text,
       pegium::test::make_file_uri("two-missing-definition-colons.calc"),
       "arithmetics");
 
@@ -505,7 +506,7 @@ TEST(ArithmeticsLanguageTest,
 
 TEST(ArithmeticsLanguageTest,
      RecoveryKeepsFollowingDivisionStatementAfterStandaloneStarRunStatement) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "Module basicMath\n"
       "\n"
@@ -527,7 +528,7 @@ TEST(ArithmeticsLanguageTest,
       "\n"
       "b % 2/0;\n";
   auto document = pegium::test::parse_document(
-      parser, text,
+      *parser, text,
       pegium::test::make_file_uri("standalone-star-run-mid-module.calc"),
       "arithmetics");
 
@@ -563,7 +564,7 @@ TEST(ArithmeticsLanguageTest,
 
 TEST(ArithmeticsLanguageTest,
      RecoveryKeepsFollowingStatementAfterLongStandaloneStarRunStatement) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string operatorRun(37u, '*');
   const std::string text =
       "Module basicMath\n"
@@ -587,7 +588,7 @@ TEST(ArithmeticsLanguageTest,
       "\n"
       "b % 2;\n";
   auto document = pegium::test::parse_document(
-      parser, text,
+      *parser, text,
       pegium::test::make_file_uri("standalone-long-star-run-mid-module.calc"),
       "arithmetics");
 
@@ -623,7 +624,7 @@ TEST(ArithmeticsLanguageTest,
 
 TEST(ArithmeticsLanguageTest,
      RecoveryKeepsRecoveredCallBeforeTrailingGarbageAndEmptyLineCommentAtEof) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "Module basicMath\n"
       "\n"
@@ -650,7 +651,7 @@ TEST(ArithmeticsLanguageTest,
       "xxxxxxxxxxxxxxxxxxxxxxx\n"
       "//\n";
   auto document = pegium::test::parse_document(
-      parser, text,
+      *parser, text,
       pegium::test::make_file_uri(
           "recovered-call-before-trailing-garbage-empty-comment.calc"),
       "arithmetics");
@@ -679,7 +680,7 @@ TEST(ArithmeticsLanguageTest,
 
 TEST(ArithmeticsLanguageTest,
      RecoveryKeepsRecoveredCallBeforeTrailingGarbageWithoutEmptyLineCommentAtEof) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "Module basicMath\n"
       "\n"
@@ -705,7 +706,7 @@ TEST(ArithmeticsLanguageTest,
       "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
       "xxxxxxxxxxxxxxxxxxxxxxx\n";
   auto document = pegium::test::parse_document(
-      parser, text,
+      *parser, text,
       pegium::test::make_file_uri(
           "recovered-call-before-trailing-garbage-no-empty-comment.calc"),
       "arithmetics");
@@ -765,7 +766,7 @@ TEST(ArithmeticsLanguageTest, RecoveredTrailingCallKeepsRootBackStatement) {
   static const Case kCases[] = {
       {"RecoveryKeepsFollowingStatementAfterLongGarbageTail",
        [] {
-         parser::ArithmeticParser parser;
+         auto parser = createArithmeticsParser();
          const std::string text =
              "Module basicMath\n"
              "\n"
@@ -793,7 +794,7 @@ TEST(ArithmeticsLanguageTest, RecoveredTrailingCallKeepsRootBackStatement) {
              "\n"
              "Root(64, 3/0); // 4\n";
          auto document = pegium::test::parse_document(
-             parser, text,
+             *parser, text,
              pegium::test::make_file_uri(
                  "recovered-long-garbage-tail-followed-by-call.calc"),
              "arithmetics");
@@ -827,7 +828,7 @@ TEST(ArithmeticsLanguageTest, RecoveredTrailingCallKeepsRootBackStatement) {
        }},
       {"ShortGarbageLineBeforeComplexBrokenCallKeepsFollowingCallRecoveryLocal",
        [] {
-         parser::ArithmeticParser parser;
+         auto parser = createArithmeticsParser();
          const std::string text =
              "Module basicMath\n"
              "\n"
@@ -853,7 +854,7 @@ TEST(ArithmeticsLanguageTest, RecoveredTrailingCallKeepsRootBackStatement) {
              "\n"
              "Root(64 + 5 3/0+5-3); // 4\n";
          auto document = pegium::test::parse_document(
-             parser, text,
+             *parser, text,
              pegium::test::make_file_uri(
                  "short-garbage-line-before-complex-broken-call-keeps-following-call-local.calc"),
              "arithmetics");
@@ -887,7 +888,7 @@ TEST(ArithmeticsLanguageTest, RecoveredTrailingCallKeepsRootBackStatement) {
        }},
       {"SpacedShortGarbageLineBeforeComplexBrokenCallKeepsFollowingCallRecoveryLocal",
        [] {
-         parser::ArithmeticParser parser;
+         auto parser = createArithmeticsParser();
          const std::string text =
              "Module basicMath\n"
              "\n"
@@ -913,7 +914,7 @@ TEST(ArithmeticsLanguageTest, RecoveredTrailingCallKeepsRootBackStatement) {
              "\n"
              "Root(64 + 5 3/0+5-3); // 4\n";
          auto document = pegium::test::parse_document(
-             parser, text,
+             *parser, text,
              pegium::test::make_file_uri(
                  "spaced-short-garbage-line-before-complex-broken-call-keeps-following-call-local.calc"),
              "arithmetics");
@@ -968,7 +969,7 @@ TEST(ArithmeticsLanguageTest, RecoveredTrailingCallKeepsRootBackStatement) {
 
 TEST(ArithmeticsLanguageTest,
      BrokenCallAfterComplexFirstArgumentKeepsFunctionNameWithoutGarbagePrefix) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "Module basicMath\n"
       "\n"
@@ -993,7 +994,7 @@ TEST(ArithmeticsLanguageTest,
       "\n"
       "Root(64 + 5 3/0+5-3); // 4\n";
   auto document = pegium::test::parse_document(
-      parser, text,
+      *parser, text,
       pegium::test::make_file_uri(
           "broken-call-after-complex-first-argument-without-garbage-prefix.calc"),
       "arithmetics");
@@ -1023,9 +1024,9 @@ TEST(ArithmeticsLanguageTest,
 
 
 TEST(ArithmeticsLanguageTest, EmptyDocumentPublishesSingleGrammarDiagnosticDirectParse) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   auto document = pegium::test::parse_document(
-      parser, "", pegium::test::make_file_uri("empty-direct.calc"), "arithmetics");
+      *parser, "", pegium::test::make_file_uri("empty-direct.calc"), "arithmetics");
 
   const auto &parsed = document->parseResult;
   const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
@@ -1036,9 +1037,9 @@ TEST(ArithmeticsLanguageTest, EmptyDocumentPublishesSingleGrammarDiagnosticDirec
 }
 
 TEST(ArithmeticsLanguageTest, CommentProviderReturnsLeadingBlockComment) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "module Demo\n"
       "/** Adds numbers. */\n"
       "def value: 1;\n",
@@ -1062,9 +1063,9 @@ TEST(ArithmeticsLanguageTest, CommentProviderReturnsLeadingBlockComment) {
 }
 
 TEST(ArithmeticsLanguageTest, DocumentationProviderRendersDocCommentMarkdown) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "module Demo\n"
       "/**\n"
       " * Adds numbers.\n"

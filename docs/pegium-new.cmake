@@ -552,8 +552,17 @@ _pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/CoreModule.cpp]==] [==[al
 
 namespace @PEGIUM_NEW_LANGUAGE_ID@ {
 
+std::unique_ptr<const pegium::parser::Parser> create@PEGIUM_NEW_CLASS@Parser() {
+  return std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>();
+}
+
+std::unique_ptr<const pegium::parser::Parser>
+create@PEGIUM_NEW_CLASS@Parser(const pegium::CoreServices &core) {
+  return std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(core);
+}
+
 void install@PEGIUM_NEW_CLASS@CoreModule(pegium::CoreServices &core) {
-  core.parser = std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(core);
+  core.parser = create@PEGIUM_NEW_CLASS@Parser(core);
   core.languageMetaData.fileExtensions = {"@PEGIUM_NEW_EXT@"};
 }
 
@@ -584,6 +593,13 @@ _pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/CoreModule.hpp]==] [==[al
 #include <pegium/core/services/SharedCoreServices.hpp>
 
 namespace @PEGIUM_NEW_LANGUAGE_ID@ {
+
+/// Creates a standalone @PEGIUM_NEW_CLASS@ parser.
+std::unique_ptr<const pegium::parser::Parser> create@PEGIUM_NEW_CLASS@Parser();
+
+/// Creates a @PEGIUM_NEW_CLASS@ parser bound to `core`.
+std::unique_ptr<const pegium::parser::Parser>
+create@PEGIUM_NEW_CLASS@Parser(const pegium::CoreServices &core);
 
 /// Wires the @PEGIUM_NEW_CLASS@ core overrides onto a service container. Every
 /// container is-a `pegium::CoreServices`, so the headless and the LSP bundle both

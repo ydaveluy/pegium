@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <requirements/core/CoreModule.hpp>
-#include <requirements/core/RequirementsParser.hpp>
+#include <requirements/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -227,17 +227,17 @@ TEST(RequirementsRecoverySampleCorpusTest, IsNotEmpty) {
 
 TEST_P(RequirementsRecoverySampleTest, RecoversCompletely) {
   const auto &sample = GetParam();
-  parser::RequirementsParser requirementsParser;
-  parser::TestsParser testsParser;
+  auto requirementsParser = createRequirementsParser();
+  auto testsParser = createTestsParser();
   std::shared_ptr<pegium::workspace::Document> document;
 
   if (sample.language == SampleLanguage::Requirements) {
     document = pegium::test::parse_document(
-        requirementsParser, pegium::test::read_text_file(sample.file.path),
+        *requirementsParser, pegium::test::read_text_file(sample.file.path),
         pegium::test::make_file_uri(sample.file.label), "requirements-lang");
   } else {
     document = pegium::test::parse_document(
-        testsParser, pegium::test::read_text_file(sample.file.path),
+        *testsParser, pegium::test::read_text_file(sample.file.path),
         pegium::test::make_file_uri(sample.file.label), "tests-lang");
   }
 

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <arithmetics/core/ast.hpp>
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include "LanguageTestSupport.hpp"
 
@@ -30,8 +30,8 @@ namespace {
 
 void expect_fullmatch_with_statement_count(const std::string &text,
                                            std::size_t expectedMinStatements) {
-  parser::ArithmeticParser parser;
-  auto parsed = parser.parse(text);
+  auto parser = createArithmeticsParser();
+  auto parsed = parser->parse(text);
   const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
   EXPECT_TRUE(parsed.fullMatch) << parseDump;
   EXPECT_EQ(parsed.parsedLength, text.size()) << parseDump;
@@ -123,13 +123,13 @@ TEST(ArithmeticsPanicResyncRecoveryTest,
      ResyncSkipPreservesDownstreamReferences) {
   // Reference `c` is defined after a broken statement. Panic-skip
   // ensures `def c` lands in the AST so later uses are resolvable.
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   const std::string text =
       "Module m\n"
       "def a: 5 * ++ 5;\n"
       "def c: 8;\n"
       "2 * c;\n";
-  auto parsed = parser.parse(text);
+  auto parsed = parser->parse(text);
   const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
   ASSERT_TRUE(parsed.fullMatch) << parseDump;
   const auto *module =
@@ -162,7 +162,7 @@ TEST(ArithmeticsPanicResyncRecoveryTest,
 
 TEST(ArithmeticsPanicResyncRecoveryTest,
      RootKeywordTypoCombinedWithDownstreamBrokenStatementsRecovers) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   // `Moule` is a 1-edit fuzzy variant of `module`. The two `def`
   // statements are both missing their `:` and `;`. The recovery must
   // commit both the keyword AND the broken statements end-to-end.
@@ -170,7 +170,7 @@ TEST(ArithmeticsPanicResyncRecoveryTest,
       "Moule basicMath\n"
       "def a 5\n"
       "def b 3\n";
-  auto parsed = parser.parse(text);
+  auto parsed = parser->parse(text);
   const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);
   ASSERT_TRUE(parsed.fullMatch) << parseDump;
   ASSERT_TRUE(parsed.value) << parseDump;

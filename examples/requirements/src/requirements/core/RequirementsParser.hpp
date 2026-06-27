@@ -1,20 +1,10 @@
 #pragma once
 
-#include <memory>
-#include <string>
-#include <string_view>
-#include <utility>
-
 #include <requirements/core/ast.hpp>
+#include <requirements/core/Language.hpp>
 
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/workspace/Document.hpp>
-
-namespace requirements {
-
-std::string decode_quoted_string(std::string_view text);
-
-} // namespace requirements
 
 namespace requirements::parser {
 

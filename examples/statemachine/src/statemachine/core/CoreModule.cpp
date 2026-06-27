@@ -11,9 +11,18 @@
 
 namespace statemachine {
 
+std::unique_ptr<const pegium::parser::Parser> createStatemachineParser() {
+  return std::make_unique<const parser::StateMachineParser>();
+}
+
+std::unique_ptr<const pegium::parser::Parser>
+createStatemachineParser(const pegium::CoreServices &core) {
+  return std::make_unique<const parser::StateMachineParser>(core);
+}
+
 void installStatemachineCoreModule(pegium::CoreServices &core,
                                    StatemachineAddedServices &added) {
-  core.parser = std::make_unique<const parser::StateMachineParser>(core);
+  core.parser = createStatemachineParser(core);
   core.languageMetaData.fileExtensions = {".statemachine"};
   added.validator = std::make_unique<validation::StatemachineValidator>();
   validation::registerValidationChecks(core, *added.validator);

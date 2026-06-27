@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <arithmetics/lsp/LspModule.hpp>
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
-#include <cstdlib>
 #include <sstream>
+#include <string_view>
 
 #include "LanguageTestSupport.hpp"
 
@@ -48,18 +48,6 @@ constexpr std::string_view kAngleGarbageClusterText =
     "\n"
     "Sqrt(81/0); // 9\n";
 
-struct ExposedArithmeticParser final : parser::ArithmeticParser {
-  void touch_constructed_rules() const {
-    (void)Module.getElement();
-    (void)Statement.getElement();
-    (void)Definition.getElement();
-    (void)Evaluation.getElement();
-    (void)Expression.getElement();
-    (void)BinaryExpression.getElement();
-    (void)PrimaryExpression.getElement();
-  }
-};
-
 // dump_parse_diagnostics is shared from LanguageTestSupport.hpp.
 
 std::string dump_document_diagnostics(const pegium::workspace::Document &document) {
@@ -77,20 +65,17 @@ std::string dump_document_diagnostics(const pegium::workspace::Document &documen
 }
 
 TEST(ArithmeticParserConstructionTest,
-     DirectConstructionKeepsExpressionRulesInitialized) {
-  EXPECT_EXIT(
-      {
-        ExposedArithmeticParser parser;
-        parser.touch_constructed_rules();
-        std::exit(0);
-      },
-      ::testing::ExitedWithCode(0), "");
+     StandaloneFactoryCreatesInitializedEntryRule) {
+  auto parser = createArithmeticsParser();
+  ASSERT_NE(parser, nullptr);
+  EXPECT_EQ(parser->getEntryRule().getName(), "Module");
 }
 
 TEST(ArithmeticParserConstructionTest,
-     DirectParserRecoversAngleGarbageCluster) {
-  ExposedArithmeticParser parser;
-  const auto result = parser.parse(kAngleGarbageClusterText);
+     StandaloneFactoryParserRecoversAngleGarbageCluster) {
+  auto parser = createArithmeticsParser();
+  ASSERT_NE(parser, nullptr);
+  const auto result = parser->parse(kAngleGarbageClusterText);
   const auto dump = dump_parse_diagnostics(result.parseDiagnostics);
 
   EXPECT_TRUE(result.value) << dump;

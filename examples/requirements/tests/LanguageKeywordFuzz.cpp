@@ -1,10 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <requirements/core/RequirementsParser.hpp>
+#include <requirements/core/CoreModule.hpp>
 
 #include <pegium/examples/KeywordFuzzHarness.hpp>
 
 #include <array>
+#include <memory>
 #include <string_view>
 
 namespace requirements::tests {
@@ -35,8 +36,9 @@ constexpr std::string_view kReqFileSuffix = ".req";
 constexpr std::string_view kReqLanguageId = "requirements";
 
 struct RequirementsFactory {
-  parser::RequirementsParser parser;
-  parser::RequirementsParser &operator()() noexcept { return parser; }
+  std::unique_ptr<const pegium::parser::Parser> parser =
+      createRequirementsParser();
+  const pegium::parser::Parser &operator()() const noexcept { return *parser; }
 };
 
 TEST(RequirementsKeywordFuzzTest, SingleMutationAlwaysRecovers) {
@@ -101,8 +103,8 @@ constexpr std::string_view kTstFileSuffix = ".tst";
 constexpr std::string_view kTstLanguageId = "tests";
 
 struct TestsFactory {
-  parser::TestsParser parser;
-  parser::TestsParser &operator()() noexcept { return parser; }
+  std::unique_ptr<const pegium::parser::Parser> parser = createTestsParser();
+  const pegium::parser::Parser &operator()() const noexcept { return *parser; }
 };
 
 TEST(RequirementsTestsKeywordFuzzTest, SingleMutationAlwaysRecovers) {

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include "LanguageTestSupport.hpp"
 
@@ -57,9 +57,9 @@ constexpr std::string_view kFunctionBodyMissingSemicolonText =
 
 TEST(ArithmeticsLanguageTest,
      DenseMissingSemicolonModuleKeepsLateCallsRecoverable) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   auto document = pegium::test::parse_document(
-      parser, std::string(kDenseMissingSemicolonText),
+      *parser, std::string(kDenseMissingSemicolonText),
       pegium::test::make_file_uri(
           "dense-missing-semicolon-module-keeps-late-calls-recoverable.calc"),
       "arithmetics");
@@ -91,9 +91,9 @@ TEST(ArithmeticsLanguageTest,
 
 TEST(ArithmeticsLanguageTest,
      FunctionBodyMissingSemicolonKeepsLateCallsRecoverable) {
-  parser::ArithmeticParser parser;
+  auto parser = createArithmeticsParser();
   auto document = pegium::test::parse_document(
-      parser, std::string(kFunctionBodyMissingSemicolonText),
+      *parser, std::string(kFunctionBodyMissingSemicolonText),
       pegium::test::make_file_uri(
           "function-body-missing-semicolon-keeps-late-calls-recoverable.calc"),
       "arithmetics");

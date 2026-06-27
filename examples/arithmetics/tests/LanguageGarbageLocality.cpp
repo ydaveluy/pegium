@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <arithmetics/lsp/LspModule.hpp>
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/CoreModule.hpp>
 
 #include "LanguageTestSupport.hpp"
 
@@ -171,9 +171,9 @@ TEST(ArithmeticsLanguageTest, GarbageBeforeBrokenCallKeepsRecoveryLocal) {
   for (const auto &c : kCases) {
     SCOPED_TRACE(c.name);
 
-    parser::ArithmeticParser parser;
+    auto parser = createArithmeticsParser();
     auto document = pegium::test::parse_document(
-        parser, c.text, pegium::test::make_file_uri(c.uri), "arithmetics");
+        *parser, c.text, pegium::test::make_file_uri(c.uri), "arithmetics");
 
     const auto &parsed = document->parseResult;
     const auto parseDump = dump_parse_diagnostics(parsed.parseDiagnostics);

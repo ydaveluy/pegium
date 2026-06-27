@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <requirements/core/CoreModule.hpp>
-#include <requirements/core/RequirementsParser.hpp>
+#include <requirements/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -10,9 +10,9 @@ namespace requirements::tests {
 namespace {
 
 TEST(RequirementsLanguageTest, ParsesRequirementModel) {
-  parser::RequirementsParser parser;
+  auto parser = createRequirementsParser();
   auto document = pegium::test::parse_document(
-      parser,
+      *parser,
       "contact: \"team\"\n"
       "environment prod: \"Production\"\n"
       "req login \"Users can login\"\n",

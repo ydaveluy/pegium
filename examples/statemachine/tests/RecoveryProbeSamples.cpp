@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <statemachine/core/StateMachineParser.hpp>
+#include <statemachine/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -18,9 +18,9 @@ TEST(StatemachineRecoveryProbeBatchTest, ReportsBatchBehavior) {
   const auto samples = probe_samples();
   ASSERT_GE(samples.size(), 1u);
 
-  parser::StateMachineParser parser;
+  auto parser = createStatemachineParser();
   const auto summary = pegium::test::run_recovery_probe_batch(
-      parser, samples, "statemachine", "statemachine");
+      *parser, samples, "statemachine", "statemachine");
   pegium::test::expect_recovery_probe_summary(
       "statemachine", summary,
       {.total = 3u,

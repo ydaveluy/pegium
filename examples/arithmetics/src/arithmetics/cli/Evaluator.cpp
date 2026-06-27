@@ -1,6 +1,6 @@
 #include <arithmetics/cli/Evaluator.hpp>
 
-#include <arithmetics/core/ArithmeticParser.hpp>
+#include <arithmetics/core/Language.hpp>
 
 #include <iostream>
 #include <string_view>
