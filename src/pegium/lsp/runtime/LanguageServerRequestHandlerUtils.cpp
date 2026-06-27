@@ -12,6 +12,7 @@
 #include <string_view>
 #include <chrono>
 #include <type_traits>
+#include <utility>
 
 #include <pegium/lsp/runtime/internal/WorkspaceReadLock.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
@@ -165,6 +166,52 @@ request_key_from_cancel_id(const ::lsp::OneOf<int, ::lsp::String> &id) {
 
 std::string next_anonymous_request_key() {
   return "anon:" + std::to_string(++g_anonymousRequestCounter);
+}
+
+ActiveRequestCancellation::ActiveRequestCancellation(
+    LanguageServerHandlerContext &owner)
+    : _owner(&owner),
+      _source(std::make_shared<utils::CancellationTokenSource>()) {
+  try {
+    _requestKey =
+        request_key_from_message_id(::lsp::MessageHandler::currentRequestId());
+  } catch (...) {
+    _requestKey.clear();
+  }
+  if (_requestKey.empty()) {
+    _requestKey = next_anonymous_request_key();
+  }
+  _owner->registerRequestCancellation(_requestKey, _source);
+}
+
+ActiveRequestCancellation::ActiveRequestCancellation(
+    ActiveRequestCancellation &&other)
+    : _owner(std::exchange(other._owner, nullptr)),
+      _source(std::move(other._source)),
+      _requestKey(std::move(other._requestKey)) {}
+
+utils::CancellationToken ActiveRequestCancellation::token() const {
+  return _source->get_token();
+}
+
+void ActiveRequestCancellation::clear() {
+  if (_owner != nullptr && !_requestKey.empty()) {
+    _owner->clearRequestCancellation(_requestKey, _source);
+    _requestKey.clear();
+  }
+}
+
+void throw_request_cancelled_error() {
+  throw ::lsp::RequestError(::lsp::MessageError::RequestCancelled,
+                            "Operation cancelled");
+}
+
+::lsp::json::Value JsonRequestTask::operator()() { return _impl->run(); }
+
+std::future<::lsp::json::Value>
+make_deferred_json_request(JsonRequestTask task) {
+  return std::async(std::launch::deferred,
+                    [task = std::move(task)]() mutable { return task(); });
 }
 
 } // namespace pegium

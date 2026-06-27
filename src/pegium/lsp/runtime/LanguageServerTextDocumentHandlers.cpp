@@ -89,9 +89,9 @@ void addLanguageServerTextDocumentHandlers(
       serviceRequirements.SelectionRangeProvider.value_or(
       workspace::DocumentState::Parsed);
 
-  handler.add<::lsp::requests::TextDocument_Completion>(
-      create_request_handler<::lsp::TextDocument_CompletionResult,
-                             ::lsp::CompletionParams>(
+  add_request_handler<::lsp::requests::TextDocument_Completion>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_Completion>(
           server, sharedServices, completionRequirement,
           [&sharedServices](const ::lsp::CompletionParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -99,9 +99,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_optional_payload<::lsp::TextDocument_CompletionResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_SignatureHelp>(
-      create_request_handler<::lsp::TextDocument_SignatureHelpResult,
-                             ::lsp::SignatureHelpParams>(
+  add_request_handler<::lsp::requests::TextDocument_SignatureHelp>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_SignatureHelp>(
           server, sharedServices, signatureHelpRequirement,
           [&sharedServices](const ::lsp::SignatureHelpParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -109,9 +109,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_optional_payload<::lsp::TextDocument_SignatureHelpResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_Hover>(
-      create_request_handler<::lsp::TextDocument_HoverResult,
-                             ::lsp::HoverParams>(
+  add_request_handler<::lsp::requests::TextDocument_Hover>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_Hover>(
           server, sharedServices, hoverRequirement,
           [&sharedServices](const ::lsp::HoverParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -119,9 +119,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_optional_payload<::lsp::TextDocument_HoverResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_DocumentSymbol>(
-      create_request_handler<::lsp::TextDocument_DocumentSymbolResult,
-                             ::lsp::DocumentSymbolParams>(
+  add_request_handler<::lsp::requests::TextDocument_DocumentSymbol>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_DocumentSymbol>(
           server, sharedServices, documentSymbolRequirement,
           [&sharedServices](const ::lsp::DocumentSymbolParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -129,9 +129,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_vector_payload<::lsp::TextDocument_DocumentSymbolResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_CodeLens>(
-      create_request_handler<::lsp::TextDocument_CodeLensResult,
-                             ::lsp::CodeLensParams>(
+  add_request_handler<::lsp::requests::TextDocument_CodeLens>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_CodeLens>(
           server, sharedServices, codeLensRequirement,
           [&sharedServices](const ::lsp::CodeLensParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -140,8 +140,9 @@ void addLanguageServerTextDocumentHandlers(
           wrap_vector_payload<::lsp::TextDocument_CodeLensResult>{}));
 
   if (has_code_lens_resolve_provider(sharedServices)) {
-    handler.add<::lsp::requests::CodeLens_Resolve>(
-        make_async_request<::lsp::CodeLens>(
+    add_request_handler<::lsp::requests::CodeLens_Resolve>(
+        handler,
+        make_async_request<::lsp::requests::CodeLens_Resolve>(
             server,
             [&server, &sharedServices](::lsp::CodeLens &&codeLens,
                                        const utils::CancellationToken &cancelToken) {
@@ -149,7 +150,7 @@ void addLanguageServerTextDocumentHandlers(
               auto codeLensForResolve = codeLens;
               auto resolvedCodeLens =
                   resolveCodeLens(sharedServices, codeLensForResolve, cancelToken);
-              return adapt_async_result<::lsp::CodeLens>(
+              return adapt_result<::lsp::CodeLens>(
                   server, std::move(resolvedCodeLens),
                   wrap_resolved_or_original<::lsp::CodeLens>{
                       std::move(codeLens)},
@@ -157,9 +158,9 @@ void addLanguageServerTextDocumentHandlers(
             }));
   }
 
-  handler.add<::lsp::requests::TextDocument_DocumentLink>(
-      create_request_handler<::lsp::TextDocument_DocumentLinkResult,
-                             ::lsp::DocumentLinkParams>(
+  add_request_handler<::lsp::requests::TextDocument_DocumentLink>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_DocumentLink>(
           server, sharedServices, documentLinkRequirement,
           [&sharedServices](const ::lsp::DocumentLinkParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -167,9 +168,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_vector_payload<::lsp::TextDocument_DocumentLinkResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_SelectionRange>(
-      create_request_handler<::lsp::TextDocument_SelectionRangeResult,
-                             ::lsp::SelectionRangeParams>(
+  add_request_handler<::lsp::requests::TextDocument_SelectionRange>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_SelectionRange>(
           server, sharedServices, selectionRangeRequirement,
           [&sharedServices](const ::lsp::SelectionRangeParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -177,9 +178,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_vector_payload<::lsp::TextDocument_SelectionRangeResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_Formatting>(
-      create_request_handler<::lsp::TextDocument_FormattingResult,
-                             ::lsp::DocumentFormattingParams>(
+  add_request_handler<::lsp::requests::TextDocument_Formatting>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_Formatting>(
           server, sharedServices, formatterRequirement,
           [&sharedServices](const ::lsp::DocumentFormattingParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -187,9 +188,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_vector_payload<::lsp::TextDocument_FormattingResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_RangeFormatting>(
-      create_request_handler<::lsp::TextDocument_RangeFormattingResult,
-                             ::lsp::DocumentRangeFormattingParams>(
+  add_request_handler<::lsp::requests::TextDocument_RangeFormatting>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_RangeFormatting>(
           server, sharedServices, formatterRequirement,
           [&sharedServices](
               const ::lsp::DocumentRangeFormattingParams &params,
@@ -198,9 +199,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_vector_payload<::lsp::TextDocument_RangeFormattingResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_OnTypeFormatting>(
-      create_request_handler<::lsp::TextDocument_OnTypeFormattingResult,
-                             ::lsp::DocumentOnTypeFormattingParams>(
+  add_request_handler<::lsp::requests::TextDocument_OnTypeFormatting>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_OnTypeFormatting>(
           server, sharedServices, formatterRequirement,
           [&sharedServices](
               const ::lsp::DocumentOnTypeFormattingParams &params,
@@ -209,9 +210,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_vector_payload<::lsp::TextDocument_OnTypeFormattingResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_InlayHint>(
-      create_request_handler<::lsp::TextDocument_InlayHintResult,
-                             ::lsp::InlayHintParams>(
+  add_request_handler<::lsp::requests::TextDocument_InlayHint>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_InlayHint>(
           server, sharedServices, inlayHintRequirement,
           [&sharedServices](const ::lsp::InlayHintParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -219,9 +220,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_vector_payload<::lsp::TextDocument_InlayHintResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_SemanticTokens_Full>(
-      create_request_handler<::lsp::TextDocument_SemanticTokens_FullResult,
-                             ::lsp::SemanticTokensParams>(
+  add_request_handler<::lsp::requests::TextDocument_SemanticTokens_Full>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_SemanticTokens_Full>(
           server, sharedServices, semanticTokenRequirement,
           [&sharedServices](const ::lsp::SemanticTokensParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -229,9 +230,10 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_optional_payload<::lsp::TextDocument_SemanticTokens_FullResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_SemanticTokens_Full_Delta>(
-      create_request_handler<::lsp::TextDocument_SemanticTokens_Full_DeltaResult,
-                             ::lsp::SemanticTokensDeltaParams>(
+  add_request_handler<::lsp::requests::TextDocument_SemanticTokens_Full_Delta>(
+      handler,
+      create_request_handler<
+          ::lsp::requests::TextDocument_SemanticTokens_Full_Delta>(
           server, sharedServices, semanticTokenRequirement,
           [&sharedServices](const ::lsp::SemanticTokensDeltaParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -240,9 +242,10 @@ void addLanguageServerTextDocumentHandlers(
           wrap_optional_payload<
               ::lsp::TextDocument_SemanticTokens_Full_DeltaResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_SemanticTokens_Range>(
-      create_request_handler<::lsp::TextDocument_SemanticTokens_RangeResult,
-                             ::lsp::SemanticTokensRangeParams>(
+  add_request_handler<::lsp::requests::TextDocument_SemanticTokens_Range>(
+      handler,
+      create_request_handler<
+          ::lsp::requests::TextDocument_SemanticTokens_Range>(
           server, sharedServices, semanticTokenRequirement,
           [&sharedServices](const ::lsp::SemanticTokensRangeParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -251,9 +254,10 @@ void addLanguageServerTextDocumentHandlers(
           wrap_optional_payload<
               ::lsp::TextDocument_SemanticTokens_RangeResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_PrepareCallHierarchy>(
-      create_request_handler<::lsp::TextDocument_PrepareCallHierarchyResult,
-                             ::lsp::CallHierarchyPrepareParams>(
+  add_request_handler<::lsp::requests::TextDocument_PrepareCallHierarchy>(
+      handler,
+      create_request_handler<
+          ::lsp::requests::TextDocument_PrepareCallHierarchy>(
           server, sharedServices, callHierarchyRequirement,
           [&sharedServices](const ::lsp::CallHierarchyPrepareParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -262,9 +266,9 @@ void addLanguageServerTextDocumentHandlers(
           wrap_empty_vector_as_null<
               ::lsp::TextDocument_PrepareCallHierarchyResult>{}));
 
-  handler.add<::lsp::requests::CallHierarchy_IncomingCalls>(
-      create_item_request_handler<::lsp::CallHierarchy_IncomingCallsResult,
-                                  ::lsp::CallHierarchyIncomingCallsParams>(
+  add_request_handler<::lsp::requests::CallHierarchy_IncomingCalls>(
+      handler,
+      create_item_request_handler<::lsp::requests::CallHierarchy_IncomingCalls>(
           server, sharedServices, callHierarchyRequirement,
           [&sharedServices](
               const ::lsp::CallHierarchyIncomingCallsParams &params,
@@ -273,9 +277,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_empty_vector_as_null<::lsp::CallHierarchy_IncomingCallsResult>{}));
 
-  handler.add<::lsp::requests::CallHierarchy_OutgoingCalls>(
-      create_item_request_handler<::lsp::CallHierarchy_OutgoingCallsResult,
-                                  ::lsp::CallHierarchyOutgoingCallsParams>(
+  add_request_handler<::lsp::requests::CallHierarchy_OutgoingCalls>(
+      handler,
+      create_item_request_handler<::lsp::requests::CallHierarchy_OutgoingCalls>(
           server, sharedServices, callHierarchyRequirement,
           [&sharedServices](
               const ::lsp::CallHierarchyOutgoingCallsParams &params,
@@ -284,9 +288,10 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_empty_vector_as_null<::lsp::CallHierarchy_OutgoingCallsResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_PrepareTypeHierarchy>(
-      create_request_handler<::lsp::TextDocument_PrepareTypeHierarchyResult,
-                             ::lsp::TypeHierarchyPrepareParams>(
+  add_request_handler<::lsp::requests::TextDocument_PrepareTypeHierarchy>(
+      handler,
+      create_request_handler<
+          ::lsp::requests::TextDocument_PrepareTypeHierarchy>(
           server, sharedServices, typeHierarchyRequirement,
           [&sharedServices](const ::lsp::TypeHierarchyPrepareParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -295,9 +300,9 @@ void addLanguageServerTextDocumentHandlers(
           wrap_empty_vector_as_null<
               ::lsp::TextDocument_PrepareTypeHierarchyResult>{}));
 
-  handler.add<::lsp::requests::TypeHierarchy_Supertypes>(
-      create_item_request_handler<::lsp::TypeHierarchy_SupertypesResult,
-                                  ::lsp::TypeHierarchySupertypesParams>(
+  add_request_handler<::lsp::requests::TypeHierarchy_Supertypes>(
+      handler,
+      create_item_request_handler<::lsp::requests::TypeHierarchy_Supertypes>(
           server, sharedServices, typeHierarchyRequirement,
           [&sharedServices](const ::lsp::TypeHierarchySupertypesParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -306,9 +311,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_empty_vector_as_null<::lsp::TypeHierarchy_SupertypesResult>{}));
 
-  handler.add<::lsp::requests::TypeHierarchy_Subtypes>(
-      create_item_request_handler<::lsp::TypeHierarchy_SubtypesResult,
-                                  ::lsp::TypeHierarchySubtypesParams>(
+  add_request_handler<::lsp::requests::TypeHierarchy_Subtypes>(
+      handler,
+      create_item_request_handler<::lsp::requests::TypeHierarchy_Subtypes>(
           server, sharedServices, typeHierarchyRequirement,
           [&sharedServices](const ::lsp::TypeHierarchySubtypesParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -317,9 +322,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_empty_vector_as_null<::lsp::TypeHierarchy_SubtypesResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_FoldingRange>(
-      create_request_handler<::lsp::TextDocument_FoldingRangeResult,
-                             ::lsp::FoldingRangeParams>(
+  add_request_handler<::lsp::requests::TextDocument_FoldingRange>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_FoldingRange>(
           server, sharedServices, foldingRangeRequirement,
           [&sharedServices](const ::lsp::FoldingRangeParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -327,9 +332,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_vector_payload<::lsp::TextDocument_FoldingRangeResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_Declaration>(
-      create_request_handler<::lsp::TextDocument_DeclarationResult,
-                             ::lsp::DeclarationParams>(
+  add_request_handler<::lsp::requests::TextDocument_Declaration>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_Declaration>(
           server, sharedServices, declarationRequirement,
           [&sharedServices](const ::lsp::DeclarationParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -339,9 +344,9 @@ void addLanguageServerTextDocumentHandlers(
                               ::lsp::Declaration>{
               GotoLinkKind::Declaration}));
 
-  handler.add<::lsp::requests::TextDocument_Definition>(
-      create_request_handler<::lsp::TextDocument_DefinitionResult,
-                             ::lsp::DefinitionParams>(
+  add_request_handler<::lsp::requests::TextDocument_Definition>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_Definition>(
           server, sharedServices, definitionRequirement,
           [&sharedServices](const ::lsp::DefinitionParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -351,9 +356,9 @@ void addLanguageServerTextDocumentHandlers(
                               ::lsp::Definition>{
               GotoLinkKind::Definition}));
 
-  handler.add<::lsp::requests::TextDocument_TypeDefinition>(
-      create_request_handler<::lsp::TextDocument_TypeDefinitionResult,
-                             ::lsp::TypeDefinitionParams>(
+  add_request_handler<::lsp::requests::TextDocument_TypeDefinition>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_TypeDefinition>(
           server, sharedServices, typeDefinitionRequirement,
           [&sharedServices](const ::lsp::TypeDefinitionParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -363,9 +368,9 @@ void addLanguageServerTextDocumentHandlers(
                               ::lsp::Definition>{
               GotoLinkKind::TypeDefinition}));
 
-  handler.add<::lsp::requests::TextDocument_Implementation>(
-      create_request_handler<::lsp::TextDocument_ImplementationResult,
-                             ::lsp::ImplementationParams>(
+  add_request_handler<::lsp::requests::TextDocument_Implementation>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_Implementation>(
           server, sharedServices, implementationRequirement,
           [&sharedServices](const ::lsp::ImplementationParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -375,9 +380,9 @@ void addLanguageServerTextDocumentHandlers(
                               ::lsp::Definition>{
               GotoLinkKind::Implementation}));
 
-  handler.add<::lsp::requests::TextDocument_References>(
-      create_request_handler<::lsp::TextDocument_ReferencesResult,
-                             ::lsp::ReferenceParams>(
+  add_request_handler<::lsp::requests::TextDocument_References>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_References>(
           server, sharedServices, referencesRequirement,
           [&sharedServices](const ::lsp::ReferenceParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -385,9 +390,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_vector_payload<::lsp::TextDocument_ReferencesResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_DocumentHighlight>(
-      create_request_handler<::lsp::TextDocument_DocumentHighlightResult,
-                             ::lsp::DocumentHighlightParams>(
+  add_request_handler<::lsp::requests::TextDocument_DocumentHighlight>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_DocumentHighlight>(
           server, sharedServices, documentHighlightRequirement,
           [&sharedServices](const ::lsp::DocumentHighlightParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -395,9 +400,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_vector_payload<::lsp::TextDocument_DocumentHighlightResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_PrepareRename>(
-      create_request_handler<::lsp::TextDocument_PrepareRenameResult,
-                             ::lsp::PrepareRenameParams>(
+  add_request_handler<::lsp::requests::TextDocument_PrepareRename>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_PrepareRename>(
           server, sharedServices, renameRequirement,
           [&sharedServices](const ::lsp::PrepareRenameParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -405,9 +410,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_optional_payload<::lsp::TextDocument_PrepareRenameResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_Rename>(
-      create_request_handler<::lsp::TextDocument_RenameResult,
-                             ::lsp::RenameParams>(
+  add_request_handler<::lsp::requests::TextDocument_Rename>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_Rename>(
           server, sharedServices, renameRequirement,
           [&sharedServices](const ::lsp::RenameParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -415,9 +420,9 @@ void addLanguageServerTextDocumentHandlers(
           },
           wrap_optional_payload<::lsp::TextDocument_RenameResult>{}));
 
-  handler.add<::lsp::requests::TextDocument_CodeAction>(
-      create_request_handler<::lsp::TextDocument_CodeActionResult,
-                             ::lsp::CodeActionParams>(
+  add_request_handler<::lsp::requests::TextDocument_CodeAction>(
+      handler,
+      create_request_handler<::lsp::requests::TextDocument_CodeAction>(
           server, sharedServices, codeActionRequirement,
           [&sharedServices](const ::lsp::CodeActionParams &params,
                             const utils::CancellationToken &cancelToken) {

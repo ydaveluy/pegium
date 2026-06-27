@@ -50,6 +50,69 @@ request_key_from_cancel_id(const ::lsp::OneOf<int, ::lsp::String> &id);
 /// Allocates a unique key for requests without a protocol id.
 std::string next_anonymous_request_key();
 
+/// Tracks the cancellation source registered for one in-flight request.
+class ActiveRequestCancellation {
+public:
+  explicit ActiveRequestCancellation(LanguageServerHandlerContext &owner);
+
+  ActiveRequestCancellation(const ActiveRequestCancellation &) = delete;
+  ActiveRequestCancellation &
+  operator=(const ActiveRequestCancellation &) = delete;
+  ActiveRequestCancellation(ActiveRequestCancellation &&other);
+  ActiveRequestCancellation &operator=(ActiveRequestCancellation &&other) =
+      delete;
+
+  [[nodiscard]] utils::CancellationToken token() const;
+  void clear();
+
+private:
+  LanguageServerHandlerContext *_owner = nullptr;
+  std::shared_ptr<utils::CancellationTokenSource> _source;
+  std::string _requestKey;
+};
+
+/// Throws the LSP-level cancellation error expected by request handlers.
+[[noreturn]] void throw_request_cancelled_error();
+
+/// Move-only JSON request task used to keep the deferred-future machinery
+/// out of each typed LSP request instantiation.
+class JsonRequestTask {
+public:
+  template <typename F>
+    requires(!std::is_same_v<std::decay_t<F>, JsonRequestTask>)
+  explicit JsonRequestTask(F &&run)
+      : _impl(std::make_unique<Model<std::decay_t<F>>>(
+            std::forward<F>(run))) {}
+
+  JsonRequestTask(const JsonRequestTask &) = delete;
+  JsonRequestTask &operator=(const JsonRequestTask &) = delete;
+  JsonRequestTask(JsonRequestTask &&) noexcept = default;
+  JsonRequestTask &operator=(JsonRequestTask &&) noexcept = default;
+
+  [[nodiscard]] ::lsp::json::Value operator()();
+
+private:
+  struct Concept {
+    virtual ~Concept() = default;
+    [[nodiscard]] virtual ::lsp::json::Value run() = 0;
+  };
+
+  template <typename F> struct Model final : Concept {
+    template <typename Fn>
+    explicit Model(Fn &&run) : _run(std::forward<Fn>(run)) {}
+
+    [[nodiscard]] ::lsp::json::Value run() override { return _run(); }
+
+    F _run;
+  };
+
+  std::unique_ptr<Concept> _impl;
+};
+
+/// Creates a deferred JSON future through one non-template implementation.
+[[nodiscard]] std::future<::lsp::json::Value>
+make_deferred_json_request(JsonRequestTask task);
+
 /// Identifies goto-style requests that may return location links.
 enum class GotoLinkKind : std::uint8_t {
   Declaration,
@@ -166,18 +229,6 @@ template <typename T> struct wrap_resolved_or_original {
   }
 };
 
-/// Extracts the resolved value type from sync or future-based handlers.
-template <typename T> struct async_value_type {
-  using type = T;
-};
-
-template <typename T> struct async_value_type<std::future<T>> {
-  using type = T;
-};
-
-template <typename T>
-using async_value_type_t = typename async_value_type<std::decay_t<T>>::type;
-
 /// Returns synchronous handler results unchanged.
 template <typename T> [[nodiscard]] T resolve_async_result(T value) {
   return value;
@@ -192,160 +243,134 @@ template <typename T>
   return future.get();
 }
 
-template <typename T, typename F>
-/// Applies `mapper` after resolving a synchronous or deferred result.
-auto map_async(T &&value, F &&mapper)
-    -> std::future<
-        std::invoke_result_t<F, async_value_type_t<std::decay_t<T>>>> {
-  using In = async_value_type_t<std::decay_t<T>>;
-  using Out = std::invoke_result_t<F, In>;
-  return std::async(
-      std::launch::deferred,
-      [value = std::forward<T>(value), mapper = std::forward<F>(mapper)]()
-          mutable -> Out {
-        return mapper(resolve_async_result(std::move(value)));
-      });
-}
-
 template <typename Result, typename T, typename Adapter>
 /// Resolves `value` and adapts it to the wire-level `Result`.
-auto adapt_async_result(LanguageServerHandlerContext &server, T &&value,
-                        Adapter &&adapter,
-                        const utils::CancellationToken &cancelToken)
-    -> std::future<Result> {
+[[nodiscard]] Result
+adapt_result(LanguageServerHandlerContext &server, T &&value, Adapter &&adapter,
+             const utils::CancellationToken &cancelToken) {
   using ResultAdapter = std::decay_t<Adapter>;
-  return map_async(
-      std::forward<T>(value),
-      [&server, adapter = ResultAdapter(std::forward<Adapter>(adapter)),
-       cancelToken](auto resolvedValue) mutable -> Result {
-        return std::move(adapter)(server, std::move(resolvedValue), cancelToken);
-      });
+  auto resolvedValue = resolve_async_result(std::forward<T>(value));
+  return ResultAdapter(std::forward<Adapter>(adapter))(
+      server, std::move(resolvedValue), cancelToken);
 }
 
-template <typename Result, typename F>
+template <typename Request, typename Handler>
+/// Registers a request handler through the non-template generic LSP entrypoint.
+void add_request_handler(::lsp::MessageHandler &messageHandler,
+                         Handler &&handler) {
+  messageHandler.add(
+      Request::Method,
+      ::lsp::MessageHandler::GenericAsyncMessageCallback(
+          std::forward<Handler>(handler)));
+}
+
+template <typename Request, typename F>
 /// Wraps one handler with cancellation registration and cleanup.
 auto make_async_request(LanguageServerHandlerContext &owner, F &&handler) {
+  using Params = typename Request::Params;
+  using Result = typename Request::Result;
   using Handler = std::decay_t<F>;
-  auto handlerPtr = std::make_shared<Handler>(std::forward<F>(handler));
-  return [&owner, handlerPtr]<typename Params>(
-             Params &&params) -> std::future<Result> {
-    using OwnedParams = std::decay_t<Params>;
-    OwnedParams ownedParams(std::forward<Params>(params));
-    auto cancellation = std::make_shared<utils::CancellationTokenSource>();
-    std::string requestKey;
-    try {
-      requestKey =
-          request_key_from_message_id(::lsp::MessageHandler::currentRequestId());
-    } catch (...) {
-      requestKey.clear();
-    }
-    if (requestKey.empty()) {
-      requestKey = next_anonymous_request_key();
-    }
-    owner.registerRequestCancellation(requestKey, cancellation);
-    return std::async(
-        std::launch::deferred,
-        [&owner, requestKey, cancellation, handlerPtr,
-         ownedParams = std::move(ownedParams)]() mutable -> Result {
-          const auto cleanup = [&owner, &requestKey, &cancellation]() {
-            if (!requestKey.empty()) {
-              owner.clearRequestCancellation(requestKey, cancellation);
-            }
-          };
+  return [&owner, handler = Handler(std::forward<F>(handler))](
+             ::lsp::json::Value &&json) -> std::future<::lsp::json::Value> {
+    Params ownedParams;
+    ::lsp::fromJson(std::move(json), ownedParams);
+    ActiveRequestCancellation cancellation(owner);
+    return make_deferred_json_request(JsonRequestTask(
+        [cancellation = std::move(cancellation), handler,
+         ownedParams = std::move(ownedParams)]() mutable -> ::lsp::json::Value {
           try {
-            auto result =
-                (*handlerPtr)(std::move(ownedParams), cancellation->get_token());
-            cleanup();
-            return resolve_async_result(std::move(result));
+            const auto cancelToken = cancellation.token();
+            auto result = handler(std::move(ownedParams), cancelToken);
+            cancellation.clear();
+            auto resolved = resolve_async_result(std::move(result));
+            return ::lsp::toJson(std::move(resolved));
           } catch (const utils::OperationCancelled &) {
-            cleanup();
-            throw ::lsp::RequestError(::lsp::MessageError::RequestCancelled,
-                                      "Operation cancelled");
+            cancellation.clear();
+            throw_request_cancelled_error();
           } catch (...) {
-            cleanup();
+            cancellation.clear();
             throw;
           }
-        });
+        }));
   };
 }
 
-template <typename Result, typename Params, typename ServiceCall,
-          typename Adapter>
+template <typename Request, typename ServiceCall, typename Adapter>
 /// Creates a document-scoped request handler.
 auto create_request_handler(LanguageServerHandlerContext &server,
                             pegium::SharedServices &sharedServices,
                             ServiceRequirement requiredState,
                             ServiceCall &&serviceCall, Adapter &&adapter) {
+  using Params = typename Request::Params;
+  using Result = typename Request::Result;
   using Call = std::decay_t<ServiceCall>;
   using ResultAdapter = std::decay_t<Adapter>;
-  return make_async_request<Result>(
+  return make_async_request<Request>(
       server,
       [&server, &sharedServices, requiredState,
        serviceCall = Call(std::forward<ServiceCall>(serviceCall)),
        adapter = ResultAdapter(std::forward<Adapter>(adapter))](
           const Params &params, const utils::CancellationToken &cancelToken)
-          -> std::future<Result> {
+          -> Result {
         ensure_initialized(server);
         const std::string uri = params.textDocument.uri.toString();
         wait_until_phase(sharedServices, cancelToken, uri, requiredState);
         if (get_services(*sharedServices.serviceRegistry, uri) == nullptr) {
-          return std::async(std::launch::deferred,
-                            []() -> Result { return Result{}; });
+          return Result{};
         }
-        return adapt_async_result<Result>(server,
-                                          serviceCall(params, cancelToken),
-                                          adapter, cancelToken);
+        return adapt_result<Result>(server, serviceCall(params, cancelToken),
+                                    adapter, cancelToken);
       });
 }
 
-template <typename Result, typename Params, typename ServiceCall,
-          typename Adapter>
+template <typename Request, typename ServiceCall, typename Adapter>
 /// Creates an item-scoped request handler.
 auto create_item_request_handler(LanguageServerHandlerContext &server,
                                  pegium::SharedServices &sharedServices,
                                  ServiceRequirement requiredState,
                                  ServiceCall &&serviceCall, Adapter &&adapter) {
+  using Params = typename Request::Params;
+  using Result = typename Request::Result;
   using Call = std::decay_t<ServiceCall>;
   using ResultAdapter = std::decay_t<Adapter>;
-  return make_async_request<Result>(
+  return make_async_request<Request>(
       server,
       [&server, &sharedServices, requiredState,
        serviceCall = Call(std::forward<ServiceCall>(serviceCall)),
        adapter = ResultAdapter(std::forward<Adapter>(adapter))](
           const Params &params, const utils::CancellationToken &cancelToken)
-          -> std::future<Result> {
+          -> Result {
         ensure_initialized(server);
         const std::string uri = params.item.uri.toString();
         wait_until_phase(sharedServices, cancelToken, uri, requiredState);
-        return adapt_async_result<Result>(server,
-                                          serviceCall(params, cancelToken),
-                                          adapter, cancelToken);
+        return adapt_result<Result>(server, serviceCall(params, cancelToken),
+                                    adapter, cancelToken);
       });
 }
 
-template <typename Result, typename Params, typename ServiceCall,
-          typename Adapter>
+template <typename Request, typename ServiceCall, typename Adapter>
 /// Creates a workspace-scoped request handler.
 auto create_server_request_handler(LanguageServerHandlerContext &server,
                                    pegium::SharedServices &sharedServices,
                                    ServiceRequirement requiredState,
                                    ServiceCall &&serviceCall,
                                    Adapter &&adapter) {
+  using Params = typename Request::Params;
+  using Result = typename Request::Result;
   using Call = std::decay_t<ServiceCall>;
   using ResultAdapter = std::decay_t<Adapter>;
-  return make_async_request<Result>(
+  return make_async_request<Request>(
       server,
       [&server, &sharedServices, requiredState,
        serviceCall = Call(std::forward<ServiceCall>(serviceCall)),
        adapter = ResultAdapter(std::forward<Adapter>(adapter))](
           const Params &params, const utils::CancellationToken &cancelToken)
-          -> std::future<Result> {
+          -> Result {
         ensure_initialized(server);
         wait_until_phase(sharedServices, cancelToken, std::nullopt,
                          requiredState);
-        return adapt_async_result<Result>(server,
-                                          serviceCall(params, cancelToken),
-                                          adapter, cancelToken);
+        return adapt_result<Result>(server, serviceCall(params, cancelToken),
+                                    adapter, cancelToken);
       });
 }
 

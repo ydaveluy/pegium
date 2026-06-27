@@ -20,8 +20,9 @@ void addLanguageServerWorkspaceHandlers(
       WorkspaceState::IndexedContent);
 
   if (sharedServices.lsp.executeCommandHandler != nullptr) {
-    handler.add<::lsp::requests::Workspace_ExecuteCommand>(
-        make_async_request<::lsp::Workspace_ExecuteCommandResult>(
+    add_request_handler<::lsp::requests::Workspace_ExecuteCommand>(
+        handler,
+        make_async_request<::lsp::requests::Workspace_ExecuteCommand>(
             server,
             [&server, &sharedServices](const ::lsp::ExecuteCommandParams &params,
                                        const utils::CancellationToken &cancelToken) {
@@ -30,7 +31,7 @@ void addLanguageServerWorkspaceHandlers(
               const auto &arguments = params.arguments.has_value()
                                           ? *params.arguments
                                           : emptyArguments;
-              return adapt_async_result<::lsp::Workspace_ExecuteCommandResult>(
+              return adapt_result<::lsp::Workspace_ExecuteCommandResult>(
                   server,
                   executeCommand(sharedServices, params.command, arguments,
                                  cancelToken),
@@ -39,9 +40,9 @@ void addLanguageServerWorkspaceHandlers(
             }));
   }
 
-  handler.add<::lsp::requests::Workspace_Symbol>(
-      create_server_request_handler<::lsp::Workspace_SymbolResult,
-                                    ::lsp::WorkspaceSymbolParams>(
+  add_request_handler<::lsp::requests::Workspace_Symbol>(
+      handler,
+      create_server_request_handler<::lsp::requests::Workspace_Symbol>(
           server, sharedServices, workspaceSymbolRequirement,
           [&sharedServices](const ::lsp::WorkspaceSymbolParams &params,
                             const utils::CancellationToken &cancelToken) {
@@ -51,8 +52,9 @@ void addLanguageServerWorkspaceHandlers(
 
   if (sharedServices.lsp.workspaceSymbolProvider != nullptr &&
       sharedServices.lsp.workspaceSymbolProvider->supportsResolveSymbol()) {
-    handler.add<::lsp::requests::WorkspaceSymbol_Resolve>(
-        make_async_request<::lsp::WorkspaceSymbol>(
+    add_request_handler<::lsp::requests::WorkspaceSymbol_Resolve>(
+        handler,
+        make_async_request<::lsp::requests::WorkspaceSymbol_Resolve>(
             server,
             [&server, &sharedServices,
              workspaceSymbolRequirement](::lsp::WorkspaceSymbol &&symbol,
@@ -64,7 +66,7 @@ void addLanguageServerWorkspaceHandlers(
               auto resolvedSymbol =
                   resolveWorkspaceSymbol(sharedServices, symbolForResolve,
                                          cancelToken);
-              return adapt_async_result<::lsp::WorkspaceSymbol>(
+              return adapt_result<::lsp::WorkspaceSymbol>(
                   server, std::move(resolvedSymbol),
                   wrap_resolved_or_original<::lsp::WorkspaceSymbol>{
                       std::move(symbol)},
